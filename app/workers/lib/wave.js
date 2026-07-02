@@ -149,16 +149,20 @@ function createWave({
       return
     }
     if (m.kind === 'wave-end') {
-      // originator (or timeout) ended the wave — everyone finishes together
+      // originator ended it (completed) or a peer hit a dead end (stalled) — everyone
+      // finishes together instead of each waiting out the timeout
       if (wave && m.waveId === wave.id) {
-        onToken({
-          event: 'completed',
-          waveId: m.waveId,
-          hops: m.hops,
-          chainHash: m.chainHash,
-          angle: angleOfId(m.by)
-        })
-        goIdle('ended')
+        if (m.stalled) onToken({ event: 'stalled', waveId: m.waveId, reason: 'no successor' })
+        else {
+          onToken({
+            event: 'completed',
+            waveId: m.waveId,
+            hops: m.hops,
+            chainHash: m.chainHash,
+            angle: angleOfId(m.by)
+          })
+        }
+        goIdle(m.stalled ? 'stalled' : 'ended')
       }
       return
     }
@@ -392,12 +396,16 @@ function createWave({
   function forwardToken(token, skipped = new Set()) {
     const succ = pickSuccessor(skipped)
     if (!succ) {
+      // dead end (kicked off solo, or all successors gone) — end the wave now so every
+      // peer returns to idle instead of waiting out the timeout
       clearHeal()
       onToken({
         event: 'stalled',
         waveId: token.waveId,
         reason: skipped.size ? 'no-reachable-successor' : 'no successor'
       })
+      broadcast({ kind: 'wave-end', waveId: token.waveId, by: token.originator, stalled: true })
+      goIdle('stalled')
       return
     }
     senders.get(succ.id)(JSON.stringify(token))

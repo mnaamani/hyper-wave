@@ -47,7 +47,7 @@ function onTokenEvent(e) {
   switch (e.event) {
     case 'wave-announce':
       waveActive = true
-      startBtn.disabled = true
+      startBtn.style.display = 'none'
       openLobby(e)
       break
     case 'joined':
@@ -60,14 +60,15 @@ function onTokenEvent(e) {
       break
     case 'wave-active':
       waveActive = true
-      startBtn.disabled = true
+      startBtn.style.display = 'none'
       closeLobby()
       statusEl.innerText = e.joined ? '📣 you are in — get ready!' : '👀 spectating this wave'
       break
     case 'wave-idle':
       waveActive = false
-      startBtn.disabled = false
+      startBtn.style.display = ''
       closeLobby()
+      closeProofWindow()
       setIdleStatus()
       break
     case 'busy':
@@ -107,10 +108,10 @@ startBtn.onclick = () => {
   bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type: 'start-wave' }))
 }
 
-// --- lobby (opt in before the wave starts) ------------------------------------
+// --- lobby (opt in before the wave starts) — shown in the centre of the field ---
 const lobbyEl = document.getElementById('lobby')
 const lobbyMsgEl = document.getElementById('lobby-msg')
-const lobbySubEl = document.getElementById('lobby-sub')
+const lobbyCountEl = document.getElementById('lobby-count')
 const joinBtn = document.getElementById('join')
 let lobbyCount = 0
 let lobbyJoined = false
@@ -121,9 +122,7 @@ function openLobby(e) {
   lobbyCount = e.count || 1
   lobbyJoined = !!e.mine || !!e.joined
   lobbyDeadline = performance.now() + (e.lobbyMs || 15000)
-  lobbyMsgEl.innerText = e.mine ? '📣 you are forming a wave' : '🌊 a wave is forming — join in?'
   joinBtn.style.display = lobbyJoined ? 'none' : 'inline-block'
-  joinBtn.disabled = false
   lobbyEl.classList.add('show')
   clearInterval(lobbyTimer)
   lobbyTimer = setInterval(paintLobby, 200)
@@ -138,7 +137,9 @@ function updateLobby(count) {
 function paintLobby() {
   if (!lobbyEl.classList.contains('show')) return
   const secs = Math.max(0, Math.ceil((lobbyDeadline - performance.now()) / 1000))
-  lobbySubEl.innerText = `starting in ${secs}s · ${lobbyCount} in`
+  lobbyCountEl.innerText = secs // big countdown in the centre
+  const who = lobbyJoined ? 'you are in' : 'join in?'
+  lobbyMsgEl.innerText = `🌊 wave forming · ${who} · ${lobbyCount} in`
 }
 
 function closeLobby() {
@@ -163,7 +164,7 @@ bridge.onWorkerIPC(UPDATER, (data) => {
 })
 
 // --- Proof window: webcam selfie ---------------------------------------------
-const modal = document.getElementById('modal')
+const proofEl = document.getElementById('proof')
 const preview = document.getElementById('preview')
 const countdownEl = document.getElementById('countdown')
 const captionEl = document.getElementById('caption')
@@ -182,9 +183,8 @@ async function openProofWindow(e) {
     chainHash: e.chainHash,
     receiptTs: e.receiptTs
   }
-  document.getElementById('modal-sub').innerText = `Hop ${e.hopCount} — you're in the chain.`
   captionEl.value = ''
-  modal.classList.add('show')
+  proofEl.classList.add('show') // circular capture, centred in the ring
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
@@ -237,7 +237,8 @@ function closeProofWindow() {
     stream = null
   }
   preview.style.display = ''
-  modal.classList.remove('show')
+  countdownEl.innerText = ''
+  proofEl.classList.remove('show')
   proofCtx = null
 }
 
