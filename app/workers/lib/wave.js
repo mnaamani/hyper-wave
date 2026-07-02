@@ -83,6 +83,7 @@ function createWave({
   // ball still visits everyone (relays), keeping the full-ring visual.
   //   wave = { id, phase: 'lobby'|'racing', by, roster: Set<id>, joined: bool } | null
   let wave = null
+  let lobbyEndsAt = 0 // ~when the lobby closes (for syncing a late joiner's countdown)
   let lobbyTimer = null // fires the race (initiator) or a fallback to idle (others)
   let waveTimer = null // racing timeout
   let healTimer = null // watches my forward; fires if the wave doesn't advance
@@ -143,6 +144,20 @@ function createWave({
           angle: angleOfId(m.holder),
           hopCount: m.hopCount
         })
+      }
+      return
+    }
+    if (m.kind === 'wave-sync') {
+      // a peer told us the wave state when we joined mid-lobby / mid-race
+      if (!m.waveId || !shouldAdopt(m.waveId)) return
+      if (m.phase === 'racing') {
+        if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, 0, true)
+        if (m.key) openGallery(m.waveId, b4a.from(m.key, 'hex'))
+        beginRace(m.roster)
+      } else {
+        if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, m.lobbyMsLeft)
+        for (const id of m.roster || []) wave.roster.add(id)
+        onToken({ event: 'roster', waveId: wave.id, count: wave.roster.size })
       }
       return
     }
@@ -327,7 +342,9 @@ function createWave({
   }
 
   // Enter the lobby for `waveId` (announced by `by`; `mine` if I'm the initiator).
-  function enterLobby(waveId, by, mine, dur = lobbyMs) {
+  // `silent` skips the wave-announce UI event (used when catching up straight into a
+  // race, so no bogus lobby countdown flashes).
+  function enterLobby(waveId, by, mine, dur = lobbyMs, silent = false) {
     if (wave && wave.id === waveId) return
     if (wave) {
       // superseded by a lower-id wave — abandon the old one
@@ -336,9 +353,11 @@ function createWave({
     }
     wave = { id: waveId, phase: 'lobby', by, roster: new Set([by]), joined: !!mine }
     if (mine) wave.roster.add(me.id)
+    lobbyEndsAt = Date.now() + dur
     // fallback: if the race never starts (initiator vanished), drop back to idle
     clearTimeout(lobbyTimer)
     lobbyTimer = setTimeout(() => goIdle('lobby-timeout'), lobbyMs + 10000)
+    if (silent) return
     onToken({
       event: 'wave-announce',
       waveId,
@@ -497,7 +516,9 @@ function createWave({
 
     // adopt into the race (may switch from a higher-id wave, or catch up if we
     // missed the announce/start) and learn this wave's gallery
-    if (!wave || wave.id !== token.waveId) enterLobby(token.waveId, token.originator, false)
+    if (!wave || wave.id !== token.waveId) {
+      enterLobby(token.waveId, token.originator, false, 0, true)
+    }
     if (wave.phase !== 'racing') beginRace()
     if (token.autobaseKey && token.waveId) {
       openGallery(token.waveId, b4a.from(token.autobaseKey, 'hex'))
@@ -593,6 +614,21 @@ function createWave({
     // greet: presence + full snapshot so the new peer converges immediately
     send(JSON.stringify({ kind: 'presence', id: me.id, country: me.country }))
     send(JSON.stringify({ kind: 'peers', peers: snapshot() }))
+    // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
+    // start a competing one (broadcasts they missed won't reach them otherwise)
+    if (wave) {
+      send(
+        JSON.stringify({
+          kind: 'wave-sync',
+          waveId: wave.id,
+          phase: wave.phase,
+          by: wave.by,
+          roster: [...wave.roster],
+          key: autobaseKey,
+          lobbyMsLeft: wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
+        })
+      )
+    }
     emit()
 
     conn.on('close', () => {

@@ -91,6 +91,12 @@ roster) get the selfie proof-window** — non-joiners just pass it on. When the 
 originator it broadcasts `wave-end` so every peer finishes together (ball rolls home, button
 re-enables); a timeout falls back to idle if a wave stalls.
 
+**Join-time sync:** lifecycle broadcasts (`wave-announce`/`wave-start`/…) only fire once, so a peer
+that connects mid-lobby/mid-race would miss them. On each new connection, existing peers push a
+`wave-sync` (waveId, phase, roster, gallery key, lobby time left) so the newcomer's UI reflects the
+current wave — joining the lobby if it's forming, or spectating if it's racing — and the Kick-off
+button is correctly gated (they can't start a competing wave).
+
 **Healing:** the token is forwarded to the next _reachable_ peer clockwise (unconnected peers are
 skipped). After forwarding, a peer watches for the wave to advance past its hop — the successor's
 `wave-pos` broadcast doubles as an ACK; if none arrives within `HEAL_TIMEOUT_MS`, that successor is
