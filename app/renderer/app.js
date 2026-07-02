@@ -14,7 +14,7 @@ let state = { me: null, peers: [] }
 const HYPERWAVE = '/workers/hyperwave.js'
 bridge.startWorker(HYPERWAVE)
 
-let pulse = null // { at } — recent token activity at my position
+let ballActive = false // is the football currently animating on the ring?
 
 bridge.onWorkerIPC(HYPERWAVE, (data) => {
   let msg
@@ -26,7 +26,7 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
   if (msg.type === 'state') {
     state = msg
     // idle status = ring readiness, unless a wave is currently animating
-    if (!pulse) {
+    if (!ballActive) {
       const n = state.peers.length
       statusEl.innerText =
         n === 0 ? 'in the ring — waiting for peers…' : `${n} peer${n === 1 ? '' : 's'} in the ring — press Start`
@@ -41,21 +41,20 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
 function onTokenEvent (e) {
   switch (e.event) {
     case 'started':
-      statusEl.innerText = '🌊 you launched the wave!'
-      pulse = { at: performance.now() }
+      statusEl.innerText = '⚽ you kicked off the wave!'
       break
     case 'holding':
-      statusEl.innerText = `wave passing you — hop ${e.hopCount ?? ''}`
-      pulse = { at: performance.now() }
+      statusEl.innerText = `the ball reached you — hop ${e.hopCount ?? ''}`
+      setBall(e.angle) // roll the football to my seat
       openProofWindow(e) // capture a selfie for the gallery
       break
-    case 'forwarded':
-      statusEl.innerText = `wave passing you — hop ${e.hopCount ?? ''}`
-      pulse = { at: performance.now() }
+    case 'position':
+      statusEl.innerText = `wave rolling — hop ${e.hopCount ?? ''}`
+      setBall(e.angle) // roll the football to the current holder
       break
     case 'completed':
       statusEl.innerText = `✅ wave completed — ${e.hops} hops, chain ${e.chainHash.slice(0, 8)}…`
-      pulse = { at: performance.now() }
+      setBall(e.angle) // roll it home to the originator
       break
     case 'stalled':
       statusEl.innerText = `⚠️ wave stalled (${e.reason})`
@@ -284,6 +283,48 @@ function pointOn (angleDeg, r) {
   return [canvas.width / 2 + r * Math.cos(a), canvas.height / 2 + r * Math.sin(a)]
 }
 
+// --- the football: rolls clockwise from holder to holder on every screen ------
+let ball = null // { from, to, startedAt }
+let ballSeenAt = 0
+const TRAVEL_MS = 1100 // ~= the per-hop dwell, so the roll is continuous
+const BALL_FADE_MS = 4000 // hide the ball this long after the last position update
+
+function ballAngle () {
+  if (!ball) return null
+  const p = Math.min(1, (performance.now() - ball.startedAt) / TRAVEL_MS)
+  let d = (ball.to - ball.from) % 360
+  if (d < 0) d += 360 // always roll clockwise (increasing angle)
+  return (ball.from + d * p) % 360
+}
+
+function setBall (toAngle) {
+  if (toAngle == null) return
+  const from = ball ? ballAngle() : toAngle // continue from where it is, or drop in
+  ball = { from, to: toAngle, startedAt: performance.now() }
+  ballSeenAt = performance.now()
+  ballActive = true
+}
+
+function drawBall (R) {
+  if (!ball) return
+  if (performance.now() - ballSeenAt >= BALL_FADE_MS) {
+    ball = null
+    ballActive = false
+    return
+  }
+  const a = ballAngle()
+  const [bx, by] = pointOn(a, R)
+  ctx.save()
+  ctx.translate(bx, by)
+  ctx.rotate((a * Math.PI) / 180) // spin as it rolls around the ring
+  ctx.font = '26px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('⚽', 0, 0)
+  ctx.restore()
+  ctx.textBaseline = 'alphabetic'
+}
+
 function render () {
   const cx = canvas.width / 2
   const cy = canvas.height / 2
@@ -317,20 +358,8 @@ function render () {
   }
   if (state.me) dot(state.me.angle, R, '#ffd166', 9, 'you')
 
-  // token pulse: an expanding ring at my position when the wave passes through me
-  if (pulse && state.me) {
-    const age = performance.now() - pulse.at
-    if (age < 700) {
-      const [px, py] = pointOn(state.me.angle, R)
-      ctx.beginPath()
-      ctx.arc(px, py, 9 + age * 0.05, 0, Math.PI * 2)
-      ctx.strokeStyle = `rgba(255,209,102,${1 - age / 700})`
-      ctx.lineWidth = 3
-      ctx.stroke()
-    } else {
-      pulse = null
-    }
-  }
+  // the football: rolls clockwise around the ring, holder to holder, on every screen
+  drawBall(R)
 
   // the wave gallery: one selfie at a time, in the centre of the ring
   drawCenterSelfie(cx, cy)
@@ -340,7 +369,7 @@ function render () {
   }
 }
 
-// continuous loop so ring updates + pulse animation both render smoothly
+// continuous loop so ring updates + football animation both render smoothly
 function loop () {
   render()
   requestAnimationFrame(loop)

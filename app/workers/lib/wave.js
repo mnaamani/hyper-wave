@@ -68,6 +68,11 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
 
   function handleGossip (m) {
     if (m.kind === 'token') return processToken(m)
+    if (m.kind === 'wave-pos') {
+      // the ball is at `holder` — every peer animates it there (angle derived locally)
+      onToken({ event: 'position', waveId: m.waveId, holder: m.holder, angle: angleOfId(m.holder), hopCount: m.hopCount })
+      return
+    }
     if (m.kind === 'autobase') {
       if (!base && m.key) openAutobase(b4a.from(m.key, 'hex'))
       return
@@ -167,6 +172,11 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
 
   // --- token race ------------------------------------------------------------
 
+  // Tell every peer the ball is at me now, so all windows animate it here.
+  function announcePosition (waveId, hopCount) {
+    broadcast({ kind: 'wave-pos', waveId, holder: me.id, hopCount })
+  }
+
   // Forward a token (already stamped with my receipt) to my successor.
   function forwardToken (token) {
     const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
@@ -211,7 +221,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     }
     // Completion: the token has returned to its originator.
     if (token.originator === me.id && token.hopCount > 0) {
-      onToken({ event: 'completed', waveId: token.waveId, hops: token.hopCount, chainHash: token.prevChainHash })
+      onToken({ event: 'completed', waveId: token.waveId, hops: token.hopCount, chainHash: token.prevChainHash, angle: me.angle })
       return
     }
     const key = token.waveId + '|' + token.hopCount
@@ -227,7 +237,8 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
 
     // The proof window opens here: the renderer captures a selfie and calls
     // postSelfie() with this receipt (its ticket into the gallery).
-    onToken({ event: 'holding', waveId: token.waveId, hopCount, holder: me.id, receiptSig: next.senderReceiptSig, chainHash: newChainHash })
+    onToken({ event: 'holding', waveId: token.waveId, hopCount, holder: me.id, angle: me.angle, receiptSig: next.senderReceiptSig, chainHash: newChainHash })
+    announcePosition(token.waveId, hopCount)
 
     // Dwell so the wave ripples visibly around the ring and proof windows open in
     // sequence rather than all at once.
@@ -246,7 +257,8 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     broadcast({ kind: 'autobase', key: autobaseKey })
     onToken({ event: 'started', waveId, by: me.id })
     // the originator is hop 0 — open their proof window too
-    onToken({ event: 'holding', waveId, hopCount: 0, holder: me.id, receiptSig: token.senderReceiptSig, chainHash: ZERO_HASH })
+    onToken({ event: 'holding', waveId, hopCount: 0, holder: me.id, angle: me.angle, receiptSig: token.senderReceiptSig, chainHash: ZERO_HASH })
+    announcePosition(waveId, 0)
     setTimeout(() => forwardToken(token), hopDelayMs)
     return waveId
   }

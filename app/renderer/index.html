@@ -55,66 +55,67 @@
         color: #06210d;
       }
       /* proof window modal */
+      /* compact corner card — must NOT cover the ring / rolling ball */
       #modal {
         display: none;
         position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.75);
-        align-items: center;
-        justify-content: center;
+        top: 14px;
+        right: 14px;
         z-index: 10;
       }
       #modal.show {
-        display: flex;
+        display: block;
       }
       .sheet {
-        background: #0b2a12;
+        background: rgba(11, 42, 18, 0.96);
         border: 2px solid #ffd166;
-        border-radius: 16px;
-        padding: 20px;
-        width: 320px;
+        border-radius: 14px;
+        padding: 12px;
+        width: 210px;
         text-align: center;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
       }
       .sheet h2 {
-        margin: 0 0 4px;
-        font-size: 20px;
+        margin: 0 0 2px;
+        font-size: 15px;
       }
       .sheet .sub {
         opacity: 0.7;
-        font-size: 13px;
-        margin-bottom: 12px;
+        font-size: 11px;
+        margin-bottom: 8px;
       }
       #preview {
-        width: 280px;
-        height: 210px;
+        width: 186px;
+        height: 140px;
         object-fit: cover;
         border-radius: 10px;
         background: #04140a;
         transform: scaleX(-1);
       }
       #countdown {
-        font-size: 40px;
+        font-size: 30px;
         font-weight: 700;
         color: #ffd166;
-        height: 46px;
+        height: 36px;
       }
       #caption {
         width: 100%;
         box-sizing: border-box;
-        margin: 10px 0;
-        padding: 8px;
+        margin: 8px 0;
+        padding: 6px 8px;
+        font-size: 13px;
         border-radius: 8px;
         border: 1px solid rgba(255, 255, 255, 0.2);
         background: rgba(0, 0, 0, 0.3);
         color: #eafff0;
       }
       .sheet button {
-        padding: 9px 18px;
-        font-size: 15px;
-        border-radius: 20px;
+        padding: 7px 14px;
+        font-size: 13px;
+        border-radius: 18px;
         border: none;
         cursor: pointer;
-        margin: 0 4px;
+        margin: 0 3px;
       }
       #capture {
         background: #ffd166;
@@ -136,7 +137,7 @@
     <div id="status">connecting…</div>
     <div id="me"></div>
     <canvas id="ring" width="440" height="440"></canvas>
-    <button id="start">🌊 Start the wave</button>
+    <button id="start">⚽ Kick off the wave</button>
 
     <div id="modal">
       <div class="sheet">

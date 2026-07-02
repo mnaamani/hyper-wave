@@ -44,11 +44,12 @@ Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
   peers:     [ { id, angle, lastSeen }, ... ],  // live, sorted clockwise
   successor: { id, angle } | null }              // next peer clockwise (wraps)
 
-// token race events (as the wave passes through this peer)
+// token race events
 { type: 'token', event: 'started'  , waveId, by }
 { type: 'token', event: 'forwarded', waveId, hopCount, to }
-{ type: 'token', event: 'holding'  , waveId, hopCount, holder, receiptSig, chainHash }  // opens proof window
-{ type: 'token', event: 'completed', waveId, hops, chainHash }
+{ type: 'token', event: 'holding'  , waveId, hopCount, holder, angle, receiptSig, chainHash }  // I hold it: opens proof window
+{ type: 'token', event: 'position' , waveId, hopCount, holder, angle }  // another peer holds it: roll the ball there
+{ type: 'token', event: 'completed', waveId, hops, chainHash, angle }
 { type: 'token', event: 'stalled'  , waveId, reason }
 
 // gallery (Autobase view) — on every change / replication
@@ -62,12 +63,13 @@ Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
 { type: 'post-selfie', selfie: { waveId, hopCount, receiptSig, chainHash, caption, image } }
 ```
 
-The ring UI draws a yellow "you" dot, green peer dots, highlights the **successor** in orange
-with a baton line, and pulses at your position as the token passes. **Start the wave** originates
-a token. When the wave passes you, a **proof-window modal** opens the webcam, counts down, and
-captures a selfie that posts to the shared gallery. The gallery plays **one selfie at a time in
-the centre of the ring** — each new selfie features as it lands (following the wave), and the
-view auto-cycles through the rest when idle.
+The ring UI draws a yellow "you" dot, green peer dots, and highlights the **successor** in orange
+with a baton line. The token is a **⚽ football that rolls clockwise around the ring, holder to
+holder, on every screen** (each peer broadcasts a `wave-pos` when it holds; every renderer
+animates the ball there). **Kick off the wave** originates a token. When the ball reaches you, a
+**proof-window modal** opens the webcam, counts down, and captures a selfie for the gallery — which
+plays **one selfie at a time in the centre of the ring**, featuring each new arrival then
+auto-cycling when idle.
 
 ## Run
 
