@@ -71,6 +71,9 @@ function onTokenEvent (e) {
       statusEl.innerText = `✅ wave completed — ${e.hops} hops, chain ${e.chainHash.slice(0, 8)}…`
       setBall(e.angle) // roll it home to the originator
       break
+    case 'healed':
+      statusEl.innerText = '🩹 routing around a dropped peer…'
+      break
     case 'stalled':
       statusEl.innerText = `⚠️ wave stalled (${e.reason})`
       break

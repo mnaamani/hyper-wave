@@ -12,6 +12,13 @@ Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`
 - [x] Wave lifecycle: single active wave at a time (anyone can start when idle); deterministic
       tie-break for simultaneous starts (lower `waveId` wins); `wave-end` broadcast so all peers
       finish together; timeout fallback to idle; `busy` guard + Start button disabled while active
+- [x] Resilience / healing: forward to the next *reachable* peer (skip unconnected ones); if the
+      wave doesn't advance past my hop within `HEAL_TIMEOUT_MS` (the successor's `wave-pos` = ACK),
+      skip that peer and re-forward (`healed` event). Bounded `seen` (cleared per wave) +
+      `endedWaves` guard so a finished wave can't be revived. `pickReachable` unit-tested.
+      NOTE: the skip path isn't networked-verified (sandbox can't form 3 peers); happy-path heal
+      arm/clear is exercised by the lifecycle run. Known edge: if a peer dies right after holding
+      (predecessor already ACKed), that gap isn't healed — the wave timeout catches it.
 
 ## Backlog
 
@@ -28,11 +35,6 @@ Implement the design's "no receipt = no write":
   needs the accumulator the validator saw (validator arbitrates at payout). Forked clients can't
   be fully stopped — the gate keeps the honest gallery clean and raises the bar.
 - The existing "anti-spam gate" comments describe this intended behaviour.
-
-### Resilience / healing (review item #4)
-- Skip dead/unreachable successors instead of stalling (`successor-unreachable` currently kills
-  the wave); ACK/timeout + skip to next live peer.
-- Bound the `seen` set (currently grows unbounded across waves).
 
 ### Housekeeping
 - Prune old `wave-gallery:<waveId>` namespaces on startup (they linger on disk under `--storage`),

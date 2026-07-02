@@ -12,7 +12,7 @@ const c = require('compact-encoding')
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
 
-const { angleOf, angleOfId, liveRing, nextClockwise } = require('./ring')
+const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
 const { ZERO_HASH, signReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
 
@@ -28,12 +28,16 @@ const HOP_DELAY_MS = 1200
 // A wave is a single, one-at-a-time event. If it doesn't complete within this
 // window (peer dropped, stall), peers fall back to idle so a new wave can start.
 const WAVE_TIMEOUT_MS = 90000
+// After forwarding, if the wave doesn't advance past my hop within this window,
+// treat the successor as dead: skip it and re-forward to the next live peer. The
+// `wave-pos` a peer broadcasts when it holds doubles as the ACK.
+const HEAL_TIMEOUT_MS = 3000
 
 function shortId (hex) {
   return hex.slice(0, 8)
 }
 
-function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () => {}, log = () => {}, bootstrap = null, matchId = MATCH, hopDelayMs = HOP_DELAY_MS, waveTimeoutMs = WAVE_TIMEOUT_MS }) {
+function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () => {}, log = () => {}, bootstrap = null, matchId = MATCH, hopDelayMs = HOP_DELAY_MS, waveTimeoutMs = WAVE_TIMEOUT_MS, healTimeoutMs = HEAL_TIMEOUT_MS }) {
   const store = new Corestore(storageDir + '/hyperwave')
   // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
@@ -43,7 +47,8 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey) }
   const peers = new Map() // id -> { id, angle, lastSeen }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
-  const seen = new Set() // waveId|hopCount already processed (drop dupes/loops)
+  const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
+  const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
 
   let base = null // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
@@ -54,6 +59,8 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   // the same wave regardless of who they heard first.
   let activeWaveId = null
   let waveTimer = null
+  let healTimer = null // watches my forward; fires if the wave doesn't advance
+  let healPending = null // { waveId, hop } I'm currently watching
 
   // --- ring / peer table -----------------------------------------------------
   function emit () {
@@ -81,6 +88,8 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     if (m.kind === 'wave-pos') {
       // only animate the ball for the active wave (angle derived locally)
       if (m.waveId === activeWaveId) {
+        // the wave advanced past my hop — my successor is alive, stop watching
+        if (healPending && m.waveId === healPending.waveId && m.hopCount > healPending.hop) clearHeal()
         onToken({ event: 'position', waveId: m.waveId, holder: m.holder, angle: angleOfId(m.holder), hopCount: m.hopCount })
       }
       return
@@ -205,6 +214,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   // Accept this wave? Idle -> yes; same wave -> yes; a competing wave only if its
   // id is lower (deterministic tie-break so every peer converges on one wave).
   function shouldAdopt (waveId) {
+    if (endedWaves.has(waveId)) return false // a finished wave never comes back
     if (!activeWaveId || waveId === activeWaveId) return true
     return waveId < activeWaveId
   }
@@ -221,7 +231,10 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     if (!activeWaveId) return
     const waveId = activeWaveId
     activeWaveId = null
+    endedWaves.add(waveId)
+    seen.clear() // only needed within the active wave; bound its growth
     clearTimeout(waveTimer)
+    clearHeal()
     onToken({ event: 'wave-idle', waveId, reason })
   }
 
@@ -232,23 +245,39 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     broadcast({ kind: 'wave-pos', waveId, holder: me.id, hopCount })
   }
 
-  // Forward a token (already stamped with my receipt) to my successor.
-  function forwardToken (token) {
+  // Next reachable peer clockwise from me (directly connected, not already skipped).
+  function pickSuccessor (skipped) {
     const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
-    const succ = nextClockwise(me.angle, ring)
+    return pickReachable(ring, me.angle, new Set(senders.keys()), skipped)
+  }
+
+  // Forward a token (already stamped with my receipt) to the next reachable peer,
+  // and watch for the wave to advance; if it doesn't, skip that peer and retry.
+  function forwardToken (token, skipped = new Set()) {
+    const succ = pickSuccessor(skipped)
     if (!succ) {
-      onToken({ event: 'stalled', waveId: token.waveId, reason: 'no successor' })
+      clearHeal()
+      onToken({ event: 'stalled', waveId: token.waveId, reason: skipped.size ? 'no-reachable-successor' : 'no successor' })
       return
     }
-    const send = senders.get(succ.id)
-    if (!send) {
-      // Successor known via gossip but not directly connected. Healing is a later
-      // step; for the fully-connected MVP this should not happen.
-      onToken({ event: 'stalled', waveId: token.waveId, reason: 'successor-unreachable', successor: succ.id })
-      return
-    }
-    send(JSON.stringify(token))
+    senders.get(succ.id)(JSON.stringify(token))
     onToken({ event: 'forwarded', waveId: token.waveId, hopCount: token.hopCount, to: succ.id })
+
+    // heal: expect a wave-pos past my hop soon (the successor's hold ACKs it)
+    clearTimeout(healTimer)
+    healPending = { waveId: token.waveId, hop: token.hopCount }
+    healTimer = setTimeout(() => {
+      healPending = null
+      skipped.add(succ.id)
+      log('healing: successor', shortId(succ.id), 'silent — skipping')
+      onToken({ event: 'healed', waveId: token.waveId, skipped: succ.id })
+      forwardToken(token, skipped)
+    }, healTimeoutMs)
+  }
+
+  function clearHeal () {
+    clearTimeout(healTimer)
+    healPending = null
   }
 
   // Build the next token this peer forwards, stamping hop `hopCount` with my receipt.
@@ -395,6 +424,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
       clearInterval(tPresence)
       clearInterval(tRing)
       clearTimeout(waveTimer)
+      clearTimeout(healTimer)
       await swarm.destroy()
       if (base) await base.close()
       await store.close()

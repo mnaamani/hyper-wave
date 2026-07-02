@@ -27,4 +27,16 @@ function nextClockwise (myAngle, sortedRing) {
   return sortedRing[0]
 }
 
-module.exports = { angleOf, angleOfId, liveRing, nextClockwise }
+// Healing: the next peer clockwise that is directly reachable and not already
+// skipped. Walks the ring from just after me, wrapping around. `reachable` and
+// `skipped` are Sets of peer ids. Returns null if none qualifies.
+function pickReachable (sortedRing, myAngle, reachable, skipped) {
+  const after = sortedRing.filter((p) => p.angle > myAngle)
+  const before = sortedRing.filter((p) => p.angle <= myAngle)
+  for (const p of [...after, ...before]) {
+    if (!skipped.has(p.id) && reachable.has(p.id)) return p
+  }
+  return null
+}
+
+module.exports = { angleOf, angleOfId, liveRing, nextClockwise, pickReachable }

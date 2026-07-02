@@ -53,6 +53,7 @@ Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
 { type: 'token', event: 'holding'    , waveId, hopCount, holder, angle, receiptSig, chainHash }  // I hold it: opens proof window
 { type: 'token', event: 'position'   , waveId, hopCount, holder, angle }  // another peer holds it: roll the ball there
 { type: 'token', event: 'completed'  , waveId, hops, chainHash, angle }   // sent to ALL peers via wave-end
+{ type: 'token', event: 'healed'     , waveId, skipped }      // routed around a dead successor
 { type: 'token', event: 'stalled'    , waveId, reason }
 
 // gallery (Autobase view) — on every change / replication
@@ -79,6 +80,11 @@ wave). Simultaneous starts are resolved deterministically — the lower `waveId`
 converge on one wave. When the token returns to the originator it broadcasts `wave-end` so every
 peer finishes together (ball rolls home, button re-enables); a timeout falls back to idle if a
 wave stalls.
+
+**Healing:** the token is forwarded to the next *reachable* peer clockwise (unconnected peers are
+skipped). After forwarding, a peer watches for the wave to advance past its hop — the successor's
+`wave-pos` broadcast doubles as an ACK; if none arrives within `HEAL_TIMEOUT_MS`, that successor is
+treated as dead, skipped, and the token re-forwarded to the next one.
 
 ## Run
 

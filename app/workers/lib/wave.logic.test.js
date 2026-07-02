@@ -3,7 +3,7 @@
 const assert = require('bare-assert')
 const deepEq = (a, b, msg) => assert.ok(JSON.stringify(a) === JSON.stringify(b), msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b))
 const b4a = require('b4a')
-const { angleOf, liveRing, nextClockwise } = require('./ring')
+const { angleOf, liveRing, nextClockwise, pickReachable } = require('./ring')
 
 let n = 0
 const test = (name, fn) => {
@@ -55,6 +55,37 @@ test('nextClockwise returns null on an empty ring', () => {
 test('single-peer ring: successor is always that peer (even if behind me)', () => {
   const ring = [{ id: 'only', angle: 5 }]
   assert.strictEqual(nextClockwise(200, ring).id, 'only')
+})
+
+// healing: pickReachable = next clockwise that is reachable and not skipped
+const R = [
+  { id: 'b', angle: 10 },
+  { id: 'c', angle: 150 },
+  { id: 'a', angle: 300 }
+]
+const all = new Set(['a', 'b', 'c'])
+
+test('pickReachable picks the next clockwise when all reachable', () => {
+  assert.strictEqual(pickReachable(R, 100, all, new Set()).id, 'c') // 100 -> c@150
+  assert.strictEqual(pickReachable(R, 200, all, new Set()).id, 'a') // 200 -> a@300
+})
+
+test('pickReachable wraps around', () => {
+  assert.strictEqual(pickReachable(R, 320, all, new Set()).id, 'b') // past a -> wrap to b
+})
+
+test('pickReachable skips a skipped (dead) successor to the next live one', () => {
+  assert.strictEqual(pickReachable(R, 100, all, new Set(['c'])).id, 'a') // c dead -> a
+})
+
+test('pickReachable skips peers we have no connection to (not reachable)', () => {
+  const reachable = new Set(['a', 'b']) // c unreachable
+  assert.strictEqual(pickReachable(R, 100, reachable, new Set()).id, 'a')
+})
+
+test('pickReachable returns null when nobody qualifies', () => {
+  assert.strictEqual(pickReachable(R, 0, new Set(), new Set()), null) // none reachable
+  assert.strictEqual(pickReachable(R, 0, all, new Set(['a', 'b', 'c'])), null) // all skipped
 })
 
 console.log(`\n${n} passed`)
