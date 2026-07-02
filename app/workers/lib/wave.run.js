@@ -55,6 +55,8 @@ const wave = createWave({
     }
   },
   onGallery: (items) =>
-    console.log(`[${name}] GALLERY size=${items.length} [${items.map((i) => i.caption).join(', ')}]`),
+    console.log(
+      `[${name}] GALLERY size=${items.length} [${items.map((i) => i.caption).join(', ')}]`
+    ),
   log: (...m) => console.log(`[${name}]`, ...m)
 })

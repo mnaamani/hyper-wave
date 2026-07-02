@@ -9,9 +9,10 @@ const { verifyReceipt } = require('./token')
 // by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
 // Runs in apply() so every peer enforces it identically. (Authenticity, not proof
 // of token-holding — see verifyReceipt.)
-function selfieHasValidReceipt (op) {
+function selfieHasValidReceipt(op) {
   return (
-    op.peerId && op.receiptSig &&
+    op.peerId &&
+    op.receiptSig &&
     verifyReceipt(op.peerId, op.waveId, op.hopCount, op.chainHash, op.receiptTs, op.receiptSig)
   )
 }
@@ -19,11 +20,11 @@ function selfieHasValidReceipt (op) {
 // Autobase config shared by the engine and tests so apply/view is exercised
 // identically. apply() admits writers and appends only receipt-valid wave-selfie
 // ops into a single ordered view.
-function galleryConfig () {
+function galleryConfig() {
   return {
     valueEncoding: 'json',
     open: (s) => s.get('gallery', { valueEncoding: 'json' }),
-    async apply (nodes, view, host) {
+    async apply(nodes, view, host) {
       for (const node of nodes) {
         const op = node.value
         if (op?.type === 'add-writer') {
@@ -39,7 +40,7 @@ function galleryConfig () {
 }
 
 // Deterministic gallery: one entry per peer per wave (newest wins), ordered by hop.
-function buildGallery (entries) {
+function buildGallery(entries) {
   const byKey = new Map()
   for (const e of entries) {
     const k = e.waveId + '|' + e.peerId
@@ -50,7 +51,7 @@ function buildGallery (entries) {
 }
 
 // Read all wave-selfie entries out of an Autobase view into an ordered gallery.
-async function readGallery (base) {
+async function readGallery(base) {
   const view = base.view
   const items = []
   for (let i = 0; i < view.length; i++) {

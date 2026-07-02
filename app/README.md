@@ -83,7 +83,7 @@ plays **one selfie at a time in the centre of the ring**, featuring each new arr
 auto-cycling when idle.
 
 **Lifecycle — idle → lobby → racing → idle.** "Kick off" doesn't race immediately: it
-**announces** the wave and opens a **lobby** (default 15s) so peers can *opt in* ("get ready").
+**announces** the wave and opens a **lobby** (default 15s) so peers can _opt in_ ("get ready").
 Anyone can start, but only while idle (button disabled otherwise); simultaneous starts resolve by
 lower-`waveId`-wins. When the lobby closes the initiator broadcasts `wave-start` with the roster and
 the token races. **Everyone relays the ball (full-ring visual), but only opted-in peers (the
@@ -91,7 +91,7 @@ roster) get the selfie proof-window** — non-joiners just pass it on. When the 
 originator it broadcasts `wave-end` so every peer finishes together (ball rolls home, button
 re-enables); a timeout falls back to idle if a wave stalls.
 
-**Healing:** the token is forwarded to the next *reachable* peer clockwise (unconnected peers are
+**Healing:** the token is forwarded to the next _reachable_ peer clockwise (unconnected peers are
 skipped). After forwarding, a peer watches for the wave to advance past its hop — the successor's
 `wave-pos` broadcast doubles as an ACK; if none arrives within `HEAL_TIMEOUT_MS`, that successor is
 treated as dead, skipped, and the token re-forwarded to the next one.

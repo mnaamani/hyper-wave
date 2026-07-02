@@ -20,12 +20,20 @@ const kp = [crypto.keyPair(), crypto.keyPair(), crypto.keyPair()]
 const id = kp.map((k) => b4a.toString(k.publicKey, 'hex'))
 
 // forge one hop: given the token a peer received, produce the token it forwards
-function stampHop (keyPair, peerId, waveId, prevToken) {
+function stampHop(keyPair, peerId, waveId, prevToken) {
   const hopCount = prevToken.hopCount + 1
   const prevChainHash = advanceChain(prevToken.prevChainHash, prevToken.senderReceiptSig)
   const timestamp = prevToken.timestamp + 50
   const senderReceiptSig = signReceipt(keyPair, waveId, hopCount, prevChainHash, timestamp)
-  return { waveId, originator: prevToken.originator, hopCount, prevChainHash, senderPeerId: peerId, senderReceiptSig, timestamp }
+  return {
+    waveId,
+    originator: prevToken.originator,
+    hopCount,
+    prevChainHash,
+    senderPeerId: peerId,
+    senderReceiptSig,
+    timestamp
+  }
 }
 
 const waveId = 'wave-abc'
@@ -50,7 +58,10 @@ test('every hop receipt verifies against its signer', () => {
 
 test('advanceChain is deterministic and input-sensitive', () => {
   assert.strictEqual(advanceChain(ZERO, t0.senderReceiptSig), t1.prevChainHash)
-  assert.notStrictEqual(advanceChain(ZERO, t0.senderReceiptSig), advanceChain(ZERO, t1.senderReceiptSig))
+  assert.notStrictEqual(
+    advanceChain(ZERO, t0.senderReceiptSig),
+    advanceChain(ZERO, t1.senderReceiptSig)
+  )
 })
 
 test('chain accumulator reproducible by an independent validator walk', () => {

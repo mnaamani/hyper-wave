@@ -1,7 +1,11 @@
 // Deterministic unit tests for the pure ring logic. Runs under Bare (the worker's
 // real runtime):  bare workers/lib/wave.logic.test.js
 const assert = require('bare-assert')
-const deepEq = (a, b, msg) => assert.ok(JSON.stringify(a) === JSON.stringify(b), msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b))
+const deepEq = (a, b, msg) =>
+  assert.ok(
+    JSON.stringify(a) === JSON.stringify(b),
+    msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b)
+  )
 const b4a = require('b4a')
 const { angleOf, liveRing, nextClockwise, pickReachable } = require('./ring')
 
@@ -28,7 +32,11 @@ test('liveRing drops stale peers and sorts clockwise', () => {
     { id: 'c', angle: 150, lastSeen: now - 99999 } // stale
   ]
   const ring = liveRing(entries, now, 12000)
-  deepEq(ring.map((p) => p.id), ['b', 'a'], 'c pruned, sorted by angle')
+  deepEq(
+    ring.map((p) => p.id),
+    ['b', 'a'],
+    'c pruned, sorted by angle'
+  )
 })
 
 test('nextClockwise picks smallest angle greater than mine', () => {

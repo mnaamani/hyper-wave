@@ -4,7 +4,11 @@
 // writer, append wave-selfie ops (only receipt-valid ones survive), read them back
 // ordered. Multi-writer *replication* across processes is covered by spike/multiwriter.
 const assert = require('bare-assert')
-const deepEq = (a, b, msg) => assert.ok(JSON.stringify(a) === JSON.stringify(b), msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b))
+const deepEq = (a, b, msg) =>
+  assert.ok(
+    JSON.stringify(a) === JSON.stringify(b),
+    msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b)
+  )
 const fs = require('bare-fs')
 const Corestore = require('corestore')
 const Autobase = require('autobase')
@@ -18,13 +22,23 @@ const CH = b4a.toString(b4a.alloc(32), 'hex') // some chain hash value
 const RT = 1000 // receipt timestamp
 
 // build a wave-selfie op with a valid receipt signed by kp
-function selfie (kp, hopCount, caption, timestamp) {
+function selfie(kp, hopCount, caption, timestamp) {
   const peerId = b4a.toString(kp.publicKey, 'hex')
   const receiptSig = signReceipt(kp, WAVE, hopCount, CH, RT)
-  return { type: 'wave-selfie', waveId: WAVE, peerId, hopCount, chainHash: CH, receiptTs: RT, receiptSig, caption, timestamp }
+  return {
+    type: 'wave-selfie',
+    waveId: WAVE,
+    peerId,
+    hopCount,
+    chainHash: CH,
+    receiptTs: RT,
+    receiptSig,
+    caption,
+    timestamp
+  }
 }
 
-async function main () {
+async function main() {
   const dir = '/tmp/hyperwave-autobase-test-' + Date.now()
   const store = new Corestore(dir)
   const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig())
@@ -42,7 +56,11 @@ async function main () {
   await base.update()
 
   const gallery = await readGallery(base)
-  deepEq(gallery.map((g) => g.caption), ['first-newer', 'second'], 'ordered by hop, newest-per-peer')
+  deepEq(
+    gallery.map((g) => g.caption),
+    ['first-newer', 'second'],
+    'ordered by hop, newest-per-peer'
+  )
   console.log('ok - valid selfies append and read back ordered via the real apply/view')
 
   // receipt gate: a selfie with a bad signature is dropped by apply()

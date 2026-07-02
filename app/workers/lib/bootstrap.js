@@ -4,7 +4,7 @@
 // HYPERWAVE_BOOTSTRAP=host:port. Ctrl-C to stop.
 const createTestnet = require('@hyperswarm/testnet')
 
-async function main () {
+async function main() {
   const testnet = await createTestnet(3)
   const { host, port } = testnet.bootstrap[0]
   console.log(`BOOTSTRAP ${host}:${port}`)

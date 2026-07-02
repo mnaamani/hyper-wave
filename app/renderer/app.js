@@ -35,13 +35,15 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
   }
 })
 
-function setIdleStatus () {
+function setIdleStatus() {
   const n = state.peers.length
   statusEl.innerText =
-    n === 0 ? 'in the ring — waiting for peers…' : `${n} peer${n === 1 ? '' : 's'} in the ring — kick off a wave`
+    n === 0
+      ? 'in the ring — waiting for peers…'
+      : `${n} peer${n === 1 ? '' : 's'} in the ring — kick off a wave`
 }
 
-function onTokenEvent (e) {
+function onTokenEvent(e) {
   switch (e.event) {
     case 'wave-announce':
       waveActive = true
@@ -75,7 +77,9 @@ function onTokenEvent (e) {
       statusEl.innerText = '⚽ the wave is off!'
       break
     case 'holding':
-      statusEl.innerText = e.canSelfie ? `📸 your turn! — hop ${e.hopCount ?? ''}` : `wave passing you — hop ${e.hopCount ?? ''}`
+      statusEl.innerText = e.canSelfie
+        ? `📸 your turn! — hop ${e.hopCount ?? ''}`
+        : `wave passing you — hop ${e.hopCount ?? ''}`
       setBall(e.angle) // roll the football to my seat
       if (e.canSelfie) openProofWindow(e) // only opted-in peers selfie
       break
@@ -113,7 +117,7 @@ let lobbyJoined = false
 let lobbyDeadline = 0
 let lobbyTimer = null
 
-function openLobby (e) {
+function openLobby(e) {
   lobbyCount = e.count || 1
   lobbyJoined = !!e.mine || !!e.joined
   lobbyDeadline = performance.now() + (e.lobbyMs || 15000)
@@ -126,18 +130,18 @@ function openLobby (e) {
   paintLobby()
 }
 
-function updateLobby (count) {
+function updateLobby(count) {
   if (typeof count === 'number') lobbyCount = count
   paintLobby()
 }
 
-function paintLobby () {
+function paintLobby() {
   if (!lobbyEl.classList.contains('show')) return
   const secs = Math.max(0, Math.ceil((lobbyDeadline - performance.now()) / 1000))
   lobbySubEl.innerText = `starting in ${secs}s · ${lobbyCount} in`
 }
 
-function closeLobby () {
+function closeLobby() {
   clearInterval(lobbyTimer)
   lobbyEl.classList.remove('show')
 }
@@ -169,9 +173,15 @@ let stream = null
 let proofCtx = null // { waveId, hopCount, receiptSig, chainHash }
 let countdownTimer = null
 
-async function openProofWindow (e) {
+async function openProofWindow(e) {
   if (proofCtx) return // already capturing for a hop; ignore re-entry
-  proofCtx = { waveId: e.waveId, hopCount: e.hopCount, receiptSig: e.receiptSig, chainHash: e.chainHash, receiptTs: e.receiptTs }
+  proofCtx = {
+    waveId: e.waveId,
+    hopCount: e.hopCount,
+    receiptSig: e.receiptSig,
+    chainHash: e.chainHash,
+    receiptTs: e.receiptTs
+  }
   document.getElementById('modal-sub').innerText = `Hop ${e.hopCount} — you're in the chain.`
   captionEl.value = ''
   modal.classList.add('show')
@@ -198,7 +208,7 @@ async function openProofWindow (e) {
   }, 1000)
 }
 
-function capture () {
+function capture() {
   if (!proofCtx) return
   let image = ''
   if (stream) {
@@ -220,7 +230,7 @@ function capture () {
   closeProofWindow()
 }
 
-function closeProofWindow () {
+function closeProofWindow() {
   if (countdownTimer) clearInterval(countdownTimer)
   if (stream) {
     for (const t of stream.getTracks()) t.stop()
@@ -244,18 +254,18 @@ const imgCache = new Map() // dataURL -> HTMLImageElement
 let advanceTimer = null
 const ADVANCE_MS = 3500
 
-function ensureImg (url) {
+function ensureImg(url) {
   if (!url) return null
   let img = imgCache.get(url)
   if (!img) {
-    img = new Image()
+    img = document.createElement('img')
     img.src = url
     imgCache.set(url, img)
   }
   return img
 }
 
-function scheduleAdvance () {
+function scheduleAdvance() {
   clearTimeout(advanceTimer)
   advanceTimer = setTimeout(() => {
     if (galleryItems.length > 1) {
@@ -265,7 +275,7 @@ function scheduleAdvance () {
   }, ADVANCE_MS)
 }
 
-function handleGallery (items) {
+function handleGallery(items) {
   // find the newest arrival (highest hop among not-yet-shown) to feature next
   let jumpTo = -1
   let jumpHop = -Infinity
@@ -290,7 +300,7 @@ function handleGallery (items) {
 }
 
 // draw an image cropped to cover a square centred at (x,y)
-function drawCover (img, x, y, size) {
+function drawCover(img, x, y, size) {
   const ar = img.naturalWidth / img.naturalHeight
   let dw = size
   let dh = size / ar
@@ -301,7 +311,7 @@ function drawCover (img, x, y, size) {
   ctx.drawImage(img, x - dw / 2, y - dh / 2, dw, dh)
 }
 
-function drawCenterSelfie (cx, cy) {
+function drawCenterSelfie(cx, cy) {
   const item = galleryItems[centerIdx]
   if (!item) return
   const rad = 78
@@ -342,7 +352,7 @@ function drawCenterSelfie (cx, cy) {
 }
 
 // --- Ring rendering -----------------------------------------------------------
-function dot (angleDeg, r, color, radius, label) {
+function dot(angleDeg, r, color, radius, label) {
   const cx = canvas.width / 2
   const cy = canvas.height / 2
   const a = ((angleDeg - 90) * Math.PI) / 180 // 0° at top, clockwise
@@ -360,7 +370,7 @@ function dot (angleDeg, r, color, radius, label) {
   }
 }
 
-function pointOn (angleDeg, r) {
+function pointOn(angleDeg, r) {
   const a = ((angleDeg - 90) * Math.PI) / 180
   return [canvas.width / 2 + r * Math.cos(a), canvas.height / 2 + r * Math.sin(a)]
 }
@@ -371,7 +381,7 @@ let ballSeenAt = 0
 const TRAVEL_MS = 1100 // ~= the per-hop dwell, so the roll is continuous
 const BALL_FADE_MS = 4000 // hide the ball this long after the last position update
 
-function ballAngle () {
+function ballAngle() {
   if (!ball) return null
   const p = Math.min(1, (performance.now() - ball.startedAt) / TRAVEL_MS)
   let d = (ball.to - ball.from) % 360
@@ -379,15 +389,15 @@ function ballAngle () {
   return (ball.from + d * p) % 360
 }
 
-function setBall (toAngle) {
-  if (toAngle == null) return
+function setBall(toAngle) {
+  if (toAngle === null) return
   const from = ball ? ballAngle() : toAngle // continue from where it is, or drop in
   ball = { from, to: toAngle, startedAt: performance.now() }
   ballSeenAt = performance.now()
   ballActive = true
 }
 
-function drawBall (R) {
+function drawBall(R) {
   if (!ball) return
   if (performance.now() - ballSeenAt >= BALL_FADE_MS) {
     ball = null
@@ -407,7 +417,7 @@ function drawBall (R) {
   ctx.textBaseline = 'alphabetic'
 }
 
-function render () {
+function render() {
   const cx = canvas.width / 2
   const cy = canvas.height / 2
   const R = 170
@@ -436,7 +446,13 @@ function render () {
 
   for (const p of state.peers) {
     const isSucc = p.id === succId
-    dot(p.angle, R, isSucc ? '#ff8c42' : '#39d98a', isSucc ? 8 : 6, isSucc ? 'next ▸ ' + p.id.slice(0, 6) : p.id.slice(0, 6))
+    dot(
+      p.angle,
+      R,
+      isSucc ? '#ff8c42' : '#39d98a',
+      isSucc ? 8 : 6,
+      isSucc ? 'next ▸ ' + p.id.slice(0, 6) : p.id.slice(0, 6)
+    )
   }
   if (state.me) dot(state.me.angle, R, '#ffd166', 9, 'you')
 
@@ -452,7 +468,7 @@ function render () {
 }
 
 // continuous loop so ring updates + football animation both render smoothly
-function loop () {
+function loop() {
   render()
   requestAnimationFrame(loop)
 }

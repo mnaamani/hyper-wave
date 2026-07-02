@@ -125,7 +125,9 @@ async function createWindow() {
   })
 
   // allow webcam access for the proof-window selfie capture
-  win.webContents.session.setPermissionRequestHandler((wc, permission, cb) => cb(permission === 'media'))
+  win.webContents.session.setPermissionRequestHandler((wc, permission, cb) =>
+    cb(permission === 'media')
+  )
 
   const devServerUrl = process.env.PEAR_DEV_SERVER_URL
 

@@ -10,7 +10,7 @@ const { createWave } = require('./lib/wave')
 const pipe = new FramedStream(Bare.IPC)
 const storageDir = Bare.argv[2]
 
-function send (msg) {
+function send(msg) {
   pipe.write(JSON.stringify(msg))
 }
 
@@ -22,7 +22,12 @@ const wave = createWave({
   log: (...a) => console.log('[hyperwave]', ...a)
 })
 
-console.log('[hyperwave] worker up, me=', wave.me.id.slice(0, 8), 'angle=', wave.me.angle.toFixed(1))
+console.log(
+  '[hyperwave] worker up, me=',
+  wave.me.id.slice(0, 8),
+  'angle=',
+  wave.me.angle.toFixed(1)
+)
 
 // Renderer -> worker commands.
 pipe.on('data', (data) => {
