@@ -48,6 +48,7 @@ function onTokenEvent(e) {
     case 'wave-announce':
       waveActive = true
       startBtn.style.display = 'none'
+      hideProgress()
       openLobby(e)
       break
     case 'joined':
@@ -61,14 +62,18 @@ function onTokenEvent(e) {
     case 'wave-active':
       waveActive = true
       startBtn.style.display = 'none'
+      expectedSelfies = e.count || 1 // roster size = selfies we expect
       closeLobby()
+      updateProgress()
       statusEl.innerText = e.joined ? '📣 you are in — get ready!' : '👀 spectating this wave'
       break
     case 'wave-idle':
       waveActive = false
       startBtn.style.display = ''
+      startBtn.classList.toggle('docked', galleryItems.length > 0) // don't cover the gallery
       closeLobby()
       closeProofWindow()
+      updateProgress()
       setIdleStatus()
       break
     case 'busy':
@@ -255,6 +260,29 @@ const imgCache = new Map() // dataURL -> HTMLImageElement
 let advanceTimer = null
 const ADVANCE_MS = 3500
 
+// gallery progress: selfies arrive slower than the ball races (proof window + capture
+// + replication), so show how many of the expected (roster) have landed.
+let expectedSelfies = 0
+const progressEl = document.getElementById('progress')
+const progressFill = document.getElementById('progress-fill')
+const progressLabel = document.getElementById('progress-label')
+
+function hideProgress() {
+  progressEl.classList.remove('show')
+}
+
+function updateProgress() {
+  const got = galleryItems.length
+  if (!waveActive && got === 0) return hideProgress()
+  const total = Math.max(expectedSelfies, got, 1)
+  progressEl.classList.add('show')
+  progressFill.style.width = Math.round((got / total) * 100) + '%'
+  progressLabel.innerText =
+    got >= total
+      ? `📸 all ${got} selfie${got === 1 ? '' : 's'} in!`
+      : `📸 collecting selfies… ${got} / ${total}`
+}
+
 function ensureImg(url) {
   if (!url) return null
   let img = imgCache.get(url)
@@ -298,6 +326,9 @@ function handleGallery(items) {
   } else if (centerIdx >= galleryItems.length) {
     centerIdx = 0
   }
+  updateProgress()
+  // once selfies exist, keep the Kick-off button out of the gallery's way
+  if (!waveActive) startBtn.classList.toggle('docked', galleryItems.length > 0)
 }
 
 // draw an image cropped to cover a square centred at (x,y)
@@ -347,9 +378,6 @@ function drawCenterSelfie(cx, cy) {
   ctx.font = '13px -apple-system, sans-serif'
   const cap = item.caption || item.peerId.slice(0, 6)
   ctx.fillText(`hop ${item.hopCount} · ${cap}`, cx, cy + rad + 20)
-  ctx.fillStyle = 'rgba(234,255,240,0.5)'
-  ctx.font = '11px ui-monospace, Menlo, monospace'
-  ctx.fillText(`${centerIdx + 1} / ${galleryItems.length}`, cx, cy + rad + 37)
 }
 
 // --- Ring rendering -----------------------------------------------------------
