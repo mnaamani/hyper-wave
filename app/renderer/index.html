@@ -1,0 +1,212 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>HyperWave</title>
+    <style>
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 50% 20%, #0e4f15 0%, #041007 100%);
+        color: #eafff0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin: 16px 0 4px;
+      }
+      h1 {
+        font-size: 26px;
+        margin: 0;
+        letter-spacing: 1px;
+      }
+      #v {
+        opacity: 0.6;
+        font-size: 13px;
+      }
+      #status {
+        font-size: 14px;
+        opacity: 0.85;
+        min-height: 20px;
+      }
+      #me {
+        font-size: 12px;
+        opacity: 0.6;
+        font-family: ui-monospace, Menlo, monospace;
+      }
+      #start {
+        margin-top: 14px;
+        padding: 10px 22px;
+        font-size: 16px;
+        border: 2px solid #ffd166;
+        border-radius: 24px;
+        background: transparent;
+        color: #ffd166;
+        cursor: pointer;
+      }
+      #start:hover {
+        background: #ffd166;
+        color: #06210d;
+      }
+      /* gallery */
+      #gallery-title {
+        margin: 20px 0 8px;
+        font-size: 14px;
+        opacity: 0.7;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      #gallery {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+        max-width: 720px;
+        padding: 0 16px 32px;
+      }
+      .card {
+        width: 130px;
+        background: rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .card img,
+      .card .noimg {
+        width: 130px;
+        height: 130px;
+        object-fit: cover;
+        display: block;
+        background: #123;
+      }
+      .card .noimg {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32px;
+      }
+      .card .meta {
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+      .card .hop {
+        color: #ffd166;
+        font-weight: 600;
+      }
+      .card .cap {
+        opacity: 0.8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* proof window modal */
+      #modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+      }
+      #modal.show {
+        display: flex;
+      }
+      .sheet {
+        background: #0b2a12;
+        border: 2px solid #ffd166;
+        border-radius: 16px;
+        padding: 20px;
+        width: 320px;
+        text-align: center;
+      }
+      .sheet h2 {
+        margin: 0 0 4px;
+        font-size: 20px;
+      }
+      .sheet .sub {
+        opacity: 0.7;
+        font-size: 13px;
+        margin-bottom: 12px;
+      }
+      #preview {
+        width: 280px;
+        height: 210px;
+        object-fit: cover;
+        border-radius: 10px;
+        background: #04140a;
+        transform: scaleX(-1);
+      }
+      #countdown {
+        font-size: 40px;
+        font-weight: 700;
+        color: #ffd166;
+        height: 46px;
+      }
+      #caption {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 10px 0;
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.3);
+        color: #eafff0;
+      }
+      .sheet button {
+        padding: 9px 18px;
+        font-size: 15px;
+        border-radius: 20px;
+        border: none;
+        cursor: pointer;
+        margin: 0 4px;
+      }
+      #capture {
+        background: #ffd166;
+        color: #06210d;
+        font-weight: 600;
+      }
+      #skip {
+        background: transparent;
+        color: #eafff0;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>🌊 HyperWave</h1>
+      <span id="v">v</span>
+    </header>
+    <div id="status">connecting…</div>
+    <div id="me"></div>
+    <canvas id="ring" width="440" height="440"></canvas>
+    <button id="start">🌊 Start the wave</button>
+
+    <div id="gallery-title">the wave gallery</div>
+    <div id="gallery"></div>
+
+    <div id="modal">
+      <div class="sheet">
+        <h2>🌊 The wave passed you!</h2>
+        <div class="sub" id="modal-sub">Strike a pose — you're in the chain.</div>
+        <video id="preview" autoplay muted playsinline></video>
+        <div id="countdown"></div>
+        <input id="caption" placeholder="Say something… 🇧🇷" maxlength="60" />
+        <div>
+          <button id="capture">📸 Capture</button>
+          <button id="skip">Skip</button>
+        </div>
+      </div>
+    </div>
+
+    <canvas id="snap" width="240" height="180" style="display: none"></canvas>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
