@@ -33,6 +33,7 @@ pipe.on('data', (data) => {
     return
   }
   if (msg.type === 'start-wave') wave.startWave()
+  else if (msg.type === 'join-wave') wave.join()
   else if (msg.type === 'post-selfie') wave.postSelfie(msg.selfie)
 })
 

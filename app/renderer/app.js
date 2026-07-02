@@ -43,25 +43,41 @@ function setIdleStatus () {
 
 function onTokenEvent (e) {
   switch (e.event) {
+    case 'wave-announce':
+      waveActive = true
+      startBtn.disabled = true
+      openLobby(e)
+      break
+    case 'joined':
+      lobbyJoined = true
+      joinBtn.style.display = 'none'
+      updateLobby(e.count)
+      break
+    case 'roster':
+      updateLobby(e.count)
+      break
     case 'wave-active':
       waveActive = true
       startBtn.disabled = true
+      closeLobby()
+      statusEl.innerText = e.joined ? '📣 you are in — get ready!' : '👀 spectating this wave'
       break
     case 'wave-idle':
       waveActive = false
       startBtn.disabled = false
+      closeLobby()
       setIdleStatus()
       break
     case 'busy':
-      statusEl.innerText = '⏳ a wave is already rolling — wait for it to finish'
+      statusEl.innerText = '⏳ a wave is already forming — wait for it to finish'
       break
     case 'started':
-      statusEl.innerText = '⚽ you kicked off the wave!'
+      statusEl.innerText = '⚽ the wave is off!'
       break
     case 'holding':
-      statusEl.innerText = `the ball reached you — hop ${e.hopCount ?? ''}`
+      statusEl.innerText = e.canSelfie ? `📸 your turn! — hop ${e.hopCount ?? ''}` : `wave passing you — hop ${e.hopCount ?? ''}`
       setBall(e.angle) // roll the football to my seat
-      openProofWindow(e) // capture a selfie for the gallery
+      if (e.canSelfie) openProofWindow(e) // only opted-in peers selfie
       break
     case 'position':
       statusEl.innerText = `wave rolling — hop ${e.hopCount ?? ''}`
@@ -85,6 +101,51 @@ function onTokenEvent (e) {
 
 startBtn.onclick = () => {
   bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type: 'start-wave' }))
+}
+
+// --- lobby (opt in before the wave starts) ------------------------------------
+const lobbyEl = document.getElementById('lobby')
+const lobbyMsgEl = document.getElementById('lobby-msg')
+const lobbySubEl = document.getElementById('lobby-sub')
+const joinBtn = document.getElementById('join')
+let lobbyCount = 0
+let lobbyJoined = false
+let lobbyDeadline = 0
+let lobbyTimer = null
+
+function openLobby (e) {
+  lobbyCount = e.count || 1
+  lobbyJoined = !!e.mine || !!e.joined
+  lobbyDeadline = performance.now() + (e.lobbyMs || 15000)
+  lobbyMsgEl.innerText = e.mine ? '📣 you are forming a wave' : '🌊 a wave is forming — join in?'
+  joinBtn.style.display = lobbyJoined ? 'none' : 'inline-block'
+  joinBtn.disabled = false
+  lobbyEl.classList.add('show')
+  clearInterval(lobbyTimer)
+  lobbyTimer = setInterval(paintLobby, 200)
+  paintLobby()
+}
+
+function updateLobby (count) {
+  if (typeof count === 'number') lobbyCount = count
+  paintLobby()
+}
+
+function paintLobby () {
+  if (!lobbyEl.classList.contains('show')) return
+  const secs = Math.max(0, Math.ceil((lobbyDeadline - performance.now()) / 1000))
+  lobbySubEl.innerText = `starting in ${secs}s · ${lobbyCount} in`
+}
+
+function closeLobby () {
+  clearInterval(lobbyTimer)
+  lobbyEl.classList.remove('show')
+}
+
+joinBtn.onclick = () => {
+  lobbyJoined = true
+  joinBtn.style.display = 'none'
+  bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type: 'join-wave' }))
 }
 bridge.onWorkerStdout(HYPERWAVE, (d) => console.log('[hyperwave]', decoder.decode(d)))
 bridge.onWorkerStderr(HYPERWAVE, (d) => console.error('[hyperwave]', decoder.decode(d)))

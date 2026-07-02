@@ -44,17 +44,23 @@ Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
   peers:     [ { id, angle, lastSeen }, ... ],  // live, sorted clockwise
   successor: { id, angle } | null }              // next peer clockwise (wraps)
 
-// token race / lifecycle events
-{ type: 'token', event: 'wave-active', waveId }               // a wave started (disable Kick-off)
-{ type: 'token', event: 'wave-idle'  , waveId, reason }       // wave ended -> idle (enable Kick-off)
-{ type: 'token', event: 'busy'       , waveId }               // tried to start while one is active
-{ type: 'token', event: 'started'    , waveId, by }
-{ type: 'token', event: 'forwarded'  , waveId, hopCount, to }
-{ type: 'token', event: 'holding'    , waveId, hopCount, holder, angle, receiptSig, chainHash }  // I hold it: opens proof window
-{ type: 'token', event: 'position'   , waveId, hopCount, holder, angle }  // another peer holds it: roll the ball there
-{ type: 'token', event: 'completed'  , waveId, hops, chainHash, angle }   // sent to ALL peers via wave-end
-{ type: 'token', event: 'healed'     , waveId, skipped }      // routed around a dead successor
-{ type: 'token', event: 'stalled'    , waveId, reason }
+// lifecycle events (idle -> lobby -> racing -> idle)
+{ type: 'token', event: 'wave-announce', waveId, by, mine, joined, count, lobbyMs }  // lobby opened
+{ type: 'token', event: 'joined'      , waveId, count }       // I opted in
+{ type: 'token', event: 'roster'      , waveId, count }       // someone opted in
+{ type: 'token', event: 'wave-active' , waveId, joined, count }  // race started (disable Kick-off)
+{ type: 'token', event: 'wave-idle'   , waveId, reason }      // wave ended -> idle (enable Kick-off)
+{ type: 'token', event: 'busy'        , waveId }              // tried to start while one is forming/racing
+
+// token race events
+{ type: 'token', event: 'started'   , waveId, by }
+{ type: 'token', event: 'forwarded' , waveId, hopCount, to }
+{ type: 'token', event: 'holding'   , waveId, hopCount, holder, angle, receiptSig, chainHash, receiptTs, canSelfie }  // ball at me; canSelfie => open proof window
+{ type: 'token', event: 'position'  , waveId, hopCount, holder, angle }  // another peer holds it: roll the ball there
+{ type: 'token', event: 'completed' , waveId, hops, chainHash, angle }   // sent to ALL peers via wave-end
+{ type: 'token', event: 'healed'    , waveId, skipped }       // routed around a dead successor
+{ type: 'token', event: 'gallery-error', waveId, reason }     // couldn't post selfie
+{ type: 'token', event: 'stalled'   , waveId, reason }
 
 // gallery (Autobase view) — on every change / replication
 { type: 'gallery', items: [ { waveId, peerId, hopCount, caption, image /* dataURL */, ... }, ... ] }
@@ -63,8 +69,9 @@ Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
 ### Renderer → worker commands
 
 ```js
-{ type: 'start-wave' }                 // this peer becomes the originator
-{ type: 'post-selfie', selfie: { waveId, hopCount, receiptSig, chainHash, caption, image } }
+{ type: 'start-wave' }                 // announce a wave + open the lobby
+{ type: 'join-wave' }                  // opt in to the current lobby
+{ type: 'post-selfie', selfie: { waveId, hopCount, receiptSig, chainHash, receiptTs, caption, image } }
 ```
 
 The ring UI draws a yellow "you" dot, green peer dots, and highlights the **successor** in orange
@@ -75,11 +82,14 @@ animates the ball there). **Kick off the wave** originates a token. When the bal
 plays **one selfie at a time in the centre of the ring**, featuring each new arrival then
 auto-cycling when idle.
 
-**One wave at a time:** anyone can Kick off, but only while idle (the button is disabled during a
-wave). Simultaneous starts are resolved deterministically — the lower `waveId` wins, so all peers
-converge on one wave. When the token returns to the originator it broadcasts `wave-end` so every
-peer finishes together (ball rolls home, button re-enables); a timeout falls back to idle if a
-wave stalls.
+**Lifecycle — idle → lobby → racing → idle.** "Kick off" doesn't race immediately: it
+**announces** the wave and opens a **lobby** (default 15s) so peers can *opt in* ("get ready").
+Anyone can start, but only while idle (button disabled otherwise); simultaneous starts resolve by
+lower-`waveId`-wins. When the lobby closes the initiator broadcasts `wave-start` with the roster and
+the token races. **Everyone relays the ball (full-ring visual), but only opted-in peers (the
+roster) get the selfie proof-window** — non-joiners just pass it on. When the token returns to the
+originator it broadcasts `wave-end` so every peer finishes together (ball rolls home, button
+re-enables); a timeout falls back to idle if a wave stalls.
 
 **Healing:** the token is forwarded to the next *reachable* peer clockwise (unconnected peers are
 skipped). After forwarding, a peer watches for the wave to advance past its hop — the successor's

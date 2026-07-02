@@ -28,6 +28,12 @@ Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`
 - [x] Lean pass: cut `lap` from the token (always 1, no multi-lap) and the unused `angle` from
       wave-selfie entries. Direction is already clockwise-only. Kept full-ring gossip + OTA worker
       by choice (see "Scale path" below).
+- [x] Wave lobby: idle → lobby → racing → idle. "Kick off" announces a wave (`wave-announce`) and
+      opens a lobby (default 15s) so peers opt in (`wave-join`); initiator broadcasts `wave-start`
+      with the roster, then the token races. Everyone relays the ball (full-ring visual); only
+      opted-in roster members get the selfie proof-window (`holding.canSelfie`). No cap (chosen).
+      NOTE: not networked-verified this session (sandbox DHT down) — verified by load + happy-path
+      trace; GUI-test on a real machine (local bootstrap).
 
 ## Backlog
 

@@ -26,6 +26,9 @@ const MAX_HOPS = 5000 // safety cap against runaway tokens
 // is what makes the wave *visibly* ripple around the ring and staggers proof windows
 // so selfies are taken in sequence (the stadium-wave feel). Configurable per wave.
 const HOP_DELAY_MS = 1200
+// Lobby: after "kick off", the wave is announced and peers get this long to opt in
+// (get ready / choose to selfie) before the token starts racing.
+const LOBBY_MS = 15000
 // A wave is a single, one-at-a-time event. If it doesn't complete within this
 // window (peer dropped, stall), peers fall back to idle so a new wave can start.
 const WAVE_TIMEOUT_MS = 90000
@@ -38,7 +41,7 @@ function shortId (hex) {
   return hex.slice(0, 8)
 }
 
-function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () => {}, log = () => {}, bootstrap = null, matchId = MATCH, hopDelayMs = HOP_DELAY_MS, waveTimeoutMs = WAVE_TIMEOUT_MS, healTimeoutMs = HEAL_TIMEOUT_MS }) {
+function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () => {}, log = () => {}, bootstrap = null, matchId = MATCH, hopDelayMs = HOP_DELAY_MS, waveTimeoutMs = WAVE_TIMEOUT_MS, healTimeoutMs = HEAL_TIMEOUT_MS, lobbyMs = LOBBY_MS }) {
   // Prune old galleries: the whole hyperwave store is per-run (galleries are keyed
   // by random waveId, nothing here persists across runs), so wipe it on startup to
   // reclaim disk instead of accumulating stale wave-gallery:<waveId> namespaces.
@@ -62,11 +65,14 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
   let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
 
-  // Wave lifecycle: exactly one wave is active at a time. Concurrent starts are
-  // resolved deterministically — the lower waveId wins, so all peers converge on
-  // the same wave regardless of who they heard first.
-  let activeWaveId = null
-  let waveTimer = null
+  // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
+  // concurrent starts resolve deterministically (lower waveId wins). During the
+  // lobby, peers opt in; only opted-in peers (the roster) get a selfie prompt — the
+  // ball still visits everyone (relays), keeping the full-ring visual.
+  //   wave = { id, phase: 'lobby'|'racing', by, roster: Set<id>, joined: bool } | null
+  let wave = null
+  let lobbyTimer = null // fires the race (initiator) or a fallback to idle (others)
+  let waveTimer = null // racing timeout
   let healTimer = null // watches my forward; fires if the wave doesn't advance
   let healPending = null // { waveId, hop } I'm currently watching
 
@@ -94,24 +100,37 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   function handleGossip (m) {
     if (m.kind === 'token') return processToken(m)
     if (m.kind === 'wave-pos') {
-      // only animate the ball for the active wave (angle derived locally)
-      if (m.waveId === activeWaveId) {
+      // only animate the ball for the wave we're racing (angle derived locally)
+      if (wave && wave.phase === 'racing' && m.waveId === wave.id) {
         // the wave advanced past my hop — my successor is alive, stop watching
         if (healPending && m.waveId === healPending.waveId && m.hopCount > healPending.hop) clearHeal()
         onToken({ event: 'position', waveId: m.waveId, holder: m.holder, angle: angleOfId(m.holder), hopCount: m.hopCount })
       }
       return
     }
-    if (m.kind === 'autobase') {
-      if (m.key && m.waveId && shouldAdopt(m.waveId)) {
-        setActive(m.waveId)
+    if (m.kind === 'wave-announce') {
+      if (shouldAdopt(m.waveId)) enterLobby(m.waveId, m.by, false, m.lobbyMs)
+      return
+    }
+    if (m.kind === 'wave-join') {
+      if (wave && m.waveId === wave.id && m.peerId) {
+        wave.roster.add(m.peerId)
+        onToken({ event: 'roster', waveId: wave.id, count: wave.roster.size })
+      }
+      return
+    }
+    if (m.kind === 'wave-start') {
+      // initiator finalized the roster and kicked off the race
+      if (m.waveId && m.key && shouldAdopt(m.waveId)) {
+        if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false)
         openGallery(m.waveId, b4a.from(m.key, 'hex'))
+        beginRace(m.roster)
       }
       return
     }
     if (m.kind === 'wave-end') {
       // originator (or timeout) ended the wave — everyone finishes together
-      if (m.waveId === activeWaveId) {
+      if (wave && m.waveId === wave.id) {
         onToken({ event: 'completed', waveId: m.waveId, hops: m.hops, chainHash: m.chainHash, angle: angleOfId(m.by) })
         goIdle('ended')
       }
@@ -223,33 +242,72 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     })
   }
 
-  // --- wave lifecycle (single active wave) -----------------------------------
+  // --- wave lifecycle (idle -> lobby -> racing -> idle) ----------------------
 
   // Accept this wave? Idle -> yes; same wave -> yes; a competing wave only if its
   // id is lower (deterministic tie-break so every peer converges on one wave).
   function shouldAdopt (waveId) {
     if (endedWaves.has(waveId)) return false // a finished wave never comes back
-    if (!activeWaveId || waveId === activeWaveId) return true
-    return waveId < activeWaveId
+    if (!wave || waveId === wave.id) return true
+    return waveId < wave.id
   }
 
-  function setActive (waveId) {
+  function teardown () {
+    clearTimeout(lobbyTimer)
+    clearTimeout(waveTimer)
+    clearHeal()
+  }
+
+  // Enter the lobby for `waveId` (announced by `by`; `mine` if I'm the initiator).
+  function enterLobby (waveId, by, mine, dur = lobbyMs) {
+    if (wave && wave.id === waveId) return
+    if (wave) { // superseded by a lower-id wave — abandon the old one
+      endedWaves.add(wave.id)
+      teardown()
+    }
+    wave = { id: waveId, phase: 'lobby', by, roster: new Set([by]), joined: !!mine }
+    if (mine) wave.roster.add(me.id)
+    // fallback: if the race never starts (initiator vanished), drop back to idle
+    clearTimeout(lobbyTimer)
+    lobbyTimer = setTimeout(() => goIdle('lobby-timeout'), lobbyMs + 10000)
+    onToken({ event: 'wave-announce', waveId, by, mine: !!mine, joined: wave.joined, count: wave.roster.size, lobbyMs: dur })
+  }
+
+  // Opt in to the current lobby (renderer command / harness).
+  function join () {
+    if (!wave || wave.phase !== 'lobby' || wave.joined) return
+    wave.joined = true
+    wave.roster.add(me.id)
+    broadcast({ kind: 'wave-join', waveId: wave.id, peerId: me.id })
+    onToken({ event: 'joined', waveId: wave.id, count: wave.roster.size })
+  }
+
+  // Transition the current wave from lobby to racing.
+  function beginRace (rosterIds) {
+    if (!wave) return
+    wave.phase = 'racing'
+    if (rosterIds) for (const id of rosterIds) wave.roster.add(id)
+    clearTimeout(lobbyTimer)
     clearTimeout(waveTimer)
     waveTimer = setTimeout(() => goIdle('timeout'), waveTimeoutMs)
-    if (activeWaveId === waveId) return
-    activeWaveId = waveId
-    onToken({ event: 'wave-active', waveId })
+    onToken({ event: 'wave-active', waveId: wave.id, joined: wave.joined, count: wave.roster.size })
   }
 
   function goIdle (reason) {
-    if (!activeWaveId) return
-    const waveId = activeWaveId
-    activeWaveId = null
+    if (!wave) return
+    const waveId = wave.id
     endedWaves.add(waveId)
+    wave = null
     seen.clear() // only needed within the active wave; bound its growth
-    clearTimeout(waveTimer)
-    clearHeal()
+    teardown()
     onToken({ event: 'wave-idle', waveId, reason })
+  }
+
+  // Emit a holding event; canSelfie tells the renderer whether to open the proof
+  // window (only opted-in roster members selfie; everyone else just relays).
+  function emitHolding (waveId, hopCount, receiptSig, chainHash, receiptTs) {
+    const canSelfie = !!(wave && wave.roster.has(me.id))
+    onToken({ event: 'holding', waveId, hopCount, holder: me.id, angle: me.angle, receiptSig, chainHash, receiptTs, canSelfie })
   }
 
   // --- token race ------------------------------------------------------------
@@ -330,17 +388,18 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     if (seen.has(key) || token.hopCount > MAX_HOPS) return
     seen.add(key)
 
-    // adopt this wave (may switch from a higher-id one) and learn its gallery
-    setActive(token.waveId)
+    // adopt into the race (may switch from a higher-id wave, or catch up if we
+    // missed the announce/start) and learn this wave's gallery
+    if (!wave || wave.id !== token.waveId) enterLobby(token.waveId, token.originator, false)
+    if (wave.phase !== 'racing') beginRace()
     if (token.autobaseKey && token.waveId) openGallery(token.waveId, b4a.from(token.autobaseKey, 'hex'))
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig)
     const hopCount = token.hopCount + 1
     const next = stampToken(token.waveId, token.originator, hopCount, newChainHash, token.autobaseKey)
 
-    // The proof window opens here: the renderer captures a selfie and calls
-    // postSelfie() with this receipt (its ticket into the gallery).
-    onToken({ event: 'holding', waveId: token.waveId, hopCount, holder: me.id, angle: me.angle, receiptSig: next.senderReceiptSig, chainHash: newChainHash, receiptTs: next.timestamp })
+    // Ball reaches me: everyone relays; only opted-in peers open the proof window.
+    emitHolding(token.waveId, hopCount, next.senderReceiptSig, newChainHash, next.timestamp)
     announcePosition(token.waveId, hopCount)
 
     // Dwell so the wave ripples visibly around the ring and proof windows open in
@@ -348,27 +407,38 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     setTimeout(() => forwardToken(next), hopDelayMs)
   }
 
-  // Originate a new wave from this peer (any peer can start; a Sponsor Validator
-  // becomes the sole originator once the payment layer lands).
-  async function startWave () {
-    if (activeWaveId) {
-      onToken({ event: 'busy', waveId: activeWaveId })
+  // Announce a new wave and open the lobby (any peer can start when idle). After the
+  // lobby window the initiator finalizes the roster and the token starts racing.
+  function startWave () {
+    if (wave) {
+      onToken({ event: 'busy', waveId: wave.id })
       return null
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
-    setActive(waveId)
+    log('announcing wave', shortId(waveId))
+    enterLobby(waveId, me.id, true) // initiator auto-joins
+    broadcast({ kind: 'wave-announce', waveId, by: me.id, lobbyMs })
+    // initiator's lobby timer starts the race (overrides the idle fallback)
+    clearTimeout(lobbyTimer)
+    lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs)
+    return waveId
+  }
+
+  async function finalizeAndStart (waveId) {
+    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return
     openGallery(waveId, null) // create this wave's gallery, then wait for its key
     await base.ready()
 
-    const token = stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey)
-    log('originating wave', shortId(waveId), 'gallery', shortId(autobaseKey))
-    broadcast({ kind: 'autobase', waveId, key: autobaseKey })
+    log('starting wave', shortId(waveId), 'roster', wave.roster.size, 'gallery', shortId(autobaseKey))
+    broadcast({ kind: 'wave-start', waveId, by: me.id, roster: [...wave.roster], key: autobaseKey })
+    beginRace()
     onToken({ event: 'started', waveId, by: me.id })
-    // the originator is hop 0 — open their proof window too
-    onToken({ event: 'holding', waveId, hopCount: 0, holder: me.id, angle: me.angle, receiptSig: token.senderReceiptSig, chainHash: ZERO_HASH, receiptTs: token.timestamp })
+
+    const token = stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey)
+    // the originator is hop 0 — open their proof window too (if they joined)
+    emitHolding(waveId, 0, token.senderReceiptSig, ZERO_HASH, token.timestamp)
     announcePosition(waveId, 0)
     setTimeout(() => forwardToken(token), hopDelayMs)
-    return waveId
   }
 
   // --- connections -----------------------------------------------------------
@@ -432,10 +502,12 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   return {
     me,
     startWave,
+    join,
     postSelfie,
     async close () {
       clearInterval(tPresence)
       clearInterval(tRing)
+      clearTimeout(lobbyTimer)
       clearTimeout(waveTimer)
       clearTimeout(healTimer)
       await swarm.destroy()

@@ -58,6 +58,41 @@
         opacity: 0.4;
         cursor: default;
       }
+      #lobby {
+        display: none;
+        margin-top: 12px;
+        padding: 12px 18px;
+        border: 2px solid #39d98a;
+        border-radius: 14px;
+        background: rgba(57, 217, 138, 0.1);
+        text-align: center;
+      }
+      #lobby.show {
+        display: block;
+      }
+      #lobby-msg {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      #lobby-sub {
+        font-size: 13px;
+        opacity: 0.8;
+        margin: 4px 0 10px;
+      }
+      #join {
+        padding: 8px 20px;
+        font-size: 15px;
+        border: none;
+        border-radius: 20px;
+        background: #39d98a;
+        color: #06210d;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #join:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
       /* proof window modal */
       /* compact corner card — must NOT cover the ring / rolling ball */
       #modal {
@@ -142,6 +177,12 @@
     <div id="me"></div>
     <canvas id="ring" width="440" height="440"></canvas>
     <button id="start">⚽ Kick off the wave</button>
+
+    <div id="lobby">
+      <div id="lobby-msg">🌊 A wave is forming</div>
+      <div id="lobby-sub"></div>
+      <button id="join">✋ Count me in</button>
+    </div>
 
     <div id="modal">
       <div class="sheet">

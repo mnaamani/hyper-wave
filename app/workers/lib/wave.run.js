@@ -2,8 +2,10 @@
 // Runs under Bare:  bare workers/lib/wave.run.js <name> <storageDir>
 //   env HYPERWAVE_BOOTSTRAP=host:port  -> local DHT (fast same-machine discovery)
 //   env HYPERWAVE_MATCH=<id>           -> isolated match topic
-//   env START=<n>                      -> originate once >= n peers are present
-//   env AUTOSELFIE=1                   -> post a fake selfie in each proof window
+//   env START=<n>                      -> announce a wave once >= n peers are present
+//   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
+//   env AUTOSELFIE=1                   -> post a fake selfie in each proof window (if joined)
+//   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 const env = require('bare-env')
 const { createWave } = require('./wave.js')
 
@@ -26,6 +28,7 @@ const wave = createWave({
   storageDir,
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
+  lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
   onState: (s) => {
     console.log(
       `[${name}] peers=${s.peers.length} me=${s.me.id.slice(0, 8)}@${s.me.angle.toFixed(1)} ` +
@@ -38,7 +41,8 @@ const wave = createWave({
   },
   onToken: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
-    if (env.AUTOSELFIE && e.event === 'holding') {
+    if (env.AUTOJOIN && e.event === 'wave-announce' && !e.mine) wave.join()
+    if (env.AUTOSELFIE && e.event === 'holding' && e.canSelfie) {
       wave.postSelfie({
         waveId: e.waveId,
         hopCount: e.hopCount,
