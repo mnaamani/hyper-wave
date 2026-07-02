@@ -39,6 +39,7 @@ pipe.on('data', (data) => {
   }
   if (msg.type === 'start-wave') wave.startWave()
   else if (msg.type === 'join-wave') wave.join()
+  else if (msg.type === 'set-country') wave.setCountry(msg.country)
   else if (msg.type === 'post-selfie') wave.postSelfie(msg.selfie)
 })
 

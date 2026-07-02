@@ -67,7 +67,7 @@ function createWave({
   const swarm = new Hyperswarm(bootstrap ? { bootstrap } : {})
 
   const meKey = swarm.keyPair.publicKey
-  const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey) }
+  const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null }
   const peers = new Map() // id -> { id, angle, lastSeen }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
@@ -94,18 +94,36 @@ function createWave({
     onState({ me, peers: ring, successor: nextClockwise(me.angle, ring) })
   }
 
-  // Angle is always derived from the peer id, never trusted from the wire.
-  function upsert(id, lastSeen) {
+  // Angle is always derived from the peer id, never trusted from the wire. Country
+  // is the nation a peer supports (self-reported flag, purely cosmetic).
+  function upsert(id, lastSeen, country) {
     if (id === me.id) return
     const cur = peers.get(id)
-    if (!cur || lastSeen > cur.lastSeen) peers.set(id, { id, angle: angleOfId(id), lastSeen })
+    if (!cur || lastSeen > cur.lastSeen) {
+      peers.set(id, {
+        id,
+        angle: angleOfId(id),
+        lastSeen,
+        country: country ?? cur?.country ?? null
+      })
+    } else if (country && cur) {
+      cur.country = country
+    }
+  }
+
+  // The nation this peer supports; rides presence gossip + selfie entries (cosmetic).
+  function setCountry(code) {
+    me.country = code || null
+    emit()
   }
 
   function snapshot() {
     const now = Date.now()
     // include self (age 0) so neighbours learn about us transitively
-    const out = [{ id: me.id, ageMs: 0 }]
-    for (const p of peers.values()) out.push({ id: p.id, ageMs: now - p.lastSeen })
+    const out = [{ id: me.id, ageMs: 0, country: me.country }]
+    for (const p of peers.values()) {
+      out.push({ id: p.id, ageMs: now - p.lastSeen, country: p.country })
+    }
     return out
   }
 
@@ -180,9 +198,9 @@ function createWave({
     }
     const now = Date.now()
     if (m.kind === 'presence') {
-      upsert(m.id, now)
+      upsert(m.id, now, m.country)
     } else if (m.kind === 'peers') {
-      for (const p of m.peers) upsert(p.id, now - (p.ageMs || 0))
+      for (const p of m.peers) upsert(p.id, now - (p.ageMs || 0), p.country)
     }
     emit()
   }
@@ -267,6 +285,7 @@ function createWave({
       receiptSig,
       chainHash,
       receiptTs,
+      country: me.country || '',
       caption: caption || '',
       image: image || '',
       timestamp: Date.now()
@@ -572,7 +591,7 @@ function createWave({
     senders.set(id, send)
 
     // greet: presence + full snapshot so the new peer converges immediately
-    send(JSON.stringify({ kind: 'presence', id: me.id }))
+    send(JSON.stringify({ kind: 'presence', id: me.id, country: me.country }))
     send(JSON.stringify({ kind: 'peers', peers: snapshot() }))
     emit()
 
@@ -594,7 +613,7 @@ function createWave({
 
   // --- timers ----------------------------------------------------------------
   const tPresence = setInterval(() => {
-    broadcast({ kind: 'presence', id: me.id })
+    broadcast({ kind: 'presence', id: me.id, country: me.country })
   }, PRESENCE_MS)
   const tRing = setInterval(() => {
     broadcast({ kind: 'peers', peers: snapshot() })
@@ -611,6 +630,7 @@ function createWave({
     me,
     startWave,
     join,
+    setCountry,
     postSelfie,
     async close() {
       clearInterval(tPresence)

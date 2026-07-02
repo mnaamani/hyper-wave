@@ -1,3 +1,5 @@
+import { COUNTRIES, flagOf } from './countries.js'
+
 const bridge = window.bridge
 const decoder = new TextDecoder('utf-8')
 
@@ -17,6 +19,8 @@ bridge.startWorker(HYPERWAVE)
 const startBtn = document.getElementById('start')
 let ballActive = false // is the football currently animating on the ring?
 let waveActive = false // is a wave in progress (single active wave at a time)?
+let countrySent = false // have we told the worker our supported nation yet?
+let expectedSelfies = 0 // roster size for the current wave (gallery progress target)
 
 bridge.onWorkerIPC(HYPERWAVE, (data) => {
   let msg
@@ -26,6 +30,10 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
     return
   }
   if (msg.type === 'state') {
+    if (!countrySent) {
+      countrySent = true
+      sendCountry() // worker is up — tell it the nation we support
+    }
     state = msg
     if (!waveActive) setIdleStatus()
   } else if (msg.type === 'token') {
@@ -111,6 +119,30 @@ function onTokenEvent(e) {
 
 startBtn.onclick = () => {
   bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type: 'start-wave' }))
+}
+
+// --- country picker: the nation you support (flag on your selfie + ring seat) ---
+const countryEl = document.getElementById('country')
+let myCountry = localStorage.getItem('hyperwave-country') || ''
+const placeholder = document.createElement('option')
+placeholder.value = ''
+placeholder.text = '🏳️ your team'
+countryEl.appendChild(placeholder)
+for (const [code, name] of COUNTRIES) {
+  const o = document.createElement('option')
+  o.value = code
+  o.text = `${flagOf(code)} ${name}`
+  countryEl.appendChild(o)
+}
+countryEl.value = myCountry
+
+function sendCountry() {
+  bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type: 'set-country', country: myCountry }))
+}
+countryEl.onchange = () => {
+  myCountry = countryEl.value
+  localStorage.setItem('hyperwave-country', myCountry)
+  sendCountry()
 }
 
 // --- lobby (opt in before the wave starts) — shown in the centre of the field ---
@@ -262,7 +294,7 @@ const ADVANCE_MS = 3500
 
 // gallery progress: selfies arrive slower than the ball races (proof window + capture
 // + replication), so show how many of the expected (roster) have landed.
-let expectedSelfies = 0
+// (expectedSelfies declared with the other state flags near the top)
 const progressEl = document.getElementById('progress')
 const progressFill = document.getElementById('progress-fill')
 const progressLabel = document.getElementById('progress-label')
@@ -373,6 +405,22 @@ function drawCenterSelfie(cx, cy) {
   ctx.lineWidth = 3
   ctx.stroke()
 
+  // flag badge (the nation this person supports) at the bottom-right of the selfie
+  const flag = flagOf(item.country)
+  if (flag) {
+    const fx = cx + rad * 0.62
+    const fy = cy + rad * 0.62
+    ctx.beginPath()
+    ctx.arc(fx, fy, 17, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(6,33,13,0.85)'
+    ctx.fill()
+    ctx.font = '22px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(flag, fx, fy)
+    ctx.textBaseline = 'alphabetic'
+  }
+
   ctx.textAlign = 'center'
   ctx.fillStyle = 'rgba(234,255,240,0.92)'
   ctx.font = '13px -apple-system, sans-serif'
@@ -402,6 +450,17 @@ function dot(angleDeg, r, color, radius, label) {
 function pointOn(angleDeg, r) {
   const a = ((angleDeg - 90) * Math.PI) / 180
   return [canvas.width / 2 + r * Math.cos(a), canvas.height / 2 + r * Math.sin(a)]
+}
+
+// draw a flag emoji at a ring angle/radius, at a readable size
+function drawFlagAt(angleDeg, r, size, flag) {
+  if (!flag) return
+  const [x, y] = pointOn(angleDeg, r)
+  ctx.font = `${size}px sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(flag, x, y)
+  ctx.textBaseline = 'alphabetic'
 }
 
 // --- the football: rolls clockwise from holder to holder on every screen ------
@@ -482,8 +541,12 @@ function render() {
       isSucc ? 8 : 6,
       isSucc ? 'next ▸ ' + p.id.slice(0, 6) : p.id.slice(0, 6)
     )
+    drawFlagAt(p.angle, R + 20, 22, flagOf(p.country)) // flag outside the ring, bigger
   }
-  if (state.me) dot(state.me.angle, R, '#ffd166', 9, 'you')
+  if (state.me) {
+    dot(state.me.angle, R, '#ffd166', 9, 'you')
+    drawFlagAt(state.me.angle, R + 22, 26, flagOf(state.me.country))
+  }
 
   // the football: rolls clockwise around the ring, holder to holder, on every screen
   drawBall(R)
