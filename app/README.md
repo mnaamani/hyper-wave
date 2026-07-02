@@ -122,28 +122,32 @@ Each window shows the DHT ring with a yellow "you" dot and a green dot per disco
 
 ## Tests (no GUI)
 
-Everything runs under **Bare** — the worker's real runtime (`bare`, not `node`). Node is only
-used by Electron's main process. Run from `app/`:
+Everything runs under **Bare** — the worker's real runtime (`bare`, not `node`); Node is only
+Electron's main process. Tests use [**brittle**](https://github.com/holepunchto/brittle) (the
+Holepunch TAP test framework). Run all of them from `app/`:
 
 ```bash
-# 1) Pure ring logic — successor + liveness TTL (deterministic, instant)
-bare workers/lib/wave.logic.test.js
+npm test          # bare test.js — runs all suites via brittle, TAP output, non-zero on failure
+```
 
-# 2) Token logic — receipts, chain accumulator, completion, tamper rejection (instant)
-bare workers/lib/wave.token.test.js
+`test.js` just requires each suite; add a new `workers/lib/*.test.js` there to include it. Run one
+suite directly with `bare workers/lib/<name>.test.js`:
 
-# 3) Gallery ordering — buildGallery dedup/sort (instant)
-bare workers/lib/wave.gallery.test.js
+```bash
+bare workers/lib/wave.logic.test.js     # ring: successor, liveness, pickReachable (healing)
+bare workers/lib/wave.token.test.js     # receipts, chain accumulator, tamper rejection
+bare workers/lib/wave.gallery.test.js   # buildGallery ordering/dedup
+bare workers/lib/wave.autobase.test.js  # real Autobase apply/view + the receipt write-gate
+```
 
-# 4) Gallery Autobase path — real apply/view, selfie append + read (in-process, instant)
-bare workers/lib/wave.autobase.test.js
+End-to-end (one wave per process — the real worker topology). AUTOJOIN opts in, AUTOSELFIE posts a
+fake selfie; both peers should converge on `GALLERY size=2`. Public DHT: allow ~30-90s to discover
+(variable); isolate with a match id.
 
-# 5) End-to-end — one wave per process (the real worker topology). AUTOSELFIE posts a
-#    fake selfie in each proof window; both peers should converge on GALLERY size=2.
-#    Public DHT: allow ~30-90s to discover (variable). Isolate with a match id.
-export HYPERWAVE_MATCH="test-$(date +%s)"
-START=1 AUTOSELFIE=1 bare workers/lib/wave.run.js A /tmp/hw/a
-AUTOSELFIE=1 bare workers/lib/wave.run.js B /tmp/hw/b
+```bash
+export HYPERWAVE_MATCH="test-$(date +%s)" HYPERWAVE_LOBBY_MS=4000
+START=1 AUTOJOIN=1 AUTOSELFIE=1 bare workers/lib/wave.run.js A /tmp/hw/a
+AUTOJOIN=1 AUTOSELFIE=1 bare workers/lib/wave.run.js B /tmp/hw/b
 ```
 
 ### Fast local discovery (optional)

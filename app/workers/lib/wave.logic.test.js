@@ -1,30 +1,17 @@
-// Deterministic unit tests for the pure ring logic. Runs under Bare (the worker's
-// real runtime):  bare workers/lib/wave.logic.test.js
-const assert = require('bare-assert')
-const deepEq = (a, b, msg) =>
-  assert.ok(
-    JSON.stringify(a) === JSON.stringify(b),
-    msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b)
-  )
+// Ring geometry: successor, liveness, and healing selection. Runs under Bare:
+//   bare workers/lib/wave.logic.test.js   (or `npm test`)
+const test = require('brittle')
 const b4a = require('b4a')
 const { angleOf, liveRing, nextClockwise, pickReachable } = require('./ring')
 
-let n = 0
-const test = (name, fn) => {
-  fn()
-  console.log('ok -', name)
-  n++
-}
-
-test('angleOf maps a key into [0,360)', () => {
-  const zero = angleOf(b4a.alloc(8))
-  assert.strictEqual(zero, 0)
+test('angleOf maps a key into [0,360)', (t) => {
+  t.is(angleOf(b4a.alloc(8)), 0)
   const high = angleOf(b4a.alloc(8).fill(0xff))
-  assert.ok(high >= 0 && high < 360, 'in range')
-  assert.ok(high > 359, 'all-0xff near 360')
+  t.ok(high >= 0 && high < 360, 'in range')
+  t.ok(high > 359, 'all-0xff near 360')
 })
 
-test('liveRing drops stale peers and sorts clockwise', () => {
+test('liveRing drops stale peers and sorts clockwise', (t) => {
   const now = 100000
   const entries = [
     { id: 'a', angle: 300, lastSeen: now - 1000 },
@@ -32,37 +19,36 @@ test('liveRing drops stale peers and sorts clockwise', () => {
     { id: 'c', angle: 150, lastSeen: now - 99999 } // stale
   ]
   const ring = liveRing(entries, now, 12000)
-  deepEq(
+  t.alike(
     ring.map((p) => p.id),
     ['b', 'a'],
     'c pruned, sorted by angle'
   )
 })
 
-test('nextClockwise picks smallest angle greater than mine', () => {
+test('nextClockwise picks smallest angle greater than mine', (t) => {
   const ring = [
     { id: 'b', angle: 10 },
     { id: 'a', angle: 300 }
   ]
-  assert.strictEqual(nextClockwise(150, ring).id, 'a')
-  assert.strictEqual(nextClockwise(5, ring).id, 'b')
+  t.is(nextClockwise(150, ring).id, 'a')
+  t.is(nextClockwise(5, ring).id, 'b')
 })
 
-test('nextClockwise wraps around past the top of the ring', () => {
+test('nextClockwise wraps around past the top of the ring', (t) => {
   const ring = [
     { id: 'b', angle: 10 },
     { id: 'a', angle: 300 }
   ]
-  assert.strictEqual(nextClockwise(350, ring).id, 'b')
+  t.is(nextClockwise(350, ring).id, 'b')
 })
 
-test('nextClockwise returns null on an empty ring', () => {
-  assert.strictEqual(nextClockwise(42, []), null)
+test('nextClockwise returns null on an empty ring', (t) => {
+  t.is(nextClockwise(42, []), null)
 })
 
-test('single-peer ring: successor is always that peer (even if behind me)', () => {
-  const ring = [{ id: 'only', angle: 5 }]
-  assert.strictEqual(nextClockwise(200, ring).id, 'only')
+test('single-peer ring: successor is always that peer (even if behind me)', (t) => {
+  t.is(nextClockwise(200, [{ id: 'only', angle: 5 }]).id, 'only')
 })
 
 // healing: pickReachable = next clockwise that is reachable and not skipped
@@ -73,27 +59,24 @@ const R = [
 ]
 const all = new Set(['a', 'b', 'c'])
 
-test('pickReachable picks the next clockwise when all reachable', () => {
-  assert.strictEqual(pickReachable(R, 100, all, new Set()).id, 'c') // 100 -> c@150
-  assert.strictEqual(pickReachable(R, 200, all, new Set()).id, 'a') // 200 -> a@300
+test('pickReachable picks the next clockwise when all reachable', (t) => {
+  t.is(pickReachable(R, 100, all, new Set()).id, 'c') // 100 -> c@150
+  t.is(pickReachable(R, 200, all, new Set()).id, 'a') // 200 -> a@300
 })
 
-test('pickReachable wraps around', () => {
-  assert.strictEqual(pickReachable(R, 320, all, new Set()).id, 'b') // past a -> wrap to b
+test('pickReachable wraps around', (t) => {
+  t.is(pickReachable(R, 320, all, new Set()).id, 'b') // past a -> wrap to b
 })
 
-test('pickReachable skips a skipped (dead) successor to the next live one', () => {
-  assert.strictEqual(pickReachable(R, 100, all, new Set(['c'])).id, 'a') // c dead -> a
+test('pickReachable skips a skipped (dead) successor to the next live one', (t) => {
+  t.is(pickReachable(R, 100, all, new Set(['c'])).id, 'a')
 })
 
-test('pickReachable skips peers we have no connection to (not reachable)', () => {
-  const reachable = new Set(['a', 'b']) // c unreachable
-  assert.strictEqual(pickReachable(R, 100, reachable, new Set()).id, 'a')
+test('pickReachable skips peers we have no connection to (not reachable)', (t) => {
+  t.is(pickReachable(R, 100, new Set(['a', 'b']), new Set()).id, 'a') // c unreachable
 })
 
-test('pickReachable returns null when nobody qualifies', () => {
-  assert.strictEqual(pickReachable(R, 0, new Set(), new Set()), null) // none reachable
-  assert.strictEqual(pickReachable(R, 0, all, new Set(['a', 'b', 'c'])), null) // all skipped
+test('pickReachable returns null when nobody qualifies', (t) => {
+  t.is(pickReachable(R, 0, new Set(), new Set()), null) // none reachable
+  t.is(pickReachable(R, 0, all, new Set(['a', 'b', 'c'])), null) // all skipped
 })
-
-console.log(`\n${n} passed`)
