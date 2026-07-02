@@ -44,6 +44,7 @@ const wave = createWave({
         hopCount: e.hopCount,
         receiptSig: e.receiptSig,
         chainHash: e.chainHash,
+        receiptTs: e.receiptTs,
         caption: `${name} was here`,
         image: `fake-image-${name}`
       })

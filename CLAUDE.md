@@ -12,7 +12,7 @@ Scaffolding underway. `app/` is the Electron MVP (forked from hello-pear-electro
 - `spike/multiwriter/` — standalone proof that Hyperswarm discovery + Autobase multi-writer converge across separate `--storage` dirs.
 - `TODO.md` — the refinement backlog (done + prioritized remaining work). Check/update it when picking up or finishing work.
 
-Note: the gallery write gate is currently **open** — admission is unconditional and `apply()` doesn't verify the receipt (see the "Gallery write authorization" item in `TODO.md`). The "anti-spam gate" comments describe the *intended* behaviour, not what's enforced yet.
+Note: the gallery write gate is **enforced** — `apply()` (in `gallery.js`) appends a `wave-selfie` only if its `receiptSig` verifies (Ed25519) by `peerId` over `(waveId, hopCount, chainHash, receiptTs)`, and admission (`add-writer`) is gated on the same receipt for the current wave. This is *authenticity* (no unsigned/impersonated entries), not proof-of-participation — a peer can still self-sign a receipt for a hop it didn't hold; the validator will cross-check the real token chain in the payment layer.
 
 **Run the app:** `cd app && npm install && npm start -- --storage /tmp/hyperwave/one` (one `--storage` dir per instance; open several). **Headless engine test:** `cd app && bare workers/lib/wave.run.js A /tmp/hw/a`.
 

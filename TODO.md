@@ -19,22 +19,14 @@ Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`
       NOTE: the skip path isn't networked-verified (sandbox can't form 3 peers); happy-path heal
       arm/clear is exercised by the lifecycle run. Known edge: if a peer dies right after holding
       (predecessor already ACKed), that gap isn't healed — the wave timeout catches it.
+- [x] Gallery write authorization (anti-spam gate): `apply()` appends a `wave-selfie` only if its
+      `receiptSig` verifies (Ed25519) by `peerId` over `(waveId, hopCount, chainHash, receiptTs)`
+      — deterministic on every peer; admission (`add-writer`) is gated on the same receipt for the
+      current wave. Rejects unsigned/impersonated entries (unit-tested in wave.autobase.test.js).
+      NOTE: authenticity only — a peer can still self-sign a receipt for a hop it didn't hold;
+      real proof-of-participation needs the validator cross-checking the token chain (payment layer).
 
 ## Backlog
-
-### Gallery write authorization (the real anti-spam gate)
-Today admission is **unconditional**: any peer that broadcasts `add-writer` is admitted, and
-`apply()` appends any `wave-selfie` without checking the receipt. Autobase only enforces the
-structural writer-set (an existing writer must add you) — there is no wave-participation check.
-Implement the design's "no receipt = no write":
-- On admission: only append `add-writer` if the request carries a valid receipt for this wave.
-- In `gallery.js` `apply()`: only append a `wave-selfie` whose `receiptSig` verifies (Ed25519)
-  for `(waveId, hopCount, peerId)` — so even an admitted writer can't post for a hop it didn't
-  hold. `apply()` is the strong point because it runs deterministically on every peer.
-- Caveat: verifying the receipt is *valid* is easy; verifying it's in *the* real token chain
-  needs the accumulator the validator saw (validator arbitrates at payout). Forked clients can't
-  be fully stopped — the gate keeps the honest gallery clean and raises the bar.
-- The existing "anti-spam gate" comments describe this intended behaviour.
 
 ### Housekeeping
 - Prune old `wave-gallery:<waveId>` namespaces on startup (they linger on disk under `--storage`),

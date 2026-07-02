@@ -3,9 +3,21 @@
 // orchestrator in wave.js owns the live base instance. Unit-tested in
 // wave.gallery.test.js and wave.autobase.test.js.
 const b4a = require('b4a')
+const { verifyReceipt } = require('./token')
+
+// A selfie is admitted to the gallery only if it carries a receipt validly signed
+// by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
+// Runs in apply() so every peer enforces it identically. (Authenticity, not proof
+// of token-holding — see verifyReceipt.)
+function selfieHasValidReceipt (op) {
+  return (
+    op.peerId && op.receiptSig &&
+    verifyReceipt(op.peerId, op.waveId, op.hopCount, op.chainHash, op.receiptTs, op.receiptSig)
+  )
+}
 
 // Autobase config shared by the engine and tests so apply/view is exercised
-// identically. apply() admits writers (the anti-spam gate) and appends wave-selfie
+// identically. apply() admits writers and appends only receipt-valid wave-selfie
 // ops into a single ordered view.
 function galleryConfig () {
   return {
@@ -20,7 +32,7 @@ function galleryConfig () {
           } catch {}
           continue
         }
-        if (op?.type === 'wave-selfie') await view.append(op)
+        if (op?.type === 'wave-selfie' && selfieHasValidReceipt(op)) await view.append(op)
       }
     }
   }

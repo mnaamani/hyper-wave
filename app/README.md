@@ -86,6 +86,12 @@ skipped). After forwarding, a peer watches for the wave to advance past its hop 
 `wave-pos` broadcast doubles as an ACK; if none arrives within `HEAL_TIMEOUT_MS`, that successor is
 treated as dead, skipped, and the token re-forwarded to the next one.
 
+**Gallery write gate:** a `wave-selfie` is appended by `apply()` only if its `receiptSig` verifies
+(Ed25519) by `peerId` over `(waveId, hopCount, chainHash, receiptTs)`; writer admission is gated on
+the same receipt for the current wave. This authenticates entries (no unsigned/impersonated posts)
+but is not proof-of-participation — a peer can self-sign a receipt for a hop it didn't hold; the
+validator will cross-check the real token chain once the payment layer lands.
+
 ## Run
 
 ```bash

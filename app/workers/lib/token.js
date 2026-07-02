@@ -18,14 +18,30 @@ function signReceipt (keyPair, waveId, hopCount, prevChainHash, timestamp) {
   )
 }
 
-// Verify the receipt the *sender* stamped on the token they forwarded.
-function verifyToken (token) {
+// Verify a receipt is a valid Ed25519 signature by `peerId` over its hop tuple.
+// This authenticates a gallery entry to a peer identity (no impersonation, no
+// unsigned spam). NOTE: it does NOT prove the peer actually held the token — a
+// peer can self-sign a receipt for a hop it never held. Proof of participation
+// (cross-checking against the real token chain) is the validator's job.
+function verifyReceipt (peerIdHex, waveId, hopCount, chainHash, timestamp, receiptSigHex) {
   try {
-    const h = receiptHash(token.waveId, token.hopCount, token.prevChainHash, token.timestamp)
-    return crypto.verify(h, b4a.from(token.senderReceiptSig, 'hex'), b4a.from(token.senderPeerId, 'hex'))
+    const h = receiptHash(waveId, hopCount, chainHash, timestamp)
+    return crypto.verify(h, b4a.from(receiptSigHex, 'hex'), b4a.from(peerIdHex, 'hex'))
   } catch {
     return false
   }
+}
+
+// Verify the receipt the *sender* stamped on the token they forwarded.
+function verifyToken (token) {
+  return verifyReceipt(
+    token.senderPeerId,
+    token.waveId,
+    token.hopCount,
+    token.prevChainHash,
+    token.timestamp,
+    token.senderReceiptSig
+  )
 }
 
 // Constant-size rolling accumulator: newHash = blake2b(prevHash || receiptSig).
@@ -36,4 +52,4 @@ function advanceChain (prevChainHash, receiptSigHex) {
   )
 }
 
-module.exports = { ZERO_HASH, receiptHash, signReceipt, verifyToken, advanceChain }
+module.exports = { ZERO_HASH, receiptHash, signReceipt, verifyReceipt, verifyToken, advanceChain }

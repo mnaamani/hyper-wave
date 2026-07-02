@@ -13,7 +13,7 @@ const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
-const { ZERO_HASH, signReceipt, verifyToken, advanceChain } = require('./token')
+const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
 
 const MATCH = 'hyperwave:demo-match:v1'
@@ -110,8 +110,13 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
       return
     }
     if (m.kind === 'add-writer') {
-      // Only an existing writer's append takes effect; the host bootstraps admission.
-      if (base && base.writable && m.key) base.append({ type: 'add-writer', key: m.key })
+      // Admit only participants of the current wave: the request must carry a receipt
+      // validly signed by the requester for this wave. (apply() re-checks each selfie.)
+      const ok =
+        base && base.writable && m.key &&
+        m.waveId === currentWaveId &&
+        verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
+      if (ok) base.append({ type: 'add-writer', key: m.key })
       return
     }
     const now = Date.now()
@@ -163,14 +168,15 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
 
   // Post my selfie to the gallery. Requests writer admission first (anti-spam gate:
   // the host admits the poster), then appends the entry once writable.
-  async function postSelfie ({ waveId, hopCount, receiptSig, chainHash, caption, image }) {
+  async function postSelfie ({ waveId, hopCount, receiptSig, chainHash, receiptTs, caption, image }) {
     if (!base) {
       onToken({ event: 'gallery-error', reason: 'no-gallery-yet' })
       return
     }
     await base.ready()
     if (!base.writable) {
-      broadcast({ kind: 'add-writer', key: b4a.toString(base.local.key, 'hex') })
+      // ask to be admitted, presenting my receipt for this wave (the anti-spam gate)
+      broadcast({ kind: 'add-writer', key: b4a.toString(base.local.key, 'hex'), peerId: me.id, waveId, hopCount, chainHash, receiptTs, receiptSig })
       const ok = await waitFor(() => base.writable, 8000)
       if (!ok) {
         onToken({ event: 'gallery-error', reason: 'not-admitted' })
@@ -185,6 +191,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
       hopCount,
       receiptSig,
       chainHash,
+      receiptTs,
       caption: caption || '',
       image: image || '',
       timestamp: Date.now()
@@ -327,7 +334,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
 
     // The proof window opens here: the renderer captures a selfie and calls
     // postSelfie() with this receipt (its ticket into the gallery).
-    onToken({ event: 'holding', waveId: token.waveId, hopCount, holder: me.id, angle: me.angle, receiptSig: next.senderReceiptSig, chainHash: newChainHash })
+    onToken({ event: 'holding', waveId: token.waveId, hopCount, holder: me.id, angle: me.angle, receiptSig: next.senderReceiptSig, chainHash: newChainHash, receiptTs: next.timestamp })
     announcePosition(token.waveId, hopCount)
 
     // Dwell so the wave ripples visibly around the ring and proof windows open in
@@ -352,7 +359,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     broadcast({ kind: 'autobase', waveId, key: autobaseKey })
     onToken({ event: 'started', waveId, by: me.id })
     // the originator is hop 0 — open their proof window too
-    onToken({ event: 'holding', waveId, hopCount: 0, holder: me.id, angle: me.angle, receiptSig: token.senderReceiptSig, chainHash: ZERO_HASH })
+    onToken({ event: 'holding', waveId, hopCount: 0, holder: me.id, angle: me.angle, receiptSig: token.senderReceiptSig, chainHash: ZERO_HASH, receiptTs: token.timestamp })
     announcePosition(waveId, 0)
     setTimeout(() => forwardToken(token), hopDelayMs)
     return waveId

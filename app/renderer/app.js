@@ -107,7 +107,7 @@ let countdownTimer = null
 
 async function openProofWindow (e) {
   if (proofCtx) return // already capturing for a hop; ignore re-entry
-  proofCtx = { waveId: e.waveId, hopCount: e.hopCount, receiptSig: e.receiptSig, chainHash: e.chainHash }
+  proofCtx = { waveId: e.waveId, hopCount: e.hopCount, receiptSig: e.receiptSig, chainHash: e.chainHash, receiptTs: e.receiptTs }
   document.getElementById('modal-sub').innerText = `Hop ${e.hopCount} — you're in the chain.`
   captionEl.value = ''
   modal.classList.add('show')
