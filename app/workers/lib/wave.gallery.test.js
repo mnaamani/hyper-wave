@@ -2,7 +2,7 @@
 //   bare workers/lib/wave.gallery.test.js
 const assert = require('bare-assert')
 const deepEq = (a, b, msg) => assert.ok(JSON.stringify(a) === JSON.stringify(b), msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b))
-const { buildGallery } = require('./wave.js')
+const { buildGallery } = require('./gallery')
 
 let n = 0
 const test = (name, fn) => {

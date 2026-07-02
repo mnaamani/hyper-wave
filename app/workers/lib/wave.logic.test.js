@@ -3,7 +3,7 @@
 const assert = require('bare-assert')
 const deepEq = (a, b, msg) => assert.ok(JSON.stringify(a) === JSON.stringify(b), msg || JSON.stringify(a) + ' !== ' + JSON.stringify(b))
 const b4a = require('b4a')
-const { angleOf, liveRing, nextClockwise } = require('./wave.js')
+const { angleOf, liveRing, nextClockwise } = require('./ring')
 
 let n = 0
 const test = (name, fn) => {

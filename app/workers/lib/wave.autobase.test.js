@@ -10,7 +10,7 @@ const Corestore = require('corestore')
 const Autobase = require('autobase')
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
-const { galleryConfig, readGallery } = require('./wave.js')
+const { galleryConfig, readGallery } = require('./gallery')
 
 async function main () {
   const dir = '/tmp/hyperwave-autobase-test-' + Date.now()

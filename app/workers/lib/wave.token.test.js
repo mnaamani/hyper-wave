@@ -5,7 +5,7 @@
 const assert = require('bare-assert')
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
-const { receiptHash, signReceipt, verifyToken, advanceChain } = require('./wave.js')
+const { receiptHash, signReceipt, verifyToken, advanceChain } = require('./token')
 
 const ZERO = b4a.toString(b4a.alloc(32), 'hex')
 let n = 0
