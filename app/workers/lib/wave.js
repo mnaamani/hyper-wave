@@ -25,12 +25,15 @@ const MAX_HOPS = 5000 // safety cap against runaway tokens
 // is what makes the wave *visibly* ripple around the ring and staggers proof windows
 // so selfies are taken in sequence (the stadium-wave feel). Configurable per wave.
 const HOP_DELAY_MS = 1200
+// A wave is a single, one-at-a-time event. If it doesn't complete within this
+// window (peer dropped, stall), peers fall back to idle so a new wave can start.
+const WAVE_TIMEOUT_MS = 90000
 
 function shortId (hex) {
   return hex.slice(0, 8)
 }
 
-function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () => {}, log = () => {}, bootstrap = null, matchId = MATCH, hopDelayMs = HOP_DELAY_MS }) {
+function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () => {}, log = () => {}, bootstrap = null, matchId = MATCH, hopDelayMs = HOP_DELAY_MS, waveTimeoutMs = WAVE_TIMEOUT_MS }) {
   const store = new Corestore(storageDir + '/hyperwave')
   // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
@@ -45,6 +48,12 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   let base = null // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
   let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
+
+  // Wave lifecycle: exactly one wave is active at a time. Concurrent starts are
+  // resolved deterministically — the lower waveId wins, so all peers converge on
+  // the same wave regardless of who they heard first.
+  let activeWaveId = null
+  let waveTimer = null
 
   // --- ring / peer table -----------------------------------------------------
   function emit () {
@@ -70,12 +79,25 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   function handleGossip (m) {
     if (m.kind === 'token') return processToken(m)
     if (m.kind === 'wave-pos') {
-      // the ball is at `holder` — every peer animates it there (angle derived locally)
-      onToken({ event: 'position', waveId: m.waveId, holder: m.holder, angle: angleOfId(m.holder), hopCount: m.hopCount })
+      // only animate the ball for the active wave (angle derived locally)
+      if (m.waveId === activeWaveId) {
+        onToken({ event: 'position', waveId: m.waveId, holder: m.holder, angle: angleOfId(m.holder), hopCount: m.hopCount })
+      }
       return
     }
     if (m.kind === 'autobase') {
-      if (m.key && m.waveId) openGallery(m.waveId, b4a.from(m.key, 'hex'))
+      if (m.key && m.waveId && shouldAdopt(m.waveId)) {
+        setActive(m.waveId)
+        openGallery(m.waveId, b4a.from(m.key, 'hex'))
+      }
+      return
+    }
+    if (m.kind === 'wave-end') {
+      // originator (or timeout) ended the wave — everyone finishes together
+      if (m.waveId === activeWaveId) {
+        onToken({ event: 'completed', waveId: m.waveId, hops: m.hops, chainHash: m.chainHash, angle: angleOfId(m.by) })
+        goIdle('ended')
+      }
       return
     }
     if (m.kind === 'add-writer') {
@@ -178,6 +200,31 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     })
   }
 
+  // --- wave lifecycle (single active wave) -----------------------------------
+
+  // Accept this wave? Idle -> yes; same wave -> yes; a competing wave only if its
+  // id is lower (deterministic tie-break so every peer converges on one wave).
+  function shouldAdopt (waveId) {
+    if (!activeWaveId || waveId === activeWaveId) return true
+    return waveId < activeWaveId
+  }
+
+  function setActive (waveId) {
+    clearTimeout(waveTimer)
+    waveTimer = setTimeout(() => goIdle('timeout'), waveTimeoutMs)
+    if (activeWaveId === waveId) return
+    activeWaveId = waveId
+    onToken({ event: 'wave-active', waveId })
+  }
+
+  function goIdle (reason) {
+    if (!activeWaveId) return
+    const waveId = activeWaveId
+    activeWaveId = null
+    clearTimeout(waveTimer)
+    onToken({ event: 'wave-idle', waveId, reason })
+  }
+
   // --- token race ------------------------------------------------------------
 
   // Tell every peer the ball is at me now, so all windows animate it here.
@@ -227,16 +274,22 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
       log('token: bad receipt from', shortId(token.senderPeerId || ''))
       return
     }
-    // Completion: the token has returned to its originator.
+    // Ignore tokens from a competing/losing wave (single active wave at a time).
+    if (!shouldAdopt(token.waveId)) return
+
+    // Completion: the token has returned to its originator. Tell everyone.
     if (token.originator === me.id && token.hopCount > 0) {
+      broadcast({ kind: 'wave-end', waveId: token.waveId, hops: token.hopCount, chainHash: token.prevChainHash, by: me.id })
       onToken({ event: 'completed', waveId: token.waveId, hops: token.hopCount, chainHash: token.prevChainHash, angle: me.angle })
+      goIdle('completed')
       return
     }
     const key = token.waveId + '|' + token.hopCount
     if (seen.has(key) || token.hopCount > MAX_HOPS) return
     seen.add(key)
 
-    // learn (and switch to) this wave's gallery from the token
+    // adopt this wave (may switch from a higher-id one) and learn its gallery
+    setActive(token.waveId)
     if (token.autobaseKey && token.waveId) openGallery(token.waveId, b4a.from(token.autobaseKey, 'hex'))
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig)
@@ -256,7 +309,12 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   // Originate a new wave from this peer (any peer can start; a Sponsor Validator
   // becomes the sole originator once the payment layer lands).
   async function startWave () {
+    if (activeWaveId) {
+      onToken({ event: 'busy', waveId: activeWaveId })
+      return null
+    }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
+    setActive(waveId)
     openGallery(waveId, null) // create this wave's gallery, then wait for its key
     await base.ready()
 
@@ -336,6 +394,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     async close () {
       clearInterval(tPresence)
       clearInterval(tRing)
+      clearTimeout(waveTimer)
       await swarm.destroy()
       if (base) await base.close()
       await store.close()

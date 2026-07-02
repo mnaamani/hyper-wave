@@ -50,9 +50,13 @@
         color: #ffd166;
         cursor: pointer;
       }
-      #start:hover {
+      #start:hover:not(:disabled) {
         background: #ffd166;
         color: #06210d;
+      }
+      #start:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       /* proof window modal */
       /* compact corner card — must NOT cover the ring / rolling ball */

@@ -9,6 +9,9 @@ Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`
 - [x] Token is a ⚽ football that rolls around the ring on every screen (cross-window `wave-pos`)
 - [x] Proof window as a compact corner card (doesn't cover the ring)
 - [x] Per-wave galleries (Autobase namespaced by `waveId`; fixes stale selfies across waves/runs)
+- [x] Wave lifecycle: single active wave at a time (anyone can start when idle); deterministic
+      tie-break for simultaneous starts (lower `waveId` wins); `wave-end` broadcast so all peers
+      finish together; timeout fallback to idle; `busy` guard + Start button disabled while active
 
 ## Backlog
 
@@ -25,11 +28,6 @@ Implement the design's "no receipt = no write":
   needs the accumulator the validator saw (validator arbitrates at payout). Forked clients can't
   be fully stopped — the gate keeps the honest gallery clean and raises the bar.
 - The existing "anti-spam gate" comments describe this intended behaviour.
-
-### Wave lifecycle (review item #3)
-- Broadcast `wave-end` so all windows finish together (currently only the originator gets
-  `completed`; other windows' footballs just fade).
-- Guard double-start (pressing Kick-off twice mints two waves).
 
 ### Resilience / healing (review item #4)
 - Skip dead/unreachable successors instead of stalling (`successor-unreachable` currently kills

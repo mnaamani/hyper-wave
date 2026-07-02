@@ -14,7 +14,9 @@ let state = { me: null, peers: [] }
 const HYPERWAVE = '/workers/hyperwave.js'
 bridge.startWorker(HYPERWAVE)
 
+const startBtn = document.getElementById('start')
 let ballActive = false // is the football currently animating on the ring?
+let waveActive = false // is a wave in progress (single active wave at a time)?
 
 bridge.onWorkerIPC(HYPERWAVE, (data) => {
   let msg
@@ -25,12 +27,7 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
   }
   if (msg.type === 'state') {
     state = msg
-    // idle status = ring readiness, unless a wave is currently animating
-    if (!ballActive) {
-      const n = state.peers.length
-      statusEl.innerText =
-        n === 0 ? 'in the ring — waiting for peers…' : `${n} peer${n === 1 ? '' : 's'} in the ring — press Start`
-    }
+    if (!waveActive) setIdleStatus()
   } else if (msg.type === 'token') {
     onTokenEvent(msg)
   } else if (msg.type === 'gallery') {
@@ -38,8 +35,26 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
   }
 })
 
+function setIdleStatus () {
+  const n = state.peers.length
+  statusEl.innerText =
+    n === 0 ? 'in the ring — waiting for peers…' : `${n} peer${n === 1 ? '' : 's'} in the ring — kick off a wave`
+}
+
 function onTokenEvent (e) {
   switch (e.event) {
+    case 'wave-active':
+      waveActive = true
+      startBtn.disabled = true
+      break
+    case 'wave-idle':
+      waveActive = false
+      startBtn.disabled = false
+      setIdleStatus()
+      break
+    case 'busy':
+      statusEl.innerText = '⏳ a wave is already rolling — wait for it to finish'
+      break
     case 'started':
       statusEl.innerText = '⚽ you kicked off the wave!'
       break
@@ -62,7 +77,7 @@ function onTokenEvent (e) {
   }
 }
 
-document.getElementById('start').onclick = () => {
+startBtn.onclick = () => {
   bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type: 'start-wave' }))
 }
 bridge.onWorkerStdout(HYPERWAVE, (d) => console.log('[hyperwave]', decoder.decode(d)))

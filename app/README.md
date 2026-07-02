@@ -44,13 +44,16 @@ Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
   peers:     [ { id, angle, lastSeen }, ... ],  // live, sorted clockwise
   successor: { id, angle } | null }              // next peer clockwise (wraps)
 
-// token race events
-{ type: 'token', event: 'started'  , waveId, by }
-{ type: 'token', event: 'forwarded', waveId, hopCount, to }
-{ type: 'token', event: 'holding'  , waveId, hopCount, holder, angle, receiptSig, chainHash }  // I hold it: opens proof window
-{ type: 'token', event: 'position' , waveId, hopCount, holder, angle }  // another peer holds it: roll the ball there
-{ type: 'token', event: 'completed', waveId, hops, chainHash, angle }
-{ type: 'token', event: 'stalled'  , waveId, reason }
+// token race / lifecycle events
+{ type: 'token', event: 'wave-active', waveId }               // a wave started (disable Kick-off)
+{ type: 'token', event: 'wave-idle'  , waveId, reason }       // wave ended -> idle (enable Kick-off)
+{ type: 'token', event: 'busy'       , waveId }               // tried to start while one is active
+{ type: 'token', event: 'started'    , waveId, by }
+{ type: 'token', event: 'forwarded'  , waveId, hopCount, to }
+{ type: 'token', event: 'holding'    , waveId, hopCount, holder, angle, receiptSig, chainHash }  // I hold it: opens proof window
+{ type: 'token', event: 'position'   , waveId, hopCount, holder, angle }  // another peer holds it: roll the ball there
+{ type: 'token', event: 'completed'  , waveId, hops, chainHash, angle }   // sent to ALL peers via wave-end
+{ type: 'token', event: 'stalled'    , waveId, reason }
 
 // gallery (Autobase view) — on every change / replication
 { type: 'gallery', items: [ { waveId, peerId, hopCount, caption, image /* dataURL */, ... }, ... ] }
@@ -70,6 +73,12 @@ animates the ball there). **Kick off the wave** originates a token. When the bal
 **proof-window modal** opens the webcam, counts down, and captures a selfie for the gallery — which
 plays **one selfie at a time in the centre of the ring**, featuring each new arrival then
 auto-cycling when idle.
+
+**One wave at a time:** anyone can Kick off, but only while idle (the button is disabled during a
+wave). Simultaneous starts are resolved deterministically — the lower `waveId` wins, so all peers
+converge on one wave. When the token returns to the originator it broadcasts `wave-end` so every
+peer finishes together (ball rolls home, button re-enables); a timeout falls back to idle if a
+wave stalls.
 
 ## Run
 
