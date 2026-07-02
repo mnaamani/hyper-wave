@@ -165,5 +165,6 @@ HYPERWAVE_BOOTSTRAP=127.0.0.1:<port> bare workers/lib/wave.run.js B /tmp/hw/b
   use the local bootstrap. Per-match topics are the intended production model (final-idea §2.2).
 - **Per-wave galleries:** each wave's gallery is a separate Autobase namespaced by its random
   `waveId` (`wave-gallery:<waveId>`), so a new wave/run starts with an empty gallery instead of
-  showing selfies from previous waves/runs. Trade-off: old per-wave namespaces accumulate on
-  disk under `--storage` (TODO: prune, or add a wave picker to browse past galleries).
+  showing selfies from previous waves/runs. The `storageDir/hyperwave` store is **wiped on
+  startup** (galleries are ephemeral per-run), so old namespaces don't accumulate on disk. A
+  persistent "past waves" picker would be a future enhancement.

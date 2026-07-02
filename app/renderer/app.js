@@ -74,6 +74,9 @@ function onTokenEvent (e) {
     case 'healed':
       statusEl.innerText = '🩹 routing around a dropped peer…'
       break
+    case 'gallery-error':
+      statusEl.innerText = `⚠️ couldn't post your selfie (${e.reason})`
+      break
     case 'stalled':
       statusEl.innerText = `⚠️ wave stalled (${e.reason})`
       break

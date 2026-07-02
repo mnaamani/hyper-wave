@@ -29,9 +29,10 @@ Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`
 ## Backlog
 
 ### Housekeeping
-- Prune old `wave-gallery:<waveId>` namespaces on startup (they linger on disk under `--storage`),
-  or add a "past waves" picker to browse them as permanent artifacts.
-- Handle `gallery-error` events in the renderer (currently silent).
+- [x] Prune old galleries: the `storageDir/hyperwave` store is wiped on startup (per-run,
+      nothing persists across runs), reclaiming stale `wave-gallery:<waveId>` disk. Galleries are
+      now ephemeral per-run; a "past waves" picker for persistent artifacts is a future option.
+- [x] Surface `gallery-error` events in the renderer (was silent).
 
 ### Payment layer (WDK) — next major step
 - WDK in the Bare worker (Tron testnet, plain transfers, no contracts for MVP): self-custodial

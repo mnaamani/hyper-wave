@@ -1,6 +1,6 @@
 // HyperWave orchestrator. Wires the transport (Hyperswarm + Protomux gossip) to the
 // three pure domains — ring geometry (ring.js), the token race (token.js), and the
-// selfie gallery (gallery.js). Runtime-agnostic (Node + Bare): no path/fs, no IPC.
+// selfie gallery (gallery.js). Runs under Bare (the worker) or Node harness.
 // The Bare worker (hyperwave.js) bridges this to the renderer; wave.run.js drives it
 // headlessly. The payment layer will attach here as its own module.
 
@@ -11,6 +11,7 @@ const Protomux = require('protomux')
 const c = require('compact-encoding')
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
+const fs = require('bare-fs')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
@@ -38,7 +39,14 @@ function shortId (hex) {
 }
 
 function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () => {}, log = () => {}, bootstrap = null, matchId = MATCH, hopDelayMs = HOP_DELAY_MS, waveTimeoutMs = WAVE_TIMEOUT_MS, healTimeoutMs = HEAL_TIMEOUT_MS }) {
-  const store = new Corestore(storageDir + '/hyperwave')
+  // Prune old galleries: the whole hyperwave store is per-run (galleries are keyed
+  // by random waveId, nothing here persists across runs), so wipe it on startup to
+  // reclaim disk instead of accumulating stale wave-gallery:<waveId> namespaces.
+  const storePath = storageDir + '/hyperwave'
+  try {
+    fs.rmSync(storePath, { recursive: true, force: true })
+  } catch {}
+  const store = new Corestore(storePath)
   // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
   const swarm = new Hyperswarm(bootstrap ? { bootstrap } : {})
