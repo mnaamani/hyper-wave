@@ -25,8 +25,23 @@ Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`
       current wave. Rejects unsigned/impersonated entries (unit-tested in wave.autobase.test.js).
       NOTE: authenticity only — a peer can still self-sign a receipt for a hop it didn't hold;
       real proof-of-participation needs the validator cross-checking the token chain (payment layer).
+- [x] Lean pass: cut `lap` from the token (always 1, no multi-lap) and the unused `angle` from
+      wave-selfie entries. Direction is already clockwise-only. Kept full-ring gossip + OTA worker
+      by choice (see "Scale path" below).
 
 ## Backlog
+
+### Scale path: gossip → Chord (future, not MVP)
+The wave only needs each peer's **successor** (next live peer clockwise), and the forwarder is
+already decoupled from discovery behind that seam (`ring.js` `nextClockwise` / `pickReachable`).
+Today discovery is full-ring gossip (every peer holds the whole ring; O(N²) traffic; full mesh) —
+fine at demo scale. To scale, replace *only* the discovery/peer-table layer with Chord:
+- per-peer state O(log N): a **successor pointer** + short **successor-list** (healing failover)
+  + a **finger table** of O(log N) shortcuts; connect to those, not everyone.
+- periodic **stabilize** / **fix-fingers** to repair pointers as peers join/leave.
+- the ring id is already Chord-shaped (`angle = hash(pubkey)`); the token race is a traversal of
+  the Chord ring. Token race / healing / gallery / lifecycle stay untouched behind the seam.
+
 
 ### Housekeeping
 - [x] Prune old galleries: the `storageDir/hyperwave` store is wiped on startup (per-run,

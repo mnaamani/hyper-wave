@@ -195,7 +195,6 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
       type: 'wave-selfie',
       waveId,
       peerId: me.id,
-      angle: me.angle,
       hopCount,
       receiptSig,
       chainHash,
@@ -296,14 +295,13 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   }
 
   // Build the next token this peer forwards, stamping hop `hopCount` with my receipt.
-  function stampToken (waveId, originator, lap, hopCount, prevChainHash, autobaseKeyHex) {
+  function stampToken (waveId, originator, hopCount, prevChainHash, autobaseKeyHex) {
     const timestamp = Date.now()
     const senderReceiptSig = signReceipt(swarm.keyPair, waveId, hopCount, prevChainHash, timestamp)
     return {
       kind: 'token',
       waveId,
       originator,
-      lap,
       hopCount,
       prevChainHash,
       senderPeerId: me.id,
@@ -338,7 +336,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig)
     const hopCount = token.hopCount + 1
-    const next = stampToken(token.waveId, token.originator, token.lap, hopCount, newChainHash, token.autobaseKey)
+    const next = stampToken(token.waveId, token.originator, hopCount, newChainHash, token.autobaseKey)
 
     // The proof window opens here: the renderer captures a selfie and calls
     // postSelfie() with this receipt (its ticket into the gallery).
@@ -362,7 +360,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     openGallery(waveId, null) // create this wave's gallery, then wait for its key
     await base.ready()
 
-    const token = stampToken(waveId, me.id, 1, 0, ZERO_HASH, autobaseKey)
+    const token = stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey)
     log('originating wave', shortId(waveId), 'gallery', shortId(autobaseKey))
     broadcast({ kind: 'autobase', waveId, key: autobaseKey })
     onToken({ event: 'started', waveId, by: me.id })
