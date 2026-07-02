@@ -65,7 +65,9 @@ Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
 The ring UI draws a yellow "you" dot, green peer dots, highlights the **successor** in orange
 with a baton line, and pulses at your position as the token passes. **Start the wave** originates
 a token. When the wave passes you, a **proof-window modal** opens the webcam, counts down, and
-captures a selfie that posts to the shared **gallery** grid below the ring.
+captures a selfie that posts to the shared gallery. The gallery plays **one selfie at a time in
+the centre of the ring** — each new selfie features as it lands (following the wave), and the
+view auto-cycles through the rest when idle.
 
 ## Run
 

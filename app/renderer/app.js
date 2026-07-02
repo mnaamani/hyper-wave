@@ -34,7 +34,7 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
   } else if (msg.type === 'token') {
     onTokenEvent(msg)
   } else if (msg.type === 'gallery') {
-    renderGallery(msg.items)
+    handleGallery(msg.items)
   }
 })
 
@@ -153,27 +153,111 @@ function closeProofWindow () {
 document.getElementById('capture').onclick = capture
 document.getElementById('skip').onclick = closeProofWindow
 
-// --- Gallery rendering --------------------------------------------------------
-const galleryEl = document.getElementById('gallery')
+// --- Gallery: one selfie at a time in the centre of the ring ------------------
+// New selfies (as they land in the Autobase) jump to the centre — the faces light
+// up following the wave. When no new ones arrive we auto-cycle through the rest.
+let galleryItems = []
+let centerIdx = 0
+const shownKeys = new Set() // waveId|peerId already displayed
+const imgCache = new Map() // dataURL -> HTMLImageElement
+let advanceTimer = null
+const ADVANCE_MS = 3500
 
-function renderGallery (items) {
-  galleryEl.innerHTML = ''
-  for (const it of items) {
-    const card = document.createElement('div')
-    card.className = 'card'
-    const media = it.image
-      ? `<img src="${it.image}" alt="hop ${it.hopCount}" />`
-      : `<div class="noimg">🌊</div>`
-    card.innerHTML =
-      media +
-      `<div class="meta"><div class="hop">hop ${it.hopCount}</div>` +
-      `<div class="cap">${escapeHtml(it.caption) || it.peerId.slice(0, 8)}</div></div>`
-    galleryEl.appendChild(card)
+function ensureImg (url) {
+  if (!url) return null
+  let img = imgCache.get(url)
+  if (!img) {
+    img = new Image()
+    img.src = url
+    imgCache.set(url, img)
+  }
+  return img
+}
+
+function scheduleAdvance () {
+  clearTimeout(advanceTimer)
+  advanceTimer = setTimeout(() => {
+    if (galleryItems.length > 1) {
+      centerIdx = (centerIdx + 1) % galleryItems.length
+      scheduleAdvance()
+    }
+  }, ADVANCE_MS)
+}
+
+function handleGallery (items) {
+  // find the newest arrival (highest hop among not-yet-shown) to feature next
+  let jumpTo = -1
+  let jumpHop = -Infinity
+  for (let i = 0; i < items.length; i++) {
+    ensureImg(items[i].image)
+    const k = items[i].waveId + '|' + items[i].peerId
+    if (!shownKeys.has(k)) {
+      shownKeys.add(k)
+      if (items[i].hopCount >= jumpHop) {
+        jumpHop = items[i].hopCount
+        jumpTo = i
+      }
+    }
+  }
+  galleryItems = items
+  if (jumpTo >= 0) {
+    centerIdx = jumpTo // feature the freshly-arrived selfie
+    scheduleAdvance()
+  } else if (centerIdx >= galleryItems.length) {
+    centerIdx = 0
   }
 }
 
-function escapeHtml (s) {
-  return (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+// draw an image cropped to cover a square centred at (x,y)
+function drawCover (img, x, y, size) {
+  const ar = img.naturalWidth / img.naturalHeight
+  let dw = size
+  let dh = size / ar
+  if (dh < size) {
+    dh = size
+    dw = size * ar
+  }
+  ctx.drawImage(img, x - dw / 2, y - dh / 2, dw, dh)
+}
+
+function drawCenterSelfie (cx, cy) {
+  const item = galleryItems[centerIdx]
+  if (!item) return
+  const rad = 78
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(cx, cy, rad, 0, Math.PI * 2)
+  ctx.clip()
+  const img = ensureImg(item.image)
+  if (item.image && img && img.complete && img.naturalWidth) {
+    drawCover(img, cx, cy, rad * 2)
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.06)'
+    ctx.fillRect(cx - rad, cy - rad, rad * 2, rad * 2)
+    ctx.fillStyle = '#eafff0'
+    ctx.font = '40px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('🌊', cx, cy)
+    ctx.textBaseline = 'alphabetic'
+  }
+  ctx.restore()
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, rad, 0, Math.PI * 2)
+  ctx.strokeStyle = '#ffd166'
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  ctx.textAlign = 'center'
+  ctx.fillStyle = 'rgba(234,255,240,0.92)'
+  ctx.font = '13px -apple-system, sans-serif'
+  const cap = item.caption || item.peerId.slice(0, 6)
+  ctx.fillText(`hop ${item.hopCount} · ${cap}`, cx, cy + rad + 20)
+  ctx.fillStyle = 'rgba(234,255,240,0.5)'
+  ctx.font = '11px ui-monospace, Menlo, monospace'
+  ctx.fillText(`${centerIdx + 1} / ${galleryItems.length}`, cx, cy + rad + 37)
 }
 
 // --- Ring rendering -----------------------------------------------------------
@@ -247,6 +331,9 @@ function render () {
       pulse = null
     }
   }
+
+  // the wave gallery: one selfie at a time, in the centre of the ring
+  drawCenterSelfie(cx, cy)
 
   if (state.me) {
     meEl.innerText = `you: ${state.me.id.slice(0, 12)}…  @ ${state.me.angle.toFixed(1)}°  ·  ${state.peers.length} peer${state.peers.length === 1 ? '' : 's'}`
