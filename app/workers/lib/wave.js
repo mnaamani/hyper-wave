@@ -42,8 +42,9 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops)
 
-  let base = null // the wave gallery Autobase (created by originator, opened by others)
+  let base = null // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
+  let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
 
   // --- ring / peer table -----------------------------------------------------
   function emit () {
@@ -74,7 +75,7 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
       return
     }
     if (m.kind === 'autobase') {
-      if (!base && m.key) openAutobase(b4a.from(m.key, 'hex'))
+      if (m.key && m.waveId) openGallery(m.waveId, b4a.from(m.key, 'hex'))
       return
     }
     if (m.kind === 'add-writer') {
@@ -102,19 +103,26 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
 
   // --- gallery (Autobase multi-writer) --------------------------------------
 
-  // Open (or, with bootstrapKey=null, create) the wave gallery Autobase. All peers
-  // share the originator's base; writes come from many admitted writers, merged into
-  // one ordered view. Replication rides the existing store.replicate(conn).
-  function openAutobase (bootstrapKey) {
-    if (base) return base
-    base = new Autobase(store.namespace('wave-gallery'), bootstrapKey, galleryConfig())
-    base.on('update', emitGallery)
-    base.ready().then(() => {
-      autobaseKey = b4a.toString(base.key, 'hex')
-      log('gallery ready', shortId(autobaseKey), 'writable', base.writable)
+  // Open (or, with bootstrapKey=null, create) the gallery Autobase for `waveId`.
+  // Galleries are PER-WAVE: the namespace is keyed by waveId so each wave (and each
+  // fresh run, since waveId is random) starts empty instead of accumulating old
+  // selfies. All peers share the originator's base; writes come from many admitted
+  // writers, merged into one ordered view. Replication rides store.replicate(conn).
+  function openGallery (waveId, bootstrapKey) {
+    if (base && currentWaveId === waveId) return base
+    if (base) base.close().catch(() => {}) // moved on to a new wave
+    currentWaveId = waveId
+    autobaseKey = null
+    const b = new Autobase(store.namespace('wave-gallery:' + waveId), bootstrapKey, galleryConfig())
+    base = b
+    b.on('update', emitGallery)
+    b.ready().then(() => {
+      if (base !== b) return // superseded by a newer wave
+      autobaseKey = b4a.toString(b.key, 'hex')
+      log('gallery ready', shortId(waveId), 'key', shortId(autobaseKey), 'writable', b.writable)
       emitGallery()
     })
-    return base
+    return b
   }
 
   async function emitGallery () {
@@ -228,8 +236,8 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
     if (seen.has(key) || token.hopCount > MAX_HOPS) return
     seen.add(key)
 
-    // learn the gallery for this wave from the token
-    if (!base && token.autobaseKey) openAutobase(b4a.from(token.autobaseKey, 'hex'))
+    // learn (and switch to) this wave's gallery from the token
+    if (token.autobaseKey && token.waveId) openGallery(token.waveId, b4a.from(token.autobaseKey, 'hex'))
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig)
     const hopCount = token.hopCount + 1
@@ -248,13 +256,13 @@ function createWave ({ storageDir, onState, onToken = () => {}, onGallery = () =
   // Originate a new wave from this peer (any peer can start; a Sponsor Validator
   // becomes the sole originator once the payment layer lands).
   async function startWave () {
-    openAutobase(null) // create the gallery and wait until its key is known
+    const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
+    openGallery(waveId, null) // create this wave's gallery, then wait for its key
     await base.ready()
 
-    const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
     const token = stampToken(waveId, me.id, 1, 0, ZERO_HASH, autobaseKey)
     log('originating wave', shortId(waveId), 'gallery', shortId(autobaseKey))
-    broadcast({ kind: 'autobase', key: autobaseKey })
+    broadcast({ kind: 'autobase', waveId, key: autobaseKey })
     onToken({ event: 'started', waveId, by: me.id })
     // the originator is hop 0 — open their proof window too
     onToken({ event: 'holding', waveId, hopCount: 0, holder: me.id, angle: me.angle, receiptSig: token.senderReceiptSig, chainHash: ZERO_HASH })
