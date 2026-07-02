@@ -10,6 +10,9 @@ Scaffolding underway. `app/` is the Electron MVP (forked from hello-pear-electro
 
 - `app/` — the desktop MVP. See `app/README.md` for architecture and run commands. Engine is split by domain under `app/workers/lib/`: `ring.js` (pure ring geometry — angle from id, successor), `token.js` (pure token crypto — receipts + blake2b accumulator), `gallery.js` (Autobase gallery config + ordering), and `wave.js` (the `createWave` orchestrator that wires Hyperswarm/Protomux transport to those three; the payment layer attaches here as its own module). `app/workers/hyperwave.js` (Bare worker ↔ IPC bridge), `app/renderer/app.js` (ring UI, proof-window webcam, gallery). `app/electron/main.js` is the template plus one line: a `setPermissionRequestHandler` allowing `media` for the webcam. Note: ring angle is always derived locally from a peer's id (`angleOfId`), never trusted from gossip.
 - `spike/multiwriter/` — standalone proof that Hyperswarm discovery + Autobase multi-writer converge across separate `--storage` dirs.
+- `TODO.md` — the refinement backlog (done + prioritized remaining work). Check/update it when picking up or finishing work.
+
+Note: the gallery write gate is currently **open** — admission is unconditional and `apply()` doesn't verify the receipt (see the "Gallery write authorization" item in `TODO.md`). The "anti-spam gate" comments describe the *intended* behaviour, not what's enforced yet.
 
 **Run the app:** `cd app && npm install && npm start -- --storage /tmp/hyperwave/one` (one `--storage` dir per instance; open several). **Headless engine test:** `cd app && bare workers/lib/wave.run.js A /tmp/hw/a`.
 
