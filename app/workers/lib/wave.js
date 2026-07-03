@@ -14,6 +14,7 @@ const b4a = require('b4a')
 const fs = require('bare-fs')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
+const { connectionTargets } = require('./chord')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
 
@@ -36,6 +37,9 @@ const WAVE_TIMEOUT_MS = 90000
 // treat the successor as dead: skip it and re-forward to the next live peer. The
 // `wave-pos` a peer broadcasts when it holds doubles as the ACK.
 const HEAL_TIMEOUT_MS = 3000
+// Successor-list length (scalable-topology.md §4.3): how many peers clockwise we
+// deliberately connect to for fault tolerance. Predecessor is pinned too.
+const K_SUCCESSORS = 3
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -70,6 +74,7 @@ function createWave({
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null }
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
+  const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
 
@@ -125,6 +130,44 @@ function createWave({
     for (const info of swarm.peers.values()) {
       upsert(b4a.toString(info.publicKey, 'hex'), now)
     }
+  }
+
+  // Phase 2 (scalable-topology.md §4.3/§6): make the ring's edges *physical*. We
+  // deliberately swarm.joinPeer() our successor-list (k clockwise) + predecessor so
+  // those connections exist even without a full mesh, then diff against `pinned` as
+  // the ring churns — joinPeer new neighbours, leavePeer former ones. leavePeer only
+  // drops the explicit pin (not a live topic-driven connection), so the full mesh
+  // stays as a fallback until later phases (finger table) let us shed it.
+  function maintainNeighbours() {
+    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
+    const targets = connectionTargets(
+      ring.map((p) => p.id),
+      me.id,
+      K_SUCCESSORS
+    )
+    for (const id of targets) {
+      if (pinned.has(id)) continue
+      pinned.add(id)
+      try {
+        swarm.joinPeer(b4a.from(id, 'hex'))
+        log('pin neighbour', shortId(id))
+      } catch {}
+    }
+    for (const id of pinned) {
+      if (targets.has(id)) continue
+      pinned.delete(id)
+      try {
+        swarm.leavePeer(b4a.from(id, 'hex'))
+        log('unpin neighbour', shortId(id))
+      } catch {}
+    }
+  }
+
+  // Re-derive ring membership from DHT discovery, re-pin our ring edges, and repaint.
+  function refreshTopology() {
+    seedFromSwarm()
+    maintainNeighbours()
+    emit()
   }
 
   // The nation this peer supports; rides presence gossip + selfie entries (cosmetic).
@@ -654,19 +697,16 @@ function createWave({
     conn.on('error', () => {})
   })
 
-  // DHT discovery feeds ring membership (Phase 1): every time Hyperswarm learns of
-  // or drops peers on the topic, refresh the ring from `swarm.peers`.
-  swarm.on('update', () => {
-    seedFromSwarm()
-    emit()
-  })
+  // DHT discovery feeds ring membership (Phase 1) and drives which peers we pin
+  // (Phase 2): every time Hyperswarm learns of or drops peers on the topic, re-seed
+  // the ring from `swarm.peers` and re-pin our successor-list + predecessor.
+  swarm.on('update', refreshTopology)
 
   const topic = crypto.hash(b4a.from(matchId))
   const discovery = swarm.join(topic, { server: true, client: true })
   discovery.flushed().then(() => {
     log('joined match', matchId, 'topic', shortId(b4a.toString(topic, 'hex')), 'as', shortId(me.id))
-    seedFromSwarm() // initial seed once the topic announce/lookup has flushed
-    emit()
+    refreshTopology() // initial seed + pin once the topic announce/lookup has flushed
   })
 
   // --- timers ----------------------------------------------------------------
@@ -675,7 +715,9 @@ function createWave({
   }, PRESENCE_MS)
   const tRing = setInterval(() => {
     broadcast({ kind: 'peers', peers: snapshot() })
-    seedFromSwarm() // keep DHT-discovered members fresh even if no 'update' fired
+    // keep DHT-discovered members fresh + ring edges pinned even if no 'update' fired
+    seedFromSwarm()
+    maintainNeighbours()
     emit() // also re-evaluate TTL pruning
     if (base) {
       base
