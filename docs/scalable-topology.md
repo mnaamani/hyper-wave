@@ -132,14 +132,25 @@ Two changes, both implemented:
 **`wave-sync` on connect** stays essential as the catch-up path for a peer that joins after a
 flood has already passed.
 
-### 4.7 Gallery replication over a partial mesh (must verify)
-Today `Corestore.replicate(conn)` on every connection replicates the gallery Autobase; a
-full mesh means everyone is connected to the originator (host) and replicates directly. In a
-**partial mesh**, a peer may not be directly connected to the host — Hypercore/Autobase
-replication forwards along *connected paths* where intermediate peers also hold the core, so
-it should propagate along ring/finger edges **if participants keep the gallery open**. Verify
-this empirically; if it lags, designate the originator (or a validator) as a well-connected
-seed, or replicate the gallery specifically across finger connections.
+### 4.7 Gallery replication over a partial mesh — **reach verified; persistence open**
+`Corestore.replicate(conn)` runs on every connection, and the gallery Autobase is opened by
+essentially every peer that sees the wave (`openGallery` fires on `wave-start`, inside
+`processToken` so even non-roster **relayers** open it, and on `wave-sync`) — so intermediate
+peers hold the cores and can re-serve them. Selfie images are **inline** (JSON dataURL, no
+separate Hyperblobs), so this is the only core set to propagate.
+
+**Transitive reach is now proven** (`gallery.replication.test.js`): over a **line** topology
+A—B—C wired A↔B and B↔C but *not* A↔C, C becomes a writer and converges to A's selfie **purely
+through B**, and A receives C's selfie through B. So Hypercore/Corestore does forward the
+gallery along connected (ring/finger) paths when intermediates keep it open — no full mesh
+required.
+
+**Still open — persistence, not reach.** The gallery lives only while connected peers keep the
+base open; when the wave ends the base is closed for the next one, and when peers leave the
+data can vanish. Designate a well-connected **seed** — the Sponsor Validator (see
+`ideas/final-idea.md`) replicating + retaining the Autobase so the gallery survives after
+peers disconnect. (Convergence *lag* at large depth is also unmeasured, but reach is not in
+doubt.)
 
 ## 5. Migration behind the seam
 
@@ -208,6 +219,9 @@ construction). `wave.js` is untouched.
   reach** without the transport. Asserts full reach in the connected component, exactly-once
   dedup, sends ≤ 2·|E|, and diameter-ish rounds (e.g. N=200 partial mesh → all 200 in ~6
   rounds; a disconnected component is correctly *not* reached).
+- **Line-topology gallery replication** (`gallery.replication.test.js`): three real
+  Corestores/Autobases wired A↔B and B↔C (no A↔C, no swarm) — proves the gallery replicates
+  *transitively* (C converges to A's writes through B). The definitive §4.7 reach test.
 - **Local DHT integration** (`bootstrap.js`): N processes; assert the ring converges (every
   peer's successor is correct), a token completes a full lap visiting all seats, and the
   gallery replicates across the partial mesh.
@@ -231,10 +245,11 @@ things that decide whether this actually works at scale — in priority order:
    ≈ hours at N=10k, so there is currently *no* working large-N wave. The deterministic
    angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely
    global wave; its kickoff already has a delivery mechanism (the §4.6 flood).
-3. **Gallery replication over a partial mesh (§4.7).** Distinct from add-writer admission:
-   verify the Autobase core actually replicates to a peer **not directly connected to the
-   originator** (forwarding along ring/finger paths), or designate a well-connected seed. The
-   shared selfie gallery is a core feature; if it doesn't converge at scale it's broken.
+3. **Gallery persistence via a seed (§4.7).** Transitive *reach* over a partial mesh is now
+   proven (`gallery.replication.test.js`: converges A→B→C over a line, no A↔C link). What
+   remains is **persistence** — the gallery only lives while connected peers hold it open, so
+   it needs a well-connected **seed** (the Sponsor Validator) that replicates + retains the
+   Autobase so it survives peers leaving. (Convergence lag at large depth also unmeasured.)
 
 Secondary / masked-for-now:
 - The `successor` seam was **not** cleanly switched to `successor-list[0]` (§5) — `wave.js`
