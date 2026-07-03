@@ -83,15 +83,22 @@ function createWave({
   hopDelayMs = HOP_DELAY_MS,
   waveTimeoutMs = WAVE_TIMEOUT_MS,
   healTimeoutMs = HEAL_TIMEOUT_MS,
-  lobbyMs = LOBBY_MS
+  lobbyMs = LOBBY_MS,
+  role = 'peer' // 'peer' | 'validator' (a.k.a. seed): keeps galleries alive after peers leave
 }) {
-  // Prune old galleries: the whole hyperwave store is per-run (galleries are keyed
-  // by random waveId, nothing here persists across runs), so wipe it on startup to
-  // reclaim disk instead of accumulating stale wave-gallery:<waveId> namespaces.
+  // A validator/seed is a first-class swarm peer whose job is to make the gallery survive:
+  // it opens every wave's gallery and RETAINS it (never closes, store not wiped), so it can
+  // keep serving it once participants disconnect. Regular peers are ephemeral per-run.
+  const isSeed = role === 'validator' || role === 'seed'
+  // Prune old galleries (peers only): the store is per-run (galleries keyed by random
+  // waveId, nothing persists across runs), so wipe it on startup to reclaim disk. A seed
+  // instead keeps its store so it archives galleries across runs.
   const storePath = storageDir + '/hyperwave'
-  try {
-    fs.rmSync(storePath, { recursive: true, force: true })
-  } catch {}
+  if (!isSeed) {
+    try {
+      fs.rmSync(storePath, { recursive: true, force: true })
+    } catch {}
+  }
   const store = new Corestore(storePath)
   // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
@@ -115,6 +122,8 @@ function createWave({
   let base = null // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
   let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
+  const galleries = new Map() // waveId -> base: a seed retains every gallery it opens
+  const seedPeers = new Set() // ids advertising role=validator — pin them (well-connected seed)
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
   // concurrent starts resolve deterministically (lower waveId wins). During the
@@ -198,6 +207,7 @@ function createWave({
     const cand = new Set([...discoveredIds(), ...senders.keys(), ...peers.keys(), ...routed.keys()])
     cand.delete(me.id)
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS)
+    for (const s of seedPeers) if (s !== me.id) targets.add(s) // always connect to seeds
     for (const id of targets) {
       if (pinned.has(id)) continue
       pinned.add(id)
@@ -333,6 +343,14 @@ function createWave({
     const now = Date.now()
     if (m.kind === 'presence') {
       upsert(m.id, now, m.country)
+      // note validators/seeds so we deliberately connect to them (a well-connected seed
+      // is always reachable for gallery replication, §4.7).
+      if (m.role === 'validator' || m.role === 'seed') {
+        if (!seedPeers.has(m.id)) {
+          seedPeers.add(m.id)
+          maintainNeighbours()
+        }
+      }
     } else if (m.kind === 'pointers') {
       // sender is a live neighbour (direct channel); its advertised succ/pred are
       // discovery hints, marked slightly stale so they age out unless independently
@@ -532,18 +550,43 @@ function createWave({
   // selfies. All peers share the originator's base; writes come from many admitted
   // writers, merged into one ordered view. Replication rides store.replicate(conn).
   function openGallery(waveId, bootstrapKey) {
-    if (base && currentWaveId === waveId) return base
-    if (base) base.close().catch(() => {}) // moved on to a new wave
+    if (currentWaveId === waveId && base) return base
+    const kept = galleries.get(waveId)
+    if (kept) {
+      // seed already holds this gallery — make it the current one, don't reopen
+      base = kept
+      currentWaveId = waveId
+      autobaseKey = b4a.toString(kept.key, 'hex')
+      return base
+    }
+    // A seed keeps old galleries open (so it can keep serving them after peers leave); a
+    // regular peer closes the previous wave's gallery when it moves on.
+    if (base && !isSeed) {
+      base.close().catch(() => {})
+      if (currentWaveId) galleries.delete(currentWaveId)
+    }
     currentWaveId = waveId
     autobaseKey = null
     const b = new Autobase(store.namespace('wave-gallery:' + waveId), bootstrapKey, galleryConfig())
     base = b
-    b.on('update', emitGallery)
+    galleries.set(waveId, b)
+    b.on('update', () => {
+      if (base === b) emitGallery()
+    })
     b.ready().then(() => {
-      if (base !== b) return // superseded by a newer wave
-      autobaseKey = b4a.toString(b.key, 'hex')
-      log('gallery ready', shortId(waveId), 'key', shortId(autobaseKey), 'writable', b.writable)
-      emitGallery()
+      if (galleries.get(waveId) !== b) return // superseded (peer moved on and closed it)
+      const key = b4a.toString(b.key, 'hex')
+      if (base === b) autobaseKey = key
+      log(
+        'gallery ready',
+        shortId(waveId),
+        'key',
+        shortId(key),
+        'writable',
+        b.writable,
+        isSeed ? '(seed)' : ''
+      )
+      if (base === b) emitGallery()
     })
     return b
   }
@@ -884,6 +927,7 @@ function createWave({
   // Announce a new wave and open the lobby (any peer can start when idle). After the
   // lobby window the initiator finalizes the roster and the token starts racing.
   function startWave() {
+    if (isSeed) return null // a seed archives galleries; it doesn't run waves
     if (wave) {
       onToken({ event: 'busy', waveId: wave.id })
       return null
@@ -957,7 +1001,7 @@ function createWave({
     // greet: presence + my compact pointers (Phase 4 — no O(N) snapshot). The
     // newcomer converges via DHT discovery (swarm.peers) + pointer exchange; at small
     // N the mesh also upserts every peer directly on connect.
-    send(JSON.stringify({ kind: 'presence', id: me.id, country: me.country }))
+    send(JSON.stringify({ kind: 'presence', id: me.id, country: me.country, role }))
     send(JSON.stringify(myPointers()))
     // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
     // start a competing one (broadcasts they missed won't reach them otherwise)
@@ -979,6 +1023,7 @@ function createWave({
     conn.on('close', () => {
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
+      seedPeers.delete(id) // re-learned from presence if it comes back
       goneUntil.set(id, Date.now() + TTL_MS) // cooldown: don't re-pin/re-hint it yet
       if (senders.size === 0) bootstrapDone = false // went solo -> re-bootstrap on reconnect
       log('peer disconnected', shortId(id))
@@ -1006,7 +1051,7 @@ function createWave({
 
   // --- timers ----------------------------------------------------------------
   const tPresence = setInterval(() => {
-    broadcastToNeighbours({ kind: 'presence', id: me.id, country: me.country })
+    broadcastToNeighbours({ kind: 'presence', id: me.id, country: me.country, role })
   }, PRESENCE_MS)
   const tRing = setInterval(() => {
     // re-pin ring edges from current discovery even if no 'update' fired
@@ -1015,12 +1060,17 @@ function createWave({
     // maintainNeighbours so `pinned` is current and reflects our latest succ/pred
     broadcastToNeighbours(myPointers())
     emit() // also re-evaluate TTL pruning
-    if (base) {
+    // pull replicated gallery writes. A seed updates ALL retained galleries so each keeps
+    // syncing (and stays a live source for latecomers); a peer just its current one.
+    if (isSeed) {
+      for (const b of galleries.values()) b.update().catch(() => {})
+      if (base) emitGallery()
+    } else if (base) {
       base
         .update()
         .then(emitGallery)
         .catch(() => {})
-    } // pull replicated gallery writes
+    }
   }, RINGUPDATE_MS)
   // Chord repair via distributed findSuccessor — correct a successor pointer my local
   // (possibly partial) view missed. Slow cadence; a no-op when local knowledge suffices.
@@ -1030,6 +1080,7 @@ function createWave({
 
   return {
     me,
+    role,
     startWave,
     join,
     setCountry,
@@ -1048,7 +1099,7 @@ function createWave({
       clearTimeout(bootstrapTimer)
       for (const { timer } of pendingLookups.values()) clearTimeout(timer)
       await swarm.destroy()
-      if (base) await base.close()
+      for (const b of galleries.values()) await b.close().catch(() => {})
       await store.close()
     }
   }

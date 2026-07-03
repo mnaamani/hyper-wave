@@ -229,10 +229,12 @@ All are JSON objects on the `hyperwave/gossip` channel. Unknown `kind`s are igno
 
 ### presence — to pinned neighbours, every `PRESENCE_MS`
 ```json
-{ "kind": "presence", "id": "<peerId>", "country": "BR" | null }
+{ "kind": "presence", "id": "<peerId>", "country": "BR" | null, "role": "peer" | "validator" }
 ```
 Heartbeat. Receiver upserts the peer (`lastSeen = now`, `country`). Sent only to pinned ring
-neighbours (Chord successor-list + predecessor + fingers), not every connection.
+neighbours (Chord successor-list + predecessor + fingers), not every connection. `role`
+`validator`/`seed` marks a **gallery seed**: peers deliberately pin it (so it's a
+well-connected replication hub that keeps galleries alive after participants leave, §4.7).
 
 ### pointers — to pinned neighbours, every `RINGUPDATE_MS`
 ```json

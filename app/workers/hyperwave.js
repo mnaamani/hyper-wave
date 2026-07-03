@@ -5,6 +5,7 @@
 
 const FramedStream = require('framed-stream')
 const goodbye = require('graceful-goodbye')
+const env = require('bare-env')
 const { createWave } = require('./lib/wave')
 
 const pipe = new FramedStream(Bare.IPC)
@@ -16,6 +17,7 @@ function send(msg) {
 
 const wave = createWave({
   storageDir,
+  role: env.HYPERWAVE_ROLE || 'peer', // 'validator'/'seed' runs this instance as a gallery seed
   onState: (state) => send({ type: 'state', ...state }),
   onToken: (event) => send({ type: 'token', ...event }),
   onGallery: (items) => send({ type: 'gallery', items }),

@@ -25,8 +25,10 @@ const bootstrap = env.HYPERWAVE_BOOTSTRAP
   : null
 
 let started = false
+const role = env.HYPERWAVE_ROLE || 'peer' // 'validator'/'seed' -> passive gallery seed
 const wave = createWave({
   storageDir,
+  role,
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
@@ -35,13 +37,14 @@ const wave = createWave({
       `[${name}] peers=${s.peers.length} me=${s.me.id.slice(0, 8)}@${s.me.angle.toFixed(1)} ` +
         `succ=${s.successor ? s.successor.id.slice(0, 8) + '@' + s.successor.angle.toFixed(1) : 'none'}`
     )
-    if (env.START && !started && s.peers.length >= Number(env.START)) {
+    if (role === 'peer' && env.START && !started && s.peers.length >= Number(env.START)) {
       started = true
       setTimeout(() => wave.startWave(), 500)
     }
   },
   onToken: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
+    if (role !== 'peer') return // a validator/seed doesn't join or selfie
     if (env.AUTOJOIN && e.event === 'wave-announce' && !e.mine) wave.join()
     // stage a (fake) selfie during the lobby, exactly like the renderer does at kickoff;
     // the worker posts it to the gallery when the token reaches this peer.

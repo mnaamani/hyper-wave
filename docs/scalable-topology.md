@@ -145,12 +145,16 @@ through B**, and A receives C's selfie through B. So Hypercore/Corestore does fo
 gallery along connected (ring/finger) paths when intermediates keep it open — no full mesh
 required.
 
-**Still open — persistence, not reach.** The gallery lives only while connected peers keep the
-base open; when the wave ends the base is closed for the next one, and when peers leave the
-data can vanish. Designate a well-connected **seed** — the Sponsor Validator (see
-`ideas/final-idea.md`) replicating + retaining the Autobase so the gallery survives after
-peers disconnect. (Convergence *lag* at large depth is also unmeasured, but reach is not in
-doubt.)
+**Persistence — addressed by a seed role.** A regular peer keeps only the current wave's
+gallery open and wipes its store per run, so galleries would vanish as peers leave. A
+**validator/seed** (`role: 'validator'`, `createWave`) instead keeps its store *and* retains
+**every** gallery it opens (`galleries` map — never closed, updated each tick), so it can keep
+serving them after participants disconnect. It advertises `role` in `presence`; peers pin any
+seed (`seedPeers`) so it's a **well-connected** replication hub. A seed never selfies or starts
+waves — it relays like any peer and archives. Verified in `gallery.replication.test.js`: a
+latecomer connected *only* to the seed gets the full gallery after the originator has left.
+(This is the same instance the payment layer's Sponsor Validator will attach to; see
+`ideas/final-idea.md`. Convergence *lag* at large depth remains unmeasured.)
 
 ## 5. Migration behind the seam
 
@@ -219,9 +223,11 @@ construction). `wave.js` is untouched.
   reach** without the transport. Asserts full reach in the connected component, exactly-once
   dedup, sends ≤ 2·|E|, and diameter-ish rounds (e.g. N=200 partial mesh → all 200 in ~6
   rounds; a disconnected component is correctly *not* reached).
-- **Line-topology gallery replication** (`gallery.replication.test.js`): three real
-  Corestores/Autobases wired A↔B and B↔C (no A↔C, no swarm) — proves the gallery replicates
-  *transitively* (C converges to A's writes through B). The definitive §4.7 reach test.
+- **Line-topology gallery replication + seed persistence** (`gallery.replication.test.js`):
+  real Corestores/Autobases with no swarm. (1) A↔B, B↔C (no A↔C) — the gallery replicates
+  *transitively* (C converges to A's writes through B). (2) originator→seed, originator leaves,
+  a latecomer connected *only* to the seed still gets the full gallery. The §4.7 reach +
+  persistence tests.
 - **Local DHT integration** (`bootstrap.js`): N processes; assert the ring converges (every
   peer's successor is correct), a token completes a full lap visiting all seats, and the
   gallery replicates across the partial mesh.
@@ -245,11 +251,11 @@ things that decide whether this actually works at scale — in priority order:
    ≈ hours at N=10k, so there is currently *no* working large-N wave. The deterministic
    angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely
    global wave; its kickoff already has a delivery mechanism (the §4.6 flood).
-3. **Gallery persistence via a seed (§4.7).** Transitive *reach* over a partial mesh is now
-   proven (`gallery.replication.test.js`: converges A→B→C over a line, no A↔C link). What
-   remains is **persistence** — the gallery only lives while connected peers hold it open, so
-   it needs a well-connected **seed** (the Sponsor Validator) that replicates + retains the
-   Autobase so it survives peers leaving. (Convergence lag at large depth also unmeasured.)
+3. ~~**Gallery persistence via a seed (§4.7).**~~ **Done** — transitive reach *and* persistence
+   are covered: a **validator/seed** role (`role: 'validator'`) retains every gallery and is
+   pinned by peers as a well-connected hub, so galleries survive participants leaving
+   (`gallery.replication.test.js`). Remaining: the payment/proof-validation layer that attaches
+   to this same seed instance (WDK — out of scope here), and convergence-lag measurement.
 
 Secondary / masked-for-now:
 - The `successor` seam was **not** cleanly switched to `successor-list[0]` (§5) — `wave.js`

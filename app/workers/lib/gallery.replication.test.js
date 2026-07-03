@@ -130,3 +130,65 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
   t.ok(await until(async () => (await captions(baseA)).length === 3), 'A converged to all 3')
   t.alike(await captions(baseA), ['A', 'B', 'C'], 'A has C (transitive via B)')
 })
+
+// The validator/seed's whole point: keep the gallery alive after participants leave. The
+// originator posts and hands the gallery to seed V; the originator then LEAVES (closes its
+// base + store); a latecomer connects ONLY to V (never to the originator) and still gets
+// the full gallery from it.
+test('a seed serves the gallery after the originator leaves (persistence)', async (t) => {
+  const dirs = ['orig', 'seed', 'late'].map((n) => `/tmp/hyperwave-seed-${n}-${Date.now()}`)
+  const [storeA, storeV, storeC] = dirs.map((d) => new Corestore(d))
+  const streams = []
+  const closed = new Set()
+  const shut = async (x) => {
+    if (x && !closed.has(x)) {
+      closed.add(x)
+      await x.close().catch(() => {})
+    }
+  }
+
+  // originator creates the gallery; seed V opens it from the key (V is a reader/replica)
+  const baseA = new Autobase(storeA.namespace('wave-gallery:' + WAVE), null, galleryConfig())
+  await baseA.ready()
+  const key = baseA.key
+  const baseV = new Autobase(storeV.namespace('wave-gallery:' + WAVE), key, galleryConfig())
+  await baseV.ready()
+  let baseC = null
+
+  t.teardown(async () => {
+    for (const s of streams) {
+      try {
+        s.destroy()
+      } catch {}
+    }
+    await shut(baseA)
+    await shut(baseV)
+    await shut(baseC)
+    await shut(storeA)
+    await shut(storeV)
+    await shut(storeC)
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true })
+  })
+
+  const av = link(storeA, storeV) // originator <-> seed
+  streams.push(...av)
+
+  await baseA.append(selfie(crypto.keyPair(), 0, 'A'))
+  t.ok(await until(async () => (await captions(baseV)).length === 1), 'seed replicated the gallery')
+
+  // the originator LEAVES: tear down its edge and close its base + store
+  for (const s of av) s.destroy()
+  await shut(baseA)
+  await shut(storeA)
+
+  // a latecomer connects ONLY to the seed (the originator is gone, never connected to it)
+  baseC = new Autobase(storeC.namespace('wave-gallery:' + WAVE), key, galleryConfig())
+  await baseC.ready()
+  streams.push(...link(storeV, storeC))
+
+  t.ok(
+    await until(async () => (await captions(baseC)).length === 1),
+    'latecomer got the gallery from the seed after the originator left'
+  )
+  t.alike(await captions(baseC), ['A'], 'gallery survived the originator leaving')
+})
