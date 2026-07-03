@@ -60,6 +60,47 @@ function connectionTargets(ids, myId, k = 3) {
   return set
 }
 
+// Chord's findSuccessor over a pre-ordered ring (§4.5): the first node at-or-
+// clockwise-after keyspace position `target` (BigInt, mod 2^64), wrapping to the
+// lowest nodeId. `ring` is the output of ringOrder (ascending by nid). null if empty.
+function successorOf(ring, target) {
+  if (ring.length === 0) return null
+  for (const node of ring) if (node.nid >= target) return node
+  return ring[0] // wrapped past the top of the ring
+}
+
+// Public findSuccessor: the id of the first node clockwise from keyspace position
+// `target`. Used to build the finger table; also the lookup primitive for placing
+// where a token starts / where a joining node inserts (§4.5).
+function findSuccessor(ids, target) {
+  const node = successorOf(ringOrder(ids), target)
+  return node ? node.id : null
+}
+
+// Chord finger table (§4.3): finger[i] = successor of (myNid + 2^i) mod 2^64, for
+// i in 0..63. Returns the DISTINCT finger node ids (excluding me). For a ring of N
+// nodes the distinct fingers collapse to O(log N) — the whole point: deliberate
+// connections stay logarithmic instead of a full mesh, while still spanning the ring.
+function fingers(ids, myId) {
+  const myNid = nodeIdOfHex(myId)
+  const ring = ringOrder([myId, ...ids])
+  const out = new Set()
+  for (let i = 0; i < 64; i++) {
+    const node = successorOf(ring, (myNid + (1n << BigInt(i))) % RING)
+    if (node && node.id !== myId) out.add(node.id)
+  }
+  return out
+}
+
+// The full set of peers to keep physically connected (Phase 3): successor-list +
+// predecessor (for the token walk / fault tolerance) unioned with the finger table
+// (for O(log N) ring-spanning reachability). This is what wave.js joinPeer()s.
+function pinTargets(ids, myId, k = 3) {
+  const set = connectionTargets(ids, myId, k)
+  for (const f of fingers(ids, myId)) set.add(f)
+  return set
+}
+
 module.exports = {
   RING,
   nodeId,
@@ -67,5 +108,8 @@ module.exports = {
   ringOrder,
   successors,
   predecessor,
-  connectionTargets
+  connectionTargets,
+  findSuccessor,
+  fingers,
+  pinTargets
 }

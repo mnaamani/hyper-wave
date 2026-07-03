@@ -1,6 +1,6 @@
 # HyperWave — Scalable Topology (design / plan)
 
-**Status:** Phases 1–2 implemented (discover via `swarm.peers`; pin ring edges via `joinPeer`); Phases 3–5 planned. This is the design for making HyperWave scale
+**Status:** Phases 1–3 implemented (discover via `swarm.peers`; pin successor-list + predecessor + finger table via `joinPeer`); Phases 4–5 planned. This is the design for making HyperWave scale
 from a handful of peers to a large, global swarm by aligning our logical ring with the
 physical Hyperswarm connection graph — the "make the ring drive connections" idea.
 
@@ -137,7 +137,13 @@ construction). `wave.js` is untouched.
    topology refresh (k=3 successors + predecessor). `leavePeer` only drops the explicit
    pin, so the topic-driven full mesh remains as the fallback until Phase 3.
 3. **Finger table + `findSuccessor` + `fixFingers`** — O(log N) connections; drop full-mesh
-   reliance.
+   reliance. **✅ Done:** `chord.js` adds `findSuccessor(ids, target)` (first node clockwise
+   of a keyspace position) and `fingers(ids, myId)` (finger[i] = successor of `myNid + 2^i`,
+   i in 0..63, deduped to O(log N) distinct nodes), composed into `pinTargets` = successor-
+   list ∪ predecessor ∪ fingers. `wave.js` `maintainNeighbours()` now pins `pinTargets`;
+   recomputing the fingers on each topology refresh *is* `fixFingers`. Brittle-tested in
+   `chord.test.js`. The finger set spans the ring so reachability no longer depends on the
+   incidental mesh (which remains only until gossip is slimmed in Phase 4).
 4. **`stabilize` + churn handling + slim gossip** — remove the O(N) `peers` snapshot.
 5. **(decision) Propagation at scale** — deterministic angular sweep for stadium/global
    waves (axis B), with independent proofs; keep the serial token for small waves.

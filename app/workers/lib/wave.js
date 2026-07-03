@@ -14,7 +14,7 @@ const b4a = require('b4a')
 const fs = require('bare-fs')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
-const { connectionTargets } = require('./chord')
+const { pinTargets } = require('./chord')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
 
@@ -132,15 +132,17 @@ function createWave({
     }
   }
 
-  // Phase 2 (scalable-topology.md §4.3/§6): make the ring's edges *physical*. We
-  // deliberately swarm.joinPeer() our successor-list (k clockwise) + predecessor so
-  // those connections exist even without a full mesh, then diff against `pinned` as
-  // the ring churns — joinPeer new neighbours, leavePeer former ones. leavePeer only
-  // drops the explicit pin (not a live topic-driven connection), so the full mesh
-  // stays as a fallback until later phases (finger table) let us shed it.
+  // Phase 2+3 (scalable-topology.md §4.3/§4.5/§6): make the ring's edges *physical*.
+  // We deliberately swarm.joinPeer() our successor-list (k clockwise) + predecessor
+  // (the token walk / fault tolerance) plus our finger table (O(log N) ring-spanning
+  // reachability), then diff against `pinned` as the ring churns — joinPeer new
+  // targets, leavePeer former ones. Recomputing the fingers here each refresh *is*
+  // Chord's fixFingers. leavePeer only drops the explicit pin (not a live topic-
+  // driven connection), so the full mesh stays as a fallback until gossip is slimmed
+  // (Phase 4); the finger set means we no longer *rely* on that mesh for reachability.
   function maintainNeighbours() {
     const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
-    const targets = connectionTargets(
+    const targets = pinTargets(
       ring.map((p) => p.id),
       me.id,
       K_SUCCESSORS
