@@ -125,29 +125,27 @@ function createWave({
     }
   }
 
-  // Phase 1 (scalable-topology.md §4.2/§6): seed the ring from Hyperswarm's DHT
-  // discovery. `swarm.peers` is every peer announced on our topic (PeerInfo, keyed
-  // by hex key) — known before/without gossip, so the ring converges faster and we
-  // lean less on transitive `peers`-snapshot flooding. We refresh their lastSeen
-  // while they remain discoverable; once Hyperswarm GCs a peer that left the topic
-  // we stop refreshing and TTL prunes it. Additive and low-risk: the token still
-  // only forwards to *connected* peers (pickReachable ∩ senders), so a discovered-
-  // but-not-yet-connected member shows in the ring but is never a forward target.
-  function seedFromSwarm() {
+  // Phase 1 (scalable-topology.md §4.2/§6): the peer keys Hyperswarm has DISCOVERED on
+  // our topic (`swarm.peers`, PeerInfo keyed by hex key). This drives *who we try to
+  // connect to* (Chord pinning below) — NOT the visible ring. A DHT announcement only
+  // means "this key advertised the topic once"; a stale announce from a since-closed
+  // instance would otherwise become a permanent ghost seat. A seat requires real
+  // liveness (a connection or gossip); discovery just tells us who to dial.
+  function discoveredIds() {
     const now = Date.now()
+    const ids = []
     for (const info of swarm.peers.values()) {
       const id = b4a.toString(info.publicKey, 'hex')
-      // Don't resurrect a peer we just saw disconnect: Hyperswarm keeps it in
-      // `swarm.peers` while it retries the (dead) connection, which would otherwise
-      // re-add a ghost seat and flap its pin. The cooldown clears on reconnect or
-      // when it expires (a genuine rediscovery then re-seeds it).
+      // Skip a peer we just saw disconnect (Hyperswarm keeps retrying it) so we don't
+      // re-pin a dead neighbour; the cooldown clears on reconnect or when it expires.
       const gone = goneUntil.get(id)
       if (gone) {
         if (now < gone) continue
         goneUntil.delete(id)
       }
-      upsert(id, now)
+      ids.push(id)
     }
+    return ids
   }
 
   // Phase 2+3 (scalable-topology.md §4.3/§4.5/§6): make the ring's edges *physical*.
@@ -158,13 +156,14 @@ function createWave({
   // Chord's fixFingers. leavePeer only drops the explicit pin (not a live topic-
   // driven connection), so the full mesh stays as a fallback until gossip is slimmed
   // (Phase 4); the finger set means we no longer *rely* on that mesh for reachability.
+  //
+  // Candidates = DHT-discovered ∪ already-connected ∪ gossip-known (live seats). The
+  // token-walk seats (`peers`) still come only from connections + gossip, so a stale
+  // discovery we can't reach is pinned (dialed) but never shown as a seat.
   function maintainNeighbours() {
-    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
-    const targets = pinTargets(
-      ring.map((p) => p.id),
-      me.id,
-      K_SUCCESSORS
-    )
+    const cand = new Set([...discoveredIds(), ...senders.keys(), ...peers.keys()])
+    cand.delete(me.id)
+    const targets = pinTargets([...cand], me.id, K_SUCCESSORS)
     for (const id of targets) {
       if (pinned.has(id)) continue
       pinned.add(id)
@@ -183,9 +182,8 @@ function createWave({
     }
   }
 
-  // Re-derive ring membership from DHT discovery, re-pin our ring edges, and repaint.
+  // Re-pin our ring edges from current discovery/connectivity, and repaint.
   function refreshTopology() {
-    seedFromSwarm()
     maintainNeighbours()
     emit()
   }
@@ -294,12 +292,15 @@ function createWave({
     if (m.kind === 'presence') {
       upsert(m.id, now, m.country)
     } else if (m.kind === 'pointers') {
-      // sender is a live neighbour; its advertised succ/pred are discovery hints,
-      // marked slightly stale so they age out unless independently refreshed.
+      // sender is a live neighbour (direct channel); its advertised succ/pred are
+      // discovery hints, marked slightly stale so they age out unless independently
+      // refreshed. Skip a hint for a peer we just saw disconnect (goneUntil), so a
+      // third peer's advert can't resurrect a ghost seat.
       upsert(m.id, now, m.country)
       const learned = now - Math.floor(TTL_MS / 2)
-      for (const id of m.succ || []) upsert(id, learned)
-      if (m.pred) upsert(m.pred, learned)
+      for (const id of [...(m.succ || []), m.pred]) {
+        if (id && !(goneUntil.get(id) > now)) upsert(id, learned)
+      }
       stabilize(m)
     }
     emit()
@@ -792,7 +793,7 @@ function createWave({
     conn.on('close', () => {
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
-      goneUntil.set(id, Date.now() + TTL_MS) // don't let seedFromSwarm resurrect it
+      goneUntil.set(id, Date.now() + TTL_MS) // cooldown: don't re-pin/re-hint it yet
       log('peer disconnected', shortId(id))
       // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
       // promotes the next successor-list entry and repairs fingers without waiting
@@ -821,8 +822,7 @@ function createWave({
     broadcastToNeighbours({ kind: 'presence', id: me.id, country: me.country })
   }, PRESENCE_MS)
   const tRing = setInterval(() => {
-    // keep DHT-discovered members fresh + ring edges pinned even if no 'update' fired
-    seedFromSwarm()
+    // re-pin ring edges from current discovery even if no 'update' fired
     maintainNeighbours()
     // slim pointer exchange (Phase 4) replaces the O(N) peers snapshot; sent after
     // maintainNeighbours so `pinned` is current and reflects our latest succ/pred
