@@ -114,7 +114,7 @@ function drawCover(img, x, y, size) {
 
 function drawCenterSelfie(cx, cy) {
   if (!center) return
-  const rad = 78
+  const rad = 108 // bigger centre selfie (ring R=170, so still clears the seats)
 
   ctx.save()
   ctx.beginPath()
@@ -147,10 +147,10 @@ function drawCenterSelfie(cx, cy) {
     const fx = cx + rad * 0.62
     const fy = cy + rad * 0.62
     ctx.beginPath()
-    ctx.arc(fx, fy, 17, 0, Math.PI * 2)
+    ctx.arc(fx, fy, 20, 0, Math.PI * 2)
     ctx.fillStyle = 'rgba(6,33,13,0.85)'
     ctx.fill()
-    ctx.font = '22px sans-serif'
+    ctx.font = '26px sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(flag, fx, fy)
