@@ -13,14 +13,7 @@ const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
 const fs = require('bare-fs')
 
-const {
-  angleOf,
-  angleOfId,
-  liveRing,
-  nextClockwise,
-  hopsUntilMe,
-  pickReachable
-} = require('./ring')
+const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
 const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
@@ -35,11 +28,6 @@ const MAX_HOPS = 5000 // safety cap against runaway tokens
 // (via wave-pos) and runs its own 3s countdown + auto-capture, so the token never
 // waits on a human. The dwell is now just the visible roll pace. Configurable per wave.
 const HOP_DELAY_MS = 250
-// Pre-arm the proof window this many hops before the ball reaches me, so the camera is
-// warm and the person has a "get ready" beat before their moment (one hop ≈ HOP_DELAY_MS
-// was too tight for camera warmup). Must be < countdown/dwell so capture still lands after
-// the ball passes; in a ring smaller than this, everyone simply arms at the first wave-pos.
-const PREARM_LEAD_HOPS = 4
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
 // (get ready / choose to selfie) before the token starts racing.
 const LOBBY_MS = 15000
@@ -107,7 +95,12 @@ function createWave({
   let waveTimer = null // racing timeout
   let healTimer = null // watches my forward; fires if the wave doesn't advance
   let healPending = null // { waveId, hop } I'm currently watching
-  let prearmedWave = null // waveId whose proof window I've already pre-armed (once per wave)
+
+  // Selfie is captured up-front during the lobby (renderer stages it here), then posted
+  // to the gallery when the token actually reaches me — signed with my hop's receipt.
+  let stagedSelfie = null // { image, caption } captured in the lobby, awaiting my hop
+  let myReceipt = null // my hop's receipt once the token reaches me, awaiting the selfie
+  let selfiePosted = false // guard: post my selfie exactly once per wave
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -235,7 +228,6 @@ function createWave({
           angle: angleOfId(m.holder),
           hopCount: m.hopCount
         })
-        maybePrearm(m.holder)
       }
       return
     }
@@ -474,6 +466,7 @@ function createWave({
       endedWaves.add(wave.id)
       teardown()
     }
+    resetSelfie() // fresh wave — clear any staged selfie/receipt from a prior one
     wave = { id: waveId, phase: 'lobby', by, roster: new Set([by]), joined: !!mine }
     if (mine) wave.roster.add(me.id)
     lobbyEndsAt = Date.now() + dur
@@ -517,7 +510,7 @@ function createWave({
     const waveId = wave.id
     endedWaves.add(waveId)
     wave = null
-    prearmedWave = null // let the next wave pre-arm afresh
+    resetSelfie() // drop any staged selfie / receipt for the next wave
     seen.clear() // only needed within the active wave; bound its growth
     teardown()
     onToken({ event: 'wave-idle', waveId, reason })
@@ -531,38 +524,52 @@ function createWave({
     goIdle(stalled ? 'stalled' : 'ended')
   }
 
-  // Am I opted in to the current wave (so my proof window should open)?
+  // Am I opted in to the current wave (a roster member who took a lobby selfie)?
   function canSelfieNow() {
     return !!(wave && wave.roster.has(me.id))
   }
 
-  // Pre-arm my proof window a few hops before the ball reaches me: as soon as the peer
-  // now holding (`holderId`) is within PREARM_LEAD_HOPS seats behind me, open the camera
-  // + start the 3s countdown early so it's warm and I've had a "get ready" beat before my
-  // moment (the token is never held up by it). The receipt arrives with the `holding`
-  // event later. Fires once per wave; falls back to opening on `holding` if missed (e.g.
-  // healing shifted the seats).
-  function maybePrearm(holderId) {
-    if (!canSelfieNow() || prearmedWave === wave.id) return
-    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
-    const hops = hopsUntilMe(ring, me.id, me.angle, holderId)
-    if (hops < 1 || hops > PREARM_LEAD_HOPS) return
-    prearmedWave = wave.id
-    onToken({ event: 'prearm', waveId: wave.id, canSelfie: true })
+  // The renderer captured my selfie during the lobby and stages it here; it's posted
+  // to the gallery when the token reaches me (below). Staging may arrive before or
+  // after my hop — tryPostSelfie() fires once both the image and my receipt are ready.
+  function stageSelfie({ image, caption } = {}) {
+    stagedSelfie = { image: image || '', caption: caption || '' }
+    tryPostSelfie()
   }
 
-  // Emit a holding event; canSelfie tells the renderer whether to open the proof
-  // window (only opted-in roster members selfie; everyone else just relays).
+  // Record my hop's receipt when the token reaches me — the write-gate credential for
+  // my staged selfie. Paired with stageSelfie() by tryPostSelfie().
+  function recordMyReceipt(waveId, hopCount, receiptSig, chainHash, receiptTs) {
+    if (!canSelfieNow()) return
+    myReceipt = { waveId, hopCount, receiptSig, chainHash, receiptTs }
+    tryPostSelfie()
+  }
+
+  // Post my lobby selfie once BOTH the receipt (token reached me) and the staged image
+  // (captured in the lobby) are available, exactly once per wave.
+  function tryPostSelfie() {
+    if (selfiePosted || !myReceipt || !stagedSelfie) return
+    if (!wave || myReceipt.waveId !== wave.id) return
+    selfiePosted = true
+    postSelfie({ ...myReceipt, image: stagedSelfie.image, caption: stagedSelfie.caption })
+  }
+
+  function resetSelfie() {
+    stagedSelfie = null
+    myReceipt = null
+    selfiePosted = false
+  }
+
+  // Emit a holding event; canSelfie tells the renderer this peer is a participant (its
+  // staged selfie will post now). Everyone else just relays the ball.
   function emitHolding(waveId, hopCount, receiptSig, chainHash, receiptTs) {
+    recordMyReceipt(waveId, hopCount, receiptSig, chainHash, receiptTs)
     onToken({
       event: 'holding',
       waveId,
       hopCount,
       holder: me.id,
       angle: me.angle,
-      receiptSig,
-      chainHash,
-      receiptTs,
       canSelfie: canSelfieNow()
     })
   }
@@ -634,8 +641,9 @@ function createWave({
     }
   }
 
-  // I now hold this token: open my proof window (if opted in), tell everyone the ball
-  // is at me, and forward to my successor after the dwell.
+  // I now hold this token: post my lobby selfie (if opted in — emitHolding records my
+  // receipt, which pairs with the staged image), tell everyone the ball is at me, and
+  // forward to my successor after the dwell.
   function holdAndForward(token) {
     emitHolding(
       token.waveId,
@@ -833,7 +841,7 @@ function createWave({
     startWave,
     join,
     setCountry,
-    postSelfie,
+    stageSelfie,
     async close() {
       clearInterval(tPresence)
       clearInterval(tRing)

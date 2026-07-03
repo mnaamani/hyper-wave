@@ -42,16 +42,10 @@ const wave = createWave({
   onToken: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
     if (env.AUTOJOIN && e.event === 'wave-announce' && !e.mine) wave.join()
-    if (env.AUTOSELFIE && e.event === 'holding' && e.canSelfie) {
-      wave.postSelfie({
-        waveId: e.waveId,
-        hopCount: e.hopCount,
-        receiptSig: e.receiptSig,
-        chainHash: e.chainHash,
-        receiptTs: e.receiptTs,
-        caption: `${name} was here`,
-        image: `fake-image-${name}`
-      })
+    // stage a (fake) selfie during the lobby, exactly like the renderer does at kickoff;
+    // the worker posts it to the gallery when the token reaches this peer.
+    if (env.AUTOSELFIE && e.event === 'wave-active' && e.joined) {
+      wave.stageSelfie({ caption: `${name} was here`, image: `fake-image-${name}` })
     }
   },
   onGallery: (items) =>

@@ -33,6 +33,6 @@ function send(type, extra) {
 export const startWave = () => send('start-wave')
 export const joinWave = () => send('join-wave')
 export const setCountry = (country) => send('set-country', { country })
-export const postSelfie = (selfie) => send('post-selfie', { selfie })
+export const stageSelfie = (selfie) => send('stage-selfie', { selfie })
 
 export const appVersion = () => bridge.pkg().version

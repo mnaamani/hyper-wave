@@ -12,6 +12,13 @@ ring.start()
 let waveActive = false
 let countrySent = false
 let peerCount = 0
+let lobbyDeadline = 0 // ~when the lobby closes (kickoff), for the capture countdown
+
+// Swap the join panel for the camera and start framing the lobby selfie.
+function beginCapture() {
+  lobby.close()
+  proof.open(Math.max(0, lobbyDeadline - performance.now()))
+}
 
 function idleStatus() {
   return peerCount === 0
@@ -40,11 +47,13 @@ ipc.on('token', (e) => {
       waveActive = true
       hud.showStart(false)
       gallery.hideProgress()
-      lobby.open(e)
+      lobbyDeadline = performance.now() + (e.lobbyMs || 15000)
+      // I'm already in (e.g. the initiator) -> start framing; else show the join panel
+      if (e.joined) beginCapture()
+      else lobby.open(e)
       break
     case 'joined':
-      lobby.markJoined()
-      lobby.update(e.count)
+      beginCapture() // opted in — swap the join panel for the camera
       break
     case 'roster':
       lobby.update(e.count)
@@ -55,7 +64,8 @@ ipc.on('token', (e) => {
       gallery.setExpected(e.count || 1)
       gallery.setActive(true)
       lobby.close()
-      hud.status(e.joined ? '📣 you are in — get ready!' : '👀 spectating this wave')
+      proof.captureAndStage() // snap + stage the lobby selfie, then free the centre
+      hud.status(e.joined ? '📸 captured — here comes the wave!' : '👀 spectating this wave')
       break
     case 'wave-idle':
       waveActive = false
@@ -72,19 +82,14 @@ ipc.on('token', (e) => {
     case 'started':
       hud.status('⚽ the wave is off!')
       break
-    case 'prearm':
-      // ball is one hop away — open the camera + start the countdown ahead of arrival
-      hud.status('📸 get ready — your turn is next!')
-      if (e.canSelfie) proof.open(e)
-      break
     case 'holding':
+      // the ball reached me — my staged selfie posts now (worker-side); just animate
       hud.status(
         e.canSelfie
-          ? `📸 your turn! — hop ${e.hopCount ?? ''}`
+          ? `📸 your selfie joins the wave! — hop ${e.hopCount ?? ''}`
           : `wave passing you — hop ${e.hopCount ?? ''}`
       )
       ring.setBall(e.angle)
-      if (e.canSelfie) proof.open(e) // fills the receipt into a pre-armed window (or opens if missed)
       break
     case 'position':
       hud.status(`wave rolling — hop ${e.hopCount ?? ''}`)

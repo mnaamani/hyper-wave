@@ -27,19 +27,6 @@ function nextClockwise(myAngle, sortedRing) {
   return sortedRing[0]
 }
 
-// How many seats clockwise the ball travels from `fromId` to reach me. The ring is all
-// OTHER seats (`others`, sorted by angle) plus me at `myAngle`; 1 = `fromId` is my
-// immediate predecessor, 2 = one before that, etc. Returns 0 if `fromId` isn't a seat.
-// Used to pre-arm my proof window a few hops before the ball reaches me.
-function hopsUntilMe(others, myId, myAngle, fromId) {
-  const full = [...others, { id: myId, angle: myAngle }].sort((a, b) => a.angle - b.angle)
-  const n = full.length
-  const meIdx = full.findIndex((p) => p.id === myId)
-  const fromIdx = full.findIndex((p) => p.id === fromId)
-  if (fromIdx < 0 || fromIdx === meIdx) return 0
-  return (meIdx - fromIdx + n) % n
-}
-
 // Healing: the next peer clockwise that is directly reachable and not already
 // skipped. Walks the ring from just after me, wrapping around. `reachable` and
 // `skipped` are Sets of peer ids. Returns null if none qualifies.
@@ -52,4 +39,4 @@ function pickReachable(sortedRing, myAngle, reachable, skipped) {
   return null
 }
 
-module.exports = { angleOf, angleOfId, liveRing, nextClockwise, hopsUntilMe, pickReachable }
+module.exports = { angleOf, angleOfId, liveRing, nextClockwise, pickReachable }

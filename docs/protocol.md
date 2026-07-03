@@ -303,25 +303,25 @@ When a peer receives a `token`:
    hopCount', newChainHash, now)`. This is *my* hop.
 7. **Hold & forward:**
    - Broadcast `wave-pos { holder: me, hopCount' }`.
-   - (UI: if I'm in the roster, deliver the receipt to my proof window — usually already
-     **pre-armed** one hop earlier, see below.)
+   - If I'm in the roster, **post my staged selfie now** (see below): I have my receipt for
+     this hop, and my image was captured back in the lobby.
    - After `HOP_DELAY_MS` (a **minimal** dwell — just the visible roll pace), forward the
      new token to my **successor** (§7.3 handles a dead successor).
 
-**Selfie ceremony is decoupled from the dwell.** The token must never wait on a human, so
-the proof window runs on its own clock, *pipelined* ahead of the ball:
-- When a roster peer sees a `wave-pos` from a holder within `PREARM_LEAD_HOPS` seats behind
-  it (the ball is a few hops away), it emits a `prearm` (once per wave): the renderer opens
-  the camera and starts the 3s countdown *before* the ball arrives, giving camera warmup +
-  a "get ready" beat.
-- The `holding` event (this peer's own hop) then delivers the receipt into that already-open
-  window a moment later; the auto-capture at the end of the countdown posts the selfie.
-- If the pre-arm is missed (e.g. the predecessor was healed around), the window opens on
-  `holding` instead — same 3s countdown, just no head start.
+**The selfie is captured up-front, in the lobby.** The token must never wait on a human, so
+capture and posting are split:
+- **Capture (lobby, synchronized):** when a peer opts in, the renderer opens the camera and
+  shows a countdown to kickoff. At kickoff (or on a manual press) it grabs one frame and
+  **stages** it to the worker (`stage-selfie` command → `stagedSelfie`). Everyone captures
+  around the same moment, at a relaxed pace — independent of ring size or dwell.
+- **Post (race, on the ball):** when the token reaches me I record my hop's receipt
+  (`recordMyReceipt`) and post the staged image to the gallery, gated on that receipt (the
+  add-writer credential). `tryPostSelfie` fires once **both** the staged image and the
+  receipt are present, so it's robust to either arriving first (e.g. the originator, which
+  stages and holds at hop 0 almost simultaneously). Posted exactly once per wave.
 
-This is why `HOP_DELAY_MS` can be small (250ms): it no longer has to cover a human taking a
-selfie. Captures stay staggered (each peer pre-arms one dwell apart), just time-shifted by
-the countdown.
+So `HOP_DELAY_MS` can be small (250ms) — it never has to cover a human taking a selfie — and
+selfies still land in the gallery in **ring order**, as the ball passes each participant.
 
 The originator starts the chain at hop 0: `prevChainHash = ZERO_HASH`, its own receipt,
 then hold & forward as above.
@@ -529,10 +529,11 @@ a local IPC bridge. A different client would have its own UI and need not match 
 only §3–§8 are the interop surface.
 
 **Renderer → worker (commands):** `start-wave`, `join-wave`, `set-country {country}`,
-`post-selfie {selfie:{waveId,hopCount,receiptSig,chainHash,receiptTs,caption,image}}`.
+`stage-selfie {selfie:{image,caption}}` (the lobby-captured selfie; the worker attaches the
+receipt and posts it when the token arrives).
 
 **Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`; and
 `token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
-`started`, `prearm {canSelfie}` (ball a few hops away — pre-open the proof window),
-`holding {canSelfie,...}`, `position`, `forwarded`, `completed`, `healed`, `stalled`,
+`started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
+`position`, `forwarded`, `completed`, `healed`, `stalled`,
 `gallery-error`.

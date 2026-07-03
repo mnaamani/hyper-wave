@@ -1,78 +1,62 @@
-// Proof window: the circular webcam selfie capture shown in the centre of the ring.
-// Two-phase so the token is never held up by a human: it PRE-ARMS one hop before the
-// ball arrives (`prearm` — camera warmup + 3s countdown, no receipt yet), then the
-// `holding` event delivers the receipt a moment later so the auto-capture can post.
-import { postSelfie } from './ipc.js'
-
-const COUNTDOWN_S = 3
+// Lobby selfie capture (shown in the centre of the ring while the wave is forming).
+// Opted-in peers frame their selfie during the lobby countdown; the frame is captured
+// — automatically at kickoff, or manually earlier — and STAGED to the worker, which
+// posts it to the gallery when the token reaches this peer. This decouples the human
+// moment (leisurely, synchronized) from the fast token race.
+import { stageSelfie } from './ipc.js'
 
 const proofEl = document.getElementById('proof')
 const preview = document.getElementById('preview')
 const countdownEl = document.getElementById('countdown')
 const captionEl = document.getElementById('caption')
 const snap = document.getElementById('snap')
+const captureBtn = document.getElementById('capture')
+const skipBtn = document.getElementById('skip')
 
 let stream = null
-let ctx = null // { waveId, hopCount?, receiptSig?, chainHash?, receiptTs? } — receipt filled on `holding`
-let countdownTimer = null
-let pendingCapture = false // countdown hit 0 before the receipt arrived; capture once it does
+let deadline = 0
+let timer = null
+let captured = false
+let isOpen = false
 
-export async function open(e) {
-  const hasReceipt = !!e.receiptSig
-  if (ctx) {
-    // window already up (pre-armed) — fill in the receipt the token just delivered
-    if (hasReceipt) {
-      ctx.waveId = e.waveId
-      ctx.hopCount = e.hopCount
-      ctx.receiptSig = e.receiptSig
-      ctx.chainHash = e.chainHash
-      ctx.receiptTs = e.receiptTs
-      if (pendingCapture) capture() // countdown already finished; post now that we can
-    }
-    return
-  }
-  ctx = {
-    waveId: e.waveId,
-    hopCount: e.hopCount,
-    receiptSig: e.receiptSig,
-    chainHash: e.chainHash,
-    receiptTs: e.receiptTs
-  }
-  pendingCapture = false
+// Open the capture modal for the remaining lobby time (ms until kickoff).
+export async function open(lobbyMsLeft) {
+  if (isOpen) return
+  isOpen = true
+  captured = false
+  deadline = performance.now() + Math.max(0, lobbyMsLeft || 0)
   captionEl.value = ''
+  captionEl.disabled = false
+  captureBtn.style.display = ''
   proofEl.classList.add('show')
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
     preview.srcObject = stream
+    preview.style.display = ''
   } catch (err) {
-    // no camera / denied — still allow posting a placeholder so the flow works
+    // no camera / denied — still allow staging a placeholder so the flow works
     console.warn('camera unavailable:', err.message)
     preview.style.display = 'none'
   }
 
-  // auto-capture after a short countdown (feels like a stadium moment)
-  let n = COUNTDOWN_S
-  countdownEl.innerText = n
-  countdownTimer = setInterval(() => {
-    n -= 1
-    countdownEl.innerText = n > 0 ? n : ''
-    if (n <= 0) {
-      clearInterval(countdownTimer)
-      countdownTimer = null
-      capture()
-    }
-  }, 1000)
+  clearInterval(timer)
+  timer = setInterval(paint, 200)
+  paint()
 }
 
+function paint() {
+  if (!isOpen || captured) return
+  const secs = Math.max(0, Math.ceil((deadline - performance.now()) / 1000))
+  countdownEl.innerText = secs > 0 ? `📸 ${secs}` : '📸'
+}
+
+// Grab the current frame + caption and hand it to the worker. Stays open (showing a
+// "ready" state) until kickoff frees the centre for the gallery.
 function capture() {
-  if (!ctx) return
-  if (!ctx.receiptSig) {
-    // pre-armed but the token hasn't reached us yet — post as soon as `holding` fills
-    // in the receipt (in practice it arrives ~one short dwell after pre-arm).
-    pendingCapture = true
-    return
-  }
+  if (captured) return
+  captured = true
+  clearInterval(timer)
   let image = ''
   if (stream) {
     const sctx = snap.getContext('2d')
@@ -83,23 +67,34 @@ function capture() {
     sctx.restore()
     image = snap.toDataURL('image/jpeg', 0.5)
   }
-  postSelfie({ ...ctx, caption: captionEl.value, image })
+  stageSelfie({ image, caption: captionEl.value })
+  countdownEl.innerText = '✅'
+  captureBtn.style.display = 'none'
+  captionEl.disabled = true
+}
+
+// Kickoff: ensure we've captured (auto if the person didn't press the button), then
+// close so the ring centre is free for the gallery during the race.
+export function captureAndStage() {
+  if (!isOpen) return
+  if (!captured) capture()
   close()
 }
 
 export function close() {
-  if (countdownTimer) clearInterval(countdownTimer)
-  countdownTimer = null
-  pendingCapture = false
+  clearInterval(timer)
+  timer = null
   if (stream) {
     for (const t of stream.getTracks()) t.stop()
     stream = null
   }
   preview.style.display = ''
   countdownEl.innerText = ''
+  captionEl.disabled = false
   proofEl.classList.remove('show')
-  ctx = null
+  isOpen = false
+  captured = false
 }
 
-document.getElementById('capture').onclick = capture
-document.getElementById('skip').onclick = close
+captureBtn.onclick = capture
+skipBtn.onclick = close // opt out of the photo (the ball still passes through you)
