@@ -72,6 +72,11 @@ ipc.on('token', (e) => {
     case 'started':
       hud.status('⚽ the wave is off!')
       break
+    case 'prearm':
+      // ball is one hop away — open the camera + start the countdown ahead of arrival
+      hud.status('📸 get ready — your turn is next!')
+      if (e.canSelfie) proof.open(e)
+      break
     case 'holding':
       hud.status(
         e.canSelfie
@@ -79,7 +84,7 @@ ipc.on('token', (e) => {
           : `wave passing you — hop ${e.hopCount ?? ''}`
       )
       ring.setBall(e.angle)
-      if (e.canSelfie) proof.open(e)
+      if (e.canSelfie) proof.open(e) // fills the receipt into a pre-armed window (or opens if missed)
       break
     case 'position':
       hud.status(`wave rolling — hop ${e.hopCount ?? ''}`)

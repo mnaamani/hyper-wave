@@ -303,9 +303,24 @@ When a peer receives a `token`:
    hopCount', newChainHash, now)`. This is *my* hop.
 7. **Hold & forward:**
    - Broadcast `wave-pos { holder: me, hopCount' }`.
-   - (UI: if I'm in the roster, open the proof window; selfies are optional.)
-   - After `HOP_DELAY_MS` (the dwell — makes the wave *visibly* ripple), forward the new
-     token to my **successor** (§7.3 handles a dead successor).
+   - (UI: if I'm in the roster, deliver the receipt to my proof window — usually already
+     **pre-armed** one hop earlier, see below.)
+   - After `HOP_DELAY_MS` (a **minimal** dwell — just the visible roll pace), forward the
+     new token to my **successor** (§7.3 handles a dead successor).
+
+**Selfie ceremony is decoupled from the dwell.** The token must never wait on a human, so
+the proof window runs on its own clock, *pipelined* ahead of the ball:
+- When a roster peer sees a `wave-pos` from its **immediate predecessor** (the ball is one
+  hop away), it emits a `prearm` (once per wave): the renderer opens the camera and starts
+  the 3s countdown *before* the ball arrives.
+- The `holding` event (this peer's own hop) then delivers the receipt into that already-open
+  window a moment later; the auto-capture at the end of the countdown posts the selfie.
+- If the pre-arm is missed (e.g. the predecessor was healed around), the window opens on
+  `holding` instead — same 3s countdown, just no head start.
+
+This is why `HOP_DELAY_MS` can be small (250ms): it no longer has to cover a human taking a
+selfie. Captures stay staggered (each peer pre-arms one dwell apart), just time-shifted by
+the countdown.
 
 The originator starts the chain at hop 0: `prevChainHash = ZERO_HASH`, its own receipt,
 then hold & forward as above.
@@ -485,7 +500,7 @@ peerId)` (newest `timestamp` wins), sorted by `hopCount` then `timestamp`.
 | `PRESENCE_MS` | 2000 | presence heartbeat cadence |
 | `RINGUPDATE_MS` | 4000 | peers-snapshot cadence |
 | `TTL_MS` | 12000 | drop a peer not refreshed within this |
-| `HOP_DELAY_MS` | 1200 | per-hop dwell (visible ripple) |
+| `HOP_DELAY_MS` | 250 | per-hop dwell (visible roll pace; selfie is decoupled, §6) |
 | `LOBBY_MS` | 15000 | lobby / opt-in window |
 | `WAVE_TIMEOUT_MS` | 90000 | force-idle if a wave doesn't finish |
 | `HEAL_TIMEOUT_MS` | 3000 | no advance past my hop ⇒ skip successor |
@@ -517,5 +532,6 @@ only §3–§8 are the interop surface.
 
 **Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`; and
 `token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
-`started`, `holding {canSelfie,...}`, `position`, `forwarded`, `completed`, `healed`,
-`stalled`, `gallery-error`.
+`started`, `prearm {canSelfie}` (ball one hop away — pre-open the proof window),
+`holding {canSelfie,...}`, `position`, `forwarded`, `completed`, `healed`, `stalled`,
+`gallery-error`.

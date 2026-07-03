@@ -13,7 +13,14 @@ const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
 const fs = require('bare-fs')
 
-const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
+const {
+  angleOf,
+  angleOfId,
+  liveRing,
+  nextClockwise,
+  prevClockwise,
+  pickReachable
+} = require('./ring')
 const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
@@ -23,10 +30,11 @@ const PRESENCE_MS = 2000 // heartbeat cadence
 const RINGUPDATE_MS = 4000 // pointer-exchange + re-pin cadence (Phase 4 slim gossip)
 const TTL_MS = 12000 // drop peers not refreshed within this window
 const MAX_HOPS = 5000 // safety cap against runaway tokens
-// Dwell per hop. The receipt chain could race in ~50-100ms, but a human-paced dwell
-// is what makes the wave *visibly* ripple around the ring and staggers proof windows
-// so selfies are taken in sequence (the stadium-wave feel). Configurable per wave.
-const HOP_DELAY_MS = 1200
+// Dwell per hop — kept minimal so the ⚽ races around the ring quickly. The selfie
+// ceremony is *decoupled* from this: a peer's proof window is pre-armed one hop ahead
+// (via wave-pos) and runs its own 3s countdown + auto-capture, so the token never
+// waits on a human. The dwell is now just the visible roll pace. Configurable per wave.
+const HOP_DELAY_MS = 250
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
 // (get ready / choose to selfie) before the token starts racing.
 const LOBBY_MS = 15000
@@ -94,6 +102,7 @@ function createWave({
   let waveTimer = null // racing timeout
   let healTimer = null // watches my forward; fires if the wave doesn't advance
   let healPending = null // { waveId, hop } I'm currently watching
+  let prearmedWave = null // waveId whose proof window I've already pre-armed (once per wave)
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -221,6 +230,7 @@ function createWave({
           angle: angleOfId(m.holder),
           hopCount: m.hopCount
         })
+        maybePrearm(m.holder)
       }
       return
     }
@@ -502,6 +512,7 @@ function createWave({
     const waveId = wave.id
     endedWaves.add(waveId)
     wave = null
+    prearmedWave = null // let the next wave pre-arm afresh
     seen.clear() // only needed within the active wave; bound its growth
     teardown()
     onToken({ event: 'wave-idle', waveId, reason })
@@ -515,10 +526,28 @@ function createWave({
     goIdle(stalled ? 'stalled' : 'ended')
   }
 
+  // Am I opted in to the current wave (so my proof window should open)?
+  function canSelfieNow() {
+    return !!(wave && wave.roster.has(me.id))
+  }
+
+  // Pre-arm my proof window one hop before the ball reaches me: when the peer now
+  // holding (`holderId`) is my immediate predecessor, open the camera + start the 3s
+  // countdown early so it's ready as the ball arrives (the token isn't held up by it).
+  // The receipt fields arrive with the `holding` event a moment later. Fires once per
+  // wave; falls back to opening on `holding` if the pre-arm was missed (e.g. healing).
+  function maybePrearm(holderId) {
+    if (!canSelfieNow() || prearmedWave === wave.id) return
+    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
+    const pred = prevClockwise(me.angle, ring)
+    if (!pred || pred.id !== holderId) return
+    prearmedWave = wave.id
+    onToken({ event: 'prearm', waveId: wave.id, canSelfie: true })
+  }
+
   // Emit a holding event; canSelfie tells the renderer whether to open the proof
   // window (only opted-in roster members selfie; everyone else just relays).
   function emitHolding(waveId, hopCount, receiptSig, chainHash, receiptTs) {
-    const canSelfie = !!(wave && wave.roster.has(me.id))
     onToken({
       event: 'holding',
       waveId,
@@ -528,7 +557,7 @@ function createWave({
       receiptSig,
       chainHash,
       receiptTs,
-      canSelfie
+      canSelfie: canSelfieNow()
     })
   }
 

@@ -52,7 +52,7 @@ function drawFlagAt(angleDeg, r, size, flag) {
 // --- the football: rolls clockwise from holder to holder --------------------
 let ball = null // { from, to, startedAt }
 let ballSeenAt = 0
-const TRAVEL_MS = 1100 // ~= the per-hop dwell, so the roll is continuous
+const TRAVEL_MS = 220 // ~= the per-hop dwell (HOP_DELAY_MS), so the fast roll keeps up
 const BALL_FADE_MS = 4000 // hide the ball this long after the last position update
 
 function ballAngle() {

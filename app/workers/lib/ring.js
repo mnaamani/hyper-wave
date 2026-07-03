@@ -27,6 +27,17 @@ function nextClockwise(myAngle, sortedRing) {
   return sortedRing[0]
 }
 
+// previous peer clockwise from myAngle — the one whose successor is me (largest angle
+// < mine), wrapping to the last (max angle). This is who holds the token one hop before
+// me, used to pre-arm my proof window as the ball approaches.
+function prevClockwise(myAngle, sortedRing) {
+  if (sortedRing.length === 0) return null
+  for (let i = sortedRing.length - 1; i >= 0; i--) {
+    if (sortedRing[i].angle < myAngle) return sortedRing[i]
+  }
+  return sortedRing[sortedRing.length - 1]
+}
+
 // Healing: the next peer clockwise that is directly reachable and not already
 // skipped. Walks the ring from just after me, wrapping around. `reachable` and
 // `skipped` are Sets of peer ids. Returns null if none qualifies.
@@ -39,4 +50,4 @@ function pickReachable(sortedRing, myAngle, reachable, skipped) {
   return null
 }
 
-module.exports = { angleOf, angleOfId, liveRing, nextClockwise, pickReachable }
+module.exports = { angleOf, angleOfId, liveRing, nextClockwise, prevClockwise, pickReachable }

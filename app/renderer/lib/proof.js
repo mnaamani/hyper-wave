@@ -1,6 +1,10 @@
-// Proof window: the circular webcam selfie capture shown in the centre of the ring
-// when the ball reaches an opted-in peer. Captures a frame and posts it to the gallery.
+// Proof window: the circular webcam selfie capture shown in the centre of the ring.
+// Two-phase so the token is never held up by a human: it PRE-ARMS one hop before the
+// ball arrives (`prearm` — camera warmup + 3s countdown, no receipt yet), then the
+// `holding` event delivers the receipt a moment later so the auto-capture can post.
 import { postSelfie } from './ipc.js'
+
+const COUNTDOWN_S = 3
 
 const proofEl = document.getElementById('proof')
 const preview = document.getElementById('preview')
@@ -9,11 +13,24 @@ const captionEl = document.getElementById('caption')
 const snap = document.getElementById('snap')
 
 let stream = null
-let ctx = null // { waveId, hopCount, receiptSig, chainHash, receiptTs }
+let ctx = null // { waveId, hopCount?, receiptSig?, chainHash?, receiptTs? } — receipt filled on `holding`
 let countdownTimer = null
+let pendingCapture = false // countdown hit 0 before the receipt arrived; capture once it does
 
 export async function open(e) {
-  if (ctx) return // already capturing for a hop; ignore re-entry
+  const hasReceipt = !!e.receiptSig
+  if (ctx) {
+    // window already up (pre-armed) — fill in the receipt the token just delivered
+    if (hasReceipt) {
+      ctx.waveId = e.waveId
+      ctx.hopCount = e.hopCount
+      ctx.receiptSig = e.receiptSig
+      ctx.chainHash = e.chainHash
+      ctx.receiptTs = e.receiptTs
+      if (pendingCapture) capture() // countdown already finished; post now that we can
+    }
+    return
+  }
   ctx = {
     waveId: e.waveId,
     hopCount: e.hopCount,
@@ -21,6 +38,7 @@ export async function open(e) {
     chainHash: e.chainHash,
     receiptTs: e.receiptTs
   }
+  pendingCapture = false
   captionEl.value = ''
   proofEl.classList.add('show')
 
@@ -34,13 +52,14 @@ export async function open(e) {
   }
 
   // auto-capture after a short countdown (feels like a stadium moment)
-  let n = 5
+  let n = COUNTDOWN_S
   countdownEl.innerText = n
   countdownTimer = setInterval(() => {
     n -= 1
     countdownEl.innerText = n > 0 ? n : ''
     if (n <= 0) {
       clearInterval(countdownTimer)
+      countdownTimer = null
       capture()
     }
   }, 1000)
@@ -48,6 +67,12 @@ export async function open(e) {
 
 function capture() {
   if (!ctx) return
+  if (!ctx.receiptSig) {
+    // pre-armed but the token hasn't reached us yet — post as soon as `holding` fills
+    // in the receipt (in practice it arrives ~one short dwell after pre-arm).
+    pendingCapture = true
+    return
+  }
   let image = ''
   if (stream) {
     const sctx = snap.getContext('2d')
@@ -64,6 +89,8 @@ function capture() {
 
 export function close() {
   if (countdownTimer) clearInterval(countdownTimer)
+  countdownTimer = null
+  pendingCapture = false
   if (stream) {
     for (const t of stream.getTracks()) t.stop()
     stream = null

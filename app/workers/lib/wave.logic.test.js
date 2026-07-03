@@ -2,7 +2,7 @@
 //   bare workers/lib/wave.logic.test.js   (or `npm test`)
 const test = require('brittle')
 const b4a = require('b4a')
-const { angleOf, liveRing, nextClockwise, pickReachable } = require('./ring')
+const { angleOf, liveRing, nextClockwise, prevClockwise, pickReachable } = require('./ring')
 
 test('angleOf maps a key into [0,360)', (t) => {
   t.is(angleOf(b4a.alloc(8)), 0)
@@ -45,6 +45,27 @@ test('nextClockwise wraps around past the top of the ring', (t) => {
 
 test('nextClockwise returns null on an empty ring', (t) => {
   t.is(nextClockwise(42, []), null)
+})
+
+test('prevClockwise picks the largest angle less than mine (who forwards to me)', (t) => {
+  const ring = [
+    { id: 'b', angle: 10 },
+    { id: 'a', angle: 300 }
+  ]
+  t.is(prevClockwise(150, ring).id, 'b') // b@10 is just before 150
+  t.is(prevClockwise(305, ring).id, 'a') // a@300 is just before 305
+})
+
+test('prevClockwise wraps to the max angle when I am the smallest', (t) => {
+  const ring = [
+    { id: 'b', angle: 10 },
+    { id: 'a', angle: 300 }
+  ]
+  t.is(prevClockwise(5, ring).id, 'a') // nobody below 5 -> wrap to the top (a@300)
+})
+
+test('prevClockwise returns null on an empty ring', (t) => {
+  t.is(prevClockwise(42, []), null)
 })
 
 test('single-peer ring: successor is always that peer (even if behind me)', (t) => {
