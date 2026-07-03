@@ -310,9 +310,10 @@ When a peer receives a `token`:
 
 **Selfie ceremony is decoupled from the dwell.** The token must never wait on a human, so
 the proof window runs on its own clock, *pipelined* ahead of the ball:
-- When a roster peer sees a `wave-pos` from its **immediate predecessor** (the ball is one
-  hop away), it emits a `prearm` (once per wave): the renderer opens the camera and starts
-  the 3s countdown *before* the ball arrives.
+- When a roster peer sees a `wave-pos` from a holder within `PREARM_LEAD_HOPS` seats behind
+  it (the ball is a few hops away), it emits a `prearm` (once per wave): the renderer opens
+  the camera and starts the 3s countdown *before* the ball arrives, giving camera warmup +
+  a "get ready" beat.
 - The `holding` event (this peer's own hop) then delivers the receipt into that already-open
   window a moment later; the auto-capture at the end of the countdown posts the selfie.
 - If the pre-arm is missed (e.g. the predecessor was healed around), the window opens on
@@ -532,6 +533,6 @@ only §3–§8 are the interop surface.
 
 **Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`; and
 `token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
-`started`, `prearm {canSelfie}` (ball one hop away — pre-open the proof window),
+`started`, `prearm {canSelfie}` (ball a few hops away — pre-open the proof window),
 `holding {canSelfie,...}`, `position`, `forwarded`, `completed`, `healed`, `stalled`,
 `gallery-error`.

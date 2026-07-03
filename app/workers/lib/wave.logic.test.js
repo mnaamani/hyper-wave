@@ -2,7 +2,7 @@
 //   bare workers/lib/wave.logic.test.js   (or `npm test`)
 const test = require('brittle')
 const b4a = require('b4a')
-const { angleOf, liveRing, nextClockwise, prevClockwise, pickReachable } = require('./ring')
+const { angleOf, liveRing, nextClockwise, hopsUntilMe, pickReachable } = require('./ring')
 
 test('angleOf maps a key into [0,360)', (t) => {
   t.is(angleOf(b4a.alloc(8)), 0)
@@ -47,25 +47,22 @@ test('nextClockwise returns null on an empty ring', (t) => {
   t.is(nextClockwise(42, []), null)
 })
 
-test('prevClockwise picks the largest angle less than mine (who forwards to me)', (t) => {
-  const ring = [
+test('hopsUntilMe counts seats clockwise from the holder to me', (t) => {
+  // others b@10, c@150, a@300 with me@200 -> ring: b, c, me, a
+  const others = [
     { id: 'b', angle: 10 },
+    { id: 'c', angle: 150 },
     { id: 'a', angle: 300 }
   ]
-  t.is(prevClockwise(150, ring).id, 'b') // b@10 is just before 150
-  t.is(prevClockwise(305, ring).id, 'a') // a@300 is just before 305
+  t.is(hopsUntilMe(others, 'me', 200, 'c'), 1, 'c is my immediate predecessor')
+  t.is(hopsUntilMe(others, 'me', 200, 'b'), 2, 'b is two hops back')
+  t.is(hopsUntilMe(others, 'me', 200, 'a'), 3, 'a wraps: a -> b -> c -> me')
 })
 
-test('prevClockwise wraps to the max angle when I am the smallest', (t) => {
-  const ring = [
-    { id: 'b', angle: 10 },
-    { id: 'a', angle: 300 }
-  ]
-  t.is(prevClockwise(5, ring).id, 'a') // nobody below 5 -> wrap to the top (a@300)
-})
-
-test('prevClockwise returns null on an empty ring', (t) => {
-  t.is(prevClockwise(42, []), null)
+test('hopsUntilMe returns 0 for myself or an unknown seat', (t) => {
+  const others = [{ id: 'b', angle: 10 }]
+  t.is(hopsUntilMe(others, 'me', 200, 'me'), 0)
+  t.is(hopsUntilMe(others, 'me', 200, 'ghost'), 0)
 })
 
 test('single-peer ring: successor is always that peer (even if behind me)', (t) => {

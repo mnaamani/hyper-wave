@@ -18,7 +18,7 @@ const {
   angleOfId,
   liveRing,
   nextClockwise,
-  prevClockwise,
+  hopsUntilMe,
   pickReachable
 } = require('./ring')
 const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord')
@@ -35,6 +35,11 @@ const MAX_HOPS = 5000 // safety cap against runaway tokens
 // (via wave-pos) and runs its own 3s countdown + auto-capture, so the token never
 // waits on a human. The dwell is now just the visible roll pace. Configurable per wave.
 const HOP_DELAY_MS = 250
+// Pre-arm the proof window this many hops before the ball reaches me, so the camera is
+// warm and the person has a "get ready" beat before their moment (one hop ≈ HOP_DELAY_MS
+// was too tight for camera warmup). Must be < countdown/dwell so capture still lands after
+// the ball passes; in a ring smaller than this, everyone simply arms at the first wave-pos.
+const PREARM_LEAD_HOPS = 4
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
 // (get ready / choose to selfie) before the token starts racing.
 const LOBBY_MS = 15000
@@ -531,16 +536,17 @@ function createWave({
     return !!(wave && wave.roster.has(me.id))
   }
 
-  // Pre-arm my proof window one hop before the ball reaches me: when the peer now
-  // holding (`holderId`) is my immediate predecessor, open the camera + start the 3s
-  // countdown early so it's ready as the ball arrives (the token isn't held up by it).
-  // The receipt fields arrive with the `holding` event a moment later. Fires once per
-  // wave; falls back to opening on `holding` if the pre-arm was missed (e.g. healing).
+  // Pre-arm my proof window a few hops before the ball reaches me: as soon as the peer
+  // now holding (`holderId`) is within PREARM_LEAD_HOPS seats behind me, open the camera
+  // + start the 3s countdown early so it's warm and I've had a "get ready" beat before my
+  // moment (the token is never held up by it). The receipt arrives with the `holding`
+  // event later. Fires once per wave; falls back to opening on `holding` if missed (e.g.
+  // healing shifted the seats).
   function maybePrearm(holderId) {
     if (!canSelfieNow() || prearmedWave === wave.id) return
     const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
-    const pred = prevClockwise(me.angle, ring)
-    if (!pred || pred.id !== holderId) return
+    const hops = hopsUntilMe(ring, me.id, me.angle, holderId)
+    if (hops < 1 || hops > PREARM_LEAD_HOPS) return
     prearmedWave = wave.id
     onToken({ event: 'prearm', waveId: wave.id, canSelfie: true })
   }
