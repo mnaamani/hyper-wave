@@ -64,6 +64,9 @@ const GOSSIP_SEEN_CAP = 4096
 const LOOKUP_TTL = 24
 const LOOKUP_TIMEOUT_MS = 5000
 const ROUTED_TTL_MS = 30000
+// After my first connection, wait this long (for a few fingers to connect → better
+// routing start) then place myself in the ring via findSuccessor (Chord join, §4.5).
+const BOOTSTRAP_MS = 1500
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -103,6 +106,8 @@ function createWave({
   const routed = new Map() // id -> expiry: successor found via distributed lookup (pin candidate)
   const pendingLookups = new Map() // qid -> { resolve, timer }: findSuccessor lookups I originated
   const lookupRoute = new Map() // qid -> upstream id: reverse path to return a lookup reply
+  let bootstrapTimer = null // one-shot join-time findSuccessor placement
+  let bootstrapDone = false
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
   const flood = createFlood({ cap: GOSSIP_SEEN_CAP }) // flood dedup for relayed control msgs
@@ -488,6 +493,20 @@ function createWave({
       routed.set(succId, Date.now() + ROUTED_TTL_MS)
       maintainNeighbours()
     }
+  }
+
+  // Chord join (§4.5): once I have my first connection(s), place myself in the ring by
+  // asking a seed to route findSuccessor(me) — so a joiner finds its true successor via
+  // O(log N) routing even when its own DHT sample is incomplete, instead of waiting for
+  // the slow periodic repair. One-shot per connected session; re-armed if I go solo.
+  function scheduleBootstrap() {
+    if (bootstrapDone || bootstrapTimer) return
+    bootstrapTimer = setTimeout(() => {
+      bootstrapTimer = null
+      bootstrapDone = true
+      log('join: placing myself via findSuccessor')
+      repairSuccessor().catch(() => {})
+    }, BOOTSTRAP_MS)
   }
 
   // Send only to our pinned ring neighbours (successor-list + predecessor + fingers).
@@ -933,6 +952,7 @@ function createWave({
 
     const send = (str) => message.send(str)
     senders.set(id, send)
+    scheduleBootstrap() // first connection -> place myself in the ring via findSuccessor
 
     // greet: presence + my compact pointers (Phase 4 — no O(N) snapshot). The
     // newcomer converges via DHT discovery (swarm.peers) + pointer exchange; at small
@@ -960,6 +980,7 @@ function createWave({
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
       goneUntil.set(id, Date.now() + TTL_MS) // cooldown: don't re-pin/re-hint it yet
+      if (senders.size === 0) bootstrapDone = false // went solo -> re-bootstrap on reconnect
       log('peer disconnected', shortId(id))
       // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
       // promotes the next successor-list entry and repairs fingers without waiting
@@ -1024,6 +1045,7 @@ function createWave({
       clearTimeout(lobbyTimer)
       clearTimeout(waveTimer)
       clearTimeout(healTimer)
+      clearTimeout(bootstrapTimer)
       for (const { timer } of pendingLookups.values()) clearTimeout(timer)
       await swarm.destroy()
       if (base) await base.close()

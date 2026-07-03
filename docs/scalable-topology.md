@@ -102,9 +102,12 @@ whole ring** (the partial-knowledge case that a purely local computation gets wr
   sends the query to the closest preceding *connected* finger; each hop forwards along
   connected fingers and the reply **retraces the same path** back to the origin (no ad-hoc
   connections), with a hop cap + timeout. Exposed as `wave.findSuccessor(target)`.
-- **Consumer:** a slow `repairSuccessor` uses it to correct a successor pointer a partial
-  local view missed, feeding the result into pin candidates (additive; a no-op at small
-  scale where local knowledge already resolves the lookup with zero hops).
+- **Consumers:** at **join time**, once a peer gets its first connection it places itself in
+  the ring by routing `findSuccessor(me)` through a seed (Chord `n.join`) — so a joiner finds
+  its true successor even when its own DHT sample is incomplete, rather than waiting for the
+  slow path. Thereafter a periodic `repairSuccessor` corrects any successor a partial local
+  view missed. Both feed the result into pin candidates (additive; a no-op at small scale
+  where local knowledge already resolves the lookup with zero hops).
 
 Uses: placing where a token starts / where a joining node inserts / routing a control message
 to a specific seat. The token still walks successor→successor for the *visual* wave (axis B).
@@ -219,10 +222,11 @@ things that decide whether this actually works at scale — in priority order:
 1. ~~**Ring correctness under partial membership knowledge (§4.3–4.5).**~~ **Done** — the
    **distributed `findSuccessor` routing** is built (pure `findSuccessorStep` + `find-succ`
    transport RPC, §4.5), so a lookup resolves to the correct successor even when the DHT only
-   samples membership; `repairSuccessor` feeds routed results back into pinning. Verified over
-   simulated 64-node partial-knowledge networks (≤ 5 hops) and end-to-end on the local DHT.
-   *Still to harden:* run `findSuccessor` at **join time** to bootstrap a joiner's successor
-   (today it's a periodic repair), and validate convergence under real large-N churn.
+   samples membership. Wired at **join time** (a peer routes `findSuccessor(me)` on its first
+   connection to place itself, Chord `n.join`) and as a periodic `repairSuccessor`; both feed
+   routed results back into pinning. Verified over simulated 64-node partial-knowledge networks
+   (≤ 5 hops) and end-to-end on the local DHT incl. a late joiner. *Still to harden:* validate
+   convergence under real large-N churn (can't force a partial mesh locally).
 2. **Propagation at scale — build the sweep (§3B / Phase 5).** The serial token is O(N·dwell)
    ≈ hours at N=10k, so there is currently *no* working large-N wave. The deterministic
    angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely
