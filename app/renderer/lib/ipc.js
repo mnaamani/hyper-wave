@@ -7,7 +7,7 @@ const HYPERWAVE = '/workers/hyperwave.js'
 
 bridge.startWorker(HYPERWAVE)
 
-const listeners = { state: [], token: [], gallery: [], wallet: [] }
+const listeners = { state: [], token: [], gallery: [], wallet: [], 'tip-result': [] }
 
 bridge.onWorkerIPC(HYPERWAVE, (data) => {
   let msg
@@ -34,5 +34,6 @@ export const startWave = () => send('start-wave')
 export const joinWave = () => send('join-wave')
 export const setCountry = (country) => send('set-country', { country })
 export const stageSelfie = (selfie) => send('stage-selfie', { selfie })
+export const tip = (to, amount, peerId) => send('tip', { to, amount, peerId })
 
 export const appVersion = () => bridge.pkg().version

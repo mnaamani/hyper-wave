@@ -41,7 +41,11 @@ ipc.on('gallery', (msg) => {
   if (!waveActive) hud.dockStart(gallery.count() > 0) // keep the button off the gallery
 })
 
-ipc.on('wallet', (msg) => hud.wallet(msg)) // self-custodial USDT wallet address + balance
+ipc.on('wallet', (msg) => {
+  hud.wallet(msg) // self-custodial USDT wallet address + balance
+  gallery.setMyAddress(msg.address) // so we don't offer to tip our own selfie
+})
+ipc.on('tip-result', (msg) => gallery.tipResult(msg))
 
 ipc.on('token', (e) => {
   switch (e.event) {

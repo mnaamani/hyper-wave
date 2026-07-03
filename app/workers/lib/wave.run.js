@@ -54,7 +54,9 @@ const wave = createWave({
   },
   onGallery: (items) =>
     console.log(
-      `[${name}] GALLERY size=${items.length} [${items.map((i) => i.caption).join(', ')}]`
+      `[${name}] GALLERY size=${items.length} [${items
+        .map((i) => i.caption + (i.address ? ' $' + i.address.slice(0, 5) : ''))
+        .join(', ')}]`
     ),
   log: (...m) => console.log(`[${name}]`, ...m)
 })
@@ -74,6 +76,7 @@ if (env.WALLET) {
   const { createPayments } = require('./pay.js')
   createPayments({ storageDir, log: (...m) => console.log(`[${name}] wallet`, ...m) })
     .then(async (pay) => {
+      wave.setWallet(pay.address) // my selfies carry my address for tipping
       const b = await pay.balances()
       console.log(`[${name}] WALLET ${b.address} trx=${b.trx} usdt=${b.usdt}`)
       if (env.WALLET_SEND) {

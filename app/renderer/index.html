@@ -120,6 +120,32 @@
       #wallet:empty {
         display: none;
       }
+      #tip {
+        display: none;
+        margin: 8px auto 0;
+        padding: 7px 16px;
+        border: 0;
+        border-radius: 999px;
+        background: #2fbf6b;
+        color: #06210d;
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      #tip:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      #tip.show {
+        display: block;
+      }
+      #tip-toast {
+        text-align: center;
+        font-size: 12px;
+        color: #7fe3a0;
+        min-height: 14px;
+        margin-top: 4px;
+      }
       /* the field: canvas ring with a centred overlay (kick-off / countdown) */
       .field {
         position: relative;
@@ -348,6 +374,9 @@
       <div id="progress-bar"><div id="progress-fill"></div></div>
       <div id="progress-label"></div>
     </div>
+
+    <button id="tip" title="Send a real testnet USDT tip to this selfie">💵 Tip 1 USDT</button>
+    <div id="tip-toast"></div>
 
     <canvas id="snap" width="240" height="180" style="display: none"></canvas>
     <script type="module" src="app.js"></script>

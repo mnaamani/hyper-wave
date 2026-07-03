@@ -40,6 +40,7 @@ let tBalance = null
 createPayments({ storageDir, log: (...a) => console.log('[wallet]', ...a) })
   .then(async (pay) => {
     payments = pay
+    wave.setWallet(pay.address) // so my selfies carry my address for tipping
     const push = async () => {
       const bal = await pay.balances().catch(() => ({ address: pay.address, trx: 0, usdt: 0 }))
       send({ type: 'wallet', ...bal })
@@ -61,7 +62,20 @@ pipe.on('data', (data) => {
   else if (msg.type === 'join-wave') wave.join()
   else if (msg.type === 'set-country') wave.setCountry(msg.country)
   else if (msg.type === 'stage-selfie') wave.stageSelfie(msg.selfie)
+  else if (msg.type === 'tip') handleTip(msg)
 })
+
+// Gallery tip: send a real testnet USDT transfer to the selfie owner's wallet, then
+// report the tx hash (or error) back to the renderer.
+async function handleTip({ to, amount }) {
+  if (!payments) return send({ type: 'tip-result', error: 'wallet not ready' })
+  try {
+    const { hash } = await payments.send(to, amount)
+    send({ type: 'tip-result', hash, to, amount })
+  } catch (e) {
+    send({ type: 'tip-result', error: e.message, to })
+  }
+}
 
 goodbye(async () => {
   if (tBalance) clearInterval(tBalance)

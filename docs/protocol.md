@@ -519,10 +519,13 @@ sequenceDiagram
 ```json
 { "type": "wave-selfie", "waveId": "<hex16>", "peerId": "<peerId>",
   "hopCount": 3, "receiptSig": "<hex64>", "chainHash": "<hex32>", "receiptTs": 1719705612080,
-  "country": "BR", "caption": "Vamos! 🇧🇷", "image": "data:image/jpeg;base64,...", "timestamp": 1719705650000 }
+  "country": "BR", "caption": "Vamos! 🇧🇷", "image": "data:image/jpeg;base64,...",
+  "address": "T…", "timestamp": 1719705650000 }
 ```
 `image` is an inline JPEG data URL (a compressed thumbnail) in the reference build;
-Hyperblobs is the scaling path. Ordering (`buildGallery`): one entry per `(waveId,
+Hyperblobs is the scaling path. `address` is the poster's Tron (USDT) wallet, carried so a
+viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → worker
+`pay.send(address, amount)`; §WDK). Ordering (`buildGallery`): one entry per `(waveId,
 peerId)` (newest `timestamp` wins), sorted by `hopCount` then `timestamp`.
 
 ## 9. Constants (reference build)
@@ -561,9 +564,11 @@ only §3–§8 are the interop surface.
 
 **Renderer → worker (commands):** `start-wave`, `join-wave`, `set-country {country}`,
 `stage-selfie {selfie:{image,caption}}` (the lobby-captured selfie; the worker attaches the
-receipt and posts it when the token arrives).
+receipt and posts it when the token arrives), `tip {to, amount, peerId}` (send a real USDT
+tip to a selfie owner's wallet).
 
-**Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`; and
+**Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`;
+`wallet {address, trx, usdt}` (self-custodial USDT wallet); `tip-result {hash?, error?}`; and
 `token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
 `position`, `forwarded`, `completed`, `healed`, `stalled`,

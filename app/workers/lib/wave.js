@@ -106,6 +106,7 @@ function createWave({
 
   const meKey = swarm.keyPair.publicKey
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null }
+  let walletAddress = null // my USDT wallet address (set by the worker once WDK is ready)
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -641,6 +642,7 @@ function createWave({
       country: me.country || '',
       caption: caption || '',
       image: image || '',
+      address: walletAddress || '', // my USDT wallet, so viewers can tip this selfie (§WDK)
       timestamp: Date.now()
     })
     log('posted selfie hop', hopCount)
@@ -1085,6 +1087,9 @@ function createWave({
     join,
     setCountry,
     stageSelfie,
+    setWallet: (address) => {
+      walletAddress = address || null
+    },
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
     findSuccessor: (target) =>
