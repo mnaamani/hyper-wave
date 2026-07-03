@@ -1,6 +1,6 @@
 # HyperWave — Scalable Topology (design / plan)
 
-**Status:** planned (not yet implemented). This is the design for making HyperWave scale
+**Status:** Phase 1 (discover via `swarm.peers`) implemented; Phases 2–5 planned. This is the design for making HyperWave scale
 from a handful of peers to a large, global swarm by aligning our logical ring with the
 physical Hyperswarm connection graph — the "make the ring drive connections" idea.
 
@@ -124,7 +124,11 @@ construction). `wave.js` is untouched.
 ## 6. Phases (each shippable + testable)
 
 1. **Discover via `swarm.peers`** — seed the peer map from DHT discovery (additive, low
-   risk; ring converges faster, less gossip).
+   risk; ring converges faster, less gossip). **✅ Done:** `wave.js` `seedFromSwarm()` walks
+   `swarm.peers` (PeerInfo keyed by hex key) into the ring, fired on `swarm.on('update')`,
+   after `discovery.flushed()`, and each `RINGUPDATE_MS` tick; peers are refreshed while
+   discoverable and TTL-pruned once Hyperswarm GCs them. Forwarding still targets only
+   *connected* peers (`pickReachable ∩ senders`), so it's purely additive.
 2. **`joinPeer` successor + predecessor (+ successor-list)** — make ring edges physical;
    keep full-ring gossip as a fallback initially.
 3. **Finger table + `findSuccessor` + `fixFingers`** — O(log N) connections; drop full-mesh

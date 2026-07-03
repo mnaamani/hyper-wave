@@ -112,6 +112,21 @@ function createWave({
     }
   }
 
+  // Phase 1 (scalable-topology.md §4.2/§6): seed the ring from Hyperswarm's DHT
+  // discovery. `swarm.peers` is every peer announced on our topic (PeerInfo, keyed
+  // by hex key) — known before/without gossip, so the ring converges faster and we
+  // lean less on transitive `peers`-snapshot flooding. We refresh their lastSeen
+  // while they remain discoverable; once Hyperswarm GCs a peer that left the topic
+  // we stop refreshing and TTL prunes it. Additive and low-risk: the token still
+  // only forwards to *connected* peers (pickReachable ∩ senders), so a discovered-
+  // but-not-yet-connected member shows in the ring but is never a forward target.
+  function seedFromSwarm() {
+    const now = Date.now()
+    for (const info of swarm.peers.values()) {
+      upsert(b4a.toString(info.publicKey, 'hex'), now)
+    }
+  }
+
   // The nation this peer supports; rides presence gossip + selfie entries (cosmetic).
   function setCountry(code) {
     me.country = code || null
@@ -639,10 +654,18 @@ function createWave({
     conn.on('error', () => {})
   })
 
+  // DHT discovery feeds ring membership (Phase 1): every time Hyperswarm learns of
+  // or drops peers on the topic, refresh the ring from `swarm.peers`.
+  swarm.on('update', () => {
+    seedFromSwarm()
+    emit()
+  })
+
   const topic = crypto.hash(b4a.from(matchId))
   const discovery = swarm.join(topic, { server: true, client: true })
   discovery.flushed().then(() => {
     log('joined match', matchId, 'topic', shortId(b4a.toString(topic, 'hex')), 'as', shortId(me.id))
+    seedFromSwarm() // initial seed once the topic announce/lookup has flushed
     emit()
   })
 
@@ -652,6 +675,7 @@ function createWave({
   }, PRESENCE_MS)
   const tRing = setInterval(() => {
     broadcast({ kind: 'peers', peers: snapshot() })
+    seedFromSwarm() // keep DHT-discovered members fresh even if no 'update' fired
     emit() // also re-evaluate TTL pruning
     if (base) {
       base
