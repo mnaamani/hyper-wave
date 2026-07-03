@@ -1,6 +1,6 @@
 # HyperWave — Scalable Topology (design / plan)
 
-**Status:** Phases 1–3 implemented (discover via `swarm.peers`; pin successor-list + predecessor + finger table via `joinPeer`); Phases 4–5 planned. This is the design for making HyperWave scale
+**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + finger table via `joinPeer`; stabilize + churn cooldown + slim pointer-exchange gossip); Phase 5 planned. This is the design for making HyperWave scale
 from a handful of peers to a large, global swarm by aligning our logical ring with the
 physical Hyperswarm connection graph — the "make the ring drive connections" idea.
 
@@ -145,6 +145,16 @@ construction). `wave.js` is untouched.
    `chord.test.js`. The finger set spans the ring so reachability no longer depends on the
    incidental mesh (which remains only until gossip is slimmed in Phase 4).
 4. **`stabilize` + churn handling + slim gossip** — remove the O(N) `peers` snapshot.
+   **✅ Done:** the O(N) `peers` snapshot is gone; membership is DHT-discovery-first
+   (`swarm.peers`) plus a compact **`pointers`** advert (successor-list + predecessor,
+   O(k + log N)) sent only to pinned neighbours, and `presence` is neighbour-scoped too.
+   `chord.js` adds `inOpenInterval` + `stabilizeStep` (brittle-tested); a `pointers` from
+   my current successor whose predecessor sits between us triggers an immediate re-pin
+   (nextClockwise then adopts the closer successor). Churn: on a pinned-neighbour close we
+   re-pin immediately (successor-list failover / finger repair), and a `goneUntil` cooldown
+   stops DHT re-seeding from resurrecting a just-dead peer. Verified end-to-end on the local
+   DHT: 4 peers converge + gallery replicates with the slim gossip; killing a node mid-wave
+   heals (token skips it, `wave` completes, gallery minus the dead peer) with no ghost seat.
 5. **(decision) Propagation at scale** — deterministic angular sweep for stadium/global
    waves (axis B), with independent proofs; keep the serial token for small waves.
 

@@ -11,7 +11,9 @@ const {
   connectionTargets,
   findSuccessor,
   fingers,
-  pinTargets
+  pinTargets,
+  inOpenInterval,
+  stabilizeStep
 } = require('./chord')
 
 // A 32-byte peer id (64 hex chars) whose top-8-byte nodeId is exactly `n`.
@@ -99,4 +101,22 @@ test('pinTargets unions successor-list, predecessor, and fingers', (t) => {
   const targets = pinTargets(ids, mk(0), 2)
   // successors {1,2}, predecessor {8} (highest wraps to me's predecessor), fingers {1,2,4,8}
   t.alike([...targets].sort(), [mk(1), mk(2), mk(4), mk(8)].sort())
+})
+
+test('inOpenInterval handles the normal and wrapping cases', (t) => {
+  t.ok(inOpenInterval(20n, 10n, 40n), 'inside')
+  t.absent(inOpenInterval(50n, 10n, 40n), 'outside')
+  t.absent(inOpenInterval(10n, 10n, 40n), 'open at the low end')
+  t.absent(inOpenInterval(40n, 10n, 40n), 'open at the high end')
+  t.ok(inOpenInterval(50n, 40n, 10n), 'wraps: 50 in (40,10)')
+  t.ok(inOpenInterval(5n, 40n, 10n), 'wraps: 5 in (40,10)')
+  t.absent(inOpenInterval(20n, 40n, 10n), 'wraps: 20 not in (40,10)')
+})
+
+test('stabilizeStep adopts a successor discovered between me and my successor', (t) => {
+  t.is(stabilizeStep(mk(10), mk(40), mk(20)), mk(20), 'succ.pred 20 is closer -> adopt')
+  t.is(stabilizeStep(mk(10), mk(40), mk(50)), mk(40), 'succ.pred 50 is outside -> keep')
+  t.is(stabilizeStep(mk(10), mk(40), null), mk(40), 'no succ.pred -> keep')
+  t.is(stabilizeStep(mk(10), mk(40), mk(10)), mk(40), "succ.pred is me -> keep (I'm its pred)")
+  t.is(stabilizeStep(mk(10), null, mk(20)), mk(20), 'no current successor -> take it')
 })

@@ -92,6 +92,26 @@ function fingers(ids, myId) {
   return out
 }
 
+// Is nodeId `x` strictly inside the open ring interval (a, b), moving clockwise
+// (mod 2^64)? When a >= b the interval wraps past the top of the ring. All BigInt.
+function inOpenInterval(x, a, b) {
+  if (a < b) return x > a && x < b
+  return x > a || x < b
+}
+
+// One Chord stabilize step (§4.4): my successor's predecessor `succPred` becomes my
+// successor if it sits strictly between me and my current successor — that means a
+// node joined (or was discovered) between us. Returns the id to use as successor
+// (`succPred` if it's closer, else the unchanged current). Ids are hex; null-safe.
+function stabilizeStep(myId, currentSuccId, succPredId) {
+  if (!succPredId || succPredId === myId || succPredId === currentSuccId) return currentSuccId
+  if (!currentSuccId) return succPredId
+  const me = nodeIdOfHex(myId)
+  const s = nodeIdOfHex(currentSuccId)
+  const x = nodeIdOfHex(succPredId)
+  return inOpenInterval(x, me, s) ? succPredId : currentSuccId
+}
+
 // The full set of peers to keep physically connected (Phase 3): successor-list +
 // predecessor (for the token walk / fault tolerance) unioned with the finger table
 // (for O(log N) ring-spanning reachability). This is what wave.js joinPeer()s.
@@ -111,5 +131,7 @@ module.exports = {
   connectionTargets,
   findSuccessor,
   fingers,
-  pinTargets
+  pinTargets,
+  inOpenInterval,
+  stabilizeStep
 }

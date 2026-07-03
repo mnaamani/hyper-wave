@@ -14,13 +14,13 @@ const b4a = require('b4a')
 const fs = require('bare-fs')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
-const { pinTargets } = require('./chord')
+const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
 
 const MATCH = 'hyperwave:demo-match:v1'
 const PRESENCE_MS = 2000 // heartbeat cadence
-const RINGUPDATE_MS = 4000 // full-snapshot cadence (transitive discovery)
+const RINGUPDATE_MS = 4000 // pointer-exchange + re-pin cadence (Phase 4 slim gossip)
 const TTL_MS = 12000 // drop peers not refreshed within this window
 const MAX_HOPS = 5000 // safety cap against runaway tokens
 // Dwell per hop. The receipt chain could race in ~50-100ms, but a human-paced dwell
@@ -75,6 +75,7 @@ function createWave({
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
+  const goneUntil = new Map() // id -> ts: suppress re-seeding a just-closed peer (churn)
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
 
@@ -128,7 +129,17 @@ function createWave({
   function seedFromSwarm() {
     const now = Date.now()
     for (const info of swarm.peers.values()) {
-      upsert(b4a.toString(info.publicKey, 'hex'), now)
+      const id = b4a.toString(info.publicKey, 'hex')
+      // Don't resurrect a peer we just saw disconnect: Hyperswarm keeps it in
+      // `swarm.peers` while it retries the (dead) connection, which would otherwise
+      // re-add a ghost seat and flap its pin. The cooldown clears on reconnect or
+      // when it expires (a genuine rediscovery then re-seeds it).
+      const gone = goneUntil.get(id)
+      if (gone) {
+        if (now < gone) continue
+        goneUntil.delete(id)
+      }
+      upsert(id, now)
     }
   }
 
@@ -178,14 +189,20 @@ function createWave({
     emit()
   }
 
-  function snapshot() {
-    const now = Date.now()
-    // include self (age 0) so neighbours learn about us transitively
-    const out = [{ id: me.id, ageMs: 0, country: me.country }]
-    for (const p of peers.values()) {
-      out.push({ id: p.id, ageMs: now - p.lastSeen, country: p.country })
+  // Phase 4 (scalable-topology.md §4.6): the compact pointer advertisement that
+  // replaces the O(N) `peers` snapshot. Each peer tells its neighbours only its own
+  // successor-list + predecessor — O(k + log N), not O(N). Recipients learn the local
+  // ring structure around us (transitive discovery, bounded) and run one stabilize
+  // step. Primary membership still comes from DHT discovery (`swarm.peers`).
+  function myPointers() {
+    const ids = liveRing([...peers.values()], Date.now(), TTL_MS).map((p) => p.id)
+    return {
+      kind: 'pointers',
+      id: me.id,
+      country: me.country,
+      succ: successors(ids, me.id, K_SUCCESSORS),
+      pred: predecessor(ids, me.id)
     }
-    return out
   }
 
   function handleGossip(m) {
@@ -269,15 +286,51 @@ function createWave({
     const now = Date.now()
     if (m.kind === 'presence') {
       upsert(m.id, now, m.country)
-    } else if (m.kind === 'peers') {
-      for (const p of m.peers) upsert(p.id, now - (p.ageMs || 0), p.country)
+    } else if (m.kind === 'pointers') {
+      // sender is a live neighbour; its advertised succ/pred are discovery hints,
+      // marked slightly stale so they age out unless independently refreshed.
+      upsert(m.id, now, m.country)
+      const learned = now - Math.floor(TTL_MS / 2)
+      for (const id of m.succ || []) upsert(id, learned)
+      if (m.pred) upsert(m.pred, learned)
+      stabilize(m)
     }
     emit()
+  }
+
+  // Chord stabilize (§4.4): if this pointer advert came from my current successor and
+  // its predecessor sits between us, that peer is my true successor — I've just
+  // upserted it, so re-pin now (nextClockwise over the ring adopts it automatically).
+  // My own periodic `pointers` advert is the reciprocal "notify" to my successor.
+  function stabilize(m) {
+    if (!m.pred) return
+    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
+    const succ = nextClockwise(me.angle, ring)
+    if (!succ || succ.id !== m.id) return
+    if (stabilizeStep(me.id, succ.id, m.pred) !== succ.id) {
+      log('stabilize: closer successor', shortId(m.pred))
+      maintainNeighbours()
+    }
   }
 
   function broadcast(obj) {
     const str = JSON.stringify(obj)
     for (const send of senders.values()) {
+      try {
+        send(str)
+      } catch {}
+    }
+  }
+
+  // Send only to our pinned ring neighbours (successor-list + predecessor + fingers).
+  // Used for the slimmed membership gossip (presence + pointers) — O(k + log N) fanout
+  // instead of hitting every connection. wave-* fanout stays on broadcast() (the
+  // visual ball / roster still need broad reach) pending the Phase-5 sweep decision.
+  function broadcastToNeighbours(obj) {
+    const str = JSON.stringify(obj)
+    for (const id of pinned) {
+      const send = senders.get(id)
+      if (!send) continue
       try {
         send(str)
       } catch {}
@@ -648,6 +701,7 @@ function createWave({
     store.replicate(conn) // carries gossip mux + Autobase gallery replication
 
     const id = b4a.toString(conn.remotePublicKey, 'hex')
+    goneUntil.delete(id) // reconnected — lift any churn cooldown
     upsert(id, Date.now())
     log('peer connected', shortId(id))
 
@@ -670,9 +724,11 @@ function createWave({
     const send = (str) => message.send(str)
     senders.set(id, send)
 
-    // greet: presence + full snapshot so the new peer converges immediately
+    // greet: presence + my compact pointers (Phase 4 — no O(N) snapshot). The
+    // newcomer converges via DHT discovery (swarm.peers) + pointer exchange; at small
+    // N the mesh also upserts every peer directly on connect.
     send(JSON.stringify({ kind: 'presence', id: me.id, country: me.country }))
-    send(JSON.stringify({ kind: 'peers', peers: snapshot() }))
+    send(JSON.stringify(myPointers()))
     // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
     // start a competing one (broadcasts they missed won't reach them otherwise)
     if (wave) {
@@ -693,7 +749,13 @@ function createWave({
     conn.on('close', () => {
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
+      goneUntil.set(id, Date.now() + TTL_MS) // don't let seedFromSwarm resurrect it
       log('peer disconnected', shortId(id))
+      // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
+      // promotes the next successor-list entry and repairs fingers without waiting
+      // for the next tick. `pinned` still holds the dead id; maintainNeighbours diffs
+      // it out (leavePeer) and pins the replacement from the now-smaller ring.
+      if (pinned.has(id)) maintainNeighbours()
       emit()
     })
     conn.on('error', () => {})
@@ -713,13 +775,15 @@ function createWave({
 
   // --- timers ----------------------------------------------------------------
   const tPresence = setInterval(() => {
-    broadcast({ kind: 'presence', id: me.id, country: me.country })
+    broadcastToNeighbours({ kind: 'presence', id: me.id, country: me.country })
   }, PRESENCE_MS)
   const tRing = setInterval(() => {
-    broadcast({ kind: 'peers', peers: snapshot() })
     // keep DHT-discovered members fresh + ring edges pinned even if no 'update' fired
     seedFromSwarm()
     maintainNeighbours()
+    // slim pointer exchange (Phase 4) replaces the O(N) peers snapshot; sent after
+    // maintainNeighbours so `pinned` is current and reflects our latest succ/pred
+    broadcastToNeighbours(myPointers())
     emit() // also re-evaluate TTL pruning
     if (base) {
       base

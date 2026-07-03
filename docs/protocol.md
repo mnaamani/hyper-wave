@@ -118,25 +118,28 @@ Gossip is **broadcast to direct neighbours, with no relay/flooding**:
 - A **broadcast** is sent once on every open gossip channel — i.e. to each *directly
   connected* peer.
 - A received gossip message is **processed locally and never re-broadcast**. There is no
-  multi-hop flooding: a control message (`presence`, `peers`, `wave-*`, `add-writer`)
+  multi-hop flooding: a control message (`presence`, `pointers`, `wave-*`, `add-writer`)
   reaches only the sender's direct neighbours.
 - The **token** is the exception to "broadcast": it is **unicast** to the current
   successor and deliberately relayed **hop by hop** as the wave mechanic — but each holder
   *re-stamps* it with a fresh receipt before forwarding (§6). It is never broadcast.
-- The **only state that propagates transitively** is the *peer set*: every peer
-  periodically re-advertises its **entire** known-peer table (the `peers` snapshot), so
-  ids + liveness spread epidemically across hops even between peers that aren't directly
-  connected. Control messages do **not** spread this way.
+- **Membership** is now primarily **DHT-discovered**: each peer seeds its ring from
+  `swarm.peers` (Hyperswarm's PeerInfo set on the topic) and refreshes on `swarm.on('update')`
+  — ids arrive before/without gossip. On top of that, a slim **pointer exchange** (each peer
+  advertising only its own successor-list + predecessor, `pointers`) propagates local ring
+  structure at O(k + log N), replacing the old O(N) full `peers` snapshot. `presence` (a
+  liveness/country heartbeat) goes only to pinned neighbours.
 
-Consequences:
-- The wave protocol assumes a **near-fully-meshed** swarm (Hyperswarm meshes small swarms
-  fully). A peer not directly connected to an originator won't receive its
-  `wave-announce`/`wave-start` — this is covered by **`wave-sync`** on every new connection
-  (§7.4), which brings a peer up to date as it connects.
-- Broadcast cost is O(direct connections), not O(N²·hops). Scaling to a large, non-meshed
-  swarm means making the ring **drive** connections (Chord over Hyperswarm) so the successor
-  is always reachable without a full mesh — the `successor` abstraction isolates that change.
-  See [`scalable-topology.md`](./scalable-topology.md) for the design.
+The ring now **drives connections** (Chord over Hyperswarm, Phases 1–4 in
+[`scalable-topology.md`](./scalable-topology.md), implemented): each peer deliberately
+`swarm.joinPeer`s its successor-list, predecessor, and O(log N) finger table, so the
+successor is reachable without a full mesh. Consequences:
+- A peer not directly connected to an originator won't receive its `wave-announce`/`wave-start`
+  — covered by **`wave-sync`** on every new connection (§7.4), which brings a peer up to date
+  as it connects.
+- Broadcast cost is O(direct connections) = O(log N) with Chord pinning, not O(N²·hops).
+  `wave-*` fanout still uses full broadcast pending the Phase-5 propagation decision; only the
+  membership gossip (`presence`/`pointers`) is neighbour-scoped today.
 
 ## 4. Peer map (membership & liveness)
 
@@ -148,10 +151,11 @@ Inputs that build the map:
 
 | Event | Effect |
 |---|---|
-| connection **open** | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor). A direct connection is authoritative liveness. |
-| connection **close** | delete the peer (and its reachable mark). |
+| **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source. |
+| connection **open** | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor); lift any churn cooldown. A direct connection is authoritative liveness. |
+| connection **close** | delete the peer (and its reachable mark); set a `goneUntil` cooldown (`TTL_MS`) so DHT re-seeding can't immediately resurrect the dead peer. |
 | `presence { id, country }` | `upsert(id, now, country)` |
-| `peers { peers: [{ id, ageMs, country }] }` | for each entry: `upsert(id, now - ageMs, country)` |
+| `pointers { id, country, succ: [id…], pred: id }` | `upsert(id, now, country)`; upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step. |
 
 ```
 upsert(id, lastSeen, country):
@@ -166,34 +170,32 @@ upsert(id, lastSeen, country):
 So `lastSeen` is **monotonic per peer** (only advances) and `angle` is always recomputed
 from the id.
 
-**Relative ages, not timestamps.** A `peers` snapshot carries `ageMs = now_sender −
-lastSeen` per entry (and `ageMs: 0` for the sender itself); the receiver reconstructs
-`lastSeen = now_receiver − ageMs`. Using *relative* ages avoids cross-machine clock skew as
-membership propagates hop to hop.
-
 **Liveness, ring, successor.** A peer is **live** if `now − lastSeen < TTL_MS`. The **ring**
 is the live peers sorted by angle; the **successor** is the next live peer clockwise
-(§2.1). A direct disconnect removes a peer immediately; the TTL only expires peers known
-*transitively* (via `peers`) once they stop being re-advertised.
+(§2.1). A direct disconnect removes a peer immediately (and cools it down against DHT
+re-seeding); the TTL only expires peers known *indirectly* (a `pointers` discovery hint, or
+a `swarm.peers` entry that has since gone) once they stop being refreshed.
 
-**Reachable vs known.** A peer may be *known* (in the map, e.g. learned from a `peers`
-snapshot) without being *reachable* (no direct connection). The token is only forwarded to
-a **reachable** live successor; healing (§7.3) skips known-but-unreachable peers.
+**Reachable vs known.** A peer may be *known* (in the map, e.g. DHT-discovered or a
+`pointers` hint) without being *reachable* (no direct connection). The token is only
+forwarded to a **reachable** live successor; healing (§7.3) skips known-but-unreachable peers.
 
 ```mermaid
 flowchart LR
+  Dht["swarm.peers (DHT discovery)"] --> U0["upsert id, now"]
   Conn["connection open"] --> U["upsert id, now"]
   Pres["presence"] --> U2["upsert id, now, country"]
-  Peers["peers snapshot"] --> U3["for each: upsert id, now minus ageMs, country"]
-  U --> M[("peer map")]
+  Ptr["pointers (succ/pred)"] --> U3["upsert sender now; hints at now minus TTL/2; stabilize"]
+  U0 --> M[("peer map")]
+  U --> M
   U2 --> M
   U3 --> M
-  Close["connection close"] -->|delete| M
+  Close["connection close"] -->|delete + cooldown| M
   M --> L["live = now minus lastSeen &lt; TTL, sorted by angle"]
   L --> S["successor = next clockwise"]
 ```
 
-On connect, a peer **greets** the newcomer with a `presence`, a `peers` snapshot, and — if a
+On connect, a peer **greets** the newcomer with a `presence`, its `pointers`, and — if a
 wave is active — a `wave-sync` (§7.4), so the newcomer's map *and* wave state converge
 immediately.
 
@@ -201,18 +203,23 @@ immediately.
 
 All are JSON objects on the `hyperwave/gossip` channel. Unknown `kind`s are ignored.
 
-### presence — broadcast, every `PRESENCE_MS`
+### presence — to pinned neighbours, every `PRESENCE_MS`
 ```json
 { "kind": "presence", "id": "<peerId>", "country": "BR" | null }
 ```
-Heartbeat. Receiver upserts the peer (`lastSeen = now`, `country`).
+Heartbeat. Receiver upserts the peer (`lastSeen = now`, `country`). Sent only to pinned ring
+neighbours (Chord successor-list + predecessor + fingers), not every connection.
 
-### peers — broadcast, every `RINGUPDATE_MS`
+### pointers — to pinned neighbours, every `RINGUPDATE_MS`
 ```json
-{ "kind": "peers", "peers": [ { "id": "<peerId>", "ageMs": 1234, "country": "BR" }, ... ] }
+{ "kind": "pointers", "id": "<peerId>", "country": "BR" | null,
+  "succ": ["<peerId>", ...], "pred": "<peerId>" | null }
 ```
-Full snapshot of the sender's peer table (including itself at `ageMs: 0`) for transitive
-discovery. Receiver upserts each with `lastSeen = now - ageMs`.
+The sender's own Chord pointers — successor-list (`succ`, ≤ `K_SUCCESSORS`) + predecessor
+(`pred`). O(k + log N), replacing the old O(N) full peer snapshot. Receiver upserts the
+sender (`lastSeen = now`) and each advertised id as a discovery hint (`lastSeen = now −
+TTL/2`), then runs one Chord stabilize step (`scalable-topology.md` §4.4). Primary membership comes from DHT discovery
+(`swarm.peers`), so pointers are structure/liveness hints, not the authoritative peer set.
 
 ### wave-announce — broadcast (originator, on kick-off)
 ```json
