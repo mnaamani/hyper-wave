@@ -7,7 +7,7 @@ const HYPERWAVE = '/workers/hyperwave.js'
 
 bridge.startWorker(HYPERWAVE)
 
-const listeners = { state: [], token: [], gallery: [] }
+const listeners = { state: [], token: [], gallery: [], wallet: [] }
 
 bridge.onWorkerIPC(HYPERWAVE, (data) => {
   let msg

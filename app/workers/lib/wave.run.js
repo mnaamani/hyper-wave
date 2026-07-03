@@ -67,3 +67,20 @@ if (env.PROBE) {
     console.log(`[${name}] FINDSUCC my-successor = ${succ ? succ.slice(0, 8) : 'null'}`)
   }, 8000)
 }
+
+// env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
+// WALLET_SEND=<addr>:<amt> -> also do a one-off USDT transfer (funded wallets only).
+if (env.WALLET) {
+  const { createPayments } = require('./pay.js')
+  createPayments({ storageDir, log: (...m) => console.log(`[${name}] wallet`, ...m) })
+    .then(async (pay) => {
+      const b = await pay.balances()
+      console.log(`[${name}] WALLET ${b.address} trx=${b.trx} usdt=${b.usdt}`)
+      if (env.WALLET_SEND) {
+        const [to, amt] = env.WALLET_SEND.split(':')
+        const r = await pay.send(to, Number(amt))
+        console.log(`[${name}] WALLET SENT ${amt} -> ${to} hash=${r.hash}`)
+      }
+    })
+    .catch((e) => console.log(`[${name}] wallet FAIL`, e.message))
+}

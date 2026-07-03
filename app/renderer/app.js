@@ -41,6 +41,8 @@ ipc.on('gallery', (msg) => {
   if (!waveActive) hud.dockStart(gallery.count() > 0) // keep the button off the gallery
 })
 
+ipc.on('wallet', (msg) => hud.wallet(msg)) // self-custodial USDT wallet address + balance
+
 ipc.on('token', (e) => {
   switch (e.event) {
     case 'wave-announce':

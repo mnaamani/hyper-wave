@@ -7,6 +7,7 @@ const FramedStream = require('framed-stream')
 const goodbye = require('graceful-goodbye')
 const env = require('bare-env')
 const { createWave } = require('./lib/wave')
+const { createPayments } = require('./lib/pay')
 
 const pipe = new FramedStream(Bare.IPC)
 const storageDir = Bare.argv[2]
@@ -31,6 +32,23 @@ console.log(
   wave.me.angle.toFixed(1)
 )
 
+// Self-custodial WDK wallet (Tron testnet USDT) for bond / payout / tips. Async init
+// (dynamic import of ESM WDK); emits `wallet` {address,trx,usdt} to the renderer on ready
+// and every 15s. Runs independently of the wave engine for now (step 2 = wallets only).
+let payments = null
+let tBalance = null
+createPayments({ storageDir, log: (...a) => console.log('[wallet]', ...a) })
+  .then(async (pay) => {
+    payments = pay
+    const push = async () => {
+      const bal = await pay.balances().catch(() => ({ address: pay.address, trx: 0, usdt: 0 }))
+      send({ type: 'wallet', ...bal })
+    }
+    await push()
+    tBalance = setInterval(push, 15000)
+  })
+  .catch((e) => console.log('[wallet] init failed:', e.message))
+
 // Renderer -> worker commands.
 pipe.on('data', (data) => {
   let msg
@@ -46,5 +64,7 @@ pipe.on('data', (data) => {
 })
 
 goodbye(async () => {
+  if (tBalance) clearInterval(tBalance)
+  if (payments) payments.dispose()
   await wave.close()
 })

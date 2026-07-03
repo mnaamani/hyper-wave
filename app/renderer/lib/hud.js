@@ -5,8 +5,16 @@ import { startWave, setCountry, appVersion } from './ipc.js'
 
 const statusEl = document.getElementById('status')
 const startBtn = document.getElementById('start')
+const walletEl = document.getElementById('wallet')
 
 document.getElementById('v').innerText = 'v' + appVersion()
+
+// --- wallet chip (self-custodial USDT wallet) -------------------------------
+export function wallet({ address, usdt, trx }) {
+  if (!address) return
+  const short = address.slice(0, 6) + '…' + address.slice(-4)
+  walletEl.innerText = `💰 ${usdt.toFixed(2)} USDT · ${short}` + (trx === 0 ? ' · ⚠ no TRX' : '')
+}
 
 // --- status + start button --------------------------------------------------
 export function status(text) {

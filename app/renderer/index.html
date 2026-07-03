@@ -110,6 +110,16 @@
         opacity: 0.6;
         font-family: ui-monospace, Menlo, monospace;
       }
+      #wallet {
+        font-size: 12px;
+        font-family: ui-monospace, Menlo, monospace;
+        color: #7fe3a0;
+        opacity: 0.85;
+        margin-top: 2px;
+      }
+      #wallet:empty {
+        display: none;
+      }
       /* the field: canvas ring with a centred overlay (kick-off / countdown) */
       .field {
         position: relative;
@@ -310,6 +320,7 @@
     </header>
     <div id="status">connecting…</div>
     <div id="me"></div>
+    <div id="wallet" title="Your self-custodial USDT wallet (Tron testnet)"></div>
     <div class="field">
       <canvas id="ring" width="440" height="440"></canvas>
       <div id="center">

@@ -18,6 +18,8 @@
     "make": "electron-forge make"
   },
   "dependencies": {
+    "@tetherto/wdk": "^1.0.0-beta.13",
+    "@tetherto/wdk-wallet-tron": "^1.0.0-beta.8",
     "autobase": "^7.28.1",
     "b4a": "^1.8.1",
     "compact-encoding": "^3.3.0",
