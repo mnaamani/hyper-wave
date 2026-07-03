@@ -15,6 +15,7 @@ const fs = require('bare-fs')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
 const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord')
+const { createFlood } = require('./flood')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
 
@@ -86,7 +87,7 @@ function createWave({
   const goneUntil = new Map() // id -> ts: suppress re-seeding a just-closed peer (churn)
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
-  const seenGossip = new Set() // mids of flooded control messages already processed/relayed
+  const flood = createFlood({ cap: GOSSIP_SEEN_CAP }) // flood dedup for relayed control msgs
 
   let base = null // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
@@ -222,8 +223,7 @@ function createWave({
     // Flood relayable control messages across the partial mesh: process each exactly
     // once, and on first sight re-broadcast to my other neighbours (dedup by `mid`).
     if (m.mid && RELAYED_KINDS.has(m.kind)) {
-      if (seenGossip.has(m.mid)) return
-      markGossipSeen(m.mid)
+      if (!flood.firstSight(m.mid)) return // already seen -> drop (stops loops)
       relayFlood(m, fromId)
     }
     if (m.kind === 'token') return processToken(m)
@@ -345,19 +345,12 @@ function createWave({
     }
   }
 
-  // Flood dedup (protocol.md §3.1): remember a message id, bounding the set so it can't
-  // grow without limit over a long session.
-  function markGossipSeen(mid) {
-    if (seenGossip.size >= GOSSIP_SEEN_CAP) seenGossip.clear()
-    seenGossip.add(mid)
-  }
-
   // Originate a flooded control message: stamp a unique id, remember it (so it doesn't
   // loop back into me), and broadcast to every direct connection. Receivers relay it on
   // (relayFlood) until it has blanketed the whole partial mesh.
   function floodGossip(obj) {
     obj.mid = b4a.toString(crypto.randomBytes(8), 'hex')
-    markGossipSeen(obj.mid)
+    flood.firstSight(obj.mid) // mark mine seen so relays can't loop back into me
     broadcast(obj)
   }
 

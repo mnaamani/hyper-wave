@@ -163,6 +163,12 @@ construction). `wave.js` is untouched.
 - **Pure unit tests (brittle):** `nodeId` from key; finger targets; `findSuccessor` over a
   synthetic node set; one `stabilize` step; successor-list failover. Put Chord math in a
   pure module (`workers/lib/chord.js`) so it's unit-testable without a swarm.
+- **Partial-topology flood harness** (`flood.test.js`): drives the real per-node flood
+  decision (`flood.js`) over synthetic graphs (line, ring, star, random partial mesh,
+  disconnected) — Hyperswarm full-meshes small swarms, so this is how we prove **relay
+  reach** without the transport. Asserts full reach in the connected component, exactly-once
+  dedup, sends ≤ 2·|E|, and diameter-ish rounds (e.g. N=200 partial mesh → all 200 in ~6
+  rounds; a disconnected component is correctly *not* reached).
 - **Local DHT integration** (`bootstrap.js`): N processes; assert the ring converges (every
   peer's successor is correct), a token completes a full lap visiting all seats, and the
   gallery replicates across the partial mesh.
