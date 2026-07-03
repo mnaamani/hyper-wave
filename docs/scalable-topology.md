@@ -1,6 +1,6 @@
 # HyperWave — Scalable Topology (design / plan)
 
-**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + finger table via `joinPeer`; stabilize + churn cooldown + slim pointer-exchange gossip); Phase 5 planned. This is the design for making HyperWave scale
+**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + finger table via `joinPeer`; stabilize + churn cooldown + slim pointer-exchange gossip) **plus control-plane flooding** (lifecycle `wave-*` relayed with dedup, §4.6); Phase 5 (sweep) planned. See §8 for the top-3 remaining items. This is the design for making HyperWave scale
 from a handful of peers to a large, global swarm by aligning our logical ring with the
 physical Hyperswarm connection graph — the "make the ring drive connections" idea.
 
@@ -53,6 +53,12 @@ make when we get there:** keep the serial token (interlocked chain, small/medium
 adopt the deterministic sweep (instant at any N, independent proofs). We can support both:
 serial for intimate waves, sweep for stadium/global moments.
 
+**Status:** decided (keep serial for small, sweep for global) but the sweep is **not built**
+— the serial token remains the only propagation model, so a genuinely large wave is still
+O(N·dwell). Note the sweep's `(startTime, speed, direction)` params are exactly what the
+**control-plane flood** (§4.6) already delivers to every seat — so the flood is the
+delivery mechanism for *either* model's kickoff; only the per-peer trigger logic differs.
+
 ## 4. Chord design (axis A)
 
 ### 4.1 Identifier space
@@ -88,10 +94,25 @@ Stop depending on Hyperswarm's incidental meshing for the ring.
 - routing a control message to a specific seat if ever needed.
 The token still walks successor→successor for the *visual* wave (axis B caveat applies).
 
-### 4.6 Gossip slimming
-Replace the O(N) `peers` snapshot with **pointer exchange** (successor-list + predecessor),
-O(k + log N). `presence` goes only to neighbors. `wave-*` / `add-writer` still broadcast to
-direct neighbors (now the ring/finger set), and **`wave-sync` on connect** stays essential.
+### 4.6 Gossip slimming & flooding
+Two changes, both implemented:
+
+- **Slim the membership plane.** Replace the O(N) `peers` snapshot with **pointer exchange**
+  (successor-list + predecessor), O(k + log N), sent only to neighbours; `presence` goes to
+  neighbours too. Membership is DHT-discovered but **liveness-gated** — `swarm.peers` drives
+  *who we dial* (pinning), while a ring **seat** requires a real connection or direct gossip,
+  so a stale announce can't become a ghost seat.
+- **Flood the lifecycle plane.** The one-hop broadcast that §4.6 originally kept for `wave-*`
+  only works on a full mesh — past the mesh limit an announce would reach ~1% of a partial
+  random mesh. So `wave-announce` / `wave-join` / `wave-start` / `wave-end` are now **flooded**:
+  each carries a unique `mid`, and a peer relays it to its other neighbours **on first sight**,
+  dropping repeats (pure `flood.js`, verified for reach over synthetic partial meshes in
+  `flood.test.js`). On the random mesh (diameter ≈ log N / log degree) this blankets every
+  seat in ~2–3 relay rounds. `wave-pos` stays one-hop (chatty; its heal-ACK only needs the
+  predecessor); `add-writer` stays one-hop (tied to gallery replication, §4.7).
+
+**`wave-sync` on connect** stays essential as the catch-up path for a peer that joins after a
+flood has already passed.
 
 ### 4.7 Gallery replication over a partial mesh (must verify)
 Today `Corestore.replicate(conn)` on every connection replicates the gallery Autobase; a
@@ -175,13 +196,38 @@ construction). `wave.js` is untouched.
 - **Churn:** kill a node mid-wave; assert successor-list failover + stabilize repair; the
   wave heals (existing §7.3) and continues.
 
-## 8. Risks / unknowns
+## 8. Remaining work / risks
 
-- `swarm.joinPeer` semantics + Hyperswarm connection limits at scale.
-- Autobase/Corestore replication over a partial mesh (§4.7) — path-dependent.
-- Serial token lap time at large N (§3B) — may force the sweep decision sooner.
-- Complexity: Chord is real code — keep it isolated and pure where possible, behind the
-  successor seam, so a bug can't destabilize the wave logic.
+Phases 1–4 + the control-plane flood are built and unit/partial-mesh tested. The **top 3**
+things that decide whether this actually works at scale — in priority order:
+
+1. **Ring correctness under *partial* membership knowledge (§4.3–4.5).** Today successor and
+   fingers are computed from the *locally known* id set (`swarm.peers` ∪ connected ∪ gossip),
+   which is complete only for small, fully-discovered swarms. At large N the DHT returns a
+   **sample**, so pointers can be wrong (you pin a "successor" with an undiscovered node
+   between you). Classic Chord fixes this with a **distributed `findSuccessor`** (route to a
+   key via remote fingers, O(log N) hops) used at join time, plus stabilize converging over
+   time. We have the *pure* `findSuccessor` but **not the routing RPC**, and no test that the
+   ring converges to the correct global order under partial knowledge. Foundational.
+2. **Propagation at scale — build the sweep (§3B / Phase 5).** The serial token is O(N·dwell)
+   ≈ hours at N=10k, so there is currently *no* working large-N wave. The deterministic
+   angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely
+   global wave; its kickoff already has a delivery mechanism (the §4.6 flood).
+3. **Gallery replication over a partial mesh (§4.7).** Distinct from add-writer admission:
+   verify the Autobase core actually replicates to a peer **not directly connected to the
+   originator** (forwarding along ring/finger paths), or designate a well-connected seed. The
+   shared selfie gallery is a core feature; if it doesn't converge at scale it's broken.
+
+Secondary / masked-for-now:
+- The `successor` seam was **not** cleanly switched to `successor-list[0]` (§5) — `wave.js`
+  still forwards via full-ring `nextClockwise`/`pickReachable`; it works only because the
+  true successor is pinned+connected, an implicit coupling unverified at partial-neighbourhood
+  scale.
+- `swarm.joinPeer` behaviour when pinning O(log N) fingers near Hyperswarm's connection limit,
+  under churn — verified semantics + N=4 only.
+- No explicit periodic `checkPredecessor` (conn-close covers it today).
+- Complexity: Chord is real code — keep it isolated and pure behind the successor seam so a
+  bug can't destabilize the wave logic.
 
 ## 9. Wow factor
 
