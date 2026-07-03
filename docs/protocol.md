@@ -111,21 +111,90 @@ where `⊕ receiptᵢ` means `advanceChain(prev, receiptSigᵢ) = BLAKE2b(prev +
 
 All timing constants are in §9.
 
-## 4. Peer table & liveness
+### 3.1 Message propagation & relay rules
 
-Each peer keeps a table of known peers: `{ id, angle, lastSeen, country }`. `angle` is
-derived from `id` (§2.1); `country` is a cosmetic ISO-3166-1 alpha-2 code (or null).
+Gossip is **broadcast to direct neighbours, with no relay/flooding**:
 
-- On **connection open**: add the remote peer (id = its Noise public key), `lastSeen =
-  now`. A direct connection is authoritative liveness.
-- On **connection close**: remove the peer.
-- **presence/peers gossip** refresh `lastSeen`; a peer is *live* if `now - lastSeen <
-  TTL_MS`. (Transitive discovery via `peers` snapshots lets peers learn about others they
-  aren't directly connected to; in a fully-meshed small swarm the connection set is the
-  ring.)
+- A **broadcast** is sent once on every open gossip channel — i.e. to each *directly
+  connected* peer.
+- A received gossip message is **processed locally and never re-broadcast**. There is no
+  multi-hop flooding: a control message (`presence`, `peers`, `wave-*`, `add-writer`)
+  reaches only the sender's direct neighbours.
+- The **token** is the exception to "broadcast": it is **unicast** to the current
+  successor and deliberately relayed **hop by hop** as the wave mechanic — but each holder
+  *re-stamps* it with a fresh receipt before forwarding (§6). It is never broadcast.
+- The **only state that propagates transitively** is the *peer set*: every peer
+  periodically re-advertises its **entire** known-peer table (the `peers` snapshot), so
+  ids + liveness spread epidemically across hops even between peers that aren't directly
+  connected. Control messages do **not** spread this way.
 
-On connect, a peer **greets** the newcomer with: a `presence`, a `peers` snapshot, and —
-if a wave is active — a `wave-sync` (§7.4).
+Consequences:
+- The wave protocol assumes a **near-fully-meshed** swarm (Hyperswarm meshes small swarms
+  fully). A peer not directly connected to an originator won't receive its
+  `wave-announce`/`wave-start` — this is covered by **`wave-sync`** on every new connection
+  (§7.4), which brings a peer up to date as it connects.
+- Broadcast cost is O(direct connections), not O(N²·hops). Scaling to a large, non-meshed
+  swarm would need real anti-entropy gossip or Chord-style routing (out of scope; the
+  `successor` abstraction isolates that change).
+
+## 4. Peer map (membership & liveness)
+
+Each peer maintains a map of **other** peers (never itself), keyed by id:
+`id -> { id, angle, lastSeen, country }`. `angle` is derived from `id` (§2.1) — never
+trusted from the wire; `country` is a cosmetic ISO-3166-1 alpha-2 code (or null).
+
+Inputs that build the map:
+
+| Event | Effect |
+|---|---|
+| connection **open** | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor). A direct connection is authoritative liveness. |
+| connection **close** | delete the peer (and its reachable mark). |
+| `presence { id, country }` | `upsert(id, now, country)` |
+| `peers { peers: [{ id, ageMs, country }] }` | for each entry: `upsert(id, now - ageMs, country)` |
+
+```
+upsert(id, lastSeen, country):
+  if id == me: return
+  cur = map[id]
+  if cur is missing OR lastSeen > cur.lastSeen:
+      map[id] = { id, angle: angleOf(id), lastSeen, country: country ?? cur?.country ?? null }
+  else if country is set:
+      cur.country = country          # country always tracks the latest report
+```
+
+So `lastSeen` is **monotonic per peer** (only advances) and `angle` is always recomputed
+from the id.
+
+**Relative ages, not timestamps.** A `peers` snapshot carries `ageMs = now_sender −
+lastSeen` per entry (and `ageMs: 0` for the sender itself); the receiver reconstructs
+`lastSeen = now_receiver − ageMs`. Using *relative* ages avoids cross-machine clock skew as
+membership propagates hop to hop.
+
+**Liveness, ring, successor.** A peer is **live** if `now − lastSeen < TTL_MS`. The **ring**
+is the live peers sorted by angle; the **successor** is the next live peer clockwise
+(§2.1). A direct disconnect removes a peer immediately; the TTL only expires peers known
+*transitively* (via `peers`) once they stop being re-advertised.
+
+**Reachable vs known.** A peer may be *known* (in the map, e.g. learned from a `peers`
+snapshot) without being *reachable* (no direct connection). The token is only forwarded to
+a **reachable** live successor; healing (§7.3) skips known-but-unreachable peers.
+
+```mermaid
+flowchart LR
+  Conn["connection open"] --> U["upsert id, now"]
+  Pres["presence"] --> U2["upsert id, now, country"]
+  Peers["peers snapshot"] --> U3["for each: upsert id, now minus ageMs, country"]
+  U --> M[("peer map")]
+  U2 --> M
+  U3 --> M
+  Close["connection close"] -->|delete| M
+  M --> L["live = now minus lastSeen &lt; TTL, sorted by angle"]
+  L --> S["successor = next clockwise"]
+```
+
+On connect, a peer **greets** the newcomer with a `presence`, a `peers` snapshot, and — if a
+wave is active — a `wave-sync` (§7.4), so the newcomer's map *and* wave state converge
+immediately.
 
 ## 5. Gossip message catalog
 
