@@ -23,10 +23,9 @@ const PRESENCE_MS = 2000 // heartbeat cadence
 const RINGUPDATE_MS = 4000 // pointer-exchange + re-pin cadence (Phase 4 slim gossip)
 const TTL_MS = 12000 // drop peers not refreshed within this window
 const MAX_HOPS = 5000 // safety cap against runaway tokens
-// Dwell per hop — kept minimal so the ⚽ races around the ring quickly. The selfie
-// ceremony is *decoupled* from this: a peer's proof window is pre-armed one hop ahead
-// (via wave-pos) and runs its own 3s countdown + auto-capture, so the token never
-// waits on a human. The dwell is now just the visible roll pace. Configurable per wave.
+// Dwell per hop — kept minimal so the ⚽ races around the ring quickly. The selfie is
+// captured up-front in the lobby (not during the race), so the dwell never has to cover
+// a human; it's purely the visible roll pace. Configurable per wave.
 const HOP_DELAY_MS = 250
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
 // (get ready / choose to selfie) before the token starts racing.
@@ -41,6 +40,14 @@ const HEAL_TIMEOUT_MS = 3000
 // Successor-list length (scalable-topology.md §4.3): how many peers clockwise we
 // deliberately connect to for fault tolerance. Predecessor is pinned too.
 const K_SUCCESSORS = 3
+// Wave lifecycle control messages that must reach *every* peer (not just direct
+// neighbours). At scale Hyperswarm is only a partial random mesh, so these are
+// flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1). The chatty
+// `wave-pos` is deliberately NOT relayed (its heal-ACK only needs the predecessor).
+const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start', 'wave-end'])
+// Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
+// straggling duplicate might then re-flood once, which is harmless and very rare.
+const GOSSIP_SEEN_CAP = 4096
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -79,6 +86,7 @@ function createWave({
   const goneUntil = new Map() // id -> ts: suppress re-seeding a just-closed peer (churn)
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
+  const seenGossip = new Set() // mids of flooded control messages already processed/relayed
 
   let base = null // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
@@ -210,7 +218,14 @@ function createWave({
     }
   }
 
-  function handleGossip(m) {
+  function handleGossip(m, fromId) {
+    // Flood relayable control messages across the partial mesh: process each exactly
+    // once, and on first sight re-broadcast to my other neighbours (dedup by `mid`).
+    if (m.mid && RELAYED_KINDS.has(m.kind)) {
+      if (seenGossip.has(m.mid)) return
+      markGossipSeen(m.mid)
+      relayFlood(m, fromId)
+    }
     if (m.kind === 'token') return processToken(m)
     if (m.kind === 'wave-pos') {
       // only animate the ball for the wave we're racing (angle derived locally)
@@ -324,6 +339,35 @@ function createWave({
   function broadcast(obj) {
     const str = JSON.stringify(obj)
     for (const send of senders.values()) {
+      try {
+        send(str)
+      } catch {}
+    }
+  }
+
+  // Flood dedup (protocol.md §3.1): remember a message id, bounding the set so it can't
+  // grow without limit over a long session.
+  function markGossipSeen(mid) {
+    if (seenGossip.size >= GOSSIP_SEEN_CAP) seenGossip.clear()
+    seenGossip.add(mid)
+  }
+
+  // Originate a flooded control message: stamp a unique id, remember it (so it doesn't
+  // loop back into me), and broadcast to every direct connection. Receivers relay it on
+  // (relayFlood) until it has blanketed the whole partial mesh.
+  function floodGossip(obj) {
+    obj.mid = b4a.toString(crypto.randomBytes(8), 'hex')
+    markGossipSeen(obj.mid)
+    broadcast(obj)
+  }
+
+  // Re-broadcast a flooded message to my other neighbours (everyone except whoever sent
+  // it to me — dedup handles the remaining echoes). This is the relay step that carries
+  // an announcement across a swarm too large to be a full mesh.
+  function relayFlood(m, fromId) {
+    const str = JSON.stringify(m)
+    for (const [id, send] of senders) {
+      if (id === fromId) continue
       try {
         send(str)
       } catch {}
@@ -491,7 +535,7 @@ function createWave({
     if (!wave || wave.phase !== 'lobby' || wave.joined) return
     wave.joined = true
     wave.roster.add(me.id)
-    broadcast({ kind: 'wave-join', waveId: wave.id, peerId: me.id })
+    floodGossip({ kind: 'wave-join', waveId: wave.id, peerId: me.id })
     onToken({ event: 'joined', waveId: wave.id, count: wave.roster.size })
   }
 
@@ -601,7 +645,7 @@ function createWave({
         waveId: token.waveId,
         reason: skipped.size ? 'no-reachable-successor' : 'no successor'
       })
-      broadcast({ kind: 'wave-end', waveId: token.waveId, by: token.originator, stalled: true })
+      floodGossip({ kind: 'wave-end', waveId: token.waveId, by: token.originator, stalled: true })
       goIdle('stalled')
       return
     }
@@ -667,7 +711,7 @@ function createWave({
 
     // Completion: the token has returned to its originator. Tell everyone, then finish.
     if (token.originator === me.id && token.hopCount > 0) {
-      broadcast({
+      floodGossip({
         kind: 'wave-end',
         waveId: token.waveId,
         hops: token.hopCount,
@@ -712,7 +756,7 @@ function createWave({
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
     log('announcing wave', shortId(waveId))
     enterLobby(waveId, me.id, true) // initiator auto-joins
-    broadcast({ kind: 'wave-announce', waveId, by: me.id, lobbyMs })
+    floodGossip({ kind: 'wave-announce', waveId, by: me.id, lobbyMs })
     // initiator's lobby timer starts the race (overrides the idle fallback)
     clearTimeout(lobbyTimer)
     lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs)
@@ -732,7 +776,13 @@ function createWave({
       'gallery',
       shortId(autobaseKey)
     )
-    broadcast({ kind: 'wave-start', waveId, by: me.id, roster: [...wave.roster], key: autobaseKey })
+    floodGossip({
+      kind: 'wave-start',
+      waveId,
+      by: me.id,
+      roster: [...wave.roster],
+      key: autobaseKey
+    })
     beginRace()
     onToken({ event: 'started', waveId, by: me.id })
 
@@ -760,7 +810,7 @@ function createWave({
         } catch {
           return
         }
-        handleGossip(m)
+        handleGossip(m, id)
       }
     })
     channel.open()

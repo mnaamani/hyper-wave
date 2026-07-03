@@ -113,33 +113,57 @@ All timing constants are in §9.
 
 ### 3.1 Message propagation & relay rules
 
-Gossip is **broadcast to direct neighbours, with no relay/flooding**:
+Past Hyperswarm's mesh limit a large swarm is only a **partial random mesh** — each peer
+is directly connected to ~its connection-limit's worth of a random subset, so a plain
+one-hop broadcast reaches only a fraction of the swarm. Different message classes are
+propagated differently to match what each needs:
 
-- A **broadcast** is sent once on every open gossip channel — i.e. to each *directly
-  connected* peer.
-- A received gossip message is **processed locally and never re-broadcast**. There is no
-  multi-hop flooding: a control message (`presence`, `pointers`, `wave-*`, `add-writer`)
-  reaches only the sender's direct neighbours.
-- The **token** is the exception to "broadcast": it is **unicast** to the current
-  successor and deliberately relayed **hop by hop** as the wave mechanic — but each holder
-  *re-stamps* it with a fresh receipt before forwarding (§6). It is never broadcast.
-- **Membership** is now primarily **DHT-discovered**: each peer seeds its ring from
-  `swarm.peers` (Hyperswarm's PeerInfo set on the topic) and refreshes on `swarm.on('update')`
-  — ids arrive before/without gossip. On top of that, a slim **pointer exchange** (each peer
-  advertising only its own successor-list + predecessor, `pointers`) propagates local ring
-  structure at O(k + log N), replacing the old O(N) full `peers` snapshot. `presence` (a
-  liveness/country heartbeat) goes only to pinned neighbours.
+| Class | Messages | Fanout |
+|---|---|---|
+| **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end` | every peer |
+| **One-hop broadcast** | `wave-pos`, `add-writer` | direct neighbours only |
+| **Neighbour-scoped** | `presence`, `pointers` | pinned ring neighbours (O(k + log N)) |
+| **Unicast** | `token`, `wave-sync` | one specific peer |
 
-The ring now **drives connections** (Chord over Hyperswarm, Phases 1–4 in
-[`scalable-topology.md`](./scalable-topology.md), implemented): each peer deliberately
-`swarm.joinPeer`s its successor-list, predecessor, and O(log N) finger table, so the
-successor is reachable without a full mesh. Consequences:
-- A peer not directly connected to an originator won't receive its `wave-announce`/`wave-start`
-  — covered by **`wave-sync`** on every new connection (§7.4), which brings a peer up to date
-  as it connects.
-- Broadcast cost is O(direct connections) = O(log N) with Chord pinning, not O(N²·hops).
-  `wave-*` fanout still uses full broadcast pending the Phase-5 propagation decision; only the
-  membership gossip (`presence`/`pointers`) is neighbour-scoped today.
+**Flood (epidemic broadcast).** The wave *lifecycle* messages must reach every seat, so they
+are relayed hop-to-hop:
+- The originator stamps the message with a unique `mid` (random id) and broadcasts it to all
+  direct connections.
+- On **first** receipt of a given `mid`, a peer records it, **re-broadcasts** to its other
+  neighbours (everyone except the sender), and then processes it locally. On any **repeat**
+  `mid` it does nothing (drops the duplicate) — this dedup is what stops loops and bounds the
+  flood.
+- On the partial random mesh (average degree ≈ connection limit, diameter ≈ log N / log
+  degree ≈ a few hops) this blankets the whole swarm in ~2–3 relay rounds — hundreds of ms,
+  far inside the lobby — and is robust to peer/link loss thanks to the many redundant paths.
+- Cost is O(edges) message-sends per flood; fine for the handful of small, infrequent
+  lifecycle messages. Seen-`mid`s are capped (`GOSSIP_SEEN_CAP`) so the dedup set can't grow
+  unbounded over a long session.
+
+**One-hop broadcast (no relay).** `wave-pos` is emitted every hop (~`HOP_DELAY_MS`); flooding
+it would be a storm, and it doesn't need to reach everyone — its role as the heal-ACK only
+needs to reach the **predecessor** (a pinned neighbour), and distant ball-animation is a
+nice-to-have. `add-writer` is one-hop today; gallery admission across a partial mesh is
+tracked with gallery replication (`scalable-topology.md` §4.7).
+
+**Unicast.** The **token** is sent only to the current successor and deliberately relayed
+**hop by hop** as the wave mechanic — each holder *re-stamps* it with a fresh receipt before
+forwarding (§6). **`wave-sync`** is sent point-to-point to a newcomer on connect (§7.4).
+
+**Membership** is **DHT-discovered but liveness-gated.** `swarm.peers` (Hyperswarm's PeerInfo
+set on the topic) drives *which peers we dial* (Chord pinning), not the visible ring — a DHT
+announcement alone is just "this key advertised the topic once", so a stale announce from a
+since-closed instance is never shown as a seat. A **seat requires real liveness**: a live
+connection or direct gossip. On top of that, a slim **pointer exchange** (`pointers`: each
+peer advertising only its own successor-list + predecessor, O(k + log N)) propagates local
+ring structure, replacing the old O(N) full-table snapshot.
+
+The ring **drives connections** (Chord over Hyperswarm, Phases 1–4 in
+[`scalable-topology.md`](./scalable-topology.md)): each peer deliberately `swarm.joinPeer`s
+its successor-list, predecessor, and O(log N) finger table, so the successor is reachable
+without a full mesh. Flooding rides the same connections, so lifecycle messages reach every
+seat whether or not the swarm is fully meshed; **`wave-sync`** on connect remains the catch-up
+path for a peer that joins after a flood has already passed.
 
 ## 4. Peer map (membership & liveness)
 
@@ -221,21 +245,25 @@ sender (`lastSeen = now`) and each advertised id as a discovery hint (`lastSeen 
 TTL/2`), then runs one Chord stabilize step (`scalable-topology.md` §4.4). Primary membership comes from DHT discovery
 (`swarm.peers`), so pointers are structure/liveness hints, not the authoritative peer set.
 
-### wave-announce — broadcast (originator, on kick-off)
+The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries a unique
+`mid` (random hex id); receivers relay on first sight and drop repeats.
+
+### wave-announce — flooded (originator, on kick-off)
 ```json
-{ "kind": "wave-announce", "waveId": "<hex16>", "by": "<peerId>", "lobbyMs": 15000 }
+{ "kind": "wave-announce", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>", "lobbyMs": 15000 }
 ```
 Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`.
 
-### wave-join — broadcast (a peer opting in during lobby)
+### wave-join — flooded (a peer opting in during lobby)
 ```json
-{ "kind": "wave-join", "waveId": "<hex16>", "peerId": "<peerId>" }
+{ "kind": "wave-join", "mid": "<hex8>", "waveId": "<hex16>", "peerId": "<peerId>" }
 ```
-Receiver adds `peerId` to the wave's roster (if it's the current wave).
+Receiver adds `peerId` to the wave's roster (if it's the current wave). Flooded so it reaches
+the initiator (which assembles the roster) even across a partial mesh.
 
-### wave-start — broadcast (originator, when the lobby closes)
+### wave-start — flooded (originator, when the lobby closes)
 ```json
-{ "kind": "wave-start", "waveId": "<hex16>", "by": "<peerId>",
+{ "kind": "wave-start", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
   "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>" }
 ```
 Finalizes the roster and begins the race. `key` is the wave's gallery Autobase bootstrap
@@ -251,22 +279,23 @@ key (§8). Receivers open the gallery and transition `lobby → racing`.
 The token as forwarded by `senderPeerId` at hop `hopCount`. `senderReceiptSig` is that
 sender's receipt over `(waveId, hopCount, prevChainHash, timestamp)`. Processing: §6.
 
-### wave-pos — broadcast (a peer when it becomes the holder)
+### wave-pos — one-hop broadcast (a peer when it becomes the holder)
 ```json
 { "kind": "wave-pos", "waveId": "<hex16>", "holder": "<peerId>", "hopCount": 3 }
 ```
-Tells every peer the ball is now at `holder` (so all clients can animate it). Also serves
-as the **ACK** that healing (§7.3) waits for.
+Tells direct neighbours the ball is now at `holder` (so they can animate it). Also serves as
+the **ACK** that healing (§7.3) waits for — the predecessor is a pinned neighbour, so it's
+received without needing a flood. Deliberately **not** relayed (emitted every hop).
 
-### wave-end — broadcast (originator on completion, or any peer on a dead-end stall)
+### wave-end — flooded (originator on completion, or any peer on a dead-end stall)
 ```json
-{ "kind": "wave-end", "waveId": "<hex16>", "by": "<peerId>",
+{ "kind": "wave-end", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
   "hops": 7, "chainHash": "<hex32>", "stalled": false }
 ```
 Ends the wave for everyone. `stalled: true` means a peer hit a dead end (no reachable
 successor); `hops`/`chainHash` are present on normal completion.
 
-### add-writer — broadcast (a peer requesting gallery write access)
+### add-writer — one-hop broadcast (a peer requesting gallery write access)
 ```json
 { "kind": "add-writer", "key": "<requesterAutobaseLocalKeyHex>", "peerId": "<peerId>",
   "waveId": "<hex16>", "hopCount": 3, "chainHash": "<hex32>",
