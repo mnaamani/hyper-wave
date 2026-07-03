@@ -99,6 +99,59 @@ function inOpenInterval(x, a, b) {
   return x > a || x < b
 }
 
+// x ∈ (a, b] on the mod-2^64 ring (half-open, includes the upper end). a === b is the
+// whole ring (single-node case). Used for Chord's "target ∈ (me, successor]" test.
+function inHalfOpenInterval(x, a, b) {
+  if (a === b) return true
+  if (a < b) return x > a && x <= b
+  return x > a || x <= b
+}
+
+// Clockwise ring distance from a to b (mod 2^64).
+function ringForward(a, b) {
+  return (b - a + RING) % RING
+}
+
+// Chord's closest_preceding_node: among the ids I know (fingers + successors), the one
+// whose nodeId lies in the open interval (me, target) and is *closest* to target — the
+// finger to forward a lookup for `target` to, so each hop jumps as far as possible
+// without overshooting. `target` is a BigInt keyspace position. null if none precedes it.
+function closestPrecedingNode(known, myId, target) {
+  const myNid = nodeIdOfHex(myId)
+  let best = null
+  let bestFwd = -1n
+  for (const id of known) {
+    if (id === myId) continue
+    const nid = nodeIdOfHex(id)
+    if (!inOpenInterval(nid, myNid, target)) continue
+    const fwd = ringForward(myNid, nid)
+    if (fwd > bestFwd) {
+      best = id
+      bestFwd = fwd
+    }
+  }
+  return best
+}
+
+// One hop of Chord's DISTRIBUTED findSuccessor (§4.5), evaluated over MY local knowledge
+// only — this is what lets a lookup resolve correctly when no single node knows the whole
+// ring. `me`/`successor` = my id and my successor's id; `known` = my finger + successor
+// ids; `target` = the keyspace position (BigInt) whose successor we're locating.
+//   - target ∈ (me, successor]  → the answer is my successor: { done: true, successor }
+//   - otherwise                 → forward to my closest preceding finger: { done: false, next }
+//   - no finger precedes target → my successor is the best answer: { done: true, successor }
+// Applied hop-to-hop (each node using its own `known`), this converges to the true
+// successor in O(log N) hops with a full finger table, or degrades to a correct linear
+// walk along successors if a node only knows its successor.
+function findSuccessorStep(me, successor, known, target) {
+  const myNid = nodeIdOfHex(me)
+  const succNid = successor !== null ? nodeIdOfHex(successor) : myNid
+  if (inHalfOpenInterval(target, myNid, succNid)) return { done: true, successor }
+  const next = closestPrecedingNode(known, me, target)
+  if (next === null) return { done: true, successor }
+  return { done: false, next }
+}
+
 // One Chord stabilize step (§4.4): my successor's predecessor `succPred` becomes my
 // successor if it sits strictly between me and my current successor — that means a
 // node joined (or was discovered) between us. Returns the id to use as successor
@@ -133,5 +186,9 @@ module.exports = {
   fingers,
   pinTargets,
   inOpenInterval,
-  stabilizeStep
+  stabilizeStep,
+  inHalfOpenInterval,
+  ringForward,
+  closestPrecedingNode,
+  findSuccessorStep
 }

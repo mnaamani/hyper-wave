@@ -13,7 +13,11 @@ const {
   fingers,
   pinTargets,
   inOpenInterval,
-  stabilizeStep
+  stabilizeStep,
+  inHalfOpenInterval,
+  closestPrecedingNode,
+  findSuccessorStep,
+  RING
 } = require('./chord')
 
 // A 32-byte peer id (64 hex chars) whose top-8-byte nodeId is exactly `n`.
@@ -119,4 +123,109 @@ test('stabilizeStep adopts a successor discovered between me and my successor', 
   t.is(stabilizeStep(mk(10), mk(40), null), mk(40), 'no succ.pred -> keep')
   t.is(stabilizeStep(mk(10), mk(40), mk(10)), mk(40), "succ.pred is me -> keep (I'm its pred)")
   t.is(stabilizeStep(mk(10), null, mk(20)), mk(20), 'no current successor -> take it')
+})
+
+// --- distributed findSuccessor routing (§4.5) -------------------------------
+
+test('inHalfOpenInterval includes the upper end and wraps', (t) => {
+  t.ok(inHalfOpenInterval(40n, 10n, 40n), 'includes b')
+  t.absent(inHalfOpenInterval(10n, 10n, 40n), 'excludes a')
+  t.ok(inHalfOpenInterval(20n, 10n, 40n), 'inside')
+  t.ok(inHalfOpenInterval(5n, 40n, 10n), 'wraps: 5 in (40,10]')
+  t.ok(inHalfOpenInterval(99n, 7n, 7n), 'a===b is the whole ring')
+})
+
+test('closestPrecedingNode picks the highest known id below the target', (t) => {
+  t.is(closestPrecedingNode([mk(10), mk(20), mk(30)], mk(0), 35n), mk(30))
+  t.is(closestPrecedingNode([mk(10), mk(20), mk(30)], mk(0), 25n), mk(20))
+  t.is(closestPrecedingNode([mk(10)], mk(0), 5n), null, 'nothing precedes the target')
+})
+
+test('findSuccessorStep resolves locally in (me, successor], else forwards', (t) => {
+  const known = [mk(20), mk(40), mk(80)]
+  t.alike(findSuccessorStep(mk(10), mk(20), known, 15n), { done: true, successor: mk(20) })
+  t.alike(
+    findSuccessorStep(mk(10), mk(20), known, 20n),
+    { done: true, successor: mk(20) },
+    'inclusive'
+  )
+  t.alike(
+    findSuccessorStep(mk(10), mk(20), known, 50n),
+    { done: false, next: mk(40) },
+    'jump to 40'
+  )
+})
+
+// Simulated Chord network: N nodes, each knowing ONLY its finger table + successor (not
+// the whole ring). Walk a lookup hop-to-hop using each node's local knowledge and assert
+// it still resolves to the globally-correct successor — this is the convergence-under-
+// partial-knowledge property that a local findSuccessor can't guarantee.
+function mkNid(nid) {
+  return nid.toString(16).padStart(16, '0') + '0'.repeat(48)
+}
+function chordIds(n) {
+  const ids = []
+  let x = 0n
+  for (let i = 0; i < n; i++) {
+    x = (x + 0x9e3779b97f4a7c15n) % RING // Fibonacci hashing spreads ids across the ring
+    ids.push(mkNid(x))
+  }
+  return ids
+}
+function buildNet(ids, withFingers = true) {
+  const net = new Map()
+  for (const id of ids) {
+    const succ = successors(ids, id, 1)[0]
+    const known = withFingers ? [...fingers(ids, id)] : []
+    if (succ && !known.includes(succ)) known.push(succ)
+    net.set(id, { successor: succ, known })
+  }
+  return net
+}
+function route(net, origin, target) {
+  let at = origin
+  let hops = 0
+  while (hops <= 1000) {
+    const n = net.get(at)
+    const step = findSuccessorStep(at, n.successor, n.known, target)
+    if (step.done) return { successor: step.successor, hops }
+    at = step.next
+    hops++
+  }
+  throw new Error('routing did not converge')
+}
+function spreadTargets(count) {
+  const out = []
+  let x = 12345n
+  for (let k = 0; k < count; k++) {
+    x = (x + 0x9e3779b97f4a7c15n) % RING
+    out.push(x)
+  }
+  return out
+}
+
+test('distributed findSuccessor resolves correctly in O(log N) hops (partial knowledge)', (t) => {
+  const ids = chordIds(64)
+  const net = buildNet(ids, true)
+  const targets = spreadTargets(40)
+  let maxHops = 0
+  for (let o = 0; o < ids.length; o += 5) {
+    for (const target of targets) {
+      const got = route(net, ids[o], target)
+      t.is(got.successor, findSuccessor(ids, target), 'matches the global truth')
+      if (got.hops > maxHops) maxHops = got.hops
+    }
+  }
+  t.ok(maxHops >= 2, `actually multi-hops (max ${maxHops})`)
+  t.ok(maxHops <= 12, `converges in <= 2·log2(64) = 12 hops (max ${maxHops})`)
+})
+
+test('routing stays correct with successor pointers only (degrades, never wrong)', (t) => {
+  const ids = chordIds(30)
+  const net = buildNet(ids, false) // no fingers — successor only => linear walk
+  for (let o = 0; o < ids.length; o += 4) {
+    for (const target of spreadTargets(6)) {
+      t.is(route(net, ids[o], target).successor, findSuccessor(ids, target))
+    }
+  }
 })

@@ -1,6 +1,6 @@
 # HyperWave — Scalable Topology (design / plan)
 
-**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + finger table via `joinPeer`; stabilize + churn cooldown + slim pointer-exchange gossip) **plus control-plane flooding** (lifecycle `wave-*` relayed with dedup, §4.6); Phase 5 (sweep) planned. See §8 for the top-3 remaining items. This is the design for making HyperWave scale
+**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + finger table via `joinPeer`; stabilize + churn cooldown + slim pointer-exchange gossip), **plus control-plane flooding** (lifecycle `wave-*` relayed with dedup, §4.6) and **distributed `findSuccessor` routing** (§4.5); Phase 5 (sweep) planned. See §8 for remaining items. This is the design for making HyperWave scale
 from a handful of peers to a large, global swarm by aligning our logical ring with the
 physical Hyperswarm connection graph — the "make the ring drive connections" idea.
 
@@ -88,11 +88,26 @@ Stop depending on Hyperswarm's incidental meshing for the ring.
 - **checkPredecessor**: drop a dead predecessor.
 - **churn:** on a connection close, promote the next successor-list entry and re-stabilize.
 
-### 4.5 Routing / lookup
-`findSuccessor(id)` = standard Chord lookup via fingers, O(log N) hops. Uses:
-- placing where the token starts / where a joining node inserts;
-- routing a control message to a specific seat if ever needed.
-The token still walks successor→successor for the *visual* wave (axis B caveat applies).
+### 4.5 Routing / lookup — **implemented**
+`findSuccessor(target)` = standard Chord lookup: route the query through fingers,
+O(log N) hops, so it resolves to the correct successor **even when no single peer knows the
+whole ring** (the partial-knowledge case that a purely local computation gets wrong).
+
+- **Pure core** (`chord.js`): `findSuccessorStep(me, successor, known, target)` is the per-hop
+  decision — answer if `target ∈ (me, successor]`, else forward to `closestPrecedingNode`
+  (the finger closest below the target). With a full finger table it converges in O(log N);
+  with only a successor pointer it degrades to a *correct* linear walk. Brittle-tested,
+  including a simulation over 64-node partial-knowledge networks (correct in ≤ 5 hops).
+- **Transport** (`wave.js`): `find-succ` / `find-succ-reply` messages. `findSuccessorRemote`
+  sends the query to the closest preceding *connected* finger; each hop forwards along
+  connected fingers and the reply **retraces the same path** back to the origin (no ad-hoc
+  connections), with a hop cap + timeout. Exposed as `wave.findSuccessor(target)`.
+- **Consumer:** a slow `repairSuccessor` uses it to correct a successor pointer a partial
+  local view missed, feeding the result into pin candidates (additive; a no-op at small
+  scale where local knowledge already resolves the lookup with zero hops).
+
+Uses: placing where a token starts / where a joining node inserts / routing a control message
+to a specific seat. The token still walks successor→successor for the *visual* wave (axis B).
 
 ### 4.6 Gossip slimming & flooding
 Two changes, both implemented:
@@ -201,14 +216,13 @@ construction). `wave.js` is untouched.
 Phases 1–4 + the control-plane flood are built and unit/partial-mesh tested. The **top 3**
 things that decide whether this actually works at scale — in priority order:
 
-1. **Ring correctness under *partial* membership knowledge (§4.3–4.5).** Today successor and
-   fingers are computed from the *locally known* id set (`swarm.peers` ∪ connected ∪ gossip),
-   which is complete only for small, fully-discovered swarms. At large N the DHT returns a
-   **sample**, so pointers can be wrong (you pin a "successor" with an undiscovered node
-   between you). Classic Chord fixes this with a **distributed `findSuccessor`** (route to a
-   key via remote fingers, O(log N) hops) used at join time, plus stabilize converging over
-   time. We have the *pure* `findSuccessor` but **not the routing RPC**, and no test that the
-   ring converges to the correct global order under partial knowledge. Foundational.
+1. ~~**Ring correctness under partial membership knowledge (§4.3–4.5).**~~ **Done** — the
+   **distributed `findSuccessor` routing** is built (pure `findSuccessorStep` + `find-succ`
+   transport RPC, §4.5), so a lookup resolves to the correct successor even when the DHT only
+   samples membership; `repairSuccessor` feeds routed results back into pinning. Verified over
+   simulated 64-node partial-knowledge networks (≤ 5 hops) and end-to-end on the local DHT.
+   *Still to harden:* run `findSuccessor` at **join time** to bootstrap a joiner's successor
+   (today it's a periodic repair), and validate convergence under real large-N churn.
 2. **Propagation at scale — build the sweep (§3B / Phase 5).** The serial token is O(N·dwell)
    ≈ hours at N=10k, so there is currently *no* working large-N wave. The deterministic
    angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely

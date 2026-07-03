@@ -14,7 +14,16 @@ const b4a = require('b4a')
 const fs = require('bare-fs')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
-const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord')
+const {
+  pinTargets,
+  successors,
+  predecessor,
+  stabilizeStep,
+  findSuccessorStep,
+  closestPrecedingNode,
+  nodeIdOfHex,
+  RING
+} = require('./chord')
 const { createFlood } = require('./flood')
 const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
@@ -49,6 +58,12 @@ const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start', 'wave
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096
+// Distributed findSuccessor routing (§4.5): safety cap on lookup hops (O(log N)
+// expected), how long the origin waits for a reply, and how long a routing-discovered
+// successor stays a pin candidate.
+const LOOKUP_TTL = 24
+const LOOKUP_TIMEOUT_MS = 5000
+const ROUTED_TTL_MS = 30000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -85,6 +100,9 @@ function createWave({
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
   const goneUntil = new Map() // id -> ts: suppress re-seeding a just-closed peer (churn)
+  const routed = new Map() // id -> expiry: successor found via distributed lookup (pin candidate)
+  const pendingLookups = new Map() // qid -> { resolve, timer }: findSuccessor lookups I originated
+  const lookupRoute = new Map() // qid -> upstream id: reverse path to return a lookup reply
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
   const flood = createFlood({ cap: GOSSIP_SEEN_CAP }) // flood dedup for relayed control msgs
@@ -170,7 +188,9 @@ function createWave({
   // token-walk seats (`peers`) still come only from connections + gossip, so a stale
   // discovery we can't reach is pinned (dialed) but never shown as a seat.
   function maintainNeighbours() {
-    const cand = new Set([...discoveredIds(), ...senders.keys(), ...peers.keys()])
+    const now = Date.now()
+    for (const [id, exp] of routed) if (exp <= now) routed.delete(id) // drop stale routing hints
+    const cand = new Set([...discoveredIds(), ...senders.keys(), ...peers.keys(), ...routed.keys()])
     cand.delete(me.id)
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS)
     for (const id of targets) {
@@ -227,6 +247,8 @@ function createWave({
       relayFlood(m, fromId)
     }
     if (m.kind === 'token') return processToken(m)
+    if (m.kind === 'find-succ') return handleFindSucc(m, fromId)
+    if (m.kind === 'find-succ-reply') return handleFindSuccReply(m)
     if (m.kind === 'wave-pos') {
       // only animate the ball for the wave we're racing (angle derived locally)
       if (wave && wave.phase === 'racing' && m.waveId === wave.id) {
@@ -364,6 +386,107 @@ function createWave({
       try {
         send(str)
       } catch {}
+    }
+  }
+
+  function trySend(id, obj) {
+    const send = senders.get(id)
+    if (!send) return false
+    try {
+      send(JSON.stringify(obj))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // My current successor id (next reachable clockwise) + the finger/successor ids I know
+  // — the inputs to Chord's per-hop routing decision.
+  function mySuccessorId() {
+    const s = nextClockwise(me.angle, liveRing([...peers.values()], Date.now(), TTL_MS))
+    return s ? s.id : null
+  }
+  function myKnownIds() {
+    return [...new Set([...pinned, ...senders.keys()])]
+  }
+
+  // --- distributed findSuccessor (Chord routing, §4.5) -----------------------
+  // Locate the true successor of a keyspace position by routing the query through
+  // fingers, so it's correct even when no single peer knows the whole ring. The request
+  // hops along connected fingers (findSuccessorStep chooses the next); the reply retraces
+  // the same path back to the origin. Resolves to a peer id, or null on timeout/no peers.
+  function findSuccessorRemote(target) {
+    return new Promise((resolve) => {
+      const start = closestPrecedingNode(myKnownIds(), me.id, target) || mySuccessorId()
+      if (!start || !senders.has(start)) return resolve(null) // nobody to ask
+      const qid = b4a.toString(crypto.randomBytes(8), 'hex')
+      const timer = setTimeout(() => {
+        pendingLookups.delete(qid)
+        resolve(null)
+      }, LOOKUP_TIMEOUT_MS)
+      pendingLookups.set(qid, { resolve, timer })
+      if (!trySend(start, { kind: 'find-succ', qid, target: target.toString(), hops: 0 })) {
+        clearTimeout(timer)
+        pendingLookups.delete(qid)
+        resolve(null)
+      }
+    })
+  }
+
+  // A find-succ request reached me: answer if the target falls in (me, successor], else
+  // forward to my closest preceding finger, remembering the upstream for the reply.
+  function handleFindSucc(m, fromId) {
+    let target
+    try {
+      target = BigInt(m.target)
+    } catch {
+      return
+    }
+    const step = findSuccessorStep(me.id, mySuccessorId(), myKnownIds(), target)
+    if (step.done || (m.hops || 0) >= LOOKUP_TTL) {
+      trySend(fromId, {
+        kind: 'find-succ-reply',
+        qid: m.qid,
+        successor: step.done ? step.successor : mySuccessorId()
+      })
+      return
+    }
+    if (!senders.has(step.next)) {
+      trySend(fromId, { kind: 'find-succ-reply', qid: m.qid, successor: mySuccessorId() })
+      return
+    }
+    lookupRoute.set(m.qid, fromId)
+    setTimeout(() => lookupRoute.delete(m.qid), LOOKUP_TIMEOUT_MS)
+    trySend(step.next, { kind: 'find-succ', qid: m.qid, target: m.target, hops: (m.hops || 0) + 1 })
+  }
+
+  // A find-succ-reply reached me: resolve it if I'm the origin, else pass it back up the
+  // reverse path toward whoever asked me.
+  function handleFindSuccReply(m) {
+    const pend = pendingLookups.get(m.qid)
+    if (pend) {
+      clearTimeout(pend.timer)
+      pendingLookups.delete(m.qid)
+      pend.resolve(m.successor || null)
+      return
+    }
+    const up = lookupRoute.get(m.qid)
+    if (up) {
+      lookupRoute.delete(m.qid)
+      trySend(up, m)
+    }
+  }
+
+  // Chord repair: verify my successor via distributed routing and, if the lookup surfaces
+  // a truer successor my local view missed (a node between me and who I think is next),
+  // add it as a pin candidate so maintainNeighbours connects to it. Additive and safe: a
+  // no-op at small scale (local knowledge already resolves the lookup with no hops).
+  async function repairSuccessor() {
+    if (senders.size === 0) return
+    const succId = await findSuccessorRemote((nodeIdOfHex(me.id) + 1n) % RING)
+    if (succId && succId !== me.id && !senders.has(succId)) {
+      routed.set(succId, Date.now() + ROUTED_TTL_MS)
+      maintainNeighbours()
     }
   }
 
@@ -878,6 +1001,11 @@ function createWave({
         .catch(() => {})
     } // pull replicated gallery writes
   }, RINGUPDATE_MS)
+  // Chord repair via distributed findSuccessor — correct a successor pointer my local
+  // (possibly partial) view missed. Slow cadence; a no-op when local knowledge suffices.
+  const tRepair = setInterval(() => {
+    repairSuccessor().catch(() => {})
+  }, RINGUPDATE_MS * 4)
 
   return {
     me,
@@ -885,12 +1013,18 @@ function createWave({
     join,
     setCountry,
     stageSelfie,
+    // Distributed Chord lookup: the true successor of a peer id's ring position (or a
+    // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
+    findSuccessor: (target) =>
+      findSuccessorRemote(typeof target === 'bigint' ? target : nodeIdOfHex(target)),
     async close() {
       clearInterval(tPresence)
       clearInterval(tRing)
+      clearInterval(tRepair)
       clearTimeout(lobbyTimer)
       clearTimeout(waveTimer)
       clearTimeout(healTimer)
+      for (const { timer } of pendingLookups.values()) clearTimeout(timer)
       await swarm.destroy()
       if (base) await base.close()
       await store.close()

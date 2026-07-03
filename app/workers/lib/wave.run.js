@@ -8,6 +8,7 @@
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 const env = require('bare-env')
 const { createWave } = require('./wave.js')
+const { nodeIdOfHex, RING } = require('./chord.js')
 
 const name = Bare.argv[2] || 'peer'
 const storageDir = Bare.argv[3]
@@ -54,3 +55,12 @@ const wave = createWave({
     ),
   log: (...m) => console.log(`[${name}]`, ...m)
 })
+
+// env PROBE=1 -> after peers converge, exercise the distributed findSuccessor RPC by
+// looking up the successor of the position just after me (my true successor).
+if (env.PROBE) {
+  setTimeout(async () => {
+    const succ = await wave.findSuccessor((nodeIdOfHex(wave.me.id) + 1n) % RING)
+    console.log(`[${name}] FINDSUCC my-successor = ${succ ? succ.slice(0, 8) : 'null'}`)
+  }, 8000)
+}
