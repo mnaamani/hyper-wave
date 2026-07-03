@@ -30,15 +30,75 @@
         opacity: 0.6;
         font-size: 13px;
       }
-      #country {
-        margin: 8px 0 2px;
+      #globe {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        z-index: 15;
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(0, 0, 0, 0.35);
+        color: #eafff0;
+        font-size: 18px;
+        cursor: pointer;
+      }
+      #globe:hover {
+        background: rgba(0, 0, 0, 0.6);
+      }
+      /* intro / onboarding: pick your team before entering the ring */
+      #intro {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: radial-gradient(circle at 50% 30%, #0e4f15 0%, #041007 100%);
+        align-items: center;
+        justify-content: center;
+      }
+      #intro.show {
+        display: flex;
+      }
+      .intro-card {
+        text-align: center;
+        padding: 0 24px;
+      }
+      .intro-card h1 {
+        font-size: 44px;
+        margin: 0 0 6px;
+      }
+      .intro-card p {
+        font-size: 17px;
+        opacity: 0.85;
+        margin: 0 0 22px;
+      }
+      #intro-country {
+        display: block;
+        margin: 0 auto 22px;
+        max-width: 360px;
+        width: 100%;
         background: rgba(0, 0, 0, 0.35);
         color: #eafff0;
         border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 18px;
-        padding: 9px 18px;
-        font-size: 17px;
+        border-radius: 22px;
+        padding: 14px 20px;
+        font-size: 20px;
         cursor: pointer;
+        text-align: center;
+      }
+      #enter {
+        padding: 14px 32px;
+        font-size: 19px;
+        font-weight: 600;
+        border: none;
+        border-radius: 28px;
+        background: #ffd166;
+        color: #06210d;
+        cursor: pointer;
+      }
+      #enter:hover {
+        background: #ffe08a;
       }
       #status {
         font-size: 14px;
@@ -232,11 +292,22 @@
     </style>
   </head>
   <body>
+    <div id="intro">
+      <div class="intro-card">
+        <h1>🌊 HyperWave</h1>
+        <p>The global stadium wave. Who do you support?</p>
+        <select id="intro-country"></select>
+        <br />
+        <button id="enter">Enter the stadium ⚽</button>
+      </div>
+    </div>
+
+    <button id="globe" title="Change your team">🌐</button>
+
     <header>
       <h1>🌊 HyperWave</h1>
       <span id="v">v</span>
     </header>
-    <select id="country" title="Who do you support?"></select>
     <div id="status">connecting…</div>
     <div id="me"></div>
     <div class="field">
