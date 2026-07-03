@@ -68,7 +68,7 @@ function createWave({
 
   const meKey = swarm.keyPair.publicKey
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null }
-  const peers = new Map() // id -> { id, angle, lastSeen }
+  const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
@@ -185,17 +185,12 @@ function createWave({
       // originator ended it (completed) or a peer hit a dead end (stalled) — everyone
       // finishes together instead of each waiting out the timeout
       if (wave && m.waveId === wave.id) {
-        if (m.stalled) onToken({ event: 'stalled', waveId: m.waveId, reason: 'no successor' })
-        else {
-          onToken({
-            event: 'completed',
-            waveId: m.waveId,
-            hops: m.hops,
-            chainHash: m.chainHash,
-            angle: angleOfId(m.by)
-          })
-        }
-        goIdle(m.stalled ? 'stalled' : 'ended')
+        finishWave(m.waveId, {
+          stalled: m.stalled,
+          hops: m.hops,
+          chainHash: m.chainHash,
+          byId: m.by
+        })
       }
       return
     }
@@ -399,6 +394,14 @@ function createWave({
     onToken({ event: 'wave-idle', waveId, reason })
   }
 
+  // Finish the current wave: emit the outcome to the UI and return to idle. Shared by
+  // the originator (local completion), a dead-end stall, and receiving a `wave-end`.
+  function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
+    if (stalled) onToken({ event: 'stalled', waveId, reason: 'no successor' })
+    else onToken({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
+    goIdle(stalled ? 'stalled' : 'ended')
+  }
+
   // Emit a holding event; canSelfie tells the renderer whether to open the proof
   // window (only opted-in roster members selfie; everyone else just relays).
   function emitHolding(waveId, hopCount, receiptSig, chainHash, receiptTs) {
@@ -483,6 +486,20 @@ function createWave({
     }
   }
 
+  // I now hold this token: open my proof window (if opted in), tell everyone the ball
+  // is at me, and forward to my successor after the dwell.
+  function holdAndForward(token) {
+    emitHolding(
+      token.waveId,
+      token.hopCount,
+      token.senderReceiptSig,
+      token.prevChainHash,
+      token.timestamp
+    )
+    announcePosition(token.waveId, token.hopCount)
+    setTimeout(() => forwardToken(token), hopDelayMs)
+  }
+
   function processToken(token) {
     if (!verifyToken(token)) {
       log('token: bad receipt from', shortId(token.senderPeerId || ''))
@@ -491,7 +508,7 @@ function createWave({
     // Ignore tokens from a competing/losing wave (single active wave at a time).
     if (!shouldAdopt(token.waveId)) return
 
-    // Completion: the token has returned to its originator. Tell everyone.
+    // Completion: the token has returned to its originator. Tell everyone, then finish.
     if (token.originator === me.id && token.hopCount > 0) {
       broadcast({
         kind: 'wave-end',
@@ -500,14 +517,7 @@ function createWave({
         chainHash: token.prevChainHash,
         by: me.id
       })
-      onToken({
-        event: 'completed',
-        waveId: token.waveId,
-        hops: token.hopCount,
-        chainHash: token.prevChainHash,
-        angle: me.angle
-      })
-      goIdle('completed')
+      finishWave(token.waveId, { hops: token.hopCount, chainHash: token.prevChainHash })
       return
     }
     const key = token.waveId + '|' + token.hopCount
@@ -525,22 +535,14 @@ function createWave({
     }
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig)
-    const hopCount = token.hopCount + 1
     const next = stampToken(
       token.waveId,
       token.originator,
-      hopCount,
+      token.hopCount + 1,
       newChainHash,
       token.autobaseKey
     )
-
-    // Ball reaches me: everyone relays; only opted-in peers open the proof window.
-    emitHolding(token.waveId, hopCount, next.senderReceiptSig, newChainHash, next.timestamp)
-    announcePosition(token.waveId, hopCount)
-
-    // Dwell so the wave ripples visibly around the ring and proof windows open in
-    // sequence rather than all at once.
-    setTimeout(() => forwardToken(next), hopDelayMs)
+    holdAndForward(next)
   }
 
   // Announce a new wave and open the lobby (any peer can start when idle). After the
@@ -577,11 +579,8 @@ function createWave({
     beginRace()
     onToken({ event: 'started', waveId, by: me.id })
 
-    const token = stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey)
-    // the originator is hop 0 — open their proof window too (if they joined)
-    emitHolding(waveId, 0, token.senderReceiptSig, ZERO_HASH, token.timestamp)
-    announcePosition(waveId, 0)
-    setTimeout(() => forwardToken(token), hopDelayMs)
+    // the originator is hop 0 — hold (proof window if joined) and forward
+    holdAndForward(stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey))
   }
 
   // --- connections -----------------------------------------------------------
