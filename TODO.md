@@ -37,16 +37,20 @@ Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`
 
 ## Backlog
 
-### Scale path: gossip → Chord (future, not MVP)
-The wave only needs each peer's **successor** (next live peer clockwise), and the forwarder is
-already decoupled from discovery behind that seam (`ring.js` `nextClockwise` / `pickReachable`).
-Today discovery is full-ring gossip (every peer holds the whole ring; O(N²) traffic; full mesh) —
-fine at demo scale. To scale, replace *only* the discovery/peer-table layer with Chord:
-- per-peer state O(log N): a **successor pointer** + short **successor-list** (healing failover)
-  + a **finger table** of O(log N) shortcuts; connect to those, not everyone.
-- periodic **stabilize** / **fix-fingers** to repair pointers as peers join/leave.
-- the ring id is already Chord-shaped (`angle = hash(pubkey)`); the token race is a traversal of
-  the Chord ring. Token race / healing / gallery / lifecycle stay untouched behind the seam.
+### Scalable topology: make the ring drive connections (Chord over Hyperswarm) — MAJOR, PLANNED
+**Full design: [`docs/scalable-topology.md`](docs/scalable-topology.md).** Promoted from "future"
+to a planned major initiative (true global scale + wow factor). The wave only needs each peer's
+**successor**, already decoupled from discovery behind the `ring.js` seam. Today discovery is
+full-ring gossip over Hyperswarm's incidental full mesh — fine at demo scale, breaks past it.
+Plan (phased, each shippable + testable — see the design doc):
+1. Seed the peer map from **`swarm.peers`** (DHT discovery) — additive, low risk.
+2. **`joinPeer`** successor + predecessor (+ successor-list) so ring edges are physical.
+3. **Finger table** + `findSuccessor` + `fixFingers` → O(log N) connections; drop full-mesh reliance.
+4. **`stabilize`** + churn handling + slim the O(N) `peers` gossip.
+5. (decision) propagation at scale: serial token vs **deterministic angular sweep** (instant at
+   any N, independent proofs — pairs with the fixed-per-participant payment model).
+Keep Chord math in a pure `workers/lib/chord.js` (brittle-tested); token race / gallery / lifecycle
+stay untouched behind the seam. Watch: Autobase gallery replication over a partial mesh (§4.7).
 
 
 ### Housekeeping

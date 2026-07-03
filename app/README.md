@@ -3,6 +3,8 @@
 Electron + Pear desktop app for the HyperWave P2P stadium wave. Forked from
 [`holepunchto/hello-pear-electron`](https://github.com/holepunchto/hello-pear-electron).
 Design: `../ideas/final-idea.md` (§11 = this desktop MVP).
+Docs: [`../docs/`](../docs/) — `architecture.md`, `protocol.md` (on-wire spec), and
+`scalable-topology.md` (planned Chord-over-Hyperswarm scaling).
 
 ## Architecture (as wired today)
 

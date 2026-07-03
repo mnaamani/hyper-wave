@@ -134,8 +134,9 @@ Consequences:
   `wave-announce`/`wave-start` — this is covered by **`wave-sync`** on every new connection
   (§7.4), which brings a peer up to date as it connects.
 - Broadcast cost is O(direct connections), not O(N²·hops). Scaling to a large, non-meshed
-  swarm would need real anti-entropy gossip or Chord-style routing (out of scope; the
-  `successor` abstraction isolates that change).
+  swarm means making the ring **drive** connections (Chord over Hyperswarm) so the successor
+  is always reachable without a full mesh — the `successor` abstraction isolates that change.
+  See [`scalable-topology.md`](./scalable-topology.md) for the design.
 
 ## 4. Peer map (membership & liveness)
 

@@ -88,6 +88,11 @@ The worker computes ring **angles** (from peer public keys) and the **successor*
 sends them in `state`; the renderer consumes them for drawing and never recomputes them —
 so there's no duplicated protocol logic across the seam.
 
+> **Planned:** the wave only ever asks `ring.js` "who is my successor?", so the discovery/
+> connection layer can be swapped without touching the wave engine. The scalability work
+> ([`scalable-topology.md`](./scalable-topology.md)) replaces full-mesh gossip with **Chord
+> over Hyperswarm** (make the ring drive connections) entirely behind this seam.
+
 ## Module map
 
 ```
