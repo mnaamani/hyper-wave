@@ -9,8 +9,8 @@ const Corestore = require('corestore')
 const Autobase = require('autobase')
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
-const { galleryConfig, readGallery, readBurns } = require('./gallery')
-const { signReceipt, signBurn } = require('./token')
+const { galleryConfig, readGallery } = require('./gallery')
+const { signReceipt } = require('./token')
 
 const WAVE = 'w'
 const CH = b4a.toString(b4a.alloc(32), 'hex') // some chain hash value
@@ -78,38 +78,4 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
   await base.append({ type: 'add-writer', key: b4a.toString(crypto.keyPair().publicKey, 'hex') })
   await base.update()
   t.pass('add-writer op processed by apply()')
-})
-
-test('gallery apply() admits valid burn-proofs, rejects forged ones', async (t) => {
-  const dir = '/tmp/hyperwave-burn-test-' + Date.now()
-  const store = new Corestore(dir)
-  const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig())
-  t.teardown(async () => {
-    await base.close()
-    await store.close()
-    fs.rmSync(dir, { recursive: true, force: true })
-  })
-  await base.ready()
-
-  const kp = crypto.keyPair()
-  const peerId = b4a.toString(kp.publicKey, 'hex')
-  const f = {
-    waveId: WAVE,
-    peerId,
-    reason: 'join',
-    amount: 1,
-    txHash: 'abc123',
-    tronAddress: 'TJbnv',
-    burnTs: 1000
-  }
-  await base.append({ type: 'burn-proof', ...f, sig: signBurn(kp, f) })
-  // forged: someone else re-signs claiming to be peerId (sig won't verify by peerId)
-  const other = crypto.keyPair()
-  await base.append({ type: 'burn-proof', ...f, sig: signBurn(other, f) })
-  await base.update()
-
-  const burns = await readBurns(base)
-  t.is(burns.length, 1, 'only the validly-signed burn-proof admitted')
-  t.is(burns[0].txHash, 'abc123')
-  t.is((await readGallery(base)).length, 0, 'burn-proofs do not appear in the selfie gallery')
 })

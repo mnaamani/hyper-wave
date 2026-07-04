@@ -31,41 +31,39 @@ fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scalin
     (relay + dedup by `mid`, `lib/flood.js`) so they reach every peer on a partial mesh.
   - **Token race:** the initiator mints a wave-token; each holder verifies the sender's
     Ed25519 receipt, advances a **constant-size blake2b chain accumulator** (never a growing
-    hops[]), signs its own receipt, pushes a `wave-proof` to any connected validator, and
-    forwards to its successor; the lap completes back at the originator. A small per-hop
-    dwell (`hopDelayMs`, default 250ms) is purely the visible roll pace — selfies are
-    captured in the lobby, so the token never waits on a human.
+    hops[]), signs its own receipt, and forwards to its successor; the lap completes back at
+    the originator, which floods a **signed** `wave-end`. A small per-hop dwell (`hopDelayMs`,
+    default 250ms) is purely the visible roll pace — selfies are captured in the lobby, so
+    the token never waits on a human.
   - **Lifecycle:** idle → (pay) → lobby → racing → idle, one wave at a time, lower-`waveId`
     tie-break, `wave-end` broadcast, timeout fallbacks, `wave-sync` for late joiners, and
     healing (skip a dead successor when its `wave-pos` ACK doesn't arrive).
   - **Gallery (Autobase):** per-wave Autobase created by the originator (key rides
     `wave-start` + the token). Writers are admitted via `add-writer` gated on a valid hop
-    receipt; `apply()` verifies every `wave-selfie` (and `burn-proof`) signature
-    deterministically on all peers. Selfies are captured during the **lobby** and staged;
-    the worker posts each one when the token reaches that peer, so the gallery fills in
-    ring order.
-- **`workers/lib/pay.js`** — the WDK payment layer (Tron **Nile testnet**, native TRX).
-  Self-custodial wallet per instance (seed at `<storage>/wallet.seed`), `send()` transfers,
-  `burn(amount, memo)` to Tron's black-hole address with an on-chain memo, and
-  `verifyBurnTx()` for the paid-wave gate. WDK is ESM-only; this CJS module bridges via
-  dynamic `import()`. Money features (all real on-chain):
+    receipt; `apply()` verifies every `wave-selfie` signature deterministically on all peers.
+    Selfies are captured during the **lobby** and staged; the worker posts each one when the
+    token reaches that peer, so the gallery fills in ring order.
+- **`workers/lib/pay.js`** + **`lib/fees.js`** — the WDK payment layer (Tron **Nile
+  testnet**, native TRX). Self-custodial wallet per instance (seed at `<storage>/wallet.seed`),
+  `send()` transfers, `burn(amount, memo)` to Tron's black-hole address with an on-chain memo,
+  and `verifyBurnTx()` for the paid-wave gate; `fees.js` is the fee flow shared by both engine
+  hosts. WDK is ESM-only; `pay.js` bridges via dynamic `import()`. The money model is simple —
+  **burned fees + tips, no sponsor rewards** (all real on-chain):
   - **Participation fees are burned** — the initiator (kick-off) and every joiner pay 1 TRX
     to the unspendable black hole; the burn tx carries `hyperwave:<waveId>:<peerId>` as an
-    on-chain memo and a ring-key-signed `burn-proof` goes into the gallery (see
-    `../docs/protocol.md` §Fees).
+    on-chain memo (see `../docs/protocol.md` §9). Nobody profits — the fee is pure skin in
+    the game / anti-spam.
   - **Paid-wave anti-spam gate** — a wave isn't announced until its kick-off burn exists
     on-chain; peers ignore unproven announces and verify the burn before joining.
-  - **Interlocked payout** — a validator walks the collected receipt chain
-    (`longestValidChain`) and pays a fixed reward to every hop whose successor continued
-    (the golden rule), each to its on-chain address.
-  - **Gallery tipping** — 💵 tip a selfie 1 TRX straight to its owner's wallet.
+  - **Gallery tipping** — 💵 tip a selfie 1 TRX straight to its owner's wallet. The only way
+    to actually make money.
 - **`workers/main.js`** — the template's OTA updater worker, left intact.
 
 **Roles:** a normal instance is a `peer`. Launch with `HYPERWAVE_ROLE=validator` to run a
 **validator/seed**: it retains every gallery (store not wiped) so galleries survive peers
-leaving, is pinned by everyone as a well-connected hub, collects `wave-proof` receipts +
-`burn-proof`s, and pays the interlocked rewards from its own (funded) wallet. It relays the
-ball but never kicks off, joins, or selfies.
+leaving, and is pinned by everyone as a well-connected replication hub. It relays the ball
+but never kicks off, joins, or selfies. (With sponsor rewards removed its job is purely
+archival; the `validator` name is kept for the role flag.)
 
 ### Worker → renderer messages
 
@@ -94,11 +92,6 @@ ball but never kicks off, joins, or selfies.
 { type: 'token', event: 'holding', waveId, hopCount, holder, angle, canSelfie }
 { type: 'token', event: 'position', waveId, hopCount, holder, angle }
 { type: 'token', event: 'forwarded' | 'healed' | 'stalled' | 'completed', ... }
-
-// validator events
-{ type: 'token', event: 'proof', waveId, hopCount, count }   // collected a hop receipt
-{ type: 'token', event: 'payout', waveId, hopCount, peerId, address, amount, hash }
-{ type: 'token', event: 'payout-done', waveId, paid, reward }
 
 // gallery (Autobase view) — on every change / replication
 { type: 'gallery', items: [ { waveId, peerId, hopCount, caption, image, address, ... } ] }
@@ -131,7 +124,7 @@ npm install    # postinstall normalizes dep engines ranges for Bare (scripts/fix
 npm start -- --storage /tmp/hyperwave/one
 npm start -- --storage /tmp/hyperwave/two
 
-# validator/seed (fund its wallet so it can pay rewards — see ../DEMO.md)
+# validator/seed (archives galleries so they survive peers leaving — see ../DEMO.md)
 HYPERWAVE_ROLE=validator npm start -- --storage /tmp/hyperwave/validator
 ```
 
@@ -158,15 +151,15 @@ npm test          # bare test.js — all suites, TAP output, non-zero on failure
 bare workers/lib/wave.logic.test.js          # ring: successor, liveness, pickReachable
 bare workers/lib/chord.test.js               # Chord math + distributed findSuccessor routing sim
 bare workers/lib/flood.test.js               # gossip-flood reach over synthetic partial meshes
-bare workers/lib/wave.token.test.js          # receipts, accumulator, burn attestation, golden rule
+bare workers/lib/wave.token.test.js          # receipts, accumulator, burn + wave-end attestations
 bare workers/lib/wave.gallery.test.js        # buildGallery ordering/dedup (+ tip address)
-bare workers/lib/wave.autobase.test.js       # real Autobase apply/view + receipt & burn gates
+bare workers/lib/wave.autobase.test.js       # real Autobase apply/view + receipt write-gate
 bare workers/lib/gallery.replication.test.js # transitive replication + seed persistence (line topology)
 bare workers/lib/pay.test.js                 # wallet derivation/persistence (offline)
 ```
 
 End-to-end (one wave per process — the real worker topology). `AUTOJOIN` opts in,
-`AUTOSELFIE` stages a fake selfie, `WALLET=1` brings up the wallet (fees/payout need funded
+`AUTOSELFIE` stages a fake selfie, `WALLET=1` brings up the wallet (fee burns need funded
 wallets), `HYPERWAVE_ROLE=validator` makes a seed:
 
 ```bash

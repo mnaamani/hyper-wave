@@ -41,7 +41,7 @@ test('empty input -> empty gallery', (t) => {
   t.alike(buildGallery([]), [])
 })
 
-test('preserves the payout address (for gallery tipping)', (t) => {
+test('preserves the wallet address (for gallery tipping)', (t) => {
   const entry = { ...e('w', 'a', 0, 10), address: 'TXYZ...ownerWallet' }
   t.is(buildGallery([entry])[0].address, 'TXYZ...ownerWallet', 'address rides through to the view')
 })

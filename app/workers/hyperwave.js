@@ -40,10 +40,10 @@ console.log(
   wave.me.angle.toFixed(1)
 )
 
-// Self-custodial WDK wallet (Tron testnet TRX) for fees / payout / tips. Async init
+// Self-custodial WDK wallet (Tron testnet TRX) for fee burns + gallery tips. Async init
 // (dynamic import of ESM WDK); emits `wallet` {address,trx} to the renderer on ready
-// and every 15s. Once up, it's wired into the engine via setWallet (address for
-// tips/attestations, on-chain burn verifier = paid-wave gate, reward sender = payout).
+// and every 15s. Once up, it's wired into the engine via wireWallet (address for
+// tips/attestations + the on-chain burn verifier = the paid-wave anti-spam gate).
 let payments = null
 let tBalance = null
 createPayments({ storageDir, log: (...a) => console.log('[wallet]', ...a) })

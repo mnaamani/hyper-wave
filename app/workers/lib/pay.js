@@ -1,5 +1,5 @@
-// Payment domain (final-idea.md WDK layer). A self-custodial Tron wallet per instance —
-// used for the join bond, interlocked payouts, and gallery tips. WDK is ESM-only, so this
+// Payment domain (WDK layer). A self-custodial Tron wallet per instance — used for the
+// burned participation fees and gallery tips (no sponsor rewards). WDK is ESM-only, so this
 // CJS module bridges to it via dynamic import(); it does real Tron Nile-testnet transfers
 // (the spike/wdk de-risk confirmed this runs under Bare). No swarm here — the worker
 // (hyperwave.js) / wave.js wire it in, mirroring ring/token/gallery as its own module.

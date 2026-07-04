@@ -123,7 +123,6 @@ propagated differently to match what each needs:
 | **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end` | every peer |
 | **One-hop broadcast** | `wave-pos`, `add-writer` | direct neighbours only |
 | **Neighbour-scoped** | `pointers` (the heartbeat) | pinned ring neighbours (O(k + log N)) |
-| **To validators** | `wave-proof` | each connected validator/seed |
 | **Unicast** | `token`, `wave-sync` | one specific peer |
 
 **Flood (epidemic broadcast).** The wave *lifecycle* messages must reach every seat, so they
@@ -248,7 +247,7 @@ The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries
 ### wave-announce — flooded (originator, on kick-off)
 ```json
 { "kind": "wave-announce", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>", "lobbyMs": 15000,
-  "paid": { /* kick-off burn-proof, §8.4 — present when the paid-wave gate is enforced */ } }
+  "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ } }
 ```
 Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`.
 
@@ -273,7 +272,7 @@ the initiator (which assembles the roster) even across a partial mesh.
 ```json
 { "kind": "wave-start", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
   "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>",
-  "paid": { /* kick-off burn-proof, §8.4 — present when the paid-wave gate is enforced */ } }
+  "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ } }
 ```
 Finalizes the roster and begins the race. `key` is the wave's gallery Autobase bootstrap
 key (§8). Receivers open the gallery and transition `lobby → racing`. When the paid-wave
@@ -326,18 +325,6 @@ holding neither can no longer force-terminate a live wave.
 Asks the gallery host to admit `key` as an Autobase writer, presenting a valid receipt
 (§8.2). Any current writer that verifies the receipt appends an `add-writer` op.
 
-### wave-proof — direct to connected validators/seeds (each hop)
-```json
-{ "kind": "wave-proof", "waveId": "<hex16>", "hopCount": 3, "peerId": "<peerId>",
-  "receiptSig": "<hex64>", "chainHash": "<hex32>", "receiptTs": 1719705612080, "address": "T…" }
-```
-Every holder pushes its hop receipt to each connected validator (`role: validator`) — so the
-validator collects the **whole ordered chain**, including relayers who never post a selfie
-(their receipt reaches it no other way). The validator verifies each receipt (§2.2) and keys
-it by `(waveId, hopCount)`; the reassembled chain drives the interlocked payout (final-idea).
-`address` is the sender's payout wallet. A validator that is itself a relay records its own
-hop directly. Not flooded — sent only to pinned seeds (which everyone pins, §4.6).
-
 ### wave-sync — DIRECT to a newly-connected peer (join-time state)
 ```json
 { "kind": "wave-sync", "waveId": "<hex16>", "phase": "lobby" | "racing",
@@ -345,7 +332,7 @@ hop directly. Not flooded — sent only to pinned seeds (which everyone pins, §
   "lobbyMsLeft": 8000 }
 ```
 Lets a peer joining mid-wave sync (§7.4). When the paid-wave gate is enforced, a `wave-sync`
-must carry the kick-off `paid` proof (§8.4) **for either phase** — including `racing` — and is
+must carry the kick-off `paid` proof (§9.0) **for either phase** — including `racing` — and is
 adopted only if it verifies (§11), so a fabricated racing sync can't push a newcomer into a
 bogus wave. (`paid` is omitted from the schema line above for brevity.)
 
@@ -533,8 +520,6 @@ admit a new one. Membership + content are gated by receipts:
   - `{ type: 'wave-selfie', ... }` → append to the view **only if** its `receiptSig`
     verifies (Ed25519) for `(waveId, hopCount, chainHash, receiptTs)` by `peerId`.
     Invalid/unsigned/impersonated entries are dropped identically everywhere.
-  - `{ type: 'burn-proof', ... }` → append **only if** its `sig` verifies (Ed25519) by
-    `peerId` over the burn tuple (§8.4). Same gate, dedicated signature.
 
 ```mermaid
 sequenceDiagram
@@ -571,56 +556,30 @@ viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → 
 `pay.send(address, amount)`; §WDK). Ordering (`buildGallery`): one entry per `(waveId,
 peerId)` (newest `timestamp` wins), sorted by `hopCount` then `timestamp`.
 
-### 8.4 `burn-proof` op (participation-fee attestation)
+## 9. Participation fees — burning & verification
+
+The money layer is deliberately minimal: **burned fees** (anti-spam / skin in the game) and
+**gallery tips** (§8.3). There are **no sponsor rewards** — nothing pays participants for
+racing, so there's no reward ledger, no proof-collection, and no chain-walk to arbitrate.
+(Wire details: the paid-wave gate on `wave-announce`/`wave-start`/`wave-sync` §5, §11.)
+
+### 9.0 Kick-off burn-proof attestation
+The initiator's kick-off burn is attested by a signed proof, carried as the `paid` field on
+`wave-announce` / `wave-start` / `wave-sync` (it is **not** an on-wire gallery entry):
 ```json
-{ "type": "burn-proof", "waveId": "<hex16>", "peerId": "<peerId>",
-  "reason": "kickoff" | "join", "amount": 1, "txHash": "<tron-tx-hash>",
-  "tronAddress": "T…", "burnTs": 1719705612080, "sig": "<hex128>" }
+{ "waveId": "<hex16>", "peerId": "<peerId>", "reason": "kickoff", "amount": 1,
+  "txHash": "<tron-tx-hash>", "tronAddress": "T…", "burnTs": 1719705612080, "sig": "<hex128>" }
 ```
-Proves the peer **burned** its participation fee *for this wave*. Two independent bindings
-make this verifiable (the Tron key that signs the burn is a different keypair from the ring
-identity, so both are needed):
+Two independent bindings make it verifiable (the Tron key that signs the burn is a different
+keypair from the ring identity, so both are needed):
 1. **On-chain memo.** The burn tx carries `data = "hyperwave:<waveId>:<peerId>"` (readable via
    `gettransactionbyid`). The burn *itself names the wave* — a third party can confirm it
    from-chain, and it can't be an old burn replayed for another wave (each carries its own
    random `waveId`, unguessable in advance).
 2. **Ring attestation.** `sig` = Ed25519 by `peerId` over
    `(waveId, peerId, reason, amount, txHash, tronAddress, burnTs)` — binds the ring
-   participant to the on-chain tx + payout address. `apply()` admits the op only if `sig`
-   verifies (§8.2).
-
-A **validator** reading these (`readBurns`) still cross-checks each `txHash` on-chain:
-`to == ` the black hole `T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb`, `amount ≥ fee`, memo commits
-`waveId`, confirmed in a block, and each `txHash` claimed once (dedup). A peer posts its
-burn-proof once it holds the token (has a receipt → can be admitted as a writer), so a
-join-fee payer surfaces its proof even if it never posts a selfie.
-
-### 8.5 Interlocked payout (validator, off-wire)
-When a wave ends, the **validator** rewards participants from its own budget (a *sponsor*
-spend, never a split pot). It's the consumer of the collected `wave-proof` receipts:
-
-1. **Reassemble + verify the chain** (`longestValidChain`): sort the hop receipts, walk from
-   hop 0, and for each hop verify (a) its `receiptSig` signs the accumulator it carries and
-   (b) the accumulator links to the previous hop (`chainHash₍ₙ₊₁₎ == advanceChain(chainHashₙ,
-   receiptSigₙ)`). The walk **stops at the first broken/forged/missing link** — so a
-   self-signed receipt for a hop never held, a gap, or a tampered link can't extend the chain.
-   Result: the longest *cryptographically valid* prefix.
-2. **The golden rule** (`payableFromChain`): peer N is paid only if peer **N+1 continued** —
-   i.e. N+1 is in the valid chain. Every hop but the last qualifies; the **last** hop
-   qualifies only if the wave **completed** (the token returned to the originator, `wave-end`
-   with `hops == ` the last hop), which proves the last hop forwarded onward too. On a
-   stall/break this is the longest valid **prefix** (the peer at the break isn't paid — its
-   continuation is unproven).
-3. **Pay** a fixed `REWARD_TRX` to each payable hop's on-chain `address`, once per wave; the
-   validator skips its **own** hop (it relays the ball but sponsors, it doesn't reward
-   itself). Emits `payout` / `payout-done`.
-
-The chain-walk is pure (`token.js`, unit-tested); only the transfers touch the chain.
-
-## 9. Participation fees — burning & verification
-
-The money layer's anti-spam mechanism, consolidated. (Wire/message details: the paid-wave
-gate on `wave-announce` §5, the `burn-proof` gallery op §8.4, the payout §8.5.)
+   participant to the on-chain tx. `validKickoff` admits the proof only if `sig` verifies,
+   and a peer then cross-checks the `txHash` on-chain before joining (§9.2).
 
 ### 9.1 The mechanism: fees are burned, not paid
 
@@ -641,36 +600,30 @@ level.) Spamming waves or Sybil-joining costs real, irrecoverable value.
 
 ### 9.2 Binding a burn to its wave and its peer
 
-A raw burn tx only proves "someone sent TRX to the black hole." Two independent bindings
-make it *"ring peer P burned specifically for wave W"* — two are needed because the Tron
-key that signs the tx is a **different keypair** from the peer's Ed25519 ring identity:
+A raw burn tx only proves "someone sent TRX to the black hole." The **on-chain memo** makes
+it *"peer P burned specifically for wave W"*: every fee burn carries
+`data = "hyperwave:<waveId>:<peerId>"`, readable via `gettransactionbyid`. Replay across
+waves is impossible — each `waveId` is 16 random bytes, unguessable before the wave exists,
+and the memo is part of the signed tx.
 
-1. **On-chain memo (burn ↔ wave, third-party auditable).** The burn tx carries
-   `data = "hyperwave:<waveId>:<peerId>"`. Anyone can read it back via
-   `gettransactionbyid` — the burn *names the wave on-chain*. Replay across waves is
-   impossible: each `waveId` is 16 random bytes, unguessable before the wave exists, and
-   the memo is part of the signed tx.
-2. **Ring attestation (burn ↔ ring identity).** The peer signs, with its **ring** Ed25519
-   key, the tuple `(waveId, peerId, reason, amount, txHash, tronAddress, burnTs)` and
-   publishes it as a `burn-proof` op in the wave's gallery (§8.4). `apply()` admits it only
-   if the signature verifies — binding the ring participant to that specific tx and payout
-   address.
+For the **kick-off** fee (the only fee anyone else needs to verify) a second binding ties the
+burn to the ring identity, since the Tron key that signs the tx is a **different keypair**
+from the peer's Ed25519 ring identity: the initiator signs the attestation of §9.0 with its
+ring key and carries it as the `paid` proof. The join fee needs no attestation — it's the
+joiner's own anti-spam cost, with no reward or ledger that would require anyone to check it.
 
 ### 9.3 Verification (who checks what, when)
 
 - **Before joining (every peer):** a `wave-announce` must carry the initiator's kick-off
-  `burn-proof`, validly signed — otherwise the announce is **ignored** (an unpaid wave is
-  invisible). Before a peer joins (and pays its own fee), it verifies the kick-off burn
+  attestation (§9.0), validly signed — otherwise the announce is **ignored** (an unpaid wave
+  is invisible). Before a peer joins (and pays its own fee), it verifies the kick-off burn
   **on-chain** — `verifyBurnTx`: the tx exists, is a `TransferContract` **to the black
-  hole**, from the attested address, `amount ≥ fee`, and the **memo commits this
-  `waveId`**. `join()` is refused until this passes, so no peer ever pays into a wave the
-  initiator hasn't paid for. The initiator, symmetrically, does not announce until its own
-  burn is readable on-chain.
-- **At payout (the validator):** re-verifies each `burn-proof` the same way, plus dedup
-  (each `txHash` creditable once).
-- **Anyone, later:** because the memo is on-chain and the `burn-proof` is in the replicated
-  gallery, a third party can audit every fee of every wave with nothing but a Tron node —
-  no trust in the validator's bookkeeping required.
+  hole**, from the attested address, `amount ≥ fee`, and the **memo commits this `waveId`**.
+  `join()` is refused until this passes, so no peer ever pays into a wave the initiator
+  hasn't paid for. The initiator, symmetrically, does not announce until its own burn is
+  readable on-chain.
+- **Anyone, later:** because every fee's memo is on-chain, a third party can audit the fees
+  of any wave with nothing but a Tron node — no trust in anyone's bookkeeping required.
 
 Enforcement is active whenever an instance has a wallet; walletless test/headless runs skip
 the gate (waves announce immediately, unpaid).
@@ -701,7 +654,9 @@ same ballpark for interop but exact values aren't required to match.
   receipts.
 - The **gallery write-gate** is authenticity, not proof-of-participation (§8.2). A malicious
   fork can drop/ignore anything locally (open P2P); the protocol keeps *honest* peers
-  consistent. A real reward system needs a validator arbitrating the token chain.
+  consistent. There are **no sponsor rewards**, so there is nothing to steal by faking
+  participation — the only money flows are burned fees (nobody profits) and voluntary tips
+  (paid directly, peer to peer). This removes the whole class of reward-gaming attacks.
 - Country is cosmetic and self-reported.
 
 ### 11.2 Adversarial hardening (against a modified client)
@@ -710,13 +665,12 @@ application logic must actually **use** that rather than trust self-reported fie
 following guards keep a hostile peer running a modified app from disrupting honest peers:
 
 - **Identity binding.** For a message that describes its own sender — `pointers.id`,
-  `wave-pos.holder`, `token.senderPeerId`, `add-writer.peerId`, `wave-proof.peerId` — the
-  claimed id must equal the authenticated connection id it arrived on, else it's dropped
-  (before any signature work). This blocks peer-map/ring pollution under spoofed ids, and
-  it means a peer can only push a `wave-proof` for **its own** key, so stuffing a validator
-  with hop receipts for keys the attacker doesn't hold requires a separate real connection
-  per key. Flooded `wave-*` fields (`by`, roster ids) are third-party at relay hops and are
-  instead authenticated by the signatures they carry (kick-off burn-proof, receipts).
+  `wave-pos.holder`, `token.senderPeerId`, `add-writer.peerId` — the claimed id must equal the
+  authenticated connection id it arrived on, else it's dropped (before any signature work).
+  This blocks peer-map/ring pollution under spoofed ids and stops a peer from requesting
+  gallery admission under a key it doesn't hold. Flooded `wave-*` fields (`by`, roster ids)
+  are third-party at relay hops and are instead authenticated by the signatures they carry
+  (kick-off attestation, receipts).
 - **Authenticated lifecycle termination.** `wave-end` is flooded (forgeable by any relay), so
   it is honoured only with proof: a **completion** carries the originator's Ed25519 signature
   over `(waveId, hops, chainHash)`; a **stall** carries the staller's own hop receipt. An
@@ -735,15 +689,6 @@ following guards keep a hostile peer running a modified app from disrupting hone
   checks before the Ed25519 verify (§6), limiting the CPU a token flood can extract.
 
 ### 11.3 Known residual risks (hardening backlog)
-- **Payout anchoring / sybil economics.** The validator currently collects any signature-valid
-  `wave-proof` and pays the on-chain addresses in the longest valid chain; it does **not** yet
-  require each paid hop to have an on-chain-verified join burn for that wave, and `REWARD_TRX`
-  (2) exceeds `FEE_TRX` (1). An attacker able to occupy multiple hops (e.g. a fully-fabricated
-  chain of offline-generated keys) could extract a net reward. Planned mitigation: pay only
-  waves whose kick-off burn the validator verified on-chain, require a verified join burn per
-  paid hop, set reward ≤ fee (or a fixed sponsor budget with a global cap), and never trust
-  gossiped completion fields for the last-hop decision. Until then, run payouts only with a
-  **trusted validator** and testnet funds (the MVP assumption).
 - **No per-connection rate limiting.** Gossip has flood-dedup, `seen`/`MAX_HOPS` caps, and the
   cheap-before-verify ordering, but not yet a per-peer message budget; a peer can still spend a
   connection's bandwidth/CPU. Planned: per-connection token buckets per message kind, plus size
@@ -778,7 +723,4 @@ announcing), `wave-verified` (kick-off burn proven — join is now allowed), `wa
 (kick-off failed verification — wave abandoned), `join-blocked {reason}` (tried to join
 before the kick-off is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
-`position`, `forwarded`, `completed`, `healed`, `stalled`,
-`proof {waveId,hopCount,count}` (validator collected a hop receipt),
-`payout {hopCount,peerId,address,amount,hash}` + `payout-done {paid,reward}` (validator paid
-an interlocked reward), `gallery-error`.
+`position`, `forwarded`, `completed`, `healed`, `stalled`, `gallery-error`.

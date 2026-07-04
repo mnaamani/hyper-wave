@@ -36,29 +36,26 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] Gallery over a partial mesh: transitive replication proven (line topology, no swarm);
       **validator/seed role** retains every gallery + is pinned as a hub (persistence)
 
-### Payment layer (WDK, Tron Nile testnet, native TRX) — functionally complete
+### Payment layer (WDK, Tron Nile testnet, native TRX) — burned fees + tips, no rewards
 - [x] Self-custodial wallet per instance (`pay.js`; seed persists at `<storage>/wallet.seed`);
       💰 chip in the renderer. WDK is ESM-only → CJS worker bridges via dynamic `import()`
-- [x] Gallery tipping: `wave-selfie` carries the poster's address; 💵 Tip → real transfer
-- [x] `wave-proof` receipt collection: every holder pushes its hop receipt to connected
-      validators; `chainProofs(waveId)` = the ordered chain (relayers included)
+- [x] Gallery tipping: `wave-selfie` carries the poster's address; 💵 Tip → real transfer.
+      **The only way to make money** — there are no sponsor rewards.
 - [x] Participation fees **burned** to Tron's black hole (kick-off + join, 1 TRX each) —
-      skin in the game with no beneficiary
-- [x] Provable burns: on-chain memo `hyperwave:<waveId>:<peerId>` + ring-key `burn-proof`
-      attestation in the gallery (protocol.md §9)
-- [x] Paid-wave anti-spam gate: no announce until the kick-off burn is on-chain; peers
-      ignore unproven announces and verify the burn before joining/paying
-- [x] Interlocked payout: validator walks `longestValidChain`, pays the golden rule
-      (`payableFromChain` — longest valid prefix; last hop only on completion) to each
-      hop's on-chain address; verified with real transfers on Nile
+      skin in the game with no beneficiary; on-chain memo `hyperwave:<waveId>:<peerId>`
+- [x] Paid-wave anti-spam gate: no announce until the kick-off burn is on-chain (carried as
+      the signed `paid` proof); peers ignore unproven announces and verify before joining
+- [x] **Sponsor rewards removed** (simplification): dropped the interlocked payout, the
+      `wave-proof` receipt collection, the golden-rule chain-walk (`longestValidChain` /
+      `payableFromChain`), and the gallery `burn-proof` op. The validator role is now purely
+      a gallery archivist. Kills the sybil-payout risk class outright (nothing to steal).
 - [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
       semver can't parse (`scripts/fix-bare-engines.js`)
 
 ### Adversarial hardening (against a modified client) — `docs/protocol.md` §11.2
 - [x] Identity binding: a self-describing gossip field (`pointers.id`, `wave-pos.holder`,
-      `token.senderPeerId`, `add-writer.peerId`, `wave-proof.peerId`) must match the
-      authenticated connection id — blocks ring pollution, heal suppression, and cross-key
-      `wave-proof` stuffing
+      `token.senderPeerId`, `add-writer.peerId`) must match the authenticated connection id
+      — blocks ring pollution, heal suppression, and admission under a key you don't hold
 - [x] Authenticated `wave-end`: completion signed by the originator (`signWaveEnd`), stall
       carries the staller's hop receipt — an outsider can't force-terminate a live wave
 - [x] Paid-gate on every adoption path (`wave-announce`/`wave-start`/`wave-sync`, incl. a
@@ -71,15 +68,10 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 ### Propagation at extreme scale (Phase 5 — decision deferred)
 Serial token is O(N·dwell) — hours at N=10k. The designed alternative is the
 **deterministic angular sweep** (each peer self-triggers from `(startTime, speed)`;
-independent proofs; pairs with fixed-per-participant payout). Decision deliberately
-parked — the serial interlocked token is the product for now (small/medium waves).
-See `docs/scalable-topology.md` §3B/§8.
+independent per-seat proofs). Decision deliberately parked — the serial token is the product
+for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Adversarial hardening still open (`docs/protocol.md` §11.3)
-- [ ] **Payout anchoring / sybil economics** (deferred — needs a reward-vs-fee decision):
-      validator should pay only waves whose kick-off burn it verified on-chain, require a
-      verified join burn per paid hop, set reward ≤ fee (or a global sponsor-budget cap), and
-      never trust gossiped completion fields. Until then: trusted validator + testnet only.
 - [ ] Per-connection rate limiting (token buckets per message kind) + size caps on gallery
       entries (inline image bytes) + bounds on auxiliary maps (`seen`/`endedWaves`/`routed`/
       `lookupRoute`/`goneUntil`)
@@ -97,11 +89,9 @@ See `docs/scalable-topology.md` §3B/§8.
 
 ### Demo polish / wow factor
 - [ ] World map with flags lighting up as selfies arrive (final-idea wow factor)
-- [ ] Validator log panel in the GUI (proofs collected, chain walk, payouts)
 - [ ] "Past waves" browser (validator retains galleries; peers could browse them)
-- [ ] Nicer payout UX for participants (a "you earned 2 TRX" toast — today only the
-      validator sees payout events; participants just see their balance change)
+- [ ] Tipping UX polish (a "you were tipped" toast for the recipient)
 
 ### Housekeeping
 - [ ] Surface `wave-unpaid` / `join-blocked` more visibly in the UI (currently status line)
-- [ ] Configurable fee/reward amounts (constants in `hyperwave.js` / `wave.js`)
+- [ ] Configurable fee/tip amounts (constants in `fees.js` / renderer)

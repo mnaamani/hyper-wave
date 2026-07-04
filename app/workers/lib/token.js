@@ -56,8 +56,9 @@ function advanceChain(prevChainHash, receiptSigHex) {
 // Bridges the peer's RING identity (Ed25519) to its on-chain burn: the peer signs, with
 // its ring key, a statement binding (waveId, peerId, reason, amount, txHash, tronAddress).
 // The Tron key that signed the burn is a *different* keypair, so this ring-key signature is
-// what ties the burn to the ring participant. The validator also cross-checks txHash on the
-// chain (to==black hole, amount, memo commits waveId) — see final-idea.md payment layer.
+// what ties the burn to the ring participant. Used for the paid-wave anti-spam gate: the
+// initiator's kick-off proof rides `wave-announce`, and peers cross-check its txHash on-chain
+// (to==black hole, amount, memo commits waveId) before joining. (§ protocol.md §9)
 function burnHash({ waveId, peerId, reason, amount, txHash, tronAddress, burnTs }) {
   return crypto.hash(
     b4a.from(`${waveId}|${peerId}|${reason}|${amount}|${txHash}|${tronAddress}|${burnTs}`)
@@ -69,8 +70,8 @@ function signBurn(keyPair, fields) {
 }
 
 // Verify a burn attestation is a valid Ed25519 signature by `fields.peerId` over the tuple.
-// Only the burnHash fields are read — callers may pass a whole burn-proof op (extra keys
-// like `sig`/`type` are ignored).
+// Only the burnHash fields are read — callers may pass a whole proof object (an extra `sig`
+// key is ignored).
 function verifyBurn(fields, sigHex) {
   try {
     return crypto.verify(burnHash(fields), b4a.from(sigHex, 'hex'), b4a.from(fields.peerId, 'hex'))
@@ -82,8 +83,8 @@ function verifyBurn(fields, sigHex) {
 // --- wave-end completion attestation ---------------------------------------
 // A completed wave is announced by its ORIGINATOR flooding a `wave-end`. Because a flood
 // message can be forged by any peer, the originator signs the completion with its ring key
-// so receivers (and the validator's payout) can't be tricked into ending/paying a wave that
-// didn't really finish. Binds (waveId, hops, chainHash) to the originator identity.
+// so receivers can't be tricked into ending a wave that didn't really finish. Binds
+// (waveId, hops, chainHash) to the originator identity.
 function waveEndHash(waveId, hops, chainHash) {
   return crypto.hash(b4a.from(`wave-end|${waveId}|${hops}|${chainHash}`))
 }
@@ -105,40 +106,6 @@ function verifyWaveEnd(originatorHex, waveId, hops, chainHash, sigHex) {
   }
 }
 
-// --- interlocked payout (final-idea.md the golden rule) --------------------
-// The validator reassembles the hop receipts it collected (§wave-proof) and walks them
-// from hop 0, verifying the CHAIN: each hop's receipt must sign the accumulator it carries,
-// and the next hop's accumulator must be advanceChain(prev, prevReceiptSig). The walk stops
-// at the first broken/forged/missing link — so a self-signed receipt for a hop the peer
-// never held (or a gap) can't extend the chain. Returns the longest valid prefix (in order).
-function longestValidChain(proofs, waveId) {
-  const sorted = [...proofs].sort((a, b) => a.hopCount - b.hopCount)
-  const valid = []
-  let expectedHop = 0
-  let expectedChainHash = ZERO_HASH
-  for (const p of sorted) {
-    if (p.hopCount !== expectedHop) break // gap — not contiguous from 0
-    if (p.chainHash !== expectedChainHash) break // accumulator doesn't link to the prev hop
-    if (!verifyReceipt(p.peerId, waveId, p.hopCount, p.chainHash, p.receiptTs, p.receiptSig)) break
-    valid.push(p)
-    expectedChainHash = advanceChain(p.chainHash, p.receiptSig)
-    expectedHop++
-  }
-  return valid
-}
-
-// The golden rule: peer N is paid only when peer N+1 continued the wave. So within the
-// valid chain, every hop except the last has a proven successor and is payable; the LAST
-// hop is payable only if the wave completed (the token returned to the originator, proving
-// that hop forwarded onward too). On a break/stall, this is the longest valid *prefix*.
-function payableFromChain(validChain, { completed = false, completedHops = -1 } = {}) {
-  if (validChain.length === 0) return []
-  const payable = validChain.slice(0, -1) // all but the last: successor proves them
-  const last = validChain[validChain.length - 1]
-  if (completed && completedHops === last.hopCount) payable.push(last)
-  return payable
-}
-
 module.exports = {
   ZERO_HASH,
   receiptHash,
@@ -150,7 +117,5 @@ module.exports = {
   signBurn,
   verifyBurn,
   signWaveEnd,
-  verifyWaveEnd,
-  longestValidChain,
-  payableFromChain
+  verifyWaveEnd
 }

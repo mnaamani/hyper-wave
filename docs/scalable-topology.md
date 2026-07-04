@@ -46,12 +46,12 @@ peer *independently* computes when the wave reaches its seat
 regardless of N — O(1) per peer, no serial passing.
 
 Trade-off: the deterministic sweep drops the **interlocked receipt chain** (each receipt
-depends on the predecessor's), because there's no serial hand-off. That's compatible with
-the **fixed-per-participant** payment model (validator pays each valid, independently-signed
-proof) rather than the interlocked-chain model — see `ideas/final-idea.md`. **Decision to
-make when we get there:** keep the serial token (interlocked chain, small/medium waves) vs.
-adopt the deterministic sweep (instant at any N, independent proofs). We can support both:
-serial for intimate waves, sweep for stadium/global moments.
+depends on the predecessor's), because there's no serial hand-off. With sponsor rewards
+removed this no longer affects payments (there are none) — the receipt chain now only backs
+the token mechanic and the gallery write-gate, both of which the sweep would replace with
+independent per-seat proofs. **Decision to make when we get there:** keep the serial token
+(small/medium waves) vs. adopt the deterministic sweep (instant at any N). We can support
+both: serial for intimate waves, sweep for stadium/global moments.
 
 **Status:** decided (keep serial for small, sweep for global) but the sweep is **not built**
 — the serial token remains the only propagation model, so a genuinely large wave is still
@@ -154,8 +154,7 @@ serving them after participants disconnect. It advertises `role` in its `pointer
 seed (`seedPeers`) so it's a **well-connected** replication hub. A seed never selfies or starts
 waves — it relays like any peer and archives. Verified in `gallery.replication.test.js`: a
 latecomer connected *only* to the seed gets the full gallery after the originator has left.
-(This is the same instance the payment layer's Sponsor Validator will attach to; see
-`ideas/final-idea.md`. Convergence *lag* at large depth remains unmeasured.)
+(Convergence *lag* at large depth remains unmeasured.)
 
 ## 5. Migration behind the seam
 

@@ -1,10 +1,11 @@
 // HyperWave orchestrator. Wires the transport (Hyperswarm + Protomux gossip) to the
 // pure domains — ring geometry (ring.js), Chord topology (chord.js), flood dedup
-// (flood.js), token/payout crypto (token.js), and the selfie gallery (gallery.js).
+// (flood.js), token crypto (token.js), and the selfie gallery (gallery.js).
 // The payment layer (pay.js, WDK) is injected by the worker via setWallet(): wallet
-// address, on-chain burn verifier (paid-wave gate), and the reward sender (validator
-// payout). Runs under Bare (the worker) or a Node harness. The Bare worker
-// (hyperwave.js) bridges this to the renderer; wave.run.js drives it headlessly.
+// address (for gallery tips) + the on-chain burn verifier (the paid-wave anti-spam gate).
+// Money model: burned fees (skin in the game) + gallery tips; there are no sponsor rewards.
+// Runs under Bare (the worker) or a Node harness. The Bare worker (hyperwave.js) bridges
+// this to the renderer; wave.run.js drives it headlessly.
 
 const Hyperswarm = require('hyperswarm')
 const Corestore = require('corestore')
@@ -36,11 +37,9 @@ const {
   signBurn,
   verifyBurn,
   signWaveEnd,
-  verifyWaveEnd,
-  longestValidChain,
-  payableFromChain
+  verifyWaveEnd
 } = require('./token')
-const { galleryConfig, readGallery, readBurns } = require('./gallery')
+const { galleryConfig, readGallery } = require('./gallery')
 
 const MATCH = 'hyperwave:demo-match:v1'
 const HEARTBEAT_MS = 2000 // pointers-heartbeat cadence (liveness + Chord pointer exchange)
@@ -81,8 +80,7 @@ const SELF_ID_FIELD = {
   pointers: 'id', // the heartbeat sender
   'wave-pos': 'holder', // whoever currently holds the ball (broadcast by the holder)
   token: 'senderPeerId', // the immediate forwarder (re-stamped every hop)
-  'add-writer': 'peerId', // the writer-admission requester
-  'wave-proof': 'peerId' // the hop whose receipt is being pushed to a validator
+  'add-writer': 'peerId' // the writer-admission requester
 }
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
@@ -100,12 +98,6 @@ const BOOTSTRAP_MS = 1500
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000
-// Interlocked payout (validator only, final-idea.md the golden rule): fixed reward per valid
-// participant, a budget cap on how many to pay per wave, and a settle delay after completion
-// so late-arriving hop proofs are collected before the validator walks the chain.
-const REWARD_TRX = 2
-const PAYOUT_MAX = 200
-const PAYOUT_DELAY_MS = 4000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -165,8 +157,6 @@ function createWave({
   let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
-  let payReward = null // (validator) send a reward to an address (validator's wallet)
-  const paidOutWaves = new Set() // validator: waves already paid out (pay exactly once)
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -184,8 +174,7 @@ function createWave({
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
   let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
   const galleries = new Map() // waveId -> base: a seed retains every gallery it opens
-  const seedPeers = new Set() // ids advertising role=validator — pin them (well-connected seed)
-  const proofs = new Map() // (validator) waveId -> Map(hopCount -> proof): collected hop receipts
+  const seedPeers = new Set() // ids advertising role=validator/seed — pin them (well-connected seed)
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
   // concurrent starts resolve deterministically (lower waveId wins). During the
@@ -204,9 +193,7 @@ function createWave({
   let stagedSelfie = null // { image, caption } captured in the lobby, awaiting my hop
   let myReceipt = null // my hop's receipt once the token reaches me, awaiting the selfie
   let selfiePosted = false // guard: post my selfie exactly once per wave
-  let pendingBurn = null // signed burn-proof attestation, awaiting a gallery write (my hop)
-  let burnPosted = false // guard: post my burn-proof exactly once per wave
-  let admissionPromise = null // in-flight add-writer request (shared by concurrent posters)
+  let admissionPromise = null // in-flight add-writer request (dedup concurrent callers)
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -448,17 +435,6 @@ function createWave({
         m.waveId === currentWaveId &&
         verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
       if (ok) base.append({ type: 'add-writer', key: m.key })
-      return
-    }
-    if (m.kind === 'wave-proof') {
-      // Only a validator collects proofs; each must carry a receipt validly self-signed
-      // for its hop (authenticity gate — apply()/payout re-checks the chain links too).
-      if (
-        isSeed &&
-        verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
-      ) {
-        collectProof(m)
-      }
       return
     }
     if (m.kind !== 'pointers') return
@@ -707,78 +683,6 @@ function createWave({
     return b
   }
 
-  // (validator) Record a verified hop receipt, keyed by wave then hop. The chain is
-  // reassembled in hop order at payout time (step 6); collecting relayers' proofs — not
-  // just selfie-takers' — is what lets the validator know the whole participation chain.
-  function collectProof(m) {
-    let byHop = proofs.get(m.waveId)
-    if (!byHop) proofs.set(m.waveId, (byHop = new Map()))
-    if (byHop.has(m.hopCount)) return // first proof per hop wins
-    byHop.set(m.hopCount, {
-      hopCount: m.hopCount,
-      peerId: m.peerId,
-      receiptSig: m.receiptSig,
-      chainHash: m.chainHash,
-      receiptTs: m.receiptTs,
-      address: m.address || ''
-    })
-    log('proof: wave', shortId(m.waveId), 'hop', m.hopCount, 'from', shortId(m.peerId))
-    onToken({ event: 'proof', waveId: m.waveId, hopCount: m.hopCount, count: byHop.size })
-  }
-
-  // Collected hop receipts for a wave, ordered by hop (contiguous from 0). For the
-  // interlocked payout (step 6) to walk and cross-check the chain.
-  function chainProofs(waveId) {
-    const byHop = proofs.get(waveId)
-    if (!byHop) return []
-    return [...byHop.values()].sort((a, b) => a.hopCount - b.hopCount)
-  }
-
-  // (validator) The verified burn-proofs (participation-fee attestations) for a wave, read
-  // from that wave's gallery. Sig-valid by construction (apply gate); the validator still
-  // cross-checks each txHash on-chain (to==black hole, amount, memo commits waveId).
-  async function chainBurns(waveId) {
-    const g = galleries.get(waveId)
-    if (!g) return []
-    await g.update().catch(() => {})
-    return readBurns(g)
-  }
-
-  // Interlocked payout (validator only, final-idea.md the golden rule). After a wave ends,
-  // walk the collected hop receipts into the longest VALID chain (each link cryptographically
-  // verified), pay a fixed reward to each hop whose successor continued (the last hop only if
-  // the wave completed back to the originator), each to its own on-chain address. Exactly
-  // once per wave; the reward is a budgeted sponsor spend, never a split pot.
-  async function runPayout(waveId, { stalled, hops }) {
-    if (!payReward || paidOutWaves.has(waveId)) return
-    paidOutWaves.add(waveId)
-    const chain = longestValidChain(chainProofs(waveId), waveId)
-    const payable = payableFromChain(chain, { completed: !stalled, completedHops: hops })
-    onToken({ event: 'payout-start', waveId, participants: chain.length, paying: payable.length })
-    let paid = 0
-    for (const hop of payable) {
-      // the validator relays the ball too, but it's the sponsor — it never rewards itself
-      if (hop.peerId === me.id || !hop.address || paid >= PAYOUT_MAX) continue
-      try {
-        const { hash } = await payReward(hop.address, REWARD_TRX)
-        paid++
-        log('paid', REWARD_TRX, 'TRX -> hop', hop.hopCount, shortId(hop.peerId), 'tx', hash)
-        onToken({
-          event: 'payout',
-          waveId,
-          hopCount: hop.hopCount,
-          peerId: hop.peerId,
-          address: hop.address,
-          amount: REWARD_TRX,
-          hash
-        })
-      } catch (e) {
-        onToken({ event: 'payout-error', waveId, hopCount: hop.hopCount, error: e.message })
-      }
-    }
-    onToken({ event: 'payout-done', waveId, paid, reward: REWARD_TRX })
-  }
-
   async function emitGallery() {
     if (!base) return
     onGallery(await readGallery(base))
@@ -786,8 +690,7 @@ function createWave({
 
   // Become an admitted gallery writer: broadcast an add-writer request presenting my
   // receipt for this wave (the anti-spam gate — the host admits my writer core), then wait
-  // until writable. Shared by the selfie and burn-proof posters — concurrent callers reuse a
-  // single in-flight request (`admissionPromise`) instead of racing two broadcasts + waits.
+  // until writable. `admissionPromise` dedups concurrent callers into one in-flight request.
   function ensureWriter(receipt) {
     if (!base) return Promise.resolve(false)
     if (base.writable) return Promise.resolve(true)
@@ -848,12 +751,12 @@ function createWave({
     emitGallery()
   }
 
-  // The worker reports a successful burn (kick-off/join fee). Build + sign the burn-proof
-  // attestation NOW (ring key binds my identity to the on-chain tx), stash it, and post it
-  // to the gallery once I hold the token (become an admitted writer). Fires flushBurnProof
-  // in case the receipt already arrived (e.g. the initiator burns at/after hop 0).
+  // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
+  // identity to the on-chain tx) and return it, so the initiator can attach its KICK-OFF
+  // proof to the wave-announce (the paid-wave gate, announcePaid). Join burns need no
+  // attestation now that there's no payout ledger — the burn itself is the anti-spam cost.
   function recordBurn({ reason, amount, txHash }) {
-    if (!wave || burnPosted) return null
+    if (!wave) return null
     const fields = {
       waveId: wave.id,
       peerId: me.id,
@@ -863,24 +766,7 @@ function createWave({
       tronAddress: walletAddress || '',
       burnTs: Date.now()
     }
-    pendingBurn = { type: 'burn-proof', ...fields, sig: signBurn(swarm.keyPair, fields) }
-    flushBurnProof()
-    return pendingBurn // so the initiator can attach it to the wave-announce (announcePaid)
-  }
-
-  // Post my stashed burn-proof once I have a receipt for this wave (so I can be admitted as
-  // a writer). Works for non-selfie participants too — a relayer that paid the join fee.
-  async function flushBurnProof() {
-    if (burnPosted || !pendingBurn || !myReceipt || !base) return
-    if (pendingBurn.waveId !== myReceipt.waveId) return
-    burnPosted = true
-    const proof = pendingBurn
-    if (!(await ensureWriter(myReceipt))) {
-      burnPosted = false // let a later attempt retry
-      return
-    }
-    await base.append(proof)
-    log('posted burn-proof', proof.reason, shortId(proof.txHash))
+    return { ...fields, sig: signBurn(swarm.keyPair, fields) }
   }
 
   function waitFor(pred, timeoutMs) {
@@ -998,12 +884,6 @@ function createWave({
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
     if (stalled) onToken({ event: 'stalled', waveId, reason: 'no successor' })
     else onToken({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
-    // validator: pay out the interlocked reward after a short settle (so late hop proofs
-    // land first). goIdle clears the current wave but the payout reads the retained gallery
-    // + collected proofs by waveId, so it's unaffected.
-    if (isSeed && payReward) {
-      setTimeout(() => runPayout(waveId, { stalled, hops }).catch(() => {}), PAYOUT_DELAY_MS)
-    }
     goIdle(stalled ? 'stalled' : 'ended')
   }
 
@@ -1026,7 +906,6 @@ function createWave({
     if (!canSelfieNow()) return
     myReceipt = { waveId, hopCount, receiptSig, chainHash, receiptTs }
     tryPostSelfie()
-    flushBurnProof() // I can now be admitted as a writer — post any stashed burn-proof
   }
 
   // Post my lobby selfie once BOTH the receipt (token reached me) and the staged image
@@ -1042,8 +921,6 @@ function createWave({
     stagedSelfie = null
     myReceipt = null
     selfiePosted = false
-    pendingBurn = null
-    burnPosted = false
     admissionPromise = null
   }
 
@@ -1152,35 +1029,8 @@ function createWave({
       token.prevChainHash,
       token.timestamp
     )
-    pushProof(token)
     announcePosition(token.waveId, token.hopCount)
     setTimeout(() => forwardToken(token), hopDelayMs)
-  }
-
-  // Push my hop's receipt to any connected validator/seed so it can reassemble the full
-  // ordered chain — including relayers who never selfie (their receipt reaches the
-  // validator no other way). Direct to pinned seeds (§ interlocked payout, final-idea).
-  function pushProof(token) {
-    const proof = {
-      waveId: token.waveId,
-      hopCount: token.hopCount,
-      peerId: me.id,
-      receiptSig: token.senderReceiptSig,
-      chainHash: token.prevChainHash,
-      receiptTs: token.timestamp,
-      address: walletAddress || ''
-    }
-    if (isSeed) collectProof(proof) // a validator relays too — record its own hop directly
-    if (seedPeers.size === 0) return
-    const str = JSON.stringify({ kind: 'wave-proof', ...proof })
-    for (const s of seedPeers) {
-      const send = senders.get(s)
-      if (send) {
-        try {
-          send(str)
-        } catch {}
-      }
-    }
   }
 
   function processToken(token) {
@@ -1458,21 +1308,17 @@ function createWave({
     join,
     setCountry,
     stageSelfie,
-    // Wire the payment layer once the wallet is up: my address (for tips/attestations), the
-    // on-chain burn verifier (enables the paid-wave gate), and — for a validator — the
-    // reward sender (enables the interlocked payout).
-    setWallet: (address, verifier, rewarder) => {
+    // Wire the payment layer once the wallet is up: my address (for gallery tips /
+    // attestations) and the on-chain burn verifier (enables the paid-wave anti-spam gate).
+    setWallet: (address, verifier) => {
       walletAddress = address || null
       if (verifier) {
         verifyBurnOnChain = verifier
         enforcePaid = true
       }
-      if (rewarder) payReward = rewarder
     },
     announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
-    recordBurn, // a peer reports its paid participation fee -> sign + post burn-proof
-    chainProofs, // (validator) collected hop receipts for a wave, ordered by hop
-    chainBurns, // (validator) verified burn-proofs for a wave (from the gallery)
+    recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
     findSuccessor: (target) =>

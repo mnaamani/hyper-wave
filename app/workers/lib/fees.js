@@ -15,8 +15,9 @@ function burnMemo(waveId, peerId) {
   return `hyperwave:${waveId}:${peerId}`
 }
 
-// Burn the participation fee for `waveId` and record the signed ring attestation
-// (burn-proof) with the engine. Returns { hash, proof }; throws if the burn fails.
+// Burn the participation fee for `waveId` and sign the ring attestation. Returns
+// { hash, proof }; throws if the burn fails. `proof` is the kick-off gate credential for the
+// initiator (announcePaid); a joiner's burn is its own anti-spam cost and ignores `proof`.
 async function payFee(wave, payments, waveId, reason) {
   const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id))
   const proof = wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash })
@@ -38,15 +39,10 @@ async function confirmBurn(payments, waveId, hash) {
   return false
 }
 
-// Wire a ready wallet into the engine: my address (tips/attestations), the on-chain
-// burn verifier (enables the paid-wave anti-spam gate), and the reward sender
-// (enables the validator's interlocked payout).
+// Wire a ready wallet into the engine: my address (gallery tips / attestations) and the
+// on-chain burn verifier (enables the paid-wave anti-spam gate).
 function wireWallet(wave, payments) {
-  wave.setWallet(
-    payments.address,
-    (txHash, expect) => payments.verifyBurnTx(txHash, expect),
-    (addr, amt) => payments.send(addr, amt)
-  )
+  wave.setWallet(payments.address, (txHash, expect) => payments.verifyBurnTx(txHash, expect))
 }
 
 module.exports = { FEE_TRX, burnMemo, payFee, confirmBurn, wireWallet }

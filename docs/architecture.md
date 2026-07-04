@@ -3,8 +3,8 @@
 HyperWave is a peer-to-peer "global stadium wave": peers join a match swarm, a ⚽
 token races around a ring of participants, each participant takes a selfie into a
 shared gallery, their supported-country flag rides along — and real (testnet) money
-flows through it: participation fees are **burned** on-chain (anti-spam), a validator
-pays **interlocked rewards**, and viewers **tip** selfies. No servers — discovery,
+flows through it: participation fees are **burned** on-chain (anti-spam, no beneficiary),
+and viewers **tip** selfies directly. No sponsor rewards. No servers — discovery,
 state, and storage are all peer-to-peer (Hyperswarm + Autobase), and payments are
 self-custodial (WDK, Tron Nile testnet).
 
@@ -23,7 +23,7 @@ flowchart TB
       R["renderer/app.js + lib/*<br/>ring canvas · lobby · webcam ·<br/>gallery · hud · country picker"]
     end
     subgraph Worker["Bare worker (per --storage)"]
-      W["workers/hyperwave.js → lib/wave.js + lib/pay.js<br/>discovery · Chord pinning · gossip · token race ·<br/>lifecycle · Autobase gallery · healing ·<br/>WDK wallet · fee burns · payout"]
+      W["workers/hyperwave.js → lib/wave.js + lib/pay.js<br/>discovery · Chord pinning · gossip · token race ·<br/>lifecycle · Autobase gallery · healing ·<br/>WDK wallet · fee burns · tips"]
     end
     subgraph Updater["Bare worker (OTA, template)"]
       U["workers/main.js<br/>pear-runtime auto-update"]
@@ -46,7 +46,7 @@ sandboxed renderer and the worker.
 |---|---|---|---|
 | **Main** (`electron/main.js`) | Node.js (Electron) | CJS | Create the window; allow `media` (webcam); spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers. Essentially unmodified template + one permission line. |
 | **Renderer** (`renderer/`) | Chromium, sandboxed | **ESM** | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto. |
-| **Worker** (`workers/hyperwave.js` + `lib/`) | **Bare** | CJS | All protocol/state: Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing — plus the WDK wallet (fees, tips, payout). WDK is ESM-only, so `pay.js` bridges via dynamic `import()`. |
+| **Worker** (`workers/hyperwave.js` + `lib/`) | **Bare** | CJS | All protocol/state: Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing — plus the WDK wallet (fee burns, tips). WDK is ESM-only, so `pay.js` bridges via dynamic `import()`. |
 | **Updater** (`workers/main.js`) | Bare | CJS | Template's OTA auto-update; unrelated to the wave. |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
@@ -66,7 +66,7 @@ renderer  ──(commands)──▶  worker
 
 worker  ──(events)──▶  renderer
   { type: 'state',   me, peers[], successor }         // ring membership (every change)
-  { type: 'token',   event, ... }                     // lifecycle + race + payout events (protocol.md)
+  { type: 'token',   event, ... }                     // lifecycle + race events (protocol.md)
   { type: 'gallery', items[] }                        // ordered selfies (every change)
   { type: 'wallet',  address, trx }                   // self-custodial wallet chip
   { type: 'burn-result' | 'tip-result', ... }         // fee/tip outcomes (toasts)
@@ -106,11 +106,11 @@ Every instance runs the same code; `role` (env `HYPERWAVE_ROLE`) selects behavio
 
 - **`peer`** (default) — participates fully: pays fees, joins waves, selfies, relays.
   Ephemeral storage (galleries wiped per run).
-- **`validator`** (a.k.a. seed) — the sponsor + archivist: retains every gallery (store
-  persists), is pinned by all peers as a well-connected replication hub, collects
-  `wave-proof` hop receipts and `burn-proof`s, and pays the **interlocked payout** from its
-  own funded wallet when a wave ends. It relays the ball but never kicks off, joins, or
-  selfies. It is a first-class swarm peer — not a server.
+- **`validator`** (a.k.a. seed) — the gallery **archivist**: retains every gallery (store
+  persists) and is pinned by all peers as a well-connected replication hub, so galleries
+  survive after participants disconnect. It relays the ball but never kicks off, joins, or
+  selfies. It is a first-class swarm peer — not a server. (The name `validator` is retained
+  for the `HYPERWAVE_ROLE` flag; with sponsor rewards removed its job is purely archival.)
 
 ## Module map
 
@@ -134,13 +134,13 @@ app/
     hyperwave.js     worker entry: bridges lib/wave.js + lib/pay.js to IPC; charges/verifies fees
     main.js          template OTA updater (unrelated)
     lib/
-      wave.js        orchestrator: transport + Chord pinning + lifecycle + gallery + healing + payout
+      wave.js        orchestrator: transport + Chord pinning + lifecycle + gallery + healing
       ring.js        pure ring geometry (angleOf, liveRing, nextClockwise, pickReachable)
       chord.js       pure Chord math (nodeId, successors, fingers, findSuccessorStep, stabilizeStep)
       flood.js       pure gossip-flood dedup (firstSight) for relayed lifecycle messages
-      token.js       pure token/payout crypto (receipts, chain accumulator, burn attestation,
-                     longestValidChain + payableFromChain = the golden rule)
-      gallery.js     Autobase config + ordering (galleryConfig, buildGallery, readGallery, readBurns)
+      token.js       pure token crypto (receipts, chain accumulator, burn + wave-end attestations)
+      gallery.js     Autobase config + ordering (galleryConfig, buildGallery, readGallery)
+      fees.js        shared fee flow (burn memo, payFee, confirmBurn, wireWallet)
       pay.js         WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx
       wave.run.js    headless harness (one wave per process; WALLET=1, HYPERWAVE_ROLE=validator)
       bootstrap.js   local DHT for fast same-machine testing
