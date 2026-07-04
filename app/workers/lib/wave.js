@@ -41,8 +41,8 @@ const {
 const { galleryConfig, readGallery, readBurns } = require('./gallery')
 
 const MATCH = 'hyperwave:demo-match:v1'
-const PRESENCE_MS = 2000 // heartbeat cadence
-const RINGUPDATE_MS = 4000 // pointer-exchange + re-pin cadence (Phase 4 slim gossip)
+const HEARTBEAT_MS = 2000 // pointers-heartbeat cadence (liveness + Chord pointer exchange)
+const RINGUPDATE_MS = 4000 // re-pin + gallery-pull maintenance cadence
 const TTL_MS = 12000 // drop peers not refreshed within this window
 const MAX_HOPS = 5000 // safety cap against runaway tokens
 // Dwell per hop — kept minimal so the ⚽ races around the ring quickly. The selfie is
@@ -92,6 +92,17 @@ const PAYOUT_DELAY_MS = 4000
 
 function shortId(hex) {
   return hex.slice(0, 8)
+}
+
+// Parse a HYPERWAVE_BOOTSTRAP-style "host:port[,host:port…]" list into Hyperswarm's
+// bootstrap option (a local DHT for instant same-machine discovery); falsy → null
+// (the public DHT). Shared by both engine hosts.
+function parseBootstrap(str) {
+  if (!str) return null
+  return str.split(',').map((hp) => {
+    const [host, port] = hp.split(':')
+    return { host, port: Number(port) }
+  })
 }
 
 function createWave({
@@ -269,7 +280,7 @@ function createWave({
     emit()
   }
 
-  // The nation this peer supports; rides presence gossip + selfie entries (cosmetic).
+  // The nation this peer supports; rides the pointers heartbeat + selfie entries (cosmetic).
   function setCountry(code) {
     me.country = code || null
     emit()
@@ -280,12 +291,15 @@ function createWave({
   // successor-list + predecessor — O(k + log N), not O(N). Recipients learn the local
   // ring structure around us (transitive discovery, bounded) and run one stabilize
   // step. Primary membership still comes from DHT discovery (`swarm.peers`).
+  // Doubles as the liveness heartbeat (it refreshes lastSeen and carries country +
+  // role), so there is no separate `presence` message.
   function myPointers() {
     const ids = liveRing([...peers.values()], Date.now(), TTL_MS).map((p) => p.id)
     return {
       kind: 'pointers',
       id: me.id,
       country: me.country,
+      role,
       succ: successors(ids, me.id, K_SUCCESSORS),
       pred: predecessor(ids, me.id)
     }
@@ -404,29 +418,24 @@ function createWave({
       }
       return
     }
+    if (m.kind !== 'pointers') return
+    // sender is a live neighbour (direct channel); its advertised succ/pred are
+    // discovery hints, marked slightly stale so they age out unless independently
+    // refreshed. Skip a hint for a peer we just saw disconnect (goneUntil), so a
+    // third peer's advert can't resurrect a ghost seat.
     const now = Date.now()
-    if (m.kind === 'presence') {
-      upsert(m.id, now, m.country)
-      // note validators/seeds so we deliberately connect to them (a well-connected seed
-      // is always reachable for gallery replication, §4.7).
-      if (m.role === 'validator' || m.role === 'seed') {
-        if (!seedPeers.has(m.id)) {
-          seedPeers.add(m.id)
-          maintainNeighbours()
-        }
-      }
-    } else if (m.kind === 'pointers') {
-      // sender is a live neighbour (direct channel); its advertised succ/pred are
-      // discovery hints, marked slightly stale so they age out unless independently
-      // refreshed. Skip a hint for a peer we just saw disconnect (goneUntil), so a
-      // third peer's advert can't resurrect a ghost seat.
-      upsert(m.id, now, m.country)
-      const learned = now - Math.floor(TTL_MS / 2)
-      for (const id of [...(m.succ || []), m.pred]) {
-        if (id && !(goneUntil.get(id) > now)) upsert(id, learned)
-      }
-      stabilize(m)
+    upsert(m.id, now, m.country)
+    // note validators/seeds so we deliberately connect to them (a well-connected seed
+    // is always reachable for gallery replication, §4.7).
+    if ((m.role === 'validator' || m.role === 'seed') && !seedPeers.has(m.id)) {
+      seedPeers.add(m.id)
+      maintainNeighbours()
     }
+    const learned = now - Math.floor(TTL_MS / 2)
+    for (const id of [...(m.succ || []), m.pred]) {
+      if (id && !(goneUntil.get(id) > now)) upsert(id, learned)
+    }
+    stabilize(m)
     emit()
   }
 
@@ -592,8 +601,8 @@ function createWave({
   }
 
   // Send only to our pinned ring neighbours (successor-list + predecessor + fingers).
-  // Used for the slimmed membership gossip (presence + pointers) — O(k + log N) fanout
-  // instead of hitting every connection. wave-* fanout stays on broadcast() (the
+  // Used for the slimmed membership gossip (the pointers heartbeat) — O(k + log N)
+  // fanout instead of hitting every connection. wave-* fanout stays on broadcast() (the
   // visual ball / roster still need broad reach) pending the Phase-5 sweep decision.
   function broadcastToNeighbours(obj) {
     const str = JSON.stringify(obj)
@@ -1214,18 +1223,7 @@ function createWave({
       p.reason === 'kickoff' &&
       p.waveId === waveId &&
       p.peerId === byId &&
-      verifyBurn(
-        {
-          waveId: p.waveId,
-          peerId: p.peerId,
-          reason: p.reason,
-          amount: p.amount,
-          txHash: p.txHash,
-          tronAddress: p.tronAddress,
-          burnTs: p.burnTs
-        },
-        p.sig
-      )
+      verifyBurn(p, p.sig)
     )
   }
 
@@ -1308,10 +1306,9 @@ function createWave({
     senders.set(id, send)
     scheduleBootstrap() // first connection -> place myself in the ring via findSuccessor
 
-    // greet: presence + my compact pointers (Phase 4 — no O(N) snapshot). The
-    // newcomer converges via DHT discovery (swarm.peers) + pointer exchange; at small
-    // N the mesh also upserts every peer directly on connect.
-    send(JSON.stringify({ kind: 'presence', id: me.id, country: me.country, role }))
+    // greet: my compact pointers (Phase 4 — no O(N) snapshot; carries liveness +
+    // country + role too). The newcomer converges via DHT discovery (swarm.peers) +
+    // pointer exchange; at small N the mesh also upserts every peer directly on connect.
     send(JSON.stringify(myPointers()))
     // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
     // start a competing one (broadcasts they missed won't reach them otherwise)
@@ -1334,7 +1331,7 @@ function createWave({
     conn.on('close', () => {
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
-      seedPeers.delete(id) // re-learned from presence if it comes back
+      seedPeers.delete(id) // re-learned from its pointers heartbeat if it comes back
       goneUntil.set(id, Date.now() + TTL_MS) // cooldown: don't re-pin/re-hint it yet
       if (senders.size === 0) bootstrapDone = false // went solo -> re-bootstrap on reconnect
       log('peer disconnected', shortId(id))
@@ -1361,15 +1358,14 @@ function createWave({
   })
 
   // --- timers ----------------------------------------------------------------
-  const tPresence = setInterval(() => {
-    broadcastToNeighbours({ kind: 'presence', id: me.id, country: me.country, role })
-  }, PRESENCE_MS)
+  // The single heartbeat: pointers double as liveness (lastSeen refresh) and the slim
+  // Phase-4 pointer exchange, so there's no separate presence message to keep in step.
+  const tHeartbeat = setInterval(() => {
+    broadcastToNeighbours(myPointers())
+  }, HEARTBEAT_MS)
   const tRing = setInterval(() => {
     // re-pin ring edges from current discovery even if no 'update' fired
     maintainNeighbours()
-    // slim pointer exchange (Phase 4) replaces the O(N) peers snapshot; sent after
-    // maintainNeighbours so `pinned` is current and reflects our latest succ/pred
-    broadcastToNeighbours(myPointers())
     emit() // also re-evaluate TTL pruning
     // pull replicated gallery writes. A seed updates ALL retained galleries so each keeps
     // syncing (and stays a live source for latecomers); a peer just its current one.
@@ -1416,7 +1412,7 @@ function createWave({
     findSuccessor: (target) =>
       findSuccessorRemote(typeof target === 'bigint' ? target : nodeIdOfHex(target)),
     async close() {
-      clearInterval(tPresence)
+      clearInterval(tHeartbeat)
       clearInterval(tRing)
       clearInterval(tRepair)
       clearTimeout(lobbyTimer)
@@ -1431,4 +1427,4 @@ function createWave({
   }
 }
 
-module.exports = { createWave, MATCH }
+module.exports = { createWave, parseBootstrap, MATCH }

@@ -7,8 +7,9 @@
 //   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted when the ball arrives, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 const env = require('bare-env')
-const { createWave } = require('./wave.js')
+const { createWave, parseBootstrap } = require('./wave.js')
 const { nodeIdOfHex, RING } = require('./chord.js')
+const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees.js')
 
 const name = Bare.argv[2] || 'peer'
 const storageDir = Bare.argv[3]
@@ -17,12 +18,7 @@ if (!storageDir) {
   Bare.exit(1)
 }
 
-const bootstrap = env.HYPERWAVE_BOOTSTRAP
-  ? env.HYPERWAVE_BOOTSTRAP.split(',').map((hp) => {
-      const [host, port] = hp.split(':')
-      return { host, port: Number(port) }
-    })
-  : null
+const bootstrap = parseBootstrap(env.HYPERWAVE_BOOTSTRAP)
 
 let started = false
 let payments = null // set by the WALLET=1 block below (if enabled)
@@ -86,12 +82,11 @@ const wave = createWave({
   log: (...m) => console.log(`[${name}]`, ...m)
 })
 
-// Burn 1 TRX (kick-off/join fee) with the wave memo, then record the ring attestation.
-async function payFee(waveId, reason) {
-  const { hash } = await payments.burn(1, `hyperwave:${waveId}:${wave.me.id}`)
-  const proof = wave.recordBurn({ reason, amount: 1, txHash: hash })
-  console.log(`[${name}] ${reason.toUpperCase()}-BURNED 1 TRX hash=${hash}`)
-  return { hash, proof }
+// Burn the participation fee (fees.js: memo + ring attestation), logging the result.
+async function burnFee(waveId, reason) {
+  const r = await payFee(wave, payments, waveId, reason)
+  console.log(`[${name}] ${reason.toUpperCase()}-BURNED ${FEE_TRX} TRX hash=${r.hash}`)
+  return r
 }
 
 // Initiator: start (deferred announce when enforcing), pay, wait for the burn to confirm
@@ -100,13 +95,9 @@ async function kickOff() {
   const waveId = wave.startWave()
   if (!waveId || !payments) return
   try {
-    const { hash, proof } = await payFee(waveId, 'kickoff')
-    for (let i = 0; i < 12; i++) {
-      const r = await payments.verifyBurnTx(hash, { waveId, from: payments.address, minTrx: 1 })
-      if (r.ok) return wave.announcePaid(proof)
-      await new Promise((res) => setTimeout(res, 2500))
-    }
-    console.log(`[${name}] kick-off burn not confirmed`)
+    const { hash, proof } = await burnFee(waveId, 'kickoff')
+    if (await confirmBurn(payments, waveId, hash)) wave.announcePaid(proof)
+    else console.log(`[${name}] kick-off burn not confirmed`)
   } catch (e) {
     console.log(`[${name}] kickoff FAIL`, e.message)
   }
@@ -122,7 +113,7 @@ async function joinAndBurn() {
   if (!payments) return
   joining = true
   try {
-    await payFee(waveId, 'join')
+    await burnFee(waveId, 'join')
   } catch (e) {
     console.log(`[${name}] join burn FAIL`, e.message)
   }
@@ -144,12 +135,7 @@ if (env.WALLET) {
   createPayments({ storageDir, log: (...m) => console.log(`[${name}] wallet`, ...m) })
     .then(async (pay) => {
       payments = pay
-      // wallet up -> paid-wave gate (verifier) + interlocked payout (reward sender)
-      wave.setWallet(
-        pay.address,
-        (txHash, expect) => pay.verifyBurnTx(txHash, expect),
-        (addr, amt) => pay.send(addr, amt)
-      )
+      wireWallet(wave, pay) // paid-wave gate (verifier) + interlocked payout (reward sender)
       const b = await pay.balances()
       console.log(`[${name}] WALLET ${b.address} trx=${b.trx}`)
       if (env.WALLET_SEND) {

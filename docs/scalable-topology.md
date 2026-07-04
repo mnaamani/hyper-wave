@@ -69,8 +69,8 @@ headroom without BigInt-heavy math getting silly; revisit if collisions matter a
 ### 4.2 Membership discovery
 - Seed the peer set from **`swarm.peers`** (PeerInfo public keys on the topic) and refresh
   on `swarm.on('update')` — DHT discovery gives ring members before/without gossip.
-- Keep a light **presence** to neighbors for liveness + country (or let country travel only
-  with the selfie). Drop the O(N) full `peers` snapshot (§4.6).
+- Liveness + country ride the **`pointers` heartbeat** to neighbours (no separate presence
+  message). Drop the O(N) full `peers` snapshot (§4.6).
 
 ### 4.3 Pointers & connections (the core change)
 Maintain, per node:
@@ -116,8 +116,9 @@ to a specific seat. The token still walks successor→successor for the *visual*
 Two changes, both implemented:
 
 - **Slim the membership plane.** Replace the O(N) `peers` snapshot with **pointer exchange**
-  (successor-list + predecessor), O(k + log N), sent only to neighbours; `presence` goes to
-  neighbours too. Membership is DHT-discovered but **liveness-gated** — `swarm.peers` drives
+  (successor-list + predecessor), O(k + log N), sent only to neighbours; `pointers` doubles
+  as the liveness heartbeat (country + role ride it — no separate presence message).
+  Membership is DHT-discovered but **liveness-gated** — `swarm.peers` drives
   *who we dial* (pinning), while a ring **seat** requires a real connection or direct gossip,
   so a stale announce can't become a ghost seat.
 - **Flood the lifecycle plane.** The one-hop broadcast that §4.6 originally kept for `wave-*`
@@ -149,7 +150,7 @@ required.
 gallery open and wipes its store per run, so galleries would vanish as peers leave. A
 **validator/seed** (`role: 'validator'`, `createWave`) instead keeps its store *and* retains
 **every** gallery it opens (`galleries` map — never closed, updated each tick), so it can keep
-serving them after participants disconnect. It advertises `role` in `presence`; peers pin any
+serving them after participants disconnect. It advertises `role` in its `pointers` heartbeat; peers pin any
 seed (`seedPeers`) so it's a **well-connected** replication hub. A seed never selfies or starts
 waves — it relays like any peer and archives. Verified in `gallery.replication.test.js`: a
 latecomer connected *only* to the seed gets the full gallery after the originator has left.
@@ -201,7 +202,7 @@ construction). `wave.js` is untouched.
 4. **`stabilize` + churn handling + slim gossip** — remove the O(N) `peers` snapshot.
    **✅ Done:** the O(N) `peers` snapshot is gone; membership is DHT-discovery-first
    (`swarm.peers`) plus a compact **`pointers`** advert (successor-list + predecessor,
-   O(k + log N)) sent only to pinned neighbours, and `presence` is neighbour-scoped too.
+   O(k + log N)) sent only to pinned neighbours — it doubles as the liveness heartbeat.
    `chord.js` adds `inOpenInterval` + `stabilizeStep` (brittle-tested); a `pointers` from
    my current successor whose predecessor sits between us triggers an immediate re-pin
    (nextClockwise then adopts the closer successor). Churn: on a pinned-neighbour close we

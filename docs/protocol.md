@@ -122,7 +122,7 @@ propagated differently to match what each needs:
 |---|---|---|
 | **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end` | every peer |
 | **One-hop broadcast** | `wave-pos`, `add-writer` | direct neighbours only |
-| **Neighbour-scoped** | `presence`, `pointers` | pinned ring neighbours (O(k + log N)) |
+| **Neighbour-scoped** | `pointers` (the heartbeat) | pinned ring neighbours (O(k + log N)) |
 | **To validators** | `wave-proof` | each connected validator/seed |
 | **Unicast** | `token`, `wave-sync` | one specific peer |
 
@@ -157,7 +157,9 @@ announcement alone is just "this key advertised the topic once", so a stale anno
 since-closed instance is never shown as a seat. A **seat requires real liveness**: a live
 connection or direct gossip. On top of that, a slim **pointer exchange** (`pointers`: each
 peer advertising only its own successor-list + predecessor, O(k + log N)) propagates local
-ring structure, replacing the old O(N) full-table snapshot.
+ring structure, replacing the old O(N) full-table snapshot. `pointers` doubles as the
+liveness **heartbeat** (it refreshes `lastSeen` and carries `country` + `role`) — there is
+no separate presence message.
 
 The ring **drives connections** (Chord over Hyperswarm, Phases 1–4 in
 [`scalable-topology.md`](./scalable-topology.md)): each peer deliberately `swarm.joinPeer`s
@@ -179,8 +181,7 @@ Inputs that build the map:
 | **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source. |
 | connection **open** | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor); lift any churn cooldown. A direct connection is authoritative liveness. |
 | connection **close** | delete the peer (and its reachable mark); set a `goneUntil` cooldown (`TTL_MS`) so DHT re-seeding can't immediately resurrect the dead peer. |
-| `presence { id, country }` | `upsert(id, now, country)` |
-| `pointers { id, country, succ: [id…], pred: id }` | `upsert(id, now, country)`; upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step. |
+| `pointers { id, country, role, succ: [id…], pred: id }` | `upsert(id, now, country)` (the heartbeat); note `role` validator/seed; upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step. |
 
 ```
 upsert(id, lastSeen, country):
@@ -209,44 +210,37 @@ forwarded to a **reachable** live successor; healing (§7.3) skips known-but-unr
 flowchart LR
   Dht["swarm.peers (DHT discovery)"] --> U0["upsert id, now"]
   Conn["connection open"] --> U["upsert id, now"]
-  Pres["presence"] --> U2["upsert id, now, country"]
-  Ptr["pointers (succ/pred)"] --> U3["upsert sender now; hints at now minus TTL/2; stabilize"]
+  Ptr["pointers (heartbeat, succ/pred)"] --> U3["upsert sender now, country; hints at now minus TTL/2; stabilize"]
   U0 --> M[("peer map")]
   U --> M
-  U2 --> M
   U3 --> M
   Close["connection close"] -->|delete + cooldown| M
   M --> L["live = now minus lastSeen &lt; TTL, sorted by angle"]
   L --> S["successor = next clockwise"]
 ```
 
-On connect, a peer **greets** the newcomer with a `presence`, its `pointers`, and — if a
-wave is active — a `wave-sync` (§7.4), so the newcomer's map *and* wave state converge
-immediately.
+On connect, a peer **greets** the newcomer with its `pointers` and — if a wave is active —
+a `wave-sync` (§7.4), so the newcomer's map *and* wave state converge immediately.
 
 ## 5. Gossip message catalog
 
 All are JSON objects on the `hyperwave/gossip` channel. Unknown `kind`s are ignored.
 
-### presence — to pinned neighbours, every `PRESENCE_MS`
+### pointers — to pinned neighbours, every `HEARTBEAT_MS`
 ```json
-{ "kind": "presence", "id": "<peerId>", "country": "BR" | null, "role": "peer" | "validator" }
-```
-Heartbeat. Receiver upserts the peer (`lastSeen = now`, `country`). Sent only to pinned ring
-neighbours (Chord successor-list + predecessor + fingers), not every connection. `role`
-`validator`/`seed` marks a **gallery seed**: peers deliberately pin it (so it's a
-well-connected replication hub that keeps galleries alive after participants leave, §4.7).
-
-### pointers — to pinned neighbours, every `RINGUPDATE_MS`
-```json
-{ "kind": "pointers", "id": "<peerId>", "country": "BR" | null,
+{ "kind": "pointers", "id": "<peerId>", "country": "BR" | null, "role": "peer" | "validator",
   "succ": ["<peerId>", ...], "pred": "<peerId>" | null }
 ```
-The sender's own Chord pointers — successor-list (`succ`, ≤ `K_SUCCESSORS`) + predecessor
-(`pred`). O(k + log N), replacing the old O(N) full peer snapshot. Receiver upserts the
-sender (`lastSeen = now`) and each advertised id as a discovery hint (`lastSeen = now −
-TTL/2`), then runs one Chord stabilize step (`scalable-topology.md` §4.4). Primary membership comes from DHT discovery
-(`swarm.peers`), so pointers are structure/liveness hints, not the authoritative peer set.
+The heartbeat **and** the Chord pointer exchange in one message, sent only to pinned ring
+neighbours (successor-list + predecessor + fingers), not every connection. Carries the
+sender's own pointers — successor-list (`succ`, ≤ `K_SUCCESSORS`) + predecessor (`pred`) —
+O(k + log N), replacing the old O(N) full peer snapshot. Receiver upserts the sender
+(`lastSeen = now`, `country`) and each advertised id as a discovery hint (`lastSeen = now −
+TTL/2`), then runs one Chord stabilize step (`scalable-topology.md` §4.4). `role`
+`validator`/`seed` marks a **gallery seed**: peers deliberately pin it (a well-connected
+replication hub that keeps galleries alive after participants leave, §4.7). Primary
+membership comes from DHT discovery (`swarm.peers`), so pointers are structure/liveness
+hints, not the authoritative peer set.
 
 The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries a unique
 `mid` (random hex id); receivers relay on first sight and drop repeats.
@@ -662,8 +656,8 @@ the gate (waves announce immediately, unpaid).
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `PRESENCE_MS` | 2000 | presence heartbeat cadence |
-| `RINGUPDATE_MS` | 4000 | peers-snapshot cadence |
+| `HEARTBEAT_MS` | 2000 | pointers-heartbeat cadence |
+| `RINGUPDATE_MS` | 4000 | re-pin + gallery-pull maintenance cadence |
 | `TTL_MS` | 12000 | drop a peer not refreshed within this |
 | `HOP_DELAY_MS` | 250 | per-hop dwell (visible roll pace; selfie is decoupled, §6) |
 | `LOBBY_MS` | 15000 | lobby / opt-in window |

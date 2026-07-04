@@ -69,6 +69,8 @@ function signBurn(keyPair, fields) {
 }
 
 // Verify a burn attestation is a valid Ed25519 signature by `fields.peerId` over the tuple.
+// Only the burnHash fields are read — callers may pass a whole burn-proof op (extra keys
+// like `sig`/`type` are ignored).
 function verifyBurn(fields, sigHex) {
   try {
     return crypto.verify(burnHash(fields), b4a.from(sigHex, 'hex'), b4a.from(fields.peerId, 'hex'))

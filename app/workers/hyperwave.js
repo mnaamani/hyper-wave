@@ -6,8 +6,9 @@
 const FramedStream = require('framed-stream')
 const goodbye = require('graceful-goodbye')
 const env = require('bare-env')
-const { createWave } = require('./lib/wave')
+const { createWave, parseBootstrap } = require('./lib/wave')
 const { createPayments } = require('./lib/pay')
+const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./lib/fees')
 
 const pipe = new FramedStream(Bare.IPC)
 const storageDir = Bare.argv[2]
@@ -18,12 +19,7 @@ function send(msg) {
 
 // Optional env overrides (same as wave.run.js): HYPERWAVE_BOOTSTRAP=host:port uses a
 // local DHT (instant same-machine discovery for demos); HYPERWAVE_MATCH isolates the ring.
-const bootstrap = env.HYPERWAVE_BOOTSTRAP
-  ? env.HYPERWAVE_BOOTSTRAP.split(',').map((hp) => {
-      const [host, port] = hp.split(':')
-      return { host, port: Number(port) }
-    })
-  : null
+const bootstrap = parseBootstrap(env.HYPERWAVE_BOOTSTRAP)
 
 const wave = createWave({
   storageDir,
@@ -53,13 +49,7 @@ let tBalance = null
 createPayments({ storageDir, log: (...a) => console.log('[wallet]', ...a) })
   .then(async (pay) => {
     payments = pay
-    // wallet up: address for tips/attestations, the on-chain burn verifier (paid-wave
-    // anti-spam gate), and — for a validator — the reward sender (interlocked payout).
-    wave.setWallet(
-      pay.address,
-      (txHash, expect) => pay.verifyBurnTx(txHash, expect),
-      (addr, amt) => pay.send(addr, amt)
-    )
+    wireWallet(wave, pay)
     const push = async () => {
       const bal = await pay.balances().catch(() => ({ address: pay.address, trx: 0 }))
       send({ type: 'wallet', ...bal })
@@ -84,41 +74,28 @@ pipe.on('data', (data) => {
   else if (msg.type === 'tip') handleTip(msg)
 })
 
-// Participation fee — 1 TRX BURNED to the black hole (not paid to anyone). Both the
-// initiator (kick-off) and each joiner pay it. The on-chain memo commits the burn to this
-// wave + peer (auditable from-chain, replay-proof); the ring-key attestation (recordBurn)
-// binds my identity + posts it to the gallery for the validator. `burn-result` -> UI toast.
-const FEE_TRX = 1
-async function burn(waveId, reason) {
-  const memo = `hyperwave:${waveId}:${wave.me.id}`
-  const { hash } = await payments.burn(FEE_TRX, memo)
-  const proof = wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash })
+// Participation fee (fees.js) — burned to the black hole (not paid to anyone) by both the
+// initiator (kick-off) and each joiner. The on-chain memo commits the burn to this wave +
+// peer; the ring-key attestation (recordBurn, inside payFee) binds my identity + posts it
+// to the gallery for the validator. `burn-result` -> UI toast.
+async function burnFee(waveId, reason) {
+  const { hash, proof } = await payFee(wave, payments, waveId, reason)
   send({ type: 'burn-result', hash, amount: FEE_TRX, waveId, reason })
   return { hash, proof }
 }
 
 // Kick-off: the wave is NOT announced until the initiator's burn is CONFIRMED on-chain, so
 // peers can verify it and won't join an unpaid (spam) wave. wave.startWave() enters the
-// lobby (deferred announce); we burn, poll until the burn confirms, then announcePaid.
+// lobby (deferred announce); we burn, wait for the burn to confirm, then announcePaid.
 async function handleStartWave() {
   const waveId = wave.startWave()
   if (!waveId || !payments) return // busy / seed / no wallet (unpaid path already announced)
   try {
-    const { hash, proof } = await burn(waveId, 'kickoff')
-    // wait for the burn to confirm on-chain (so peers verify it instantly), bounded
-    for (let i = 0; i < 12; i++) {
-      const r = await payments.verifyBurnTx(hash, {
-        waveId,
-        from: payments.address,
-        minTrx: FEE_TRX
-      })
-      if (r.ok) {
-        wave.announcePaid(proof)
-        return
-      }
-      await new Promise((res) => setTimeout(res, 2500))
+    const { hash, proof } = await burnFee(waveId, 'kickoff')
+    if (await confirmBurn(payments, waveId, hash)) wave.announcePaid(proof)
+    else {
+      send({ type: 'burn-result', error: 'kick-off burn not confirmed', waveId, reason: 'kickoff' })
     }
-    send({ type: 'burn-result', error: 'kick-off burn not confirmed', waveId, reason: 'kickoff' })
   } catch (e) {
     send({ type: 'burn-result', error: e.message, waveId, reason: 'kickoff' })
   }
@@ -130,7 +107,7 @@ async function handleJoin() {
   const waveId = wave.join()
   if (!waveId || !payments) return
   try {
-    await burn(waveId, 'join')
+    await burnFee(waveId, 'join')
   } catch (e) {
     send({ type: 'burn-result', error: e.message, waveId, reason: 'join' })
   }

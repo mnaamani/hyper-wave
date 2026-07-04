@@ -26,7 +26,7 @@ fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scalin
     physical without a full mesh. Includes distributed `findSuccessor` routing
     (`find-succ` RPC, correct under partial membership knowledge), join-time placement, a
     periodic stabilize/repair, and churn handling.
-  - **Gossip:** slim pointer-exchange (`presence`/`pointers` to pinned neighbours only) for
+  - **Gossip:** slim pointer-exchange (a single `pointers` heartbeat to pinned neighbours only) for
     membership; wave lifecycle messages (`wave-announce/join/start/end`) are **flooded**
     (relay + dedup by `mid`, `lib/flood.js`) so they reach every peer on a partial mesh.
   - **Token race:** the initiator mints a wave-token; each holder verifies the sender's

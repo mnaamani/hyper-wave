@@ -21,22 +21,7 @@ function selfieHasValidReceipt(op) {
 // validly binds the ring `peerId` to the on-chain burn (txHash + tronAddress). The
 // validator additionally cross-checks txHash on the chain before crediting it.
 function burnProofValid(op) {
-  return (
-    op.peerId &&
-    op.sig &&
-    verifyBurn(
-      {
-        waveId: op.waveId,
-        peerId: op.peerId,
-        reason: op.reason,
-        amount: op.amount,
-        txHash: op.txHash,
-        tronAddress: op.tronAddress,
-        burnTs: op.burnTs
-      },
-      op.sig
-    )
-  )
+  return !!(op.peerId && op.sig && verifyBurn(op, op.sig))
 }
 
 // Autobase config shared by the engine and tests so apply/view is exercised

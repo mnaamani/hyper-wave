@@ -28,7 +28,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] Phase 2: `joinPeer` pinning of successor-list (k=3) + predecessor — ring edges physical
 - [x] Phase 3: finger table + `findSuccessor` + `fixFingers` → O(log N) connections
 - [x] Phase 4: stabilize + churn handling (re-pin on close, `goneUntil` cooldown) + slim
-      gossip (O(N) `peers` snapshot → `pointers` exchange, neighbour-scoped `presence`)
+      gossip (O(N) `peers` snapshot → a single neighbour-scoped `pointers` heartbeat)
 - [x] Control-plane flooding: `wave-announce/join/start/end` relayed with `mid` dedup
       (`flood.js` + partial-topology reach harness `flood.test.js`)
 - [x] Distributed `findSuccessor` routing (`find-succ` RPC) — correct under partial
