@@ -85,6 +85,12 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 - [ ] Per-connection rate limiting (token buckets per message kind) + a byte-size cap on the
       inline selfie `image` + bounds on auxiliary maps (`seen`/`endedWaves`/`routed`/
       `lookupRoute`/`goneUntil`). (Gallery entry *count* is already bounded — one per burn.)
+- [ ] Ban peers by IP for invalid protocol messages: track per-connection violations (bad
+      JSON, failed signature/identity-binding checks, forged gallery keys, spoofed sender ids)
+      and, past a threshold, drop + block the peer at the transport layer (Hyperswarm `ban` /
+      `swarm.leavePeer` by remote key; consider IP-level so a peer can't just rekey). Turns the
+      per-message drops above into an escalating penalty, so a modified client that keeps
+      sending garbage gets cut off rather than re-processed each time.
 - [ ] Byzantine admitter: burn-gated admission is enforced by the admitting writer, so a
       malicious *already-admitted* writer could admit a non-payer. Fine while admissions route
       through the originator/seed; harden with quorum admission or proof-in-the-op if needed.
