@@ -25,6 +25,7 @@ const bootstrap = env.HYPERWAVE_BOOTSTRAP
   : null
 
 let started = false
+let payments = null // set by the WALLET=1 block below (if enabled)
 const role = env.HYPERWAVE_ROLE || 'peer' // 'validator'/'seed' -> passive gallery seed
 const wave = createWave({
   storageDir,
@@ -39,7 +40,16 @@ const wave = createWave({
     )
     if (role === 'peer' && env.START && !started && s.peers.length >= Number(env.START)) {
       started = true
-      setTimeout(() => wave.startWave(), 500)
+      setTimeout(() => {
+        const waveId = wave.startWave()
+        // initiator's kick-off fee: burn 1 TRX to the black hole (needs WALLET=1 + funds)
+        if (waveId && payments) {
+          payments
+            .burn(1)
+            .then(({ hash }) => console.log(`[${name}] BURNED 1 TRX hash=${hash}`))
+            .catch((e) => console.log(`[${name}] burn FAIL`, e.message))
+        }
+      }, 500)
     }
   },
   onToken: (e) => {
@@ -76,6 +86,7 @@ if (env.WALLET) {
   const { createPayments } = require('./pay.js')
   createPayments({ storageDir, log: (...m) => console.log(`[${name}] wallet`, ...m) })
     .then(async (pay) => {
+      payments = pay
       wave.setWallet(pay.address) // my selfies carry my address for tipping
       const b = await pay.balances()
       console.log(`[${name}] WALLET ${b.address} trx=${b.trx}`)

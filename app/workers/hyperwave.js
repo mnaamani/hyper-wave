@@ -58,12 +58,25 @@ pipe.on('data', (data) => {
   } catch {
     return
   }
-  if (msg.type === 'start-wave') wave.startWave()
+  if (msg.type === 'start-wave') handleStartWave()
   else if (msg.type === 'join-wave') wave.join()
   else if (msg.type === 'set-country') wave.setCountry(msg.country)
   else if (msg.type === 'stage-selfie') wave.stageSelfie(msg.selfie)
   else if (msg.type === 'tip') handleTip(msg)
 })
+
+// Kick-off: start the wave immediately, and burn the initiator's fee alongside (fire-and-
+// forget — the lobby/race never waits on the chain). Burning (black hole address) proves
+// skin in the game without enriching anyone; result is reported for the UI toast.
+const KICKOFF_BURN_TRX = 1
+function handleStartWave() {
+  const waveId = wave.startWave()
+  if (!waveId || !payments) return // busy / seed role / wallet not up — no fee due
+  payments
+    .burn(KICKOFF_BURN_TRX)
+    .then(({ hash }) => send({ type: 'burn-result', hash, amount: KICKOFF_BURN_TRX, waveId }))
+    .catch((e) => send({ type: 'burn-result', error: e.message, waveId }))
+}
 
 // Gallery tip: send a real testnet TRX transfer to the selfie owner's wallet, then
 // report the tx hash (or error) back to the renderer.

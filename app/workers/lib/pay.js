@@ -11,6 +11,11 @@ const fs = require('bare-fs')
 
 const NILE_PROVIDER = 'https://nile.trongrid.io'
 const SUN = 1_000_000 // 1 TRX = 1e6 sun
+// Tron's black hole (base58check of the all-zero EVM address, 41 + 20×00): no key exists,
+// so TRX sent here is provably unspendable — the canonical burn. Used for the initiator's
+// kick-off fee. (Zero-amount transfers are rejected by TransferContract, so a burn is a
+// real small transfer; Tron also burns tx fees at the protocol level.)
+const BURN_ADDRESS = 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb'
 
 const toSun = (trx) => BigInt(Math.round(Number(trx) * SUN))
 const fromSun = (raw) => Number(raw) / SUN
@@ -52,6 +57,13 @@ async function createPayments({ storageDir, provider = NILE_PROVIDER, log = () =
       log('sent', amountTrx, 'TRX ->', recipient, 'hash', res.hash)
       return { hash: res.hash, fee: res.fee }
     },
+    // Burn `amountTrx` (send to the black hole — unspendable by anyone). The initiator's
+    // kick-off fee: proves skin in the game without enriching any party.
+    async burn(amountTrx) {
+      const res = await account.sendTransaction({ to: BURN_ADDRESS, value: toSun(amountTrx) })
+      log('burned', amountTrx, 'TRX 🔥 hash', res.hash)
+      return { hash: res.hash, fee: res.fee }
+    },
     dispose() {
       try {
         if (wallet.dispose) wallet.dispose()
@@ -60,4 +72,4 @@ async function createPayments({ storageDir, provider = NILE_PROVIDER, log = () =
   }
 }
 
-module.exports = { createPayments, NILE_PROVIDER, SUN, toSun, fromSun }
+module.exports = { createPayments, NILE_PROVIDER, BURN_ADDRESS, SUN, toSun, fromSun }

@@ -46,6 +46,14 @@ ipc.on('wallet', (msg) => {
   gallery.setMyAddress(msg.address) // so we don't offer to tip our own selfie
 })
 ipc.on('tip-result', (msg) => gallery.tipResult(msg))
+ipc.on('burn-result', (msg) => {
+  // the initiator's kick-off fee, burned to the black hole (skin in the game)
+  hud.status(
+    msg.hash
+      ? `🔥 kick-off fee burned — ${msg.amount} TRX (tx ${msg.hash.slice(0, 8)}…)`
+      : `⚠️ kick-off burn failed: ${msg.error}`
+  )
+})
 
 ipc.on('token', (e) => {
   switch (e.event) {
