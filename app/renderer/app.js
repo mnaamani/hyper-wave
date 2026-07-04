@@ -47,11 +47,12 @@ ipc.on('wallet', (msg) => {
 })
 ipc.on('tip-result', (msg) => gallery.tipResult(msg))
 ipc.on('burn-result', (msg) => {
-  // the initiator's kick-off fee, burned to the black hole (skin in the game)
+  // participation fee (kick-off or join), burned to the black hole (skin in the game)
+  const what = msg.reason === 'join' ? 'join' : 'kick-off'
   hud.status(
     msg.hash
-      ? `🔥 kick-off fee burned — ${msg.amount} TRX (tx ${msg.hash.slice(0, 8)}…)`
-      : `⚠️ kick-off burn failed: ${msg.error}`
+      ? `🔥 ${what} fee burned — ${msg.amount} TRX (tx ${msg.hash.slice(0, 8)}…)`
+      : `⚠️ ${what} fee burn failed: ${msg.error}`
   )
 })
 

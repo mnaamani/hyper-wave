@@ -749,13 +749,15 @@ function createWave({
     })
   }
 
-  // Opt in to the current lobby (renderer command / harness).
+  // Opt in to the current lobby (renderer command / harness). Returns the joined waveId
+  // (so the worker can charge the join fee on a real opt-in), or null if it was a no-op.
   function join() {
-    if (!wave || wave.phase !== 'lobby' || wave.joined) return
+    if (!wave || wave.phase !== 'lobby' || wave.joined) return null
     wave.joined = true
     wave.roster.add(me.id)
     floodGossip({ kind: 'wave-join', waveId: wave.id, peerId: me.id })
     onToken({ event: 'joined', waveId: wave.id, count: wave.roster.size })
+    return wave.id
   }
 
   // Transition the current wave from lobby to racing.

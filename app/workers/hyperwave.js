@@ -59,23 +59,28 @@ pipe.on('data', (data) => {
     return
   }
   if (msg.type === 'start-wave') handleStartWave()
-  else if (msg.type === 'join-wave') wave.join()
+  else if (msg.type === 'join-wave') handleJoin()
   else if (msg.type === 'set-country') wave.setCountry(msg.country)
   else if (msg.type === 'stage-selfie') wave.stageSelfie(msg.selfie)
   else if (msg.type === 'tip') handleTip(msg)
 })
 
-// Kick-off: start the wave immediately, and burn the initiator's fee alongside (fire-and-
-// forget — the lobby/race never waits on the chain). Burning (black hole address) proves
-// skin in the game without enriching anyone; result is reported for the UI toast.
-const KICKOFF_BURN_TRX = 1
-function handleStartWave() {
-  const waveId = wave.startWave()
-  if (!waveId || !payments) return // busy / seed role / wallet not up — no fee due
+// Participation fee — 1 TRX BURNED to the black hole (not paid to anyone). Both the
+// initiator (kick-off) and each joiner pay it. Fire-and-forget: charged alongside the
+// action so the lobby/race never waits on the chain; `burn-result` drives a UI toast.
+const FEE_TRX = 1
+function burnFee(waveId, reason) {
+  if (!waveId || !payments) return // busy / no-op join / seed role / wallet not up
   payments
-    .burn(KICKOFF_BURN_TRX)
-    .then(({ hash }) => send({ type: 'burn-result', hash, amount: KICKOFF_BURN_TRX, waveId }))
-    .catch((e) => send({ type: 'burn-result', error: e.message, waveId }))
+    .burn(FEE_TRX)
+    .then(({ hash }) => send({ type: 'burn-result', hash, amount: FEE_TRX, waveId, reason }))
+    .catch((e) => send({ type: 'burn-result', error: e.message, waveId, reason }))
+}
+function handleStartWave() {
+  burnFee(wave.startWave(), 'kickoff')
+}
+function handleJoin() {
+  burnFee(wave.join(), 'join')
 }
 
 // Gallery tip: send a real testnet TRX transfer to the selfie owner's wallet, then

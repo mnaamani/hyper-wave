@@ -582,10 +582,11 @@ tip to a selfie owner's wallet).
 
 **Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`;
 `wallet {address, trx}` (self-custodial TRX wallet); `tip-result {hash?, error?}`;
-`burn-result {hash?, amount?, error?, waveId}` (the initiator's kick-off fee — 1 TRX burned
+`burn-result {hash?, amount?, error?, waveId, reason}` (a **participation fee** — 1 TRX burned
 to Tron's black hole address `T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb`, i.e. the all-zero EVM
 address: unspendable by anyone, so the fee proves skin in the game without enriching any
-party; fired alongside `start-wave`, never blocking the wave); and
+party. `reason: 'kickoff'` for the initiator on `start-wave`, `'join'` for each opt-in on
+`join-wave`. Fired alongside the action, never blocking the wave); and
 `token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
 `position`, `forwarded`, `completed`, `healed`, `stalled`,

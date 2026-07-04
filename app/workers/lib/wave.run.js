@@ -55,7 +55,15 @@ const wave = createWave({
   onToken: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
     if (role !== 'peer') return // a validator/seed doesn't join or selfie
-    if (env.AUTOJOIN && e.event === 'wave-announce' && !e.mine) wave.join()
+    if (env.AUTOJOIN && e.event === 'wave-announce' && !e.mine) {
+      const joinedId = wave.join()
+      if (joinedId && payments) {
+        payments
+          .burn(1)
+          .then(({ hash }) => console.log(`[${name}] JOIN-BURNED 1 TRX hash=${hash}`))
+          .catch((err) => console.log(`[${name}] join burn FAIL`, err.message))
+      }
+    }
     // stage a (fake) selfie during the lobby, exactly like the renderer does at kickoff;
     // the worker posts it to the gallery when the token reaches this peer.
     if (env.AUTOSELFIE && e.event === 'wave-active' && e.joined) {
