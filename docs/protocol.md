@@ -320,10 +320,12 @@ holding neither can no longer force-terminate a live wave.
 ```json
 { "kind": "add-writer", "key": "<requesterAutobaseLocalKeyHex>", "peerId": "<peerId>",
   "waveId": "<hex16>", "hopCount": 3, "chainHash": "<hex32>",
-  "receiptTs": 1719705612080, "receiptSig": "<hex64>" }
+  "receiptTs": 1719705612080, "receiptSig": "<hex64>",
+  "burn": { /* the requester's fee-burn attestation, §9.0 — present when the gate is enforced */ } }
 ```
-Asks the gallery host to admit `key` as an Autobase writer, presenting a valid receipt
-(§8.2). Any current writer that verifies the receipt appends an `add-writer` op.
+Asks the gallery host to admit `key` as an Autobase writer, presenting a valid receipt **and**
+the requester's fee-burn attestation (§8.2). Any current writer verifies the receipt, then
+verifies the burn on-chain, and only then appends an `add-writer` op.
 
 ### wave-sync — DIRECT to a newly-connected peer (join-time state)
 ```json
@@ -508,13 +510,18 @@ deterministic linearized view), namespaced per wave so it starts empty.
 - `valueEncoding`: JSON. The linearized **view** is an append-only list of `wave-selfie`
   entries (in hop/timestamp order after `buildGallery`, §8.3).
 
-### 8.2 Writer admission & the receipt gate (anti-spam)
+### 8.2 Writer admission: the burn gate (anti-spam)
 Autobase writes only count from keys in the writer set, and only an existing writer can
-admit a new one. Membership + content are gated by receipts:
-- **Admission:** to post, a non-writer broadcasts `add-writer` with its Autobase local key
-  **and a valid receipt for the current wave**. A current writer (initially the
-  originator) verifies the receipt and, if valid, appends an `add-writer` **op** to the
-  base. Once linearized, the requester becomes a writer.
+admit a new one. Admission is where the fee actually earns its keep — **a gallery seat
+requires a verified fee burn**:
+- **Admission:** to post, a non-writer broadcasts `add-writer` with its Autobase local key,
+  a valid receipt for the current wave, **and its fee-burn attestation** (§9.0). A current
+  writer (initially the originator) checks, in order: the receipt verifies (authenticity;
+  `peerId` is connection-bound, §11); the burn attestation is signed by that `peerId` for
+  this wave (`burnAuthorizes`); and the burn `txHash` is real **on-chain** (`verifyBurnTx` —
+  to the black hole, from the attested address, `amount ≥ fee`, memo commits the `waveId`).
+  Only then does it append the `add-writer` op. So **no burn, no seat** — and because tips go
+  to gallery entries, every tippable selfie is from a peer who paid in.
 - **`apply()` (runs deterministically on every peer):**
   - `{ type: 'add-writer', key }` → `addWriter(key)`.
   - `{ type: 'wave-selfie', ... }` → append to the view **only if** its `receiptSig`
@@ -528,9 +535,9 @@ sequenceDiagram
   participant H as Host a current writer
   participant AB as Autobase view
   Note over P: ball reached me, took a selfie
-  P-)H: add-writer, my key plus receipt, broadcast
-  Note right of H: verify receipt for this wave
-  H->>AB: append add-writer op
+  P-)H: add-writer, my key plus receipt plus burn proof
+  Note right of H: verify receipt, then verify the burn ON-CHAIN
+  H->>AB: append add-writer op (only if the burn is real)
   Note over AB: apply on every peer, addWriter key
   Note right of P: now writable
   P->>AB: append wave-selfie
@@ -538,10 +545,15 @@ sequenceDiagram
   AB-->>P: view updates, replicates to all
 ```
 
-> **Scope of the gate:** this is *authenticity* — entries are provably from the claimed
-> peer. It is **not** proof-of-participation: a peer can self-sign a receipt for a hop it
-> never held. Full proof requires cross-checking the receipt against the real token chain
-> (a validator's job, out of scope here).
+> **Two layers, two properties.** The on-chain **burn check at admission** is
+> proof-of-payment: it bounds the gallery to peers who each burned a fee, so a Sybil pays per
+> identity and can't flood it. The **`apply()` receipt check** is authenticity: it's
+> deterministic (no network I/O), so every peer independently drops unsigned/impersonated
+> entries. The burn check is non-deterministic, so it's the *admitter* that vouches — the
+> guarantee holds while admissions route through an honest, well-connected writer (the
+> originator or a seed). When enforcement is off (no wallet / tests) only the receipt gate
+> applies. A receipt still isn't proof the peer *held* the token (it can self-sign one) — but
+> with no rewards riding on hops, that no longer matters; the burn is what gates value.
 
 ### 8.3 `wave-selfie` op (Autobase entry)
 ```json
@@ -561,13 +573,17 @@ peerId)` (newest `timestamp` wins), sorted by `hopCount` then `timestamp`.
 The money layer is deliberately minimal: **burned fees** (anti-spam / skin in the game) and
 **gallery tips** (§8.3). There are **no sponsor rewards** — nothing pays participants for
 racing, so there's no reward ledger, no proof-collection, and no chain-walk to arbitrate.
-(Wire details: the paid-wave gate on `wave-announce`/`wave-start`/`wave-sync` §5, §11.)
+Each burn does real work: the **kick-off** burn gates whether a wave is adoptable at all (the
+paid-wave gate, §9.3), and a **join** burn gates whether a peer may write to the gallery (the
+admission gate, §8.2). (Wire details: the paid-wave gate on
+`wave-announce`/`wave-start`/`wave-sync` §5; the admission gate on `add-writer` §8.2.)
 
-### 9.0 Kick-off burn-proof attestation
-The initiator's kick-off burn is attested by a signed proof, carried as the `paid` field on
-`wave-announce` / `wave-start` / `wave-sync` (it is **not** an on-wire gallery entry):
+### 9.0 Fee-burn attestation
+A fee burn is attested by a signed proof. The **kick-off** attestation is carried as the
+`paid` field on `wave-announce` / `wave-start` / `wave-sync`; a **join** attestation is
+carried as the `burn` field on `add-writer` (§8.2). It is **not** an on-wire gallery entry:
 ```json
-{ "waveId": "<hex16>", "peerId": "<peerId>", "reason": "kickoff", "amount": 1,
+{ "waveId": "<hex16>", "peerId": "<peerId>", "reason": "kickoff" | "join", "amount": 1,
   "txHash": "<tron-tx-hash>", "tronAddress": "T…", "burnTs": 1719705612080, "sig": "<hex128>" }
 ```
 Two independent bindings make it verifiable (the Tron key that signs the burn is a different
@@ -606,11 +622,11 @@ it *"peer P burned specifically for wave W"*: every fee burn carries
 waves is impossible — each `waveId` is 16 random bytes, unguessable before the wave exists,
 and the memo is part of the signed tx.
 
-For the **kick-off** fee (the only fee anyone else needs to verify) a second binding ties the
-burn to the ring identity, since the Tron key that signs the tx is a **different keypair**
-from the peer's Ed25519 ring identity: the initiator signs the attestation of §9.0 with its
-ring key and carries it as the `paid` proof. The join fee needs no attestation — it's the
-joiner's own anti-spam cost, with no reward or ledger that would require anyone to check it.
+A second binding ties the burn to the ring identity, since the Tron key that signs the tx is a
+**different keypair** from the peer's Ed25519 ring identity: the peer signs the attestation of
+§9.0 with its ring key. Both fees carry it — the **kick-off** one as the `paid` proof (so
+peers can gate wave adoption), the **join** one as the `add-writer` `burn` field (so the
+gallery admitter can gate write access).
 
 ### 9.3 Verification (who checks what, when)
 
@@ -622,6 +638,9 @@ joiner's own anti-spam cost, with no reward or ledger that would require anyone 
   `join()` is refused until this passes, so no peer ever pays into a wave the initiator
   hasn't paid for. The initiator, symmetrically, does not announce until its own burn is
   readable on-chain.
+- **Before admitting a gallery writer (the admitter):** the same `verifyBurnTx` check is run
+  on the requester's **join** burn before granting write access (§8.2), so a gallery seat —
+  and therefore a tippable selfie — requires a real, on-chain-verified burn.
 - **Anyone, later:** because every fee's memo is on-chain, a third party can audit the fees
   of any wave with nothing but a Tron node — no trust in anyone's bookkeeping required.
 
@@ -680,6 +699,10 @@ following guards keep a hostile peer running a modified app from disrupting hone
 - **Paid-gate on every adoption path.** When enforced, `wave-announce`, `wave-start`, and
   `wave-sync` (both lobby **and** racing) are all gated on a valid kick-off burn-proof, so no
   single message shape can push a peer into an unpaid/forged wave.
+- **Burn-gated gallery admission.** A writer is admitted only after the admitter verifies the
+  requester's join burn on-chain (§8.2). This bounds the gallery to one entry per real burn —
+  a Sybil pays per identity — and means a tip (which targets a gallery entry) always reaches a
+  peer who paid in. Holds while admissions route through an honest well-connected writer.
 - **Completion self-guard.** A peer treats a returning token as completion only for a wave it
   is actually running, so a token with `originator == me` for a wave it never started can't
   forge a completion.
@@ -693,12 +716,16 @@ following guards keep a hostile peer running a modified app from disrupting hone
   cheap-before-verify ordering, but not yet a per-peer message budget; a peer can still spend a
   connection's bandwidth/CPU. Planned: per-connection token buckets per message kind, plus size
   caps on gallery entries (inline image bytes) and bounds on the auxiliary maps.
-- **Gallery admission at scale** and **gallery-key trust** (a competing low-`waveId` `wave-start`
-  can still name an attacker-chosen Autobase key) remain open; see `scalable-topology.md` §4.7.
-- **Wallet-less mode is unauthenticated by design.** All paid-gate guarantees hold only when a
-  wallet is present (`enforcePaid`); an unfunded demo/test run accepts unpaid waves so the
-  lifecycle can be exercised without on-chain calls. Don't mistake that mode for the security
-  model.
+- **Byzantine admitter at scale.** The burn-gated admission (§8.2) is enforced by whichever
+  writer admits — sound when that's the originator or a seed, but a malicious *already-admitted*
+  writer could admit a non-payer by skipping the check. Mitigation would be quorum admission or
+  moving the on-chain proof into the op; fine for the MVP (admissions route through the
+  originator/seed). **Gallery-key trust** (a competing low-`waveId` `wave-start` can still name
+  an attacker-chosen Autobase key) also remains open; see `scalable-topology.md` §4.7.
+- **Wallet-less mode is unauthenticated by design.** All paid-gate and burn-gated-admission
+  guarantees hold only when a wallet is present (`enforcePaid`); an unfunded demo/test run
+  accepts unpaid waves and receipt-only gallery admission so the lifecycle can be exercised
+  without on-chain calls. Don't mistake that mode for the security model.
 
 ## Appendix A — app-internal IPC (informative, not on-wire)
 

@@ -45,6 +45,10 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       skin in the game with no beneficiary; on-chain memo `hyperwave:<waveId>:<peerId>`
 - [x] Paid-wave anti-spam gate: no announce until the kick-off burn is on-chain (carried as
       the signed `paid` proof); peers ignore unproven announces and verify before joining
+- [x] **Burn-gated gallery admission**: `add-writer` carries the join burn attestation; the
+      admitter runs `burnAuthorizes` + verifies the burn on-chain before granting write access
+      — a gallery seat requires a real burn, so every tippable selfie is from a peer who paid
+      in (bounds the gallery to one entry per burn). Verified live end-to-end on Nile.
 - [x] **Sponsor rewards removed** (simplification): dropped the interlocked payout, the
       `wave-proof` receipt collection, the golden-rule chain-walk (`longestValidChain` /
       `payableFromChain`), and the gallery `burn-proof` op. The validator role is now purely
@@ -74,7 +78,11 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 ### Adversarial hardening still open (`docs/protocol.md` §11.3)
 - [ ] Per-connection rate limiting (token buckets per message kind) + size caps on gallery
       entries (inline image bytes) + bounds on auxiliary maps (`seen`/`endedWaves`/`routed`/
-      `lookupRoute`/`goneUntil`)
+      `lookupRoute`/`goneUntil`). (Entry *count* is already bounded — burn-gated admission caps
+      the gallery to one entry per on-chain burn.)
+- [ ] Byzantine admitter: burn-gated admission is enforced by the admitting writer, so a
+      malicious *already-admitted* writer could admit a non-payer. Fine while admissions route
+      through the originator/seed; harden with quorum admission or proof-in-the-op if needed.
 - [ ] Gallery-key trust: a competing low-`waveId` `wave-start` can still name an
       attacker-chosen Autobase key — bind the key to the originator / derive from `waveId`
 

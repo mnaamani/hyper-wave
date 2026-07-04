@@ -11,6 +11,7 @@ const {
   advanceChain,
   signBurn,
   verifyBurn,
+  burnAuthorizes,
   signWaveEnd,
   verifyWaveEnd
 } = require('./token')
@@ -111,6 +112,16 @@ test('burn attestation rejects impersonation and tampering', (t) => {
   t.absent(verifyBurn({ ...burnFields, txHash: 'other' }, sig), 'swapped txHash')
   t.absent(verifyBurn({ ...burnFields, waveId: 'other-wave' }, sig), 'reused for another wave')
   t.absent(verifyBurn({ ...burnFields, amount: 99 }, sig), 'inflated amount')
+})
+
+test('burnAuthorizes gates gallery admission on a real, bound burn', (t) => {
+  const proof = { ...burnFields, sig: signBurn(kp[1], burnFields) }
+  t.ok(burnAuthorizes(proof, id[1], waveId), 'a valid burn authorizes its own peer + wave')
+  t.absent(burnAuthorizes(null, id[1], waveId), 'no burn = no gallery seat')
+  t.absent(burnAuthorizes(proof, id[2], waveId), 'not another peer’s admission (bound to peerId)')
+  t.absent(burnAuthorizes(proof, id[1], 'other-wave'), 'not reusable for another wave')
+  const forged = { ...burnFields, sig: signBurn(kp[2], burnFields) } // someone else's signature
+  t.absent(burnAuthorizes(forged, id[1], waveId), 'signature must be by the admitted peer')
 })
 
 // --- wave-end completion attestation ---------------------------------------

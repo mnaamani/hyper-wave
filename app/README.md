@@ -39,10 +39,12 @@ fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scalin
     tie-break, `wave-end` broadcast, timeout fallbacks, `wave-sync` for late joiners, and
     healing (skip a dead successor when its `wave-pos` ACK doesn't arrive).
   - **Gallery (Autobase):** per-wave Autobase created by the originator (key rides
-    `wave-start` + the token). Writers are admitted via `add-writer` gated on a valid hop
-    receipt; `apply()` verifies every `wave-selfie` signature deterministically on all peers.
-    Selfies are captured during the **lobby** and staged; the worker posts each one when the
-    token reaches that peer, so the gallery fills in ring order.
+    `wave-start` + the token). Writer admission (`add-writer`) is **burn-gated** — the admitter
+    verifies the requester's join burn on-chain before granting write access, so a gallery seat
+    (and thus a tippable selfie) requires a real fee burn; `apply()` also verifies every
+    `wave-selfie` signature deterministically on all peers. Selfies are captured during the
+    **lobby** and staged; the worker posts each one when the token reaches that peer, so the
+    gallery fills in ring order.
 - **`workers/lib/pay.js`** + **`lib/fees.js`** — the WDK payment layer (Tron **Nile
   testnet**, native TRX). Self-custodial wallet per instance (seed at `<storage>/wallet.seed`),
   `send()` transfers, `burn(amount, memo)` to Tron's black-hole address with an on-chain memo,
@@ -55,8 +57,10 @@ fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scalin
     the game / anti-spam.
   - **Paid-wave anti-spam gate** — a wave isn't announced until its kick-off burn exists
     on-chain; peers ignore unproven announces and verify the burn before joining.
+  - **Burn-gated gallery admission** — the join burn is the ticket to write a selfie: the
+    admitter verifies it on-chain before admitting, so every gallery entry is backed by a burn.
   - **Gallery tipping** — 💵 tip a selfie 1 TRX straight to its owner's wallet. The only way
-    to actually make money.
+    to actually make money — and always to a peer who paid in.
 - **`workers/main.js`** — the template's OTA updater worker, left intact.
 
 **Roles:** a normal instance is a `peer`. Launch with `HYPERWAVE_ROLE=validator` to run a

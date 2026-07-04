@@ -36,6 +36,7 @@ const {
   advanceChain,
   signBurn,
   verifyBurn,
+  burnAuthorizes,
   signWaveEnd,
   verifyWaveEnd
 } = require('./token')
@@ -194,6 +195,8 @@ function createWave({
   let myReceipt = null // my hop's receipt once the token reaches me, awaiting the selfie
   let selfiePosted = false // guard: post my selfie exactly once per wave
   let admissionPromise = null // in-flight add-writer request (dedup concurrent callers)
+  let myBurnProof = null // my signed fee-burn attestation — my gallery-admission ticket
+  const admittedKeys = new Set() // (admitter) writer core keys I've already admitted this wave
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -426,15 +429,7 @@ function createWave({
       return
     }
     if (m.kind === 'add-writer') {
-      // Admit only participants of the current wave: the request must carry a receipt
-      // validly signed by the requester for this wave. (apply() re-checks each selfie.)
-      const ok =
-        base &&
-        base.writable &&
-        m.key &&
-        m.waveId === currentWaveId &&
-        verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
-      if (ok) base.append({ type: 'add-writer', key: m.key })
+      admitWriter(m)
       return
     }
     if (m.kind !== 'pointers') return
@@ -688,27 +683,71 @@ function createWave({
     onGallery(await readGallery(base))
   }
 
-  // Become an admitted gallery writer: broadcast an add-writer request presenting my
-  // receipt for this wave (the anti-spam gate — the host admits my writer core), then wait
+  // (Admitter side) Grant gallery write access — the anti-spam gate. Only a current writer
+  // (the originator, or an already-admitted writer) admits, and only if the requester proves:
+  //   1. a valid hop receipt for the current wave (authenticity, connection-bound peerId), and
+  //   2. a fee-burn attestation bound to that peerId + wave (burnAuthorizes), whose txHash the
+  //      admitter then verifies ON-CHAIN (verifyBurnOnChain) — a real, unspendable burn.
+  // So every gallery entry is backed by a real burn: no burn, no seat. Because tips go to
+  // gallery entries, a tip therefore always reaches a peer who paid in. When enforcement is off
+  // (no wallet / tests) the burn checks are skipped, matching the paid-gate. The on-chain step
+  // is non-deterministic, so it's the admitter that vouches (apply() can't do network I/O);
+  // this holds while admissions route through an honest well-connected writer (originator/seed).
+  async function admitWriter(m) {
+    if (!base || !base.writable || !m.key || m.waveId !== currentWaveId) return
+    if (admittedKeys.has(m.key)) return // already admitted this writer core
+    if (!verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)) {
+      return
+    }
+    if (enforcePaid) {
+      if (!burnAuthorizes(m.burn, m.peerId, m.waveId)) return // no valid burn ticket
+      if (verifyBurnOnChain) {
+        const r = await verifyBurnOnChain(m.burn.txHash, {
+          waveId: m.waveId,
+          from: m.burn.tronAddress,
+          minTrx: m.burn.amount
+        }).catch(() => null)
+        if (!r || !r.ok) {
+          return log('add-writer: burn not verified', shortId(m.peerId), r && r.reason)
+        }
+      }
+      // re-check after the await — the wave may have moved on
+      if (!base || !base.writable || m.waveId !== currentWaveId || admittedKeys.has(m.key)) return
+    }
+    admittedKeys.add(m.key)
+    base.append({ type: 'add-writer', key: m.key })
+    log('admitted gallery writer', shortId(m.peerId))
+  }
+
+  // Become an admitted gallery writer: broadcast an add-writer request presenting (a) my hop
+  // receipt for this wave and (b) my fee-burn attestation — the admitter verifies the burn
+  // ON-CHAIN before granting write access, so a gallery seat requires a real burn. Then wait
   // until writable. `admissionPromise` dedups concurrent callers into one in-flight request.
+  // (The originator is already a writer and never comes here — it paid its kick-off burn.)
   function ensureWriter(receipt) {
     if (!base) return Promise.resolve(false)
     if (base.writable) return Promise.resolve(true)
     if (admissionPromise) return admissionPromise
-    admissionPromise = base.ready().then(() => {
-      if (base.writable) return true
-      broadcast({
-        kind: 'add-writer',
-        key: b4a.toString(base.local.key, 'hex'),
-        peerId: me.id,
-        waveId: receipt.waveId,
-        hopCount: receipt.hopCount,
-        chainHash: receipt.chainHash,
-        receiptTs: receipt.receiptTs,
-        receiptSig: receipt.receiptSig
+    admissionPromise = base
+      .ready()
+      // when enforcing, my burn attestation is my ticket; wait briefly if the burn tx is
+      // still confirming (join burns are fire-and-forget from the lobby)
+      .then(() => (enforcePaid && !myBurnProof ? waitFor(() => !!myBurnProof, 8000) : true))
+      .then(() => {
+        if (base.writable) return true
+        broadcast({
+          kind: 'add-writer',
+          key: b4a.toString(base.local.key, 'hex'),
+          peerId: me.id,
+          waveId: receipt.waveId,
+          hopCount: receipt.hopCount,
+          chainHash: receipt.chainHash,
+          receiptTs: receipt.receiptTs,
+          receiptSig: receipt.receiptSig,
+          burn: myBurnProof || undefined
+        })
+        return waitFor(() => base.writable, 8000)
       })
-      return waitFor(() => base.writable, 8000)
-    })
     admissionPromise.finally(() => {
       admissionPromise = null
     })
@@ -752,9 +791,10 @@ function createWave({
   }
 
   // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
-  // identity to the on-chain tx) and return it, so the initiator can attach its KICK-OFF
-  // proof to the wave-announce (the paid-wave gate, announcePaid). Join burns need no
-  // attestation now that there's no payout ledger — the burn itself is the anti-spam cost.
+  // identity to the on-chain tx), stash it as my gallery-admission ticket, and return it.
+  // Two consumers: the initiator attaches its KICK-OFF proof to the wave-announce (the
+  // paid-wave gate, announcePaid); and any participant presents its proof (kick-off OR join)
+  // when it requests to write a selfie — so a gallery seat requires a real burn (ensureWriter).
   function recordBurn({ reason, amount, txHash }) {
     if (!wave) return null
     const fields = {
@@ -766,7 +806,8 @@ function createWave({
       tronAddress: walletAddress || '',
       burnTs: Date.now()
     }
-    return { ...fields, sig: signBurn(swarm.keyPair, fields) }
+    myBurnProof = { ...fields, sig: signBurn(swarm.keyPair, fields) }
+    return myBurnProof
   }
 
   function waitFor(pred, timeoutMs) {
@@ -922,6 +963,8 @@ function createWave({
     myReceipt = null
     selfiePosted = false
     admissionPromise = null
+    myBurnProof = null
+    admittedKeys.clear()
   }
 
   // Emit a holding event; canSelfie tells the renderer this peer is a participant (its

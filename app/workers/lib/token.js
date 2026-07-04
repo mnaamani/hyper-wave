@@ -80,6 +80,15 @@ function verifyBurn(fields, sigHex) {
   }
 }
 
+// Does this burn attestation authorize `peerId` to write to `waveId`'s gallery? Checks the
+// signature and that the burn is bound to this exact peer + wave (so a burn can't be replayed
+// for another identity or wave). This is the gallery-admission gate: presence in the gallery
+// requires a real fee burn, which makes every tippable selfie one from a peer who paid in.
+// The on-chain reality of the txHash is verified separately by the admitter (network I/O).
+function burnAuthorizes(burn, peerId, waveId) {
+  return !!(burn && burn.peerId === peerId && burn.waveId === waveId && verifyBurn(burn, burn.sig))
+}
+
 // --- wave-end completion attestation ---------------------------------------
 // A completed wave is announced by its ORIGINATOR flooding a `wave-end`. Because a flood
 // message can be forged by any peer, the originator signs the completion with its ring key
@@ -116,6 +125,7 @@ module.exports = {
   burnHash,
   signBurn,
   verifyBurn,
+  burnAuthorizes,
   signWaveEnd,
   verifyWaveEnd
 }
