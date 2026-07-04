@@ -271,23 +271,28 @@ the initiator (which assembles the roster) even across a partial mesh.
 ### wave-start — flooded (originator, when the lobby closes)
 ```json
 { "kind": "wave-start", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
-  "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>",
+  "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>", "keySig": "<hex64>",
   "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ } }
 ```
-Finalizes the roster and begins the race. `key` is the wave's gallery Autobase bootstrap
-key (§8). Receivers open the gallery and transition `lobby → racing`. When the paid-wave
-gate is enforced, `wave-start` carries the same kick-off `paid` proof as the announce and is
-gated on it (§11), so a forged start can't conjure a race + gallery; carrying it also lets a
-peer that adopted via `wave-start` re-authenticate a later `wave-sync` to a newcomer.
+Finalizes the roster and begins the race. `key` is the wave's gallery Autobase bootstrap key
+(§8); `keySig` is the originator's Ed25519 signature over `(waveId, key)` — receivers verify
+it against the wave's originator before opening the gallery, so a relay can't swap the
+(unsigned) key to point them at an attacker-controlled Autobase (§8.1). Receivers transition
+`lobby → racing`. When the paid-wave gate is enforced, `wave-start` also carries the kick-off
+`paid` proof and is gated on it (§11); carrying it also lets a peer that adopted via
+`wave-start` re-authenticate a later `wave-sync` to a newcomer.
 
 ### token — DIRECT to the successor (the ⚽)
 ```json
 { "kind": "token", "waveId": "<hex16>", "originator": "<peerId>",
   "hopCount": 3, "prevChainHash": "<hex32>",
   "senderPeerId": "<peerId>", "senderReceiptSig": "<hex64>",
-  "timestamp": 1719705612080, "autobaseKey": "<autobaseKeyHex>" }
+  "timestamp": 1719705612080, "autobaseKey": "<autobaseKeyHex>", "autobaseKeySig": "<hex64>" }
 ```
-The token as forwarded by `senderPeerId` at hop `hopCount`. `senderReceiptSig` is that
+`autobaseKeySig` is the originator's signature over the gallery key (as in `wave-start`),
+carried so a peer catching up via the token — and re-stamped hop to hop — still verifies the
+key rather than trusting a forwarder (§8.1). The token as forwarded by `senderPeerId` at hop
+`hopCount`. `senderReceiptSig` is that
 sender's receipt over `(waveId, hopCount, prevChainHash, timestamp)`. Processing: §6.
 
 ### wave-pos — one-hop broadcast (a peer when it becomes the holder)
@@ -331,9 +336,10 @@ verifies the burn on-chain, and only then appends an `add-writer` op.
 ```json
 { "kind": "wave-sync", "waveId": "<hex16>", "phase": "lobby" | "racing",
   "by": "<peerId>", "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>|null",
-  "lobbyMsLeft": 8000 }
+  "keySig": "<hex64>", "lobbyMsLeft": 8000 }
 ```
-Lets a peer joining mid-wave sync (§7.4). When the paid-wave gate is enforced, a `wave-sync`
+Lets a peer joining mid-wave sync (§7.4). `keySig` carries the originator's gallery-key
+signature (§8.1) so the newcomer verifies the key. When the paid-wave gate is enforced, a `wave-sync`
 must carry the kick-off `paid` proof (§9.0) **for either phase** — including `racing` — and is
 adopted only if it verifies (§11), so a fabricated racing sync can't push a newcomer into a
 bogus wave. (`paid` is omitted from the schema line above for brevity.)
@@ -502,13 +508,19 @@ fallback. On ending: add `waveId` to `endedWaves`, clear `seen`, return to idle.
 Each wave has its own gallery: an **Autobase** (Holepunch multi-writer append log with a
 deterministic linearized view), namespaced per wave so it starts empty.
 
-### 8.1 Setup
+### 8.1 Setup & the signed gallery key
 - The **originator** creates the Autobase (bootstrap key = null → its own key), and
   publishes the resulting **`autobaseKey`** (hex) in `wave-start` and in every `token`.
+- **The key is signed.** The originator also publishes `keySig` = Ed25519 over
+  `(waveId, autobaseKey)`; a peer opens the gallery only after verifying it against the wave's
+  originator (and rejects a key whose claimed originator doesn't match the one it already
+  adopted). The key travels on *unsigned, relayed/re-stamped* fields, so without this a
+  malicious relay could swap it and point peers at an attacker-controlled Autobase — the
+  signature makes that a detectable forgery. (Pure integrity; independent of payments.)
 - Other peers **open** the same Autobase by that bootstrap key. It replicates over the
   existing `Corestore.replicate(conn)` on each connection.
 - `valueEncoding`: JSON. The linearized **view** is an append-only list of `wave-selfie`
-  entries (in hop/timestamp order after `buildGallery`, §8.3).
+  entries (one per peer, in hop/timestamp order; see §8.2–§8.3).
 
 ### 8.2 Writer admission: the burn gate (anti-spam)
 Autobase writes only count from keys in the writer set, and only an existing writer can
@@ -526,7 +538,14 @@ requires a verified fee burn**:
   - `{ type: 'add-writer', key }` → `addWriter(key)`.
   - `{ type: 'wave-selfie', ... }` → append to the view **only if** its `receiptSig`
     verifies (Ed25519) for `(waveId, hopCount, chainHash, receiptTs)` by `peerId`.
-    Invalid/unsigned/impersonated entries are dropped identically everywhere.
+    Invalid/unsigned/impersonated entries are dropped identically everywhere. Two more
+    deterministic rules: **one entry per peer** (the first valid write wins; extras are
+    dropped, so a paid seat can't append unbounded entries); and the tip **`address` survives
+    only if a signed burn backs it** — the entry carries the peer's burn attestation, and the
+    address is kept only when it equals that burn's `tronAddress` (`burnAuthorizes` +
+    `tronAddress === address`), else it's blanked (the selfie still shows, but isn't tippable).
+    The bulky burn is verified then dropped from the stored entry. So a **tip always reaches
+    the wallet that paid the fee**, never a self-declared unrelated address.
 
 ```mermaid
 sequenceDiagram
@@ -560,13 +579,15 @@ sequenceDiagram
 { "type": "wave-selfie", "waveId": "<hex16>", "peerId": "<peerId>",
   "hopCount": 3, "receiptSig": "<hex64>", "chainHash": "<hex32>", "receiptTs": 1719705612080,
   "country": "BR", "caption": "Vamos! 🇧🇷", "image": "data:image/jpeg;base64,...",
-  "address": "T…", "timestamp": 1719705650000 }
+  "address": "T…", "burn": { /* the poster's §9.0 attestation — verified then dropped */ },
+  "timestamp": 1719705650000 }
 ```
 `image` is an inline JPEG data URL (a compressed thumbnail) in the reference build;
 Hyperblobs is the scaling path. `address` is the poster's Tron (TRX) wallet, carried so a
 viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → worker
-`pay.send(address, amount)`; §WDK). Ordering (`buildGallery`): one entry per `(waveId,
-peerId)` (newest `timestamp` wins), sorted by `hopCount` then `timestamp`.
+`pay.send(address, amount)`; §WDK) — but only if `apply()` finds it backed by the `burn`
+(§8.2), so a tip always reaches the wallet that paid in. Stored form: one entry per
+`(waveId, peerId)`, `burn` stripped, sorted by `hopCount` then `timestamp`.
 
 ## 9. Participation fees — burning & verification
 
@@ -659,7 +680,7 @@ the gate (waves announce immediately, unpaid).
 | `WAVE_TIMEOUT_MS` | 90000 | force-idle if a wave doesn't finish |
 | `HEAL_TIMEOUT_MS` | 3000 | no advance past my hop ⇒ skip successor |
 | `MAX_HOPS` | 5000 | runaway-token safety cap |
-| writer-admission wait | 8000 | give up if not admitted to the gallery |
+| `ADMIT_TIMEOUT_MS` | 25000 | give up requesting gallery admission (re-broadcasts every 3s) |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.
@@ -703,6 +724,12 @@ following guards keep a hostile peer running a modified app from disrupting hone
   requester's join burn on-chain (§8.2). This bounds the gallery to one entry per real burn —
   a Sybil pays per identity — and means a tip (which targets a gallery entry) always reaches a
   peer who paid in. Holds while admissions route through an honest well-connected writer.
+- **Signed gallery key.** The gallery Autobase key is opened only after verifying the
+  originator's signature over `(waveId, key)` (§8.1), so a relay can't swap the (unsigned,
+  re-stamped) key to redirect peers to an attacker's gallery.
+- **Burn-bound tip address + one entry per peer.** `apply()` deterministically keeps a
+  selfie's tip `address` only if a signed burn names that wallet, and admits one entry per
+  peer (§8.2) — so tips can't be routed to a non-payer and a paid seat can't bloat the log.
 - **Completion self-guard.** A peer treats a returning token as completion only for a wave it
   is actually running, so a token with `originator == me` for a wave it never started can't
   forge a completion.
@@ -714,14 +741,14 @@ following guards keep a hostile peer running a modified app from disrupting hone
 ### 11.3 Known residual risks (hardening backlog)
 - **No per-connection rate limiting.** Gossip has flood-dedup, `seen`/`MAX_HOPS` caps, and the
   cheap-before-verify ordering, but not yet a per-peer message budget; a peer can still spend a
-  connection's bandwidth/CPU. Planned: per-connection token buckets per message kind, plus size
-  caps on gallery entries (inline image bytes) and bounds on the auxiliary maps.
+  connection's bandwidth/CPU. Planned: per-connection token buckets per message kind, plus a
+  byte-size cap on the inline selfie `image` (entry *count* is already bounded — one per burn)
+  and bounds on the auxiliary maps.
 - **Byzantine admitter at scale.** The burn-gated admission (§8.2) is enforced by whichever
   writer admits — sound when that's the originator or a seed, but a malicious *already-admitted*
   writer could admit a non-payer by skipping the check. Mitigation would be quorum admission or
   moving the on-chain proof into the op; fine for the MVP (admissions route through the
-  originator/seed). **Gallery-key trust** (a competing low-`waveId` `wave-start` can still name
-  an attacker-chosen Autobase key) also remains open; see `scalable-topology.md` §4.7.
+  originator/seed).
 - **Wallet-less mode is unauthenticated by design.** All paid-gate and burn-gated-admission
   guarantees hold only when a wallet is present (`enforcePaid`); an unfunded demo/test run
   accepts unpaid waves and receipt-only gallery admission so the lifecycle can be exercised

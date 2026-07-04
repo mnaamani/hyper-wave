@@ -3,7 +3,7 @@
 // orchestrator in wave.js owns the live base instance. Unit-tested in
 // wave.gallery.test.js and wave.autobase.test.js.
 const b4a = require('b4a')
-const { verifyReceipt } = require('./token')
+const { verifyReceipt, burnAuthorizes } = require('./token')
 
 // A selfie is admitted to the gallery only if it carries a receipt validly signed
 // by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
@@ -17,14 +17,34 @@ function selfieHasValidReceipt(op) {
   )
 }
 
-// Autobase config shared by the engine and tests so apply/view is exercised
-// identically. apply() admits writers and appends only receipt-valid wave-selfie
-// ops into a single ordered view.
+// Is this selfie's tip `address` provably the wallet that paid the peer's fee? The op carries
+// the peer's burn attestation; the address is trusted only if it's the `tronAddress` of a
+// validly-signed burn by this peer for this wave. (The burn's on-chain reality is checked at
+// admission, §8.2 — here we bind the address to that same burn deterministically.) So a tip
+// always goes to the wallet that burned in, never a self-declared unrelated address.
+function tipAddressIsBackedByBurn(op) {
+  return !!(
+    op.address &&
+    op.burn &&
+    burnAuthorizes(op.burn, op.peerId, op.waveId) &&
+    op.burn.tronAddress === op.address
+  )
+}
+
+// Autobase config shared by the engine and tests so apply/view is exercised identically.
+// apply() admits writers and appends receipt-valid wave-selfie ops into one ordered view,
+// enforcing two rules deterministically on every peer:
+//   - one entry per peer per wave (first write wins) — bounds the log so a paid seat can't be
+//     used to append unbounded entries (only the display was deduped before);
+//   - the tip `address` survives only if a signed burn backs it, else it's stripped (the
+//     selfie still shows, but isn't tippable to an unverified wallet).
+// The bulky `burn` attestation is verified then dropped, so stored entries stay lean.
 function galleryConfig() {
   return {
     valueEncoding: 'json',
     open: (s) => s.get('gallery', { valueEncoding: 'json' }),
     async apply(nodes, view, host) {
+      let seen = null // lazily-built set of peerIds already in the view (per-peer dedup)
       for (const node of nodes) {
         const op = node.value
         if (op?.type === 'add-writer') {
@@ -33,7 +53,19 @@ function galleryConfig() {
           } catch {}
           continue
         }
-        if (op?.type === 'wave-selfie' && selfieHasValidReceipt(op)) await view.append(op)
+        if (op?.type !== 'wave-selfie' || !selfieHasValidReceipt(op)) continue
+        if (seen === null) {
+          seen = new Set()
+          for (let i = 0; i < view.length; i++) {
+            const e = await view.get(i)
+            if (e?.type === 'wave-selfie') seen.add(e.peerId)
+          }
+        }
+        if (seen.has(op.peerId)) continue // one selfie per peer per wave — drop extras
+        seen.add(op.peerId)
+        const { burn, ...entry } = op
+        if (!tipAddressIsBackedByBurn(op)) entry.address = '' // unverified address → not tippable
+        await view.append(entry)
       }
     }
   }

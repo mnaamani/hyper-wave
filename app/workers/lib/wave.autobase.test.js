@@ -10,7 +10,7 @@ const Autobase = require('autobase')
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
 const { galleryConfig, readGallery } = require('./gallery')
-const { signReceipt } = require('./token')
+const { signReceipt, signBurn } = require('./token')
 
 const WAVE = 'w'
 const CH = b4a.toString(b4a.alloc(32), 'hex') // some chain hash value
@@ -52,12 +52,12 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
 
   await base.append(selfie(p2, 1, 'second', 100))
   await base.append(selfie(p1, 0, 'first', 100))
-  await base.append(selfie(p1, 0, 'first-newer', 200)) // newer selfie from p1, same hop
+  await base.append(selfie(p1, 0, 'first-dupe', 200)) // a second selfie from p1 — dropped at write
   await base.update()
   t.alike(
     (await readGallery(base)).map((g) => g.caption),
-    ['first-newer', 'second'],
-    'ordered by hop, newest-per-peer'
+    ['first', 'second'],
+    'ordered by hop; one entry per peer — p1’s second post is dropped at write (#3)'
   )
 
   // receipt gate: a selfie with a bad signature is dropped by apply()
@@ -78,4 +78,58 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
   await base.append({ type: 'add-writer', key: b4a.toString(crypto.keyPair().publicKey, 'hex') })
   await base.update()
   t.pass('add-writer op processed by apply()')
+})
+
+// #2: a tip address survives apply() only if a signed burn (by the same peer, for this wave,
+// naming that address) backs it — otherwise it's stripped, so tips can't go to a wallet that
+// didn't pay in.
+test('gallery apply() keeps a tip address only if a matching burn backs it', async (t) => {
+  const dir = '/tmp/hyperwave-tipaddr-test-' + Date.now()
+  const store = new Corestore(dir)
+  const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig())
+  t.teardown(async () => {
+    await base.close()
+    await store.close()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+  await base.ready()
+
+  const mkBurn = (kp, address) => {
+    const f = {
+      waveId: WAVE,
+      peerId: b4a.toString(kp.publicKey, 'hex'),
+      reason: 'join',
+      amount: 1,
+      txHash: 'abc123',
+      tronAddress: address,
+      burnTs: 1000
+    }
+    return { ...f, sig: signBurn(kp, f) }
+  }
+
+  const paid = crypto.keyPair() // burns from TPaid and tips there — legit
+  const spoof = crypto.keyPair() // claims a tip address with no backing burn
+  await base.append({
+    ...selfie(paid, 0, 'paid', 100),
+    address: 'TPaid',
+    burn: mkBurn(paid, 'TPaid')
+  })
+  await base.append({ ...selfie(spoof, 1, 'spoof', 100), address: 'TSpoof' }) // no burn
+  // a burn that names a DIFFERENT address than the selfie claims → not honoured
+  const mism = crypto.keyPair()
+  await base.append({
+    ...selfie(mism, 2, 'mismatch', 100),
+    address: 'TClaim',
+    burn: mkBurn(mism, 'TReal')
+  })
+  await base.update()
+
+  const byCaption = Object.fromEntries((await readGallery(base)).map((g) => [g.caption, g.address]))
+  t.is(byCaption.paid, 'TPaid', 'burn-backed address is kept (tippable)')
+  t.is(byCaption.spoof, '', 'unbacked address is stripped (not tippable)')
+  t.is(byCaption.mismatch, '', 'address not matching the burn wallet is stripped')
+  t.absent(
+    'burn' in (await base.view.get(0)),
+    'the burn attestation is dropped from stored entries'
+  )
 })

@@ -38,13 +38,14 @@ fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scalin
   - **Lifecycle:** idle → (pay) → lobby → racing → idle, one wave at a time, lower-`waveId`
     tie-break, `wave-end` broadcast, timeout fallbacks, `wave-sync` for late joiners, and
     healing (skip a dead successor when its `wave-pos` ACK doesn't arrive).
-  - **Gallery (Autobase):** per-wave Autobase created by the originator (key rides
-    `wave-start` + the token). Writer admission (`add-writer`) is **burn-gated** — the admitter
-    verifies the requester's join burn on-chain before granting write access, so a gallery seat
-    (and thus a tippable selfie) requires a real fee burn; `apply()` also verifies every
-    `wave-selfie` signature deterministically on all peers. Selfies are captured during the
-    **lobby** and staged; the worker posts each one when the token reaches that peer, so the
-    gallery fills in ring order.
+  - **Gallery (Autobase):** per-wave Autobase created by the originator. The gallery **key is
+    signed** by the originator (rides `wave-start`/token/`wave-sync`) so a relay can't swap it
+    to a rogue base. Writer admission (`add-writer`) is **burn-gated** — the admitter verifies
+    the requester's join burn on-chain before granting write access, so a gallery seat (and thus
+    a tippable selfie) requires a real fee burn. `apply()` runs deterministically on all peers:
+    verifies every `wave-selfie` signature, admits **one entry per peer**, and keeps the tip
+    `address` only if the entry's burn names that wallet (so tips always reach a payer). Selfies
+    are captured during the **lobby** and posted when the token reaches that peer (ring order).
 - **`workers/lib/pay.js`** + **`lib/fees.js`** — the WDK payment layer (Tron **Nile
   testnet**, native TRX). Self-custodial wallet per instance (seed at `<storage>/wallet.seed`),
   `send()` transfers, `burn(amount, memo)` to Tron's black-hole address with an on-chain memo,

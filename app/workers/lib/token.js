@@ -89,6 +89,33 @@ function burnAuthorizes(burn, peerId, waveId) {
   return !!(burn && burn.peerId === peerId && burn.waveId === waveId && verifyBurn(burn, burn.sig))
 }
 
+// --- gallery-key attestation -----------------------------------------------
+// The wave's gallery Autobase key is chosen by the originator and then travels on unsigned,
+// relayed fields (`wave-start`, the token, `wave-sync`). Without a binding, a malicious relay
+// could swap the key and point peers at an attacker-controlled gallery. So the originator
+// signs (waveId, autobaseKey) with its ring key; every peer verifies the signature against
+// the wave's originator before opening the gallery. (Independent of payments — pure integrity.)
+function galleryKeyHash(waveId, autobaseKey) {
+  return crypto.hash(b4a.from(`gallery-key|${waveId}|${autobaseKey}`))
+}
+
+function signGalleryKey(keyPair, waveId, autobaseKey) {
+  return b4a.toString(crypto.sign(galleryKeyHash(waveId, autobaseKey), keyPair.secretKey), 'hex')
+}
+
+// Verify the gallery key is the one the wave's `originatorHex` published for `waveId`.
+function verifyGalleryKey(originatorHex, waveId, autobaseKey, sigHex) {
+  try {
+    return crypto.verify(
+      galleryKeyHash(waveId, autobaseKey),
+      b4a.from(sigHex, 'hex'),
+      b4a.from(originatorHex, 'hex')
+    )
+  } catch {
+    return false
+  }
+}
+
 // --- wave-end completion attestation ---------------------------------------
 // A completed wave is announced by its ORIGINATOR flooding a `wave-end`. Because a flood
 // message can be forged by any peer, the originator signs the completion with its ring key
@@ -126,6 +153,8 @@ module.exports = {
   signBurn,
   verifyBurn,
   burnAuthorizes,
+  signGalleryKey,
+  verifyGalleryKey,
   signWaveEnd,
   verifyWaveEnd
 }

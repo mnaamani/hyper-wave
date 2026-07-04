@@ -37,6 +37,8 @@ const {
   signBurn,
   verifyBurn,
   burnAuthorizes,
+  signGalleryKey,
+  verifyGalleryKey,
   signWaveEnd,
   verifyWaveEnd
 } = require('./token')
@@ -99,6 +101,15 @@ const BOOTSTRAP_MS = 1500
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000
+// Gallery-writer admission (§8.2). The requester re-broadcasts its add-writer every
+// ADMIT_RETRY_MS (a single one-hop broadcast can race connection setup) until admitted or
+// ADMIT_TIMEOUT_MS — generous because the admitter verifies the burn ON-CHAIN (~seconds on
+// Nile), and because in a fast few-peer wave the race finishes first; the gallery persists
+// after the wave, so a late admission still lands. BURN_WAIT_MS: how long to wait for my own
+// join burn to be recorded before requesting admission.
+const ADMIT_TIMEOUT_MS = 25000
+const ADMIT_RETRY_MS = 3000
+const BURN_WAIT_MS = 10000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -197,6 +208,7 @@ function createWave({
   let admissionPromise = null // in-flight add-writer request (dedup concurrent callers)
   let myBurnProof = null // my signed fee-burn attestation — my gallery-admission ticket
   const admittedKeys = new Set() // (admitter) writer core keys I've already admitted this wave
+  const admittingKeys = new Set() // (admitter) keys with an on-chain burn check currently in flight
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -364,7 +376,7 @@ function createWave({
         if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, 0, true)
         if (m.paid) wave.kickoffProof = m.paid
         wave.paid = 'verified'
-        if (m.key) openGallery(m.waveId, b4a.from(m.key, 'hex'))
+        verifyAndOpenGallery(m.waveId, m.key, m.keySig, m.by)
         beginRace(m.roster)
       } else {
         if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, m.lobbyMsLeft)
@@ -403,7 +415,7 @@ function createWave({
       if (m.waveId && m.key && shouldAdopt(m.waveId)) {
         if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false)
         if (m.paid) wave.kickoffProof = m.paid // carry it so we can re-sync newcomers
-        openGallery(m.waveId, b4a.from(m.key, 'hex'))
+        verifyAndOpenGallery(m.waveId, m.key, m.keySig, m.by)
         beginRace(m.roster)
       }
       return
@@ -678,6 +690,24 @@ function createWave({
     return b
   }
 
+  // Open a gallery a peer advertised (wave-start / token / wave-sync), but ONLY after
+  // verifying the key is the one the wave's originator signed (§ gallery-key attestation).
+  // Blocks a malicious relay from swapping the (unsigned, relayed) key to point us at an
+  // attacker-controlled Autobase. The verified sig is stashed on `wave` so we can re-advertise
+  // it to newcomers we sync. `originatorId` is the wave's originator as this message claims it;
+  // it must match the originator we already adopted (no mid-wave originator swap).
+  function verifyAndOpenGallery(waveId, keyHex, keySig, originatorId) {
+    if (!keyHex) return
+    if (wave && wave.id === waveId && wave.by !== originatorId) {
+      return log('gallery-key: originator mismatch for wave', shortId(waveId))
+    }
+    if (!verifyGalleryKey(originatorId, waveId, keyHex, keySig)) {
+      return log('gallery-key: rejected unsigned/forged key for wave', shortId(waveId))
+    }
+    if (wave && wave.id === waveId) wave.keySig = keySig
+    openGallery(waveId, b4a.from(keyHex, 'hex'))
+  }
+
   async function emitGallery() {
     if (!base) return
     onGallery(await readGallery(base))
@@ -695,18 +725,20 @@ function createWave({
   // this holds while admissions route through an honest well-connected writer (originator/seed).
   async function admitWriter(m) {
     if (!base || !base.writable || !m.key || m.waveId !== currentWaveId) return
-    if (admittedKeys.has(m.key)) return // already admitted this writer core
+    if (admittedKeys.has(m.key) || admittingKeys.has(m.key)) return // done / on-chain check in flight
     if (!verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)) {
       return
     }
     if (enforcePaid) {
       if (!burnAuthorizes(m.burn, m.peerId, m.waveId)) return // no valid burn ticket
       if (verifyBurnOnChain) {
+        admittingKeys.add(m.key) // dedup concurrent re-broadcasts while this check runs
         const r = await verifyBurnOnChain(m.burn.txHash, {
           waveId: m.waveId,
           from: m.burn.tronAddress,
           minTrx: m.burn.amount
         }).catch(() => null)
+        admittingKeys.delete(m.key)
         if (!r || !r.ok) {
           return log('add-writer: burn not verified', shortId(m.peerId), r && r.reason)
         }
@@ -730,28 +762,42 @@ function createWave({
     if (admissionPromise) return admissionPromise
     admissionPromise = base
       .ready()
-      // when enforcing, my burn attestation is my ticket; wait briefly if the burn tx is
-      // still confirming (join burns are fire-and-forget from the lobby)
-      .then(() => (enforcePaid && !myBurnProof ? waitFor(() => !!myBurnProof, 8000) : true))
-      .then(() => {
-        if (base.writable) return true
-        broadcast({
-          kind: 'add-writer',
-          key: b4a.toString(base.local.key, 'hex'),
-          peerId: me.id,
-          waveId: receipt.waveId,
-          hopCount: receipt.hopCount,
-          chainHash: receipt.chainHash,
-          receiptTs: receipt.receiptTs,
-          receiptSig: receipt.receiptSig,
-          burn: myBurnProof || undefined
-        })
-        return waitFor(() => base.writable, 8000)
-      })
+      // when enforcing, my burn attestation is my admission ticket; wait for the burn tx to be
+      // recorded (join burns are fire-and-forget from the lobby) before requesting admission
+      .then(() => (enforcePaid && !myBurnProof ? waitFor(() => !!myBurnProof, BURN_WAIT_MS) : true))
+      .then(() => requestAdmission(receipt))
     admissionPromise.finally(() => {
       admissionPromise = null
     })
     return admissionPromise
+  }
+
+  // Broadcast add-writer and wait until admitted, re-broadcasting every ADMIT_RETRY_MS. The
+  // burn (my admission ticket) is pinned into the request now, so a later resetSelfie can't
+  // blank it mid-wait. Resolves true once writable, false on timeout.
+  function requestAdmission(receipt) {
+    return new Promise((resolve) => {
+      if (base.writable) return resolve(true)
+      const req = {
+        kind: 'add-writer',
+        key: b4a.toString(base.local.key, 'hex'),
+        peerId: me.id,
+        waveId: receipt.waveId,
+        hopCount: receipt.hopCount,
+        chainHash: receipt.chainHash,
+        receiptTs: receipt.receiptTs,
+        receiptSig: receipt.receiptSig,
+        burn: myBurnProof || undefined
+      }
+      const started = Date.now()
+      const tick = () => {
+        if (base.writable) return resolve(true)
+        if (Date.now() - started > ADMIT_TIMEOUT_MS) return resolve(false)
+        broadcast(req)
+        setTimeout(tick, ADMIT_RETRY_MS)
+      }
+      tick()
+    })
   }
 
   // Post my selfie to the gallery (admission first, then append).
@@ -768,6 +814,11 @@ function createWave({
       onToken({ event: 'gallery-error', reason: 'no-gallery-yet' })
       return
     }
+    // Capture the burn proof NOW, before the admission await: in a fast (few-peer) wave the
+    // race can complete during ensureWriter, and goIdle→resetSelfie would clear myBurnProof
+    // before the append — stripping our own tip address. The staged image/receipt are already
+    // captured as args; the burn is the last closure read that must be pinned too.
+    const burnProof = myBurnProof
     if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
       onToken({ event: 'gallery-error', reason: 'not-admitted' })
       return
@@ -784,6 +835,10 @@ function createWave({
       caption: caption || '',
       image: image || '',
       address: walletAddress || '', // my TRX wallet, so viewers can tip this selfie (§WDK)
+      // my burn attestation — apply() keeps the tip `address` only if it's the wallet this
+      // burn came from, so a tip always reaches the wallet that paid in (§ tip-address gate).
+      // It's verified then dropped from the stored entry (kept lean); `tronAddress === address`.
+      burn: burnProof || undefined,
       timestamp: Date.now()
     })
     log('posted selfie hop', hopCount)
@@ -862,7 +917,8 @@ function createWave({
       roster: new Set([by]),
       joined: !!mine,
       paid: enforcePaid ? 'pending' : 'verified',
-      kickoffProof: null
+      kickoffProof: null,
+      keySig: null // originator's signature over (waveId, galleryKey); set when we learn the key
     }
     if (mine) wave.roster.add(me.id)
     lobbyEndsAt = Date.now() + dur
@@ -965,6 +1021,7 @@ function createWave({
     admissionPromise = null
     myBurnProof = null
     admittedKeys.clear()
+    admittingKeys.clear()
   }
 
   // Emit a holding event; canSelfie tells the renderer this peer is a participant (its
@@ -1044,7 +1101,9 @@ function createWave({
     healPending = null
   }
 
-  // Build the next token this peer forwards, stamping hop `hopCount` with my receipt.
+  // Build the next token this peer forwards, stamping hop `hopCount` with my receipt. The
+  // gallery key travels with the token (the catch-up path for peers that missed wave-start),
+  // carrying the originator's signature over it so a forwarder can't swap it (§ gallery-key).
   function stampToken(waveId, originator, hopCount, prevChainHash, autobaseKeyHex) {
     const timestamp = Date.now()
     const senderReceiptSig = signReceipt(swarm.keyPair, waveId, hopCount, prevChainHash, timestamp)
@@ -1057,7 +1116,8 @@ function createWave({
       senderPeerId: me.id,
       senderReceiptSig,
       timestamp,
-      autobaseKey: autobaseKeyHex
+      autobaseKey: autobaseKeyHex,
+      autobaseKeySig: wave ? wave.keySig : null
     }
   }
 
@@ -1115,9 +1175,7 @@ function createWave({
       enterLobby(token.waveId, token.originator, false, 0, true)
     }
     if (wave.phase !== 'racing') beginRace()
-    if (token.autobaseKey && token.waveId) {
-      openGallery(token.waveId, b4a.from(token.autobaseKey, 'hex'))
-    }
+    verifyAndOpenGallery(token.waveId, token.autobaseKey, token.autobaseKeySig, token.originator)
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig)
     const next = stampToken(
@@ -1212,6 +1270,9 @@ function createWave({
     if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return
     openGallery(waveId, null) // create this wave's gallery, then wait for its key
     await base.ready()
+    // I'm the originator: sign (waveId, galleryKey) so peers can trust the key I publish
+    // (it rides unsigned/relayed fields otherwise — § gallery-key attestation).
+    wave.keySig = signGalleryKey(swarm.keyPair, waveId, autobaseKey)
 
     log(
       'starting wave',
@@ -1227,6 +1288,7 @@ function createWave({
       by: me.id,
       roster: [...wave.roster],
       key: autobaseKey,
+      keySig: wave.keySig,
       paid: wave.kickoffProof || undefined // so peers adopting via start can re-sync newcomers
     })
     beginRace()
@@ -1280,6 +1342,7 @@ function createWave({
           by: wave.by,
           roster: [...wave.roster],
           key: autobaseKey,
+          keySig: wave.keySig || undefined, // originator's signed gallery key (§ gallery-key)
           paid: wave.kickoffProof || undefined, // so a mid-lobby newcomer can verify + join
           lobbyMsLeft: wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
         })

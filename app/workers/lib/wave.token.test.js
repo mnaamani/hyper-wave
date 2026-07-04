@@ -12,6 +12,8 @@ const {
   signBurn,
   verifyBurn,
   burnAuthorizes,
+  signGalleryKey,
+  verifyGalleryKey,
   signWaveEnd,
   verifyWaveEnd
 } = require('./token')
@@ -122,6 +124,16 @@ test('burnAuthorizes gates gallery admission on a real, bound burn', (t) => {
   t.absent(burnAuthorizes(proof, id[1], 'other-wave'), 'not reusable for another wave')
   const forged = { ...burnFields, sig: signBurn(kp[2], burnFields) } // someone else's signature
   t.absent(burnAuthorizes(forged, id[1], waveId), 'signature must be by the admitted peer')
+})
+
+// --- gallery-key attestation -----------------------------------------------
+test('signGalleryKey/verifyGalleryKey binds the gallery key to the originator', (t) => {
+  const key = 'a4da63edc0ffee'
+  const sig = signGalleryKey(kp[0], waveId, key)
+  t.ok(verifyGalleryKey(id[0], waveId, key, sig), 'the originator’s signed key verifies')
+  t.absent(verifyGalleryKey(id[1], waveId, key, sig), 'a non-originator can’t vouch for the key')
+  t.absent(verifyGalleryKey(id[0], waveId, 'deadbeef', sig), 'a swapped key is rejected')
+  t.absent(verifyGalleryKey(id[0], 'other-wave', key, sig), 'not reusable for another wave')
 })
 
 // --- wave-end completion attestation ---------------------------------------

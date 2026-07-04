@@ -49,6 +49,12 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       admitter runs `burnAuthorizes` + verifies the burn on-chain before granting write access
       — a gallery seat requires a real burn, so every tippable selfie is from a peer who paid
       in (bounds the gallery to one entry per burn). Verified live end-to-end on Nile.
+- [x] **Signed gallery key**: originator signs `(waveId, autobaseKey)` (`signGalleryKey`);
+      peers verify before opening — a relay can't swap the unsigned key to a rogue Autobase
+- [x] **Tip address bound to the burn**: `apply()` keeps a selfie's tip `address` only if a
+      signed burn names that wallet — a tip always reaches the wallet that paid in (§8.2)
+- [x] **One gallery entry per peer at write** (`apply()` dedup) — a paid seat can't bloat the
+      log with unbounded self-signed entries (was display-only dedup before)
 - [x] **Sponsor rewards removed** (simplification): dropped the interlocked payout, the
       `wave-proof` receipt collection, the golden-rule chain-walk (`longestValidChain` /
       `payableFromChain`), and the gallery `burn-proof` op. The validator role is now purely
@@ -76,15 +82,12 @@ independent per-seat proofs). Decision deliberately parked — the serial token 
 for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Adversarial hardening still open (`docs/protocol.md` §11.3)
-- [ ] Per-connection rate limiting (token buckets per message kind) + size caps on gallery
-      entries (inline image bytes) + bounds on auxiliary maps (`seen`/`endedWaves`/`routed`/
-      `lookupRoute`/`goneUntil`). (Entry *count* is already bounded — burn-gated admission caps
-      the gallery to one entry per on-chain burn.)
+- [ ] Per-connection rate limiting (token buckets per message kind) + a byte-size cap on the
+      inline selfie `image` + bounds on auxiliary maps (`seen`/`endedWaves`/`routed`/
+      `lookupRoute`/`goneUntil`). (Gallery entry *count* is already bounded — one per burn.)
 - [ ] Byzantine admitter: burn-gated admission is enforced by the admitting writer, so a
       malicious *already-admitted* writer could admit a non-payer. Fine while admissions route
       through the originator/seed; harden with quorum admission or proof-in-the-op if needed.
-- [ ] Gallery-key trust: a competing low-`waveId` `wave-start` can still name an
-      attacker-chosen Autobase key — bind the key to the originator / derive from `waveId`
 
 ### Remaining hardening (scalable-topology §8)
 - [ ] Validate Chord convergence under real large-N churn (can't force a partial mesh
