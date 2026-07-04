@@ -15,9 +15,27 @@ const fs = require('fs')
 const path = require('path')
 
 const NODE_MODULES = path.join(__dirname, '..', 'node_modules')
-// bare-semver only handles simple comparator ranges (>=, >, <=, <, =) on x.y.z versions.
-const UNPARSEABLE = /[\^~*]|\|\||\s-\s|\bx\b/i
 const SAFE = '>=0.0.0' // always satisfied — removes the (advisory) constraint, stays parseable
+
+// Use bare-semver ITSELF as the oracle: a range is a problem iff bare-semver can't parse it
+// (the same check the pear-runtime resolver runs). Covers `^`, `||`, `~`, `x`, spaces after
+// operators (`>= 16`), hyphen ranges, etc. — no need to enumerate the syntaxes by hand.
+let semver = null
+let probe = null // a high version so `satisfies` reaches (and eagerly parses) the range
+try {
+  semver = require('bare-semver')
+  probe = new semver.Version(999, 0, 0)
+} catch {}
+
+function bareCanParse(range) {
+  if (!semver || !probe) return true // no oracle available — leave it alone
+  try {
+    semver.satisfies(probe, range) // throws INVALID_VERSION iff the range is unparseable
+    return true
+  } catch {
+    return false
+  }
+}
 
 function walk(dir, depth = 0) {
   if (depth > 6) return
@@ -55,7 +73,7 @@ function fixPackage(pkgDir) {
   if (!eng || typeof eng !== 'object') return
   let changed = false
   for (const [k, v] of Object.entries(eng)) {
-    if (typeof v === 'string' && UNPARSEABLE.test(v)) {
+    if (typeof v === 'string' && !bareCanParse(v)) {
       eng[k] = SAFE
       changed = true
     }
