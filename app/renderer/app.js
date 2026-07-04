@@ -42,7 +42,7 @@ ipc.on('gallery', (msg) => {
 })
 
 ipc.on('wallet', (msg) => {
-  hud.wallet(msg) // self-custodial USDT wallet address + balance
+  hud.wallet(msg) // self-custodial TRX wallet address + balance
   gallery.setMyAddress(msg.address) // so we don't offer to tip our own selfie
 })
 ipc.on('tip-result', (msg) => gallery.tipResult(msg))

@@ -3,7 +3,7 @@
 //   bare workers/lib/pay.test.js   (or `npm test`)
 const test = require('brittle')
 const fs = require('bare-fs')
-const { createPayments, toUnits, fromUnits } = require('./pay')
+const { createPayments, toSun, fromSun } = require('./pay')
 
 const TRON_ADDRESS = /^T[1-9A-HJ-NP-Za-km-z]{33}$/ // base58check, 34 chars
 
@@ -22,8 +22,8 @@ test('createPayments derives a persistent self-custodial Tron wallet (offline)',
   pay2.dispose()
 })
 
-test('USDT unit conversion is 6-decimal exact', (t) => {
-  t.is(toUnits(1.5), 1500000n)
-  t.is(toUnits(0.000001), 1n, 'smallest unit')
-  t.is(fromUnits(1500000n), 1.5)
+test('TRX <-> sun conversion is 6-decimal exact', (t) => {
+  t.is(toSun(1.5), 1500000n)
+  t.is(toSun(0.000001), 1n, 'smallest unit (1 sun)')
+  t.is(fromSun(1500000n), 1.5)
 })

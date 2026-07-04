@@ -523,7 +523,7 @@ sequenceDiagram
   "address": "T…", "timestamp": 1719705650000 }
 ```
 `image` is an inline JPEG data URL (a compressed thumbnail) in the reference build;
-Hyperblobs is the scaling path. `address` is the poster's Tron (USDT) wallet, carried so a
+Hyperblobs is the scaling path. `address` is the poster's Tron (TRX) wallet, carried so a
 viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → worker
 `pay.send(address, amount)`; §WDK). Ordering (`buildGallery`): one entry per `(waveId,
 peerId)` (newest `timestamp` wins), sorted by `hopCount` then `timestamp`.
@@ -564,11 +564,11 @@ only §3–§8 are the interop surface.
 
 **Renderer → worker (commands):** `start-wave`, `join-wave`, `set-country {country}`,
 `stage-selfie {selfie:{image,caption}}` (the lobby-captured selfie; the worker attaches the
-receipt and posts it when the token arrives), `tip {to, amount, peerId}` (send a real USDT
+receipt and posts it when the token arrives), `tip {to, amount, peerId}` (send a real TRX
 tip to a selfie owner's wallet).
 
 **Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`;
-`wallet {address, trx, usdt}` (self-custodial USDT wallet); `tip-result {hash?, error?}`; and
+`wallet {address, trx}` (self-custodial TRX wallet); `tip-result {hash?, error?}`; and
 `token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
 `position`, `forwarded`, `completed`, `healed`, `stalled`,

@@ -106,7 +106,7 @@ function createWave({
 
   const meKey = swarm.keyPair.publicKey
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null }
-  let walletAddress = null // my USDT wallet address (set by the worker once WDK is ready)
+  let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -642,7 +642,7 @@ function createWave({
       country: me.country || '',
       caption: caption || '',
       image: image || '',
-      address: walletAddress || '', // my USDT wallet, so viewers can tip this selfie (§WDK)
+      address: walletAddress || '', // my TRX wallet, so viewers can tip this selfie (§WDK)
       timestamp: Date.now()
     })
     log('posted selfie hop', hopCount)

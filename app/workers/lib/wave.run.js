@@ -71,14 +71,14 @@ if (env.PROBE) {
 }
 
 // env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
-// WALLET_SEND=<addr>:<amt> -> also do a one-off USDT transfer (funded wallets only).
+// WALLET_SEND=<addr>:<amt> -> also do a one-off TRX transfer (funded wallets only).
 if (env.WALLET) {
   const { createPayments } = require('./pay.js')
   createPayments({ storageDir, log: (...m) => console.log(`[${name}] wallet`, ...m) })
     .then(async (pay) => {
       wave.setWallet(pay.address) // my selfies carry my address for tipping
       const b = await pay.balances()
-      console.log(`[${name}] WALLET ${b.address} trx=${b.trx} usdt=${b.usdt}`)
+      console.log(`[${name}] WALLET ${b.address} trx=${b.trx}`)
       if (env.WALLET_SEND) {
         const [to, amt] = env.WALLET_SEND.split(':')
         const r = await pay.send(to, Number(amt))

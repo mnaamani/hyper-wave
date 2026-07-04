@@ -32,8 +32,8 @@ console.log(
   wave.me.angle.toFixed(1)
 )
 
-// Self-custodial WDK wallet (Tron testnet USDT) for bond / payout / tips. Async init
-// (dynamic import of ESM WDK); emits `wallet` {address,trx,usdt} to the renderer on ready
+// Self-custodial WDK wallet (Tron testnet TRX) for bond / payout / tips. Async init
+// (dynamic import of ESM WDK); emits `wallet` {address,trx} to the renderer on ready
 // and every 15s. Runs independently of the wave engine for now (step 2 = wallets only).
 let payments = null
 let tBalance = null
@@ -42,7 +42,7 @@ createPayments({ storageDir, log: (...a) => console.log('[wallet]', ...a) })
     payments = pay
     wave.setWallet(pay.address) // so my selfies carry my address for tipping
     const push = async () => {
-      const bal = await pay.balances().catch(() => ({ address: pay.address, trx: 0, usdt: 0 }))
+      const bal = await pay.balances().catch(() => ({ address: pay.address, trx: 0 }))
       send({ type: 'wallet', ...bal })
     }
     await push()
@@ -65,7 +65,7 @@ pipe.on('data', (data) => {
   else if (msg.type === 'tip') handleTip(msg)
 })
 
-// Gallery tip: send a real testnet USDT transfer to the selfie owner's wallet, then
+// Gallery tip: send a real testnet TRX transfer to the selfie owner's wallet, then
 // report the tx hash (or error) back to the renderer.
 async function handleTip({ to, amount }) {
   if (!payments) return send({ type: 'tip-result', error: 'wallet not ready' })

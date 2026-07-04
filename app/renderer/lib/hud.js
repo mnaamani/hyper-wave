@@ -9,11 +9,11 @@ const walletEl = document.getElementById('wallet')
 
 document.getElementById('v').innerText = 'v' + appVersion()
 
-// --- wallet chip (self-custodial USDT wallet) -------------------------------
-export function wallet({ address, usdt, trx }) {
+// --- wallet chip (self-custodial TRX wallet) -------------------------------
+export function wallet({ address, trx }) {
   if (!address) return
   const short = address.slice(0, 6) + '…' + address.slice(-4)
-  walletEl.innerText = `💰 ${usdt.toFixed(2)} USDT · ${short}` + (trx === 0 ? ' · ⚠ no TRX' : '')
+  walletEl.innerText = `💰 ${trx.toFixed(2)} TRX · ${short}` + (trx === 0 ? ' · ⚠ unfunded' : '')
 }
 
 // --- status + start button --------------------------------------------------

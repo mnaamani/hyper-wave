@@ -10,7 +10,7 @@ const progressFill = document.getElementById('progress-fill')
 const progressLabel = document.getElementById('progress-label')
 const tipBtn = document.getElementById('tip')
 const ADVANCE_MS = 3500
-const TIP_USDT = 1
+const TIP_TRX = 1
 
 let items = []
 let centerIdx = 0
@@ -32,7 +32,7 @@ function refreshTip() {
   const payable = it && it.address && it.address !== myAddress
   tipBtn.classList.toggle('show', !!payable)
   tipBtn.disabled = false
-  tipBtn.innerText = `💵 Tip ${TIP_USDT} USDT`
+  tipBtn.innerText = `💵 Tip ${TIP_TRX} TRX`
 }
 
 tipBtn.onclick = () => {
@@ -40,7 +40,7 @@ tipBtn.onclick = () => {
   if (!it || !it.address || it.address === myAddress) return
   tipBtn.disabled = true
   tipBtn.innerText = '💸 sending…'
-  tip(it.address, TIP_USDT, it.peerId)
+  tip(it.address, TIP_TRX, it.peerId)
 }
 
 export function count() {
