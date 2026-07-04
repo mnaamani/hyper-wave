@@ -82,7 +82,9 @@ ipc.on('token', (e) => {
       if (e.mine) {
         beginCapture()
       } // initiator's wave is now live + paid
-      else lobby.setJoinable(true) // safe to join — kick-off is proven paid
+      else {
+        lobby.setJoinable(true)
+      } // safe to join — kick-off is proven paid
       break
     case 'wave-unpaid':
       hud.status('⚠️ ignored an unpaid wave')
@@ -146,6 +148,13 @@ ipc.on('token', (e) => {
       break
     case 'stalled':
       hud.status(`⚠️ wave stalled (${e.reason})`)
+      break
+    case 'payout':
+      // validator view: an interlocked reward went out to a participant
+      hud.status(`💸 paid hop ${e.hopCount} — ${e.amount} TRX (tx ${e.hash.slice(0, 8)}…)`)
+      break
+    case 'payout-done':
+      hud.status(`💸 rewards done — paid ${e.paid} participant${e.paid === 1 ? '' : 's'}`)
       break
   }
 })

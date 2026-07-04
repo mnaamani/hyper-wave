@@ -77,6 +77,40 @@ function verifyBurn(fields, sigHex) {
   }
 }
 
+// --- interlocked payout (final-idea.md the golden rule) --------------------
+// The validator reassembles the hop receipts it collected (§wave-proof) and walks them
+// from hop 0, verifying the CHAIN: each hop's receipt must sign the accumulator it carries,
+// and the next hop's accumulator must be advanceChain(prev, prevReceiptSig). The walk stops
+// at the first broken/forged/missing link — so a self-signed receipt for a hop the peer
+// never held (or a gap) can't extend the chain. Returns the longest valid prefix (in order).
+function longestValidChain(proofs, waveId) {
+  const sorted = [...proofs].sort((a, b) => a.hopCount - b.hopCount)
+  const valid = []
+  let expectedHop = 0
+  let expectedChainHash = ZERO_HASH
+  for (const p of sorted) {
+    if (p.hopCount !== expectedHop) break // gap — not contiguous from 0
+    if (p.chainHash !== expectedChainHash) break // accumulator doesn't link to the prev hop
+    if (!verifyReceipt(p.peerId, waveId, p.hopCount, p.chainHash, p.receiptTs, p.receiptSig)) break
+    valid.push(p)
+    expectedChainHash = advanceChain(p.chainHash, p.receiptSig)
+    expectedHop++
+  }
+  return valid
+}
+
+// The golden rule: peer N is paid only when peer N+1 continued the wave. So within the
+// valid chain, every hop except the last has a proven successor and is payable; the LAST
+// hop is payable only if the wave completed (the token returned to the originator, proving
+// that hop forwarded onward too). On a break/stall, this is the longest valid *prefix*.
+function payableFromChain(validChain, { completed = false, completedHops = -1 } = {}) {
+  if (validChain.length === 0) return []
+  const payable = validChain.slice(0, -1) // all but the last: successor proves them
+  const last = validChain[validChain.length - 1]
+  if (completed && completedHops === last.hopCount) payable.push(last)
+  return payable
+}
+
 module.exports = {
   ZERO_HASH,
   receiptHash,
@@ -86,5 +120,7 @@ module.exports = {
   advanceChain,
   burnHash,
   signBurn,
-  verifyBurn
+  verifyBurn,
+  longestValidChain,
+  payableFromChain
 }

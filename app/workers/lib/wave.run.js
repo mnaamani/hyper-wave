@@ -45,6 +45,16 @@ const wave = createWave({
   },
   onToken: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
+    if (e.event === 'payout') {
+      console.log(
+        `[${name}] PAYOUT hop ${e.hopCount} -> ${e.address.slice(0, 6)} ${e.amount} TRX tx=${e.hash}`
+      )
+    }
+    if (e.event === 'payout-done') {
+      console.log(
+        `[${name}] PAYOUT-DONE wave=${e.waveId.slice(0, 8)} paid=${e.paid} x ${e.reward} TRX`
+      )
+    }
     // validator: on completion, read the burn-proofs it collected for this wave
     if (role !== 'peer' && e.event === 'completed') {
       setTimeout(async () => {
@@ -134,8 +144,12 @@ if (env.WALLET) {
   createPayments({ storageDir, log: (...m) => console.log(`[${name}] wallet`, ...m) })
     .then(async (pay) => {
       payments = pay
-      // wallet up -> enable the paid-wave gate (on-chain kick-off verification)
-      wave.setWallet(pay.address, (txHash, expect) => pay.verifyBurnTx(txHash, expect))
+      // wallet up -> paid-wave gate (verifier) + interlocked payout (reward sender)
+      wave.setWallet(
+        pay.address,
+        (txHash, expect) => pay.verifyBurnTx(txHash, expect),
+        (addr, amt) => pay.send(addr, amt)
+      )
       const b = await pay.balances()
       console.log(`[${name}] WALLET ${b.address} trx=${b.trx}`)
       if (env.WALLET_SEND) {

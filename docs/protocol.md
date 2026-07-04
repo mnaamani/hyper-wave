@@ -578,6 +578,28 @@ A **validator** reading these (`readBurns`) still cross-checks each `txHash` on-
 burn-proof once it holds the token (has a receipt → can be admitted as a writer), so a
 join-fee payer surfaces its proof even if it never posts a selfie.
 
+### 8.5 Interlocked payout (validator, off-wire)
+When a wave ends, the **validator** rewards participants from its own budget (a *sponsor*
+spend, never a split pot). It's the consumer of the collected `wave-proof` receipts:
+
+1. **Reassemble + verify the chain** (`longestValidChain`): sort the hop receipts, walk from
+   hop 0, and for each hop verify (a) its `receiptSig` signs the accumulator it carries and
+   (b) the accumulator links to the previous hop (`chainHash₍ₙ₊₁₎ == advanceChain(chainHashₙ,
+   receiptSigₙ)`). The walk **stops at the first broken/forged/missing link** — so a
+   self-signed receipt for a hop never held, a gap, or a tampered link can't extend the chain.
+   Result: the longest *cryptographically valid* prefix.
+2. **The golden rule** (`payableFromChain`): peer N is paid only if peer **N+1 continued** —
+   i.e. N+1 is in the valid chain. Every hop but the last qualifies; the **last** hop
+   qualifies only if the wave **completed** (the token returned to the originator, `wave-end`
+   with `hops == ` the last hop), which proves the last hop forwarded onward too. On a
+   stall/break this is the longest valid **prefix** (the peer at the break isn't paid — its
+   continuation is unproven).
+3. **Pay** a fixed `REWARD_TRX` to each payable hop's on-chain `address`, once per wave; the
+   validator skips its **own** hop (it relays the ball but sponsors, it doesn't reward
+   itself). Emits `payout` / `payout-done`.
+
+The chain-walk is pure (`token.js`, unit-tested); only the transfers touch the chain.
+
 ## 9. Constants (reference build)
 
 | Constant | Value | Meaning |
@@ -630,4 +652,6 @@ announcing), `wave-verified` (kick-off burn proven — join is now allowed), `wa
 before the kick-off is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
 `position`, `forwarded`, `completed`, `healed`, `stalled`,
-`proof {waveId,hopCount,count}` (validator collected a hop receipt), `gallery-error`.
+`proof {waveId,hopCount,count}` (validator collected a hop receipt),
+`payout {hopCount,peerId,address,amount,hash}` + `payout-done {paid,reward}` (validator paid
+an interlocked reward), `gallery-error`.

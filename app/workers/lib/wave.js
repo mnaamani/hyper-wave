@@ -32,7 +32,9 @@ const {
   verifyToken,
   advanceChain,
   signBurn,
-  verifyBurn
+  verifyBurn,
+  longestValidChain,
+  payableFromChain
 } = require('./token')
 const { galleryConfig, readGallery, readBurns } = require('./gallery')
 
@@ -79,6 +81,12 @@ const BOOTSTRAP_MS = 1500
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000
+// Interlocked payout (validator only, final-idea.md the golden rule): fixed reward per valid
+// participant, a budget cap on how many to pay per wave, and a settle delay after completion
+// so late-arriving hop proofs are collected before the validator walks the chain.
+const REWARD_TRX = 2
+const PAYOUT_MAX = 200
+const PAYOUT_DELAY_MS = 4000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -127,6 +135,8 @@ function createWave({
   let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
+  let payReward = null // (validator) send a reward to an address (validator's wallet)
+  const paidOutWaves = new Set() // validator: waves already paid out (pay exactly once)
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -680,6 +690,41 @@ function createWave({
     return readBurns(g)
   }
 
+  // Interlocked payout (validator only, final-idea.md the golden rule). After a wave ends,
+  // walk the collected hop receipts into the longest VALID chain (each link cryptographically
+  // verified), pay a fixed reward to each hop whose successor continued (the last hop only if
+  // the wave completed back to the originator), each to its own on-chain address. Exactly
+  // once per wave; the reward is a budgeted sponsor spend, never a split pot.
+  async function runPayout(waveId, { stalled, hops }) {
+    if (!payReward || paidOutWaves.has(waveId)) return
+    paidOutWaves.add(waveId)
+    const chain = longestValidChain(chainProofs(waveId), waveId)
+    const payable = payableFromChain(chain, { completed: !stalled, completedHops: hops })
+    onToken({ event: 'payout-start', waveId, participants: chain.length, paying: payable.length })
+    let paid = 0
+    for (const hop of payable) {
+      // the validator relays the ball too, but it's the sponsor — it never rewards itself
+      if (hop.peerId === me.id || !hop.address || paid >= PAYOUT_MAX) continue
+      try {
+        const { hash } = await payReward(hop.address, REWARD_TRX)
+        paid++
+        log('paid', REWARD_TRX, 'TRX -> hop', hop.hopCount, shortId(hop.peerId), 'tx', hash)
+        onToken({
+          event: 'payout',
+          waveId,
+          hopCount: hop.hopCount,
+          peerId: hop.peerId,
+          address: hop.address,
+          amount: REWARD_TRX,
+          hash
+        })
+      } catch (e) {
+        onToken({ event: 'payout-error', waveId, hopCount: hop.hopCount, error: e.message })
+      }
+    }
+    onToken({ event: 'payout-done', waveId, paid, reward: REWARD_TRX })
+  }
+
   async function emitGallery() {
     if (!base) return
     onGallery(await readGallery(base))
@@ -899,6 +944,12 @@ function createWave({
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
     if (stalled) onToken({ event: 'stalled', waveId, reason: 'no successor' })
     else onToken({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
+    // validator: pay out the interlocked reward after a short settle (so late hop proofs
+    // land first). goIdle clears the current wave but the payout reads the retained gallery
+    // + collected proofs by waveId, so it's unaffected.
+    if (isSeed && payReward) {
+      setTimeout(() => runPayout(waveId, { stalled, hops }).catch(() => {}), PAYOUT_DELAY_MS)
+    }
     goIdle(stalled ? 'stalled' : 'ended')
   }
 
@@ -1343,14 +1394,16 @@ function createWave({
     join,
     setCountry,
     stageSelfie,
-    // Wire the payment layer once the wallet is up: my address (for tips/attestations),
-    // the on-chain burn verifier, and — since I can now pay — enable the paid-wave gate.
-    setWallet: (address, verifier) => {
+    // Wire the payment layer once the wallet is up: my address (for tips/attestations), the
+    // on-chain burn verifier (enables the paid-wave gate), and — for a validator — the
+    // reward sender (enables the interlocked payout).
+    setWallet: (address, verifier, rewarder) => {
       walletAddress = address || null
       if (verifier) {
         verifyBurnOnChain = verifier
         enforcePaid = true
       }
+      if (rewarder) payReward = rewarder
     },
     announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
     recordBurn, // a peer reports its paid participation fee -> sign + post burn-proof

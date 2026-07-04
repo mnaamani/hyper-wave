@@ -40,9 +40,13 @@ let tBalance = null
 createPayments({ storageDir, log: (...a) => console.log('[wallet]', ...a) })
   .then(async (pay) => {
     payments = pay
-    // wallet up: address for tips/attestations + the on-chain burn verifier -> enables the
-    // paid-wave anti-spam gate (waves must prove their kick-off burn before peers join).
-    wave.setWallet(pay.address, (txHash, expect) => pay.verifyBurnTx(txHash, expect))
+    // wallet up: address for tips/attestations, the on-chain burn verifier (paid-wave
+    // anti-spam gate), and — for a validator — the reward sender (interlocked payout).
+    wave.setWallet(
+      pay.address,
+      (txHash, expect) => pay.verifyBurnTx(txHash, expect),
+      (addr, amt) => pay.send(addr, amt)
+    )
     const push = async () => {
       const bal = await pay.balances().catch(() => ({ address: pay.address, trx: 0 }))
       send({ type: 'wallet', ...bal })

@@ -10,7 +10,9 @@ const {
   verifyToken,
   advanceChain,
   signBurn,
-  verifyBurn
+  verifyBurn,
+  longestValidChain,
+  payableFromChain
 } = require('./token')
 
 const ZERO = b4a.toString(b4a.alloc(32), 'hex')
@@ -109,4 +111,57 @@ test('burn attestation rejects impersonation and tampering', (t) => {
   t.absent(verifyBurn({ ...burnFields, txHash: 'other' }, sig), 'swapped txHash')
   t.absent(verifyBurn({ ...burnFields, waveId: 'other-wave' }, sig), 'reused for another wave')
   t.absent(verifyBurn({ ...burnFields, amount: 99 }, sig), 'inflated amount')
+})
+
+// --- interlocked payout (the golden rule) ----------------------------------
+// A collected hop receipt, as the validator stores it (§wave-proof), derived from a token.
+function proofOf(tok, address) {
+  return {
+    hopCount: tok.hopCount,
+    peerId: tok.senderPeerId,
+    receiptSig: tok.senderReceiptSig,
+    chainHash: tok.prevChainHash,
+    receiptTs: tok.timestamp,
+    address
+  }
+}
+const chainProofs = [proofOf(t0, 'Taddr0'), proofOf(t1, 'Taddr1'), proofOf(t2, 'Taddr2')]
+
+test('longestValidChain walks the whole chain when every link verifies', (t) => {
+  const chain = longestValidChain(chainProofs, waveId)
+  t.alike(
+    chain.map((p) => p.hopCount),
+    [0, 1, 2],
+    'all three hops form a valid chain'
+  )
+})
+
+test('longestValidChain stops at a forged/broken link (longest valid prefix)', (t) => {
+  const tampered = [
+    proofOf(t0, 'a'),
+    { ...proofOf(t1, 'b'), receiptSig: t1.senderReceiptSig.replace(/^../, '00') },
+    proofOf(t2, 'c')
+  ]
+  t.is(longestValidChain(tampered, waveId).length, 1, 'stops before the forged hop 1')
+  const gap = [proofOf(t0, 'a'), proofOf(t2, 'c')] // missing hop 1
+  t.is(longestValidChain(gap, waveId).length, 1, 'a gap breaks the chain')
+  const wrongLink = [proofOf(t0, 'a'), { ...proofOf(t1, 'b'), chainHash: ZERO }] // link doesn't match
+  t.is(longestValidChain(wrongLink, waveId).length, 1, 'a non-linking accumulator breaks it')
+})
+
+test('payableFromChain applies the golden rule (successor must continue)', (t) => {
+  const chain = longestValidChain(chainProofs, waveId)
+  // stalled: only hops with a proven *successor* in the chain are paid (drop the last)
+  t.alike(
+    payableFromChain(chain, { completed: false }).map((p) => p.hopCount),
+    [0, 1],
+    'stall pays the longest prefix — the last hop has no proven successor'
+  )
+  // completed at the last hop: the return to the originator proves the last hop too
+  t.alike(
+    payableFromChain(chain, { completed: true, completedHops: 2 }).map((p) => p.hopCount),
+    [0, 1, 2],
+    'completion pays everyone including the last'
+  )
+  t.alike(payableFromChain([], { completed: true }), [], 'empty chain pays nobody')
 })
