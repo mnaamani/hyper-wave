@@ -8,6 +8,7 @@
 // a TRX transfer pays its own (tiny) fee from the same balance — so a wallet that received
 // TRX can immediately send it, no separate gas token to fund.
 const fs = require('bare-fs')
+const b4a = require('b4a')
 
 const NILE_PROVIDER = 'https://nile.trongrid.io'
 const SUN = 1_000_000 // 1 TRX = 1e6 sun
@@ -73,6 +74,43 @@ async function createPayments({ storageDir, provider = NILE_PROVIDER, log = () =
       const res = await account.sendTransaction(tx) // prebuilt (has txID) -> WDK signs + broadcasts
       log('burned', amountTrx, 'TRX 🔥 hash', res.hash, memo ? `memo=${memo}` : '')
       return { hash: res.hash, fee: res.fee }
+    },
+    // Verify (on-chain) that `txHash` is a burn matching expectations — the anti-spam gate a
+    // peer runs before joining a wave: the kick-off fee must really be paid. Checks (via
+    // `getTransaction`, which reflects a broadcast tx within seconds — `getTransactionInfo`'s
+    // block confirmation lags badly on Nile): TransferContract to the black hole, from
+    // `expect.from`, amount ≥ `expect.minTrx`, and the memo commits `expect.waveId`. The tx
+    // is signed + spends real TRX, so its existence is a sufficient stake for anti-spam.
+    // Returns { ok, reason }. Missing tx / RPC error → { ok: false } (fail closed).
+    async verifyBurnTx(txHash, expect = {}) {
+      try {
+        const tx = await tronweb.trx.getTransaction(txHash)
+        const c = tx?.raw_data?.contract?.[0]
+        if (c?.type !== 'TransferContract') {
+          return { ok: false, reason: 'not-found-or-not-transfer' }
+        }
+        const v = c.parameter.value
+        const burnHex = tronweb.address.toHex(BURN_ADDRESS).toLowerCase()
+        if ((v.to_address || '').toLowerCase() !== burnHex) {
+          return { ok: false, reason: 'not-burned' }
+        }
+        if (expect.from) {
+          const fromHex = tronweb.address.toHex(expect.from).toLowerCase()
+          if ((v.owner_address || '').toLowerCase() !== fromHex) {
+            return { ok: false, reason: 'wrong-sender' }
+          }
+        }
+        if (expect.minTrx !== undefined && BigInt(v.amount || 0) < toSun(expect.minTrx)) {
+          return { ok: false, reason: 'amount-too-low' }
+        }
+        if (expect.waveId) {
+          const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : ''
+          if (!memo.includes(expect.waveId)) return { ok: false, reason: 'memo-mismatch' }
+        }
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, reason: e.message }
+      }
     },
     dispose() {
       try {

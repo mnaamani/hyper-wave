@@ -253,9 +253,20 @@ The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries
 
 ### wave-announce — flooded (originator, on kick-off)
 ```json
-{ "kind": "wave-announce", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>", "lobbyMs": 15000 }
+{ "kind": "wave-announce", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>", "lobbyMs": 15000,
+  "paid": { /* kick-off burn-proof, §8.4 — present when the paid-wave gate is enforced */ } }
 ```
 Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`.
+
+**Paid-wave gate (anti-spam).** When enforced (every instance has a wallet), the initiator
+**does not announce until it has burned the kick-off fee and confirmed it on-chain** — the
+announce then carries `paid`, the kick-off `burn-proof`. A peer **ignores any announce whose
+`paid` proof is missing or not validly signed** (an unpaid/spam wave is invisible), and before
+it will **join** (and pay its own fee) it verifies the burn **on-chain** (`verifyBurnTx`:
+`to == ` the black hole, `amount ≥ fee`, memo commits `waveId`). `join()` is refused until the
+kick-off is `verified`. So no peer ever pays into a wave the initiator hasn't paid for. The
+same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Without wallets
+— headless/tests — enforcement is off and waves announce immediately, unpaid.)
 
 ### wave-join — flooded (a peer opting in during lobby)
 ```json
@@ -613,7 +624,10 @@ to Tron's black hole address `T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb`, i.e. the all-
 address: unspendable by anyone, so the fee proves skin in the game without enriching any
 party. `reason: 'kickoff'` for the initiator on `start-wave`, `'join'` for each opt-in on
 `join-wave`. Fired alongside the action, never blocking the wave); and
-`token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
+`token` events: `wave-announce`, `paying` (initiator burning the kick-off fee before
+announcing), `wave-verified` (kick-off burn proven — join is now allowed), `wave-unpaid`
+(kick-off failed verification — wave abandoned), `join-blocked {reason}` (tried to join
+before the kick-off is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
 `position`, `forwarded`, `completed`, `healed`, `stalled`,
 `proof {waveId,hopCount,count}` (validator collected a hop receipt), `gallery-error`.

@@ -33,6 +33,14 @@ export function markJoined() {
   joinBtn.style.display = 'none'
 }
 
+// Gate the join button on the wave's kick-off payment being verified (anti-spam): show a
+// "verifying…" state until the initiator's burn is confirmed, then enable joining.
+export function setJoinable(ok) {
+  if (joined) return
+  joinBtn.disabled = !ok
+  joinBtn.innerText = ok ? '✋ Count me in' : '⏳ verifying payment…'
+}
+
 export function close() {
   clearInterval(timer)
   lobbyEl.classList.remove('show')

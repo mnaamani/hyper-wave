@@ -40,19 +40,7 @@ const wave = createWave({
     )
     if (role === 'peer' && env.START && !started && s.peers.length >= Number(env.START)) {
       started = true
-      setTimeout(() => {
-        const waveId = wave.startWave()
-        // initiator's kick-off fee: burn 1 TRX to the black hole (needs WALLET=1 + funds)
-        if (waveId && payments) {
-          payments
-            .burn(1, `hyperwave:${waveId}:${wave.me.id}`)
-            .then(({ hash }) => {
-              wave.recordBurn({ reason: 'kickoff', amount: 1, txHash: hash })
-              console.log(`[${name}] BURNED 1 TRX hash=${hash}`)
-            })
-            .catch((e) => console.log(`[${name}] burn FAIL`, e.message))
-        }
-      }, 500)
+      setTimeout(() => kickOff(), 500)
     }
   },
   onToken: (e) => {
@@ -68,17 +56,10 @@ const wave = createWave({
       }, 3000)
     }
     if (role !== 'peer') return // a validator/seed doesn't join or selfie
-    if (env.AUTOJOIN && e.event === 'wave-announce' && !e.mine) {
-      const joinedId = wave.join()
-      if (joinedId && payments) {
-        payments
-          .burn(1, `hyperwave:${joinedId}:${wave.me.id}`)
-          .then(({ hash }) => {
-            wave.recordBurn({ reason: 'join', amount: 1, txHash: hash })
-            console.log(`[${name}] JOIN-BURNED 1 TRX hash=${hash}`)
-          })
-          .catch((err) => console.log(`[${name}] join burn FAIL`, err.message))
-      }
+    // AUTOJOIN: try on announce (no-wallet path: already 'verified') and on wave-verified
+    // (wallet path: after the kick-off burn confirms). join() dedupes + gates on paid.
+    if (env.AUTOJOIN && !e.mine && (e.event === 'wave-announce' || e.event === 'wave-verified')) {
+      joinAndBurn()
     }
     // stage a (fake) selfie during the lobby, exactly like the renderer does at kickoff;
     // the worker posts it to the gallery when the token reaches this peer.
@@ -94,6 +75,48 @@ const wave = createWave({
     ),
   log: (...m) => console.log(`[${name}]`, ...m)
 })
+
+// Burn 1 TRX (kick-off/join fee) with the wave memo, then record the ring attestation.
+async function payFee(waveId, reason) {
+  const { hash } = await payments.burn(1, `hyperwave:${waveId}:${wave.me.id}`)
+  const proof = wave.recordBurn({ reason, amount: 1, txHash: hash })
+  console.log(`[${name}] ${reason.toUpperCase()}-BURNED 1 TRX hash=${hash}`)
+  return { hash, proof }
+}
+
+// Initiator: start (deferred announce when enforcing), pay, wait for the burn to confirm
+// on-chain, then announce. Without a wallet, startWave announces immediately (unpaid path).
+async function kickOff() {
+  const waveId = wave.startWave()
+  if (!waveId || !payments) return
+  try {
+    const { hash, proof } = await payFee(waveId, 'kickoff')
+    for (let i = 0; i < 12; i++) {
+      const r = await payments.verifyBurnTx(hash, { waveId, from: payments.address, minTrx: 1 })
+      if (r.ok) return wave.announcePaid(proof)
+      await new Promise((res) => setTimeout(res, 2500))
+    }
+    console.log(`[${name}] kick-off burn not confirmed`)
+  } catch (e) {
+    console.log(`[${name}] kickoff FAIL`, e.message)
+  }
+}
+
+// Joiner: join() gates on the kick-off being verified (null otherwise), so we only pay for
+// a proven-paid wave. Guarded so a double event (announce + verified) burns once.
+let joining = false
+async function joinAndBurn() {
+  if (joining) return
+  const waveId = wave.join()
+  if (!waveId) return
+  if (!payments) return
+  joining = true
+  try {
+    await payFee(waveId, 'join')
+  } catch (e) {
+    console.log(`[${name}] join burn FAIL`, e.message)
+  }
+}
 
 // env PROBE=1 -> after peers converge, exercise the distributed findSuccessor RPC by
 // looking up the successor of the position just after me (my true successor).
@@ -111,7 +134,8 @@ if (env.WALLET) {
   createPayments({ storageDir, log: (...m) => console.log(`[${name}] wallet`, ...m) })
     .then(async (pay) => {
       payments = pay
-      wave.setWallet(pay.address) // my selfies carry my address for tipping
+      // wallet up -> enable the paid-wave gate (on-chain kick-off verification)
+      wave.setWallet(pay.address, (txHash, expect) => pay.verifyBurnTx(txHash, expect))
       const b = await pay.balances()
       console.log(`[${name}] WALLET ${b.address} trx=${b.trx}`)
       if (env.WALLET_SEND) {

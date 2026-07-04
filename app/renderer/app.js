@@ -63,9 +63,33 @@ ipc.on('token', (e) => {
       hud.showStart(false)
       gallery.hideProgress()
       lobbyDeadline = performance.now() + (e.lobbyMs || 15000)
-      // I'm already in (e.g. the initiator) -> start framing; else show the join panel
-      if (e.joined) beginCapture()
-      else lobby.open(e)
+      if (e.mine) {
+        // initiator: capture once the wave is live (immediately if already paid, else
+        // wait for wave-verified after the kick-off burn confirms)
+        if (e.paid === 'verified') beginCapture()
+        else hud.status('🔥 paying the kick-off fee…')
+      } else {
+        // joiner: show the join panel; the join button stays disabled until the wave's
+        // kick-off payment is verified (anti-spam — never pay into an unpaid wave)
+        lobby.open(e)
+        lobby.setJoinable(e.paid === 'verified')
+      }
+      break
+    case 'paying':
+      hud.status('🔥 paying the kick-off fee…')
+      break
+    case 'wave-verified':
+      if (e.mine) {
+        beginCapture()
+      } // initiator's wave is now live + paid
+      else lobby.setJoinable(true) // safe to join — kick-off is proven paid
+      break
+    case 'wave-unpaid':
+      hud.status('⚠️ ignored an unpaid wave')
+      lobby.close()
+      break
+    case 'join-blocked':
+      hud.status('⏳ verifying the wave’s kick-off payment…')
       break
     case 'joined':
       beginCapture() // opted in — swap the join panel for the camera

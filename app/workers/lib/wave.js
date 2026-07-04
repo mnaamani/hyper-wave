@@ -31,7 +31,8 @@ const {
   verifyReceipt,
   verifyToken,
   advanceChain,
-  signBurn
+  signBurn,
+  verifyBurn
 } = require('./token')
 const { galleryConfig, readGallery, readBurns } = require('./gallery')
 
@@ -74,6 +75,10 @@ const ROUTED_TTL_MS = 30000
 // After my first connection, wait this long (for a few fingers to connect → better
 // routing start) then place myself in the ring via findSuccessor (Chord join, §4.5).
 const BOOTSTRAP_MS = 1500
+// How long the initiator waits for its kick-off burn to confirm + announce before aborting
+// the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
+// read-back can lag; must exceed the worker's confirmation poll budget.
+const PAY_TIMEOUT_MS = 60000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -91,7 +96,13 @@ function createWave({
   waveTimeoutMs = WAVE_TIMEOUT_MS,
   healTimeoutMs = HEAL_TIMEOUT_MS,
   lobbyMs = LOBBY_MS,
-  role = 'peer' // 'peer' | 'validator' (a.k.a. seed): keeps galleries alive after peers leave
+  role = 'peer', // 'peer' | 'validator' (a.k.a. seed): keeps galleries alive after peers leave
+  // Anti-spam: when enabled, a wave is only announced once its initiator has PROVEN the
+  // kick-off fee burn, and peers refuse to join a wave whose kick-off isn't verified
+  // on-chain. `verifyBurnTx(txHash, {waveId, from, minTrx}) -> {ok}` is the on-chain check
+  // (provided by the payment layer once the wallet is up; off by default so no-wallet
+  // headless/tests behave as before — waves announce immediately, unpaid).
+  verifyBurnTx = null
 }) {
   // A validator/seed is a first-class swarm peer whose job is to make the gallery survive:
   // it opens every wave's gallery and RETAINS it (never closes, store not wiped), so it can
@@ -114,6 +125,8 @@ function createWave({
   const meKey = swarm.keyPair.publicKey
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null }
   let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
+  let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
+  let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -296,19 +309,35 @@ function createWave({
     if (m.kind === 'wave-sync') {
       // a peer told us the wave state when we joined mid-lobby / mid-race
       if (!m.waveId || !shouldAdopt(m.waveId)) return
+      // anti-spam: a synced lobby is only adoptable with a valid kick-off proof (a racing
+      // wave already cleared that gate when its roster joined, so accept it as paid).
+      if (enforcePaid && m.phase !== 'racing' && !validKickoff(m.paid, m.waveId, m.by)) return
       if (m.phase === 'racing') {
         if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, 0, true)
+        wave.paid = 'verified'
         if (m.key) openGallery(m.waveId, b4a.from(m.key, 'hex'))
         beginRace(m.roster)
       } else {
         if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, m.lobbyMsLeft)
+        if (enforcePaid && m.paid && !wave.kickoffProof) {
+          wave.kickoffProof = m.paid
+          verifyKickoff(m.waveId, m.paid)
+        }
         for (const id of m.roster || []) wave.roster.add(id)
         onToken({ event: 'roster', waveId: wave.id, count: wave.roster.size })
       }
       return
     }
     if (m.kind === 'wave-announce') {
-      if (shouldAdopt(m.waveId)) enterLobby(m.waveId, m.by, false, m.lobbyMs)
+      // anti-spam: an enforced peer ignores any announce lacking a validly-signed kick-off
+      // proof (unpaid/spam waves are invisible). Then it verifies the burn on-chain.
+      if (enforcePaid && !validKickoff(m.paid, m.waveId, m.by)) return
+      if (!shouldAdopt(m.waveId)) return
+      enterLobby(m.waveId, m.by, false, m.lobbyMs)
+      if (enforcePaid && m.paid) {
+        wave.kickoffProof = m.paid
+        verifyKickoff(m.waveId, m.paid)
+      }
       return
     }
     if (m.kind === 'wave-join') {
@@ -725,7 +754,7 @@ function createWave({
   // to the gallery once I hold the token (become an admitted writer). Fires flushBurnProof
   // in case the receipt already arrived (e.g. the initiator burns at/after hop 0).
   function recordBurn({ reason, amount, txHash }) {
-    if (!wave || burnPosted) return
+    if (!wave || burnPosted) return null
     const fields = {
       waveId: wave.id,
       peerId: me.id,
@@ -737,6 +766,7 @@ function createWave({
     }
     pendingBurn = { type: 'burn-proof', ...fields, sig: signBurn(swarm.keyPair, fields) }
     flushBurnProof()
+    return pendingBurn // so the initiator can attach it to the wave-announce (announcePaid)
   }
 
   // Post my stashed burn-proof once I have a receipt for this wave (so I can be admitted as
@@ -797,7 +827,17 @@ function createWave({
       teardown()
     }
     resetSelfie() // fresh wave — clear any staged selfie/receipt from a prior one
-    wave = { id: waveId, phase: 'lobby', by, roster: new Set([by]), joined: !!mine }
+    // paid: 'verified' when the kick-off burn is confirmed (or enforcement is off);
+    // 'pending' while a peer verifies it on-chain; 'rejected' if it isn't a real burn.
+    wave = {
+      id: waveId,
+      phase: 'lobby',
+      by,
+      roster: new Set([by]),
+      joined: !!mine,
+      paid: enforcePaid ? 'pending' : 'verified',
+      kickoffProof: null
+    }
     if (mine) wave.roster.add(me.id)
     lobbyEndsAt = Date.now() + dur
     // fallback: if the race never starts (initiator vanished), drop back to idle
@@ -811,7 +851,8 @@ function createWave({
       mine: !!mine,
       joined: wave.joined,
       count: wave.roster.size,
-      lobbyMs: dur
+      lobbyMs: dur,
+      paid: wave.paid // 'verified' (enforcement off / already paid) | 'pending' (verifying)
     })
   }
 
@@ -819,6 +860,11 @@ function createWave({
   // (so the worker can charge the join fee on a real opt-in), or null if it was a no-op.
   function join() {
     if (!wave || wave.phase !== 'lobby' || wave.joined) return null
+    // anti-spam: never join (and pay) a wave whose kick-off fee isn't proven paid
+    if (wave.paid !== 'verified') {
+      onToken({ event: 'join-blocked', waveId: wave.id, reason: wave.paid })
+      return null
+    }
     wave.joined = true
     wave.roster.add(me.id)
     floodGossip({ kind: 'wave-join', waveId: wave.id, peerId: me.id })
@@ -1073,13 +1119,84 @@ function createWave({
       return null
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
-    log('announcing wave', shortId(waveId))
-    enterLobby(waveId, me.id, true) // initiator auto-joins
-    floodGossip({ kind: 'wave-announce', waveId, by: me.id, lobbyMs })
-    // initiator's lobby timer starts the race (overrides the idle fallback)
+    enterLobby(waveId, me.id, true) // initiator auto-joins (marks its own lobby)
+    if (enforcePaid) {
+      // Anti-spam: don't announce yet. Wait for the worker to burn the kick-off fee and
+      // prove it (announcePaid). Fall back to idle if that never happens.
+      log('wave', shortId(waveId), '— awaiting kick-off payment')
+      clearTimeout(lobbyTimer)
+      lobbyTimer = setTimeout(() => goIdle('unpaid'), PAY_TIMEOUT_MS)
+      onToken({ event: 'paying', waveId })
+    } else {
+      doAnnounce(waveId, null) // legacy/no-wallet path: announce immediately, unpaid
+    }
+    return waveId
+  }
+
+  // Flood the wave-announce (carrying the kick-off `paid` proof when present) and start the
+  // lobby→race timer. Shared by the paid and unpaid initiator paths.
+  function doAnnounce(waveId, paidProof) {
+    log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '')
+    floodGossip({ kind: 'wave-announce', waveId, by: me.id, lobbyMs, paid: paidProof || undefined })
     clearTimeout(lobbyTimer)
     lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs)
-    return waveId
+  }
+
+  // The worker proved the kick-off burn (after it confirmed on-chain) — attach the proof
+  // and NOW announce. The initiator trusts its own confirmed burn (paid = 'verified').
+  function announcePaid(proof) {
+    if (!wave || wave.phase !== 'lobby' || !enforcePaid) return
+    if (!validKickoff(proof, wave.id, me.id)) return
+    wave.kickoffProof = proof
+    wave.paid = 'verified'
+    doAnnounce(wave.id, proof)
+    onToken({ event: 'wave-verified', waveId: wave.id, mine: true })
+  }
+
+  // A kick-off proof is structurally valid: signed (Ed25519) by the initiator over a
+  // kick-off burn for this wave. (On-chain reality is checked separately, async.)
+  function validKickoff(p, waveId, byId) {
+    return !!(
+      p &&
+      p.reason === 'kickoff' &&
+      p.waveId === waveId &&
+      p.peerId === byId &&
+      verifyBurn(
+        {
+          waveId: p.waveId,
+          peerId: p.peerId,
+          reason: p.reason,
+          amount: p.amount,
+          txHash: p.txHash,
+          tronAddress: p.tronAddress,
+          burnTs: p.burnTs
+        },
+        p.sig
+      )
+    )
+  }
+
+  // Verify a wave's kick-off burn ON-CHAIN, then settle wave.paid. Abandons the wave if the
+  // burn isn't real (anti-spam). No-op if enforcement is off or no verifier is wired.
+  function verifyKickoff(waveId, proof) {
+    if (!enforcePaid || !verifyBurnOnChain) return
+    verifyBurnOnChain(proof.txHash, {
+      waveId,
+      from: proof.tronAddress,
+      minTrx: proof.amount
+    })
+      .then((res) => {
+        if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return
+        if (res && res.ok) {
+          wave.paid = 'verified'
+          onToken({ event: 'wave-verified', waveId })
+        } else {
+          wave.paid = 'rejected'
+          onToken({ event: 'wave-unpaid', waveId, reason: res && res.reason })
+          goIdle('unpaid-rejected')
+        }
+      })
+      .catch(() => {})
   }
 
   async function finalizeAndStart(waveId) {
@@ -1154,6 +1271,7 @@ function createWave({
           by: wave.by,
           roster: [...wave.roster],
           key: autobaseKey,
+          paid: wave.kickoffProof || undefined, // so a mid-lobby newcomer can verify + join
           lobbyMsLeft: wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
         })
       )
@@ -1225,9 +1343,16 @@ function createWave({
     join,
     setCountry,
     stageSelfie,
-    setWallet: (address) => {
+    // Wire the payment layer once the wallet is up: my address (for tips/attestations),
+    // the on-chain burn verifier, and — since I can now pay — enable the paid-wave gate.
+    setWallet: (address, verifier) => {
       walletAddress = address || null
+      if (verifier) {
+        verifyBurnOnChain = verifier
+        enforcePaid = true
+      }
     },
+    announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
     recordBurn, // a peer reports its paid participation fee -> sign + post burn-proof
     chainProofs, // (validator) collected hop receipts for a wave, ordered by hop
     chainBurns, // (validator) verified burn-proofs for a wave (from the gallery)
