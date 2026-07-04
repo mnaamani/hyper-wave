@@ -125,6 +125,7 @@ function createWave({
   let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
   const galleries = new Map() // waveId -> base: a seed retains every gallery it opens
   const seedPeers = new Set() // ids advertising role=validator — pin them (well-connected seed)
+  const proofs = new Map() // (validator) waveId -> Map(hopCount -> proof): collected hop receipts
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
   // concurrent starts resolve deterministically (lower waveId wins). During the
@@ -339,6 +340,17 @@ function createWave({
         m.waveId === currentWaveId &&
         verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
       if (ok) base.append({ type: 'add-writer', key: m.key })
+      return
+    }
+    if (m.kind === 'wave-proof') {
+      // Only a validator collects proofs; each must carry a receipt validly self-signed
+      // for its hop (authenticity gate — apply()/payout re-checks the chain links too).
+      if (
+        isSeed &&
+        verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
+      ) {
+        collectProof(m)
+      }
       return
     }
     const now = Date.now()
@@ -590,6 +602,33 @@ function createWave({
       if (base === b) emitGallery()
     })
     return b
+  }
+
+  // (validator) Record a verified hop receipt, keyed by wave then hop. The chain is
+  // reassembled in hop order at payout time (step 6); collecting relayers' proofs — not
+  // just selfie-takers' — is what lets the validator know the whole participation chain.
+  function collectProof(m) {
+    let byHop = proofs.get(m.waveId)
+    if (!byHop) proofs.set(m.waveId, (byHop = new Map()))
+    if (byHop.has(m.hopCount)) return // first proof per hop wins
+    byHop.set(m.hopCount, {
+      hopCount: m.hopCount,
+      peerId: m.peerId,
+      receiptSig: m.receiptSig,
+      chainHash: m.chainHash,
+      receiptTs: m.receiptTs,
+      address: m.address || ''
+    })
+    log('proof: wave', shortId(m.waveId), 'hop', m.hopCount, 'from', shortId(m.peerId))
+    onToken({ event: 'proof', waveId: m.waveId, hopCount: m.hopCount, count: byHop.size })
+  }
+
+  // Collected hop receipts for a wave, ordered by hop (contiguous from 0). For the
+  // interlocked payout (step 6) to walk and cross-check the chain.
+  function chainProofs(waveId) {
+    const byHop = proofs.get(waveId)
+    if (!byHop) return []
+    return [...byHop.values()].sort((a, b) => a.hopCount - b.hopCount)
   }
 
   async function emitGallery() {
@@ -877,8 +916,35 @@ function createWave({
       token.prevChainHash,
       token.timestamp
     )
+    pushProof(token)
     announcePosition(token.waveId, token.hopCount)
     setTimeout(() => forwardToken(token), hopDelayMs)
+  }
+
+  // Push my hop's receipt to any connected validator/seed so it can reassemble the full
+  // ordered chain — including relayers who never selfie (their receipt reaches the
+  // validator no other way). Direct to pinned seeds (§ interlocked payout, final-idea).
+  function pushProof(token) {
+    const proof = {
+      waveId: token.waveId,
+      hopCount: token.hopCount,
+      peerId: me.id,
+      receiptSig: token.senderReceiptSig,
+      chainHash: token.prevChainHash,
+      receiptTs: token.timestamp,
+      address: walletAddress || ''
+    }
+    if (isSeed) collectProof(proof) // a validator relays too — record its own hop directly
+    if (seedPeers.size === 0) return
+    const str = JSON.stringify({ kind: 'wave-proof', ...proof })
+    for (const s of seedPeers) {
+      const send = senders.get(s)
+      if (send) {
+        try {
+          send(str)
+        } catch {}
+      }
+    }
   }
 
   function processToken(token) {
@@ -1090,6 +1156,7 @@ function createWave({
     setWallet: (address) => {
       walletAddress = address || null
     },
+    chainProofs, // (validator) collected hop receipts for a wave, ordered by hop
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
     findSuccessor: (target) =>

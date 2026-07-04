@@ -123,6 +123,7 @@ propagated differently to match what each needs:
 | **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end` | every peer |
 | **One-hop broadcast** | `wave-pos`, `add-writer` | direct neighbours only |
 | **Neighbour-scoped** | `presence`, `pointers` | pinned ring neighbours (O(k + log N)) |
+| **To validators** | `wave-proof` | each connected validator/seed |
 | **Unicast** | `token`, `wave-sync` | one specific peer |
 
 **Flood (epidemic broadcast).** The wave *lifecycle* messages must reach every seat, so they
@@ -305,6 +306,18 @@ successor); `hops`/`chainHash` are present on normal completion.
 ```
 Asks the gallery host to admit `key` as an Autobase writer, presenting a valid receipt
 (§8.2). Any current writer that verifies the receipt appends an `add-writer` op.
+
+### wave-proof — direct to connected validators/seeds (each hop)
+```json
+{ "kind": "wave-proof", "waveId": "<hex16>", "hopCount": 3, "peerId": "<peerId>",
+  "receiptSig": "<hex64>", "chainHash": "<hex32>", "receiptTs": 1719705612080, "address": "T…" }
+```
+Every holder pushes its hop receipt to each connected validator (`role: validator`) — so the
+validator collects the **whole ordered chain**, including relayers who never post a selfie
+(their receipt reaches it no other way). The validator verifies each receipt (§2.2) and keys
+it by `(waveId, hopCount)`; the reassembled chain drives the interlocked payout (final-idea).
+`address` is the sender's payout wallet. A validator that is itself a relay records its own
+hop directly. Not flooded — sent only to pinned seeds (which everyone pins, §4.6).
 
 ### wave-sync — DIRECT to a newly-connected peer (join-time state)
 ```json
@@ -572,4 +585,4 @@ tip to a selfie owner's wallet).
 `token` events: `wave-announce`, `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
 `position`, `forwarded`, `completed`, `healed`, `stalled`,
-`gallery-error`.
+`proof {waveId,hopCount,count}` (validator collected a hop receipt), `gallery-error`.
