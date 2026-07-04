@@ -1,8 +1,10 @@
 // HyperWave orchestrator. Wires the transport (Hyperswarm + Protomux gossip) to the
-// three pure domains — ring geometry (ring.js), the token race (token.js), and the
-// selfie gallery (gallery.js). Runs under Bare (the worker) or Node harness.
-// The Bare worker (hyperwave.js) bridges this to the renderer; wave.run.js drives it
-// headlessly. The payment layer will attach here as its own module.
+// pure domains — ring geometry (ring.js), Chord topology (chord.js), flood dedup
+// (flood.js), token/payout crypto (token.js), and the selfie gallery (gallery.js).
+// The payment layer (pay.js, WDK) is injected by the worker via setWallet(): wallet
+// address, on-chain burn verifier (paid-wave gate), and the reward sender (validator
+// payout). Runs under Bare (the worker) or a Node harness. The Bare worker
+// (hyperwave.js) bridges this to the renderer; wave.run.js drives it headlessly.
 
 const Hyperswarm = require('hyperswarm')
 const Corestore = require('corestore')
@@ -1273,7 +1275,7 @@ function createWave({
     beginRace()
     onToken({ event: 'started', waveId, by: me.id })
 
-    // the originator is hop 0 — hold (proof window if joined) and forward
+    // the originator is hop 0 — hold (post staged selfie if joined) and forward
     holdAndForward(stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey))
   }
 

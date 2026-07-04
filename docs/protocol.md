@@ -109,7 +109,7 @@ where `⊕ receiptᵢ` means `advanceChain(prev, receiptSigᵢ) = BLAKE2b(prev +
 - The gossip channel and the Corestore replication share the same underlying stream
   (Protomux multiplexes them).
 
-All timing constants are in §9.
+All timing constants are in §10.
 
 ### 3.1 Message propagation & relay rules
 
@@ -600,7 +600,65 @@ spend, never a split pot). It's the consumer of the collected `wave-proof` recei
 
 The chain-walk is pure (`token.js`, unit-tested); only the transfers touch the chain.
 
-## 9. Constants (reference build)
+## 9. Participation fees — burning & verification
+
+The money layer's anti-spam mechanism, consolidated. (Wire/message details: the paid-wave
+gate on `wave-announce` §5, the `burn-proof` gallery op §8.4, the payout §8.5.)
+
+### 9.1 The mechanism: fees are burned, not paid
+
+Starting a wave (**kick-off fee**) and opting into one (**join fee**) each cost a fixed
+amount (1 TRX in the reference build), and the payment is **burned**: sent to Tron's
+black-hole address
+
+```
+T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb        (base58check of the all-zero EVM address)
+```
+
+for which no private key exists — the funds are provably unspendable by *anyone*. This is
+deliberate: the fee creates **skin in the game with no beneficiary**. Nobody (not the
+validator, not the initiator) profits from fees, so there is no censorship or collusion
+incentive, no custodial ledger, and no refund path to dispute. (Tron rejects zero-amount
+transfers, so a burn is a real small transfer; Tron also burns tx fees at the protocol
+level.) Spamming waves or Sybil-joining costs real, irrecoverable value.
+
+### 9.2 Binding a burn to its wave and its peer
+
+A raw burn tx only proves "someone sent TRX to the black hole." Two independent bindings
+make it *"ring peer P burned specifically for wave W"* — two are needed because the Tron
+key that signs the tx is a **different keypair** from the peer's Ed25519 ring identity:
+
+1. **On-chain memo (burn ↔ wave, third-party auditable).** The burn tx carries
+   `data = "hyperwave:<waveId>:<peerId>"`. Anyone can read it back via
+   `gettransactionbyid` — the burn *names the wave on-chain*. Replay across waves is
+   impossible: each `waveId` is 16 random bytes, unguessable before the wave exists, and
+   the memo is part of the signed tx.
+2. **Ring attestation (burn ↔ ring identity).** The peer signs, with its **ring** Ed25519
+   key, the tuple `(waveId, peerId, reason, amount, txHash, tronAddress, burnTs)` and
+   publishes it as a `burn-proof` op in the wave's gallery (§8.4). `apply()` admits it only
+   if the signature verifies — binding the ring participant to that specific tx and payout
+   address.
+
+### 9.3 Verification (who checks what, when)
+
+- **Before joining (every peer):** a `wave-announce` must carry the initiator's kick-off
+  `burn-proof`, validly signed — otherwise the announce is **ignored** (an unpaid wave is
+  invisible). Before a peer joins (and pays its own fee), it verifies the kick-off burn
+  **on-chain** — `verifyBurnTx`: the tx exists, is a `TransferContract` **to the black
+  hole**, from the attested address, `amount ≥ fee`, and the **memo commits this
+  `waveId`**. `join()` is refused until this passes, so no peer ever pays into a wave the
+  initiator hasn't paid for. The initiator, symmetrically, does not announce until its own
+  burn is readable on-chain.
+- **At payout (the validator):** re-verifies each `burn-proof` the same way, plus dedup
+  (each `txHash` creditable once).
+- **Anyone, later:** because the memo is on-chain and the `burn-proof` is in the replicated
+  gallery, a third party can audit every fee of every wave with nothing but a Tron node —
+  no trust in the validator's bookkeeping required.
+
+Enforcement is active whenever an instance has a wallet; walletless test/headless runs skip
+the gate (waves announce immediately, unpaid).
+
+## 10. Constants (reference build)
 
 | Constant | Value | Meaning |
 |---|---|---|
@@ -617,7 +675,7 @@ The chain-walk is pure (`token.js`, unit-tested); only the transfers touch the c
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.
 
-## 10. Security & trust notes
+## 11. Security & trust notes
 
 - **Angle/seat** is bound to the public key and can't be forged without grinding keys.
 - **Receipts** authenticate each hop and each gallery entry to a peer identity; the

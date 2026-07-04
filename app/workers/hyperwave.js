@@ -16,8 +16,20 @@ function send(msg) {
   pipe.write(JSON.stringify(msg))
 }
 
+// Optional env overrides (same as wave.run.js): HYPERWAVE_BOOTSTRAP=host:port uses a
+// local DHT (instant same-machine discovery for demos); HYPERWAVE_MATCH isolates the ring.
+const bootstrap = env.HYPERWAVE_BOOTSTRAP
+  ? env.HYPERWAVE_BOOTSTRAP.split(',').map((hp) => {
+      const [host, port] = hp.split(':')
+      return { host, port: Number(port) }
+    })
+  : null
+
 const wave = createWave({
   storageDir,
+  bootstrap,
+  matchId: env.HYPERWAVE_MATCH || undefined,
+  lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
   role: env.HYPERWAVE_ROLE || 'peer', // 'validator'/'seed' runs this instance as a gallery seed
   onState: (state) => send({ type: 'state', ...state }),
   onToken: (event) => send({ type: 'token', ...event }),
@@ -32,9 +44,10 @@ console.log(
   wave.me.angle.toFixed(1)
 )
 
-// Self-custodial WDK wallet (Tron testnet TRX) for bond / payout / tips. Async init
+// Self-custodial WDK wallet (Tron testnet TRX) for fees / payout / tips. Async init
 // (dynamic import of ESM WDK); emits `wallet` {address,trx} to the renderer on ready
-// and every 15s. Runs independently of the wave engine for now (step 2 = wallets only).
+// and every 15s. Once up, it's wired into the engine via setWallet (address for
+// tips/attestations, on-chain burn verifier = paid-wave gate, reward sender = payout).
 let payments = null
 let tBalance = null
 createPayments({ storageDir, log: (...a) => console.log('[wallet]', ...a) })

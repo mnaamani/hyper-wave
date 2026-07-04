@@ -4,7 +4,7 @@
 //   env HYPERWAVE_MATCH=<id>           -> isolated match topic
 //   env START=<n>                      -> announce a wave once >= n peers are present
 //   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
-//   env AUTOSELFIE=1                   -> post a fake selfie in each proof window (if joined)
+//   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted when the ball arrives, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 const env = require('bare-env')
 const { createWave } = require('./wave.js')
