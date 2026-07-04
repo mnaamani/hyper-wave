@@ -272,10 +272,14 @@ the initiator (which assembles the roster) even across a partial mesh.
 ### wave-start — flooded (originator, when the lobby closes)
 ```json
 { "kind": "wave-start", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
-  "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>" }
+  "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>",
+  "paid": { /* kick-off burn-proof, §8.4 — present when the paid-wave gate is enforced */ } }
 ```
 Finalizes the roster and begins the race. `key` is the wave's gallery Autobase bootstrap
-key (§8). Receivers open the gallery and transition `lobby → racing`.
+key (§8). Receivers open the gallery and transition `lobby → racing`. When the paid-wave
+gate is enforced, `wave-start` carries the same kick-off `paid` proof as the announce and is
+gated on it (§11), so a forged start can't conjure a race + gallery; carrying it also lets a
+peer that adopted via `wave-start` re-authenticate a later `wave-sync` to a newcomer.
 
 ### token — DIRECT to the successor (the ⚽)
 ```json
@@ -293,15 +297,25 @@ sender's receipt over `(waveId, hopCount, prevChainHash, timestamp)`. Processing
 ```
 Tells direct neighbours the ball is now at `holder` (so they can animate it). Also serves as
 the **ACK** that healing (§7.3) waits for — the predecessor is a pinned neighbour, so it's
-received without needing a flood. Deliberately **not** relayed (emitted every hop).
+received without needing a flood. Deliberately **not** relayed (emitted every hop). `holder`
+is connection-bound (§11), and healing only accepts the ACK when `holder` is the **specific
+successor** it forwarded to, so a bogus `wave-pos` can't suppress healing of a dead successor.
 
-### wave-end — flooded (originator on completion, or any peer on a dead-end stall)
+### wave-end — flooded (originator on completion, or a participant on a dead-end stall)
 ```json
+// completion (by the originator):
 { "kind": "wave-end", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
-  "hops": 7, "chainHash": "<hex32>", "stalled": false }
+  "hops": 7, "chainHash": "<hex32>", "sig": "<hex64>" }
+// stall (by the participant that dead-ended):
+{ "kind": "wave-end", "mid": "<hex8>", "waveId": "<hex16>", "by": "<originatorId>",
+  "stalled": true, "staller": "<peerId>", "hopCount": 5, "chainHash": "<hex32>",
+  "receiptTs": 1719705612080, "receiptSig": "<hex64>" }
 ```
-Ends the wave for everyone. `stalled: true` means a peer hit a dead end (no reachable
-successor); `hops`/`chainHash` are present on normal completion.
+Ends the wave for everyone. Because it is flooded (forgeable by any relay), it is honoured
+only with proof it's genuine (§11): a **completion** carries `sig`, the originator's Ed25519
+signature over `(waveId, hops, chainHash)`; a **stall** carries the staller's own hop
+`receiptSig`, proving it was an admitted participant that hit a dead end. An outside attacker
+holding neither can no longer force-terminate a live wave.
 
 ### add-writer — one-hop broadcast (a peer requesting gallery write access)
 ```json
@@ -330,21 +344,29 @@ hop directly. Not flooded — sent only to pinned seeds (which everyone pins, §
   "by": "<peerId>", "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>|null",
   "lobbyMsLeft": 8000 }
 ```
-Lets a peer joining mid-wave sync (§7.4).
+Lets a peer joining mid-wave sync (§7.4). When the paid-wave gate is enforced, a `wave-sync`
+must carry the kick-off `paid` proof (§8.4) **for either phase** — including `racing` — and is
+adopted only if it verifies (§11), so a fabricated racing sync can't push a newcomer into a
+bogus wave. (`paid` is omitted from the schema line above for brevity.)
 
 ## 6. Token processing
 
-When a peer receives a `token`:
+When a peer receives a `token` (identity binding first: `senderPeerId` must equal the
+connection it arrived on, §11 — else drop):
 
-1. **Verify** `senderReceiptSig` against `receiptHash(waveId, hopCount, prevChainHash,
-   timestamp)` and `senderPeerId`. If invalid, drop.
-2. **Wave filter:** if `!shouldAdopt(waveId)` (§7.1), drop (it's a competing/finished
+1. **Wave filter (cheap):** if `!shouldAdopt(waveId)` (§7.1), drop (it's a competing/finished
    wave).
-3. **Completion:** if `originator == me` and `hopCount > 0`, the token has returned:
-   broadcast `wave-end { hops: hopCount, chainHash: prevChainHash, by: me }`, finish the
-   wave locally, stop.
-4. **Dedup / cap:** key = `waveId + "|" + hopCount`; if already in `seen`, or `hopCount >
-   MAX_HOPS`, drop. Else add to `seen`.
+2. **Dedup / cap (cheap):** key = `waveId + "|" + hopCount`; unless this is a completion (next
+   step), if already in `seen` or `hopCount > MAX_HOPS`, drop. These cheap rejects run
+   **before** the expensive signature verify, so a token flood can't force unbounded Ed25519
+   work.
+3. **Verify:** check `senderReceiptSig` against `receiptHash(waveId, hopCount, prevChainHash,
+   timestamp)` and `senderPeerId`. If invalid, drop.
+4. **Completion:** if I am **running** this wave (`wave.id == waveId`), `originator == me`, and
+   `hopCount > 0`, the token has returned: flood `wave-end { hops, chainHash, by: me, sig }`
+   where `sig` signs the completion (§11), finish the wave locally, stop. (Requiring that I'm
+   actually running the wave stops a token with `originator == me` for a wave I never started
+   from forging a completion.) Otherwise add the key to `seen`.
 5. **Adopt & learn gallery:** ensure engaged with this wave and `racing` (a peer that
    missed announce/start catches up here); open the gallery from `autobaseKey`.
 6. **Advance & stamp:** compute `newChainHash = advanceChain(prevChainHash,
@@ -452,10 +474,11 @@ gossip. Each hop the holder broadcasts `wave-pos`, and — if in the roster — 
 
 ### 7.3 Healing
 When forwarding, pick the **next reachable peer clockwise** (directly connected, not
-already skipped). After forwarding, watch for the wave to advance past my hop — the
-successor's `wave-pos` is the ACK. If none arrives within `HEAL_TIMEOUT_MS`, mark that
-successor skipped and re-forward to the next reachable peer. If none remain, it's a
-**dead end**: broadcast `wave-end { stalled: true }` and finish.
+already skipped). After forwarding, watch for the wave to advance past my hop — a `wave-pos`
+**from that specific successor** is the ACK (a position from any other peer is ignored for
+healing, §11). If none arrives within `HEAL_TIMEOUT_MS`, mark that successor skipped and
+re-forward to the next reachable peer. If none remain, it's a **dead end**: flood a stall
+`wave-end` carrying my hop receipt (§11) and finish.
 
 ```mermaid
 sequenceDiagram
@@ -671,6 +694,7 @@ same ballpark for interop but exact values aren't required to match.
 
 ## 11. Security & trust notes
 
+### 11.1 Foundations
 - **Angle/seat** is bound to the public key and can't be forged without grinding keys.
 - **Receipts** authenticate each hop and each gallery entry to a peer identity; the
   **chain accumulator** lets an observer reconstruct/verify hop order from collected
@@ -679,6 +703,57 @@ same ballpark for interop but exact values aren't required to match.
   fork can drop/ignore anything locally (open P2P); the protocol keeps *honest* peers
   consistent. A real reward system needs a validator arbitrating the token chain.
 - Country is cosmetic and self-reported.
+
+### 11.2 Adversarial hardening (against a modified client)
+The transport (Noise over Hyperswarm) authenticates *who* a message came from, but the
+application logic must actually **use** that rather than trust self-reported fields. The
+following guards keep a hostile peer running a modified app from disrupting honest peers:
+
+- **Identity binding.** For a message that describes its own sender — `pointers.id`,
+  `wave-pos.holder`, `token.senderPeerId`, `add-writer.peerId`, `wave-proof.peerId` — the
+  claimed id must equal the authenticated connection id it arrived on, else it's dropped
+  (before any signature work). This blocks peer-map/ring pollution under spoofed ids, and
+  it means a peer can only push a `wave-proof` for **its own** key, so stuffing a validator
+  with hop receipts for keys the attacker doesn't hold requires a separate real connection
+  per key. Flooded `wave-*` fields (`by`, roster ids) are third-party at relay hops and are
+  instead authenticated by the signatures they carry (kick-off burn-proof, receipts).
+- **Authenticated lifecycle termination.** `wave-end` is flooded (forgeable by any relay), so
+  it is honoured only with proof: a **completion** carries the originator's Ed25519 signature
+  over `(waveId, hops, chainHash)`; a **stall** carries the staller's own hop receipt. An
+  outsider holding neither can't force-terminate a live wave. (A malicious *admitted*
+  participant can still stall a wave it's part of — but it could already do that by simply not
+  forwarding; no new power.)
+- **Paid-gate on every adoption path.** When enforced, `wave-announce`, `wave-start`, and
+  `wave-sync` (both lobby **and** racing) are all gated on a valid kick-off burn-proof, so no
+  single message shape can push a peer into an unpaid/forged wave.
+- **Completion self-guard.** A peer treats a returning token as completion only for a wave it
+  is actually running, so a token with `originator == me` for a wave it never started can't
+  forge a completion.
+- **Heal-ACK precision.** The heal timer is cleared only by a `wave-pos` from the exact
+  successor a peer forwarded to (§7.3), so a bogus position can't suppress healing.
+- **Cheap-before-expensive.** Token processing runs the cheap wave-filter and dedup/cap
+  checks before the Ed25519 verify (§6), limiting the CPU a token flood can extract.
+
+### 11.3 Known residual risks (hardening backlog)
+- **Payout anchoring / sybil economics.** The validator currently collects any signature-valid
+  `wave-proof` and pays the on-chain addresses in the longest valid chain; it does **not** yet
+  require each paid hop to have an on-chain-verified join burn for that wave, and `REWARD_TRX`
+  (2) exceeds `FEE_TRX` (1). An attacker able to occupy multiple hops (e.g. a fully-fabricated
+  chain of offline-generated keys) could extract a net reward. Planned mitigation: pay only
+  waves whose kick-off burn the validator verified on-chain, require a verified join burn per
+  paid hop, set reward ≤ fee (or a fixed sponsor budget with a global cap), and never trust
+  gossiped completion fields for the last-hop decision. Until then, run payouts only with a
+  **trusted validator** and testnet funds (the MVP assumption).
+- **No per-connection rate limiting.** Gossip has flood-dedup, `seen`/`MAX_HOPS` caps, and the
+  cheap-before-verify ordering, but not yet a per-peer message budget; a peer can still spend a
+  connection's bandwidth/CPU. Planned: per-connection token buckets per message kind, plus size
+  caps on gallery entries (inline image bytes) and bounds on the auxiliary maps.
+- **Gallery admission at scale** and **gallery-key trust** (a competing low-`waveId` `wave-start`
+  can still name an attacker-chosen Autobase key) remain open; see `scalable-topology.md` §4.7.
+- **Wallet-less mode is unauthenticated by design.** All paid-gate guarantees hold only when a
+  wallet is present (`enforcePaid`); an unfunded demo/test run accepts unpaid waves so the
+  lifecycle can be exercised without on-chain calls. Don't mistake that mode for the security
+  model.
 
 ## Appendix A — app-internal IPC (informative, not on-wire)
 

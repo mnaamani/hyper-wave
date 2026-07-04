@@ -54,6 +54,18 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
       semver can't parse (`scripts/fix-bare-engines.js`)
 
+### Adversarial hardening (against a modified client) — `docs/protocol.md` §11.2
+- [x] Identity binding: a self-describing gossip field (`pointers.id`, `wave-pos.holder`,
+      `token.senderPeerId`, `add-writer.peerId`, `wave-proof.peerId`) must match the
+      authenticated connection id — blocks ring pollution, heal suppression, and cross-key
+      `wave-proof` stuffing
+- [x] Authenticated `wave-end`: completion signed by the originator (`signWaveEnd`), stall
+      carries the staller's hop receipt — an outsider can't force-terminate a live wave
+- [x] Paid-gate on every adoption path (`wave-announce`/`wave-start`/`wave-sync`, incl. a
+      **racing** sync) — closes the `wave-sync` bypass; kick-off proof now rides `wave-start`
+- [x] Completion self-guard (only for a wave I'm running) + heal-ACK precision (only my
+      actual successor's `wave-pos`) + cheap-checks-before-Ed25519-verify in token processing
+
 ## Backlog
 
 ### Propagation at extreme scale (Phase 5 — decision deferred)
@@ -62,6 +74,17 @@ Serial token is O(N·dwell) — hours at N=10k. The designed alternative is the
 independent proofs; pairs with fixed-per-participant payout). Decision deliberately
 parked — the serial interlocked token is the product for now (small/medium waves).
 See `docs/scalable-topology.md` §3B/§8.
+
+### Adversarial hardening still open (`docs/protocol.md` §11.3)
+- [ ] **Payout anchoring / sybil economics** (deferred — needs a reward-vs-fee decision):
+      validator should pay only waves whose kick-off burn it verified on-chain, require a
+      verified join burn per paid hop, set reward ≤ fee (or a global sponsor-budget cap), and
+      never trust gossiped completion fields. Until then: trusted validator + testnet only.
+- [ ] Per-connection rate limiting (token buckets per message kind) + size caps on gallery
+      entries (inline image bytes) + bounds on auxiliary maps (`seen`/`endedWaves`/`routed`/
+      `lookupRoute`/`goneUntil`)
+- [ ] Gallery-key trust: a competing low-`waveId` `wave-start` can still name an
+      attacker-chosen Autobase key — bind the key to the originator / derive from `waveId`
 
 ### Remaining hardening (scalable-topology §8)
 - [ ] Validate Chord convergence under real large-N churn (can't force a partial mesh

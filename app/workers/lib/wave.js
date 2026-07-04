@@ -35,6 +35,8 @@ const {
   advanceChain,
   signBurn,
   verifyBurn,
+  signWaveEnd,
+  verifyWaveEnd,
   longestValidChain,
   payableFromChain
 } = require('./token')
@@ -67,6 +69,21 @@ const K_SUCCESSORS = 3
 // flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1). The chatty
 // `wave-pos` is deliberately NOT relayed (its heal-ACK only needs the predecessor).
 const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start', 'wave-end'])
+// Identity binding: for a message that describes its OWN sender, the claimed id must equal
+// the Noise-authenticated connection id it arrived on (`fromId`). Hyperswarm authenticates
+// *who* we're talking to; without this the app would still believe whatever a modified
+// client *claims* to be — letting one peer inject presence/holds/receipts/proofs under keys
+// it doesn't control (ring pollution, heal suppression, sybil proof stuffing). Only the
+// direct-path (unicast / one-hop) messages are listed; flooded messages (wave-*) are relayed
+// so their `by`/`peerId` is a third party at relay hops — those are authenticated by their
+// carried signatures (kick-off burn-proof, receipts) instead, not by the connection.
+const SELF_ID_FIELD = {
+  pointers: 'id', // the heartbeat sender
+  'wave-pos': 'holder', // whoever currently holds the ball (broadcast by the holder)
+  token: 'senderPeerId', // the immediate forwarder (re-stamped every hop)
+  'add-writer': 'peerId', // the writer-admission requester
+  'wave-proof': 'peerId' // the hop whose receipt is being pushed to a validator
+}
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096
@@ -306,6 +323,11 @@ function createWave({
   }
 
   function handleGossip(m, fromId) {
+    // Identity binding (see SELF_ID_FIELD): drop a self-describing message that didn't come
+    // from the peer it claims to be. Cheap string compare, before any signature work.
+    const idField = SELF_ID_FIELD[m.kind]
+    if (idField && m[idField] !== fromId) return
+
     // Flood relayable control messages across the partial mesh: process each exactly
     // once, and on first sight re-broadcast to my other neighbours (dedup by `mid`).
     if (m.mid && RELAYED_KINDS.has(m.kind)) {
@@ -318,8 +340,16 @@ function createWave({
     if (m.kind === 'wave-pos') {
       // only animate the ball for the wave we're racing (angle derived locally)
       if (wave && wave.phase === 'racing' && m.waveId === wave.id) {
-        // the wave advanced past my hop — my successor is alive, stop watching
-        if (healPending && m.waveId === healPending.waveId && m.hopCount > healPending.hop) {
+        // Heal-ACK: my forward is only ACKed when the peer I actually forwarded to holds the
+        // ball (m.holder is connection-bound to the real sender). Requiring the *successor*
+        // id — not just any hopCount past mine — stops a hostile peer from broadcasting a
+        // bogus wave-pos to suppress healing while my real successor is dead.
+        if (
+          healPending &&
+          m.waveId === healPending.waveId &&
+          m.holder === healPending.succId &&
+          m.hopCount > healPending.hop
+        ) {
           clearHeal()
         }
         onToken({
@@ -335,11 +365,14 @@ function createWave({
     if (m.kind === 'wave-sync') {
       // a peer told us the wave state when we joined mid-lobby / mid-race
       if (!m.waveId || !shouldAdopt(m.waveId)) return
-      // anti-spam: a synced lobby is only adoptable with a valid kick-off proof (a racing
-      // wave already cleared that gate when its roster joined, so accept it as paid).
-      if (enforcePaid && m.phase !== 'racing' && !validKickoff(m.paid, m.waveId, m.by)) return
+      // anti-spam: adopt a synced wave (lobby OR racing) only with a valid kick-off proof.
+      // Previously a *racing* sync skipped this — a hostile peer could unicast a fabricated
+      // racing wave-sync on connect to force a newcomer into a bogus wave, bypassing the
+      // paid gate. The signed burn-proof can't be forged for a key the attacker lacks.
+      if (enforcePaid && !validKickoff(m.paid, m.waveId, m.by)) return
       if (m.phase === 'racing') {
         if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, 0, true)
+        if (m.paid) wave.kickoffProof = m.paid
         wave.paid = 'verified'
         if (m.key) openGallery(m.waveId, b4a.from(m.key, 'hex'))
         beginRace(m.roster)
@@ -374,25 +407,35 @@ function createWave({
       return
     }
     if (m.kind === 'wave-start') {
-      // initiator finalized the roster and kicked off the race
+      // initiator finalized the roster and kicked off the race. Gate on the same kick-off
+      // proof as the announce, so a forged wave-start can't conjure a race + gallery either.
+      if (enforcePaid && !validKickoff(m.paid, m.waveId, m.by)) return
       if (m.waveId && m.key && shouldAdopt(m.waveId)) {
         if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false)
+        if (m.paid) wave.kickoffProof = m.paid // carry it so we can re-sync newcomers
         openGallery(m.waveId, b4a.from(m.key, 'hex'))
         beginRace(m.roster)
       }
       return
     }
     if (m.kind === 'wave-end') {
-      // originator ended it (completed) or a peer hit a dead end (stalled) — everyone
-      // finishes together instead of each waiting out the timeout
-      if (wave && m.waveId === wave.id) {
-        finishWave(m.waveId, {
-          stalled: m.stalled,
-          hops: m.hops,
-          chainHash: m.chainHash,
-          byId: m.by
-        })
-      }
+      // The originator ended it (completed) or a real participant hit a dead end (stalled) —
+      // everyone finishes together instead of each waiting out the timeout. wave-end is
+      // flooded (forgeable by any relay), so it's only honoured with proof it's genuine:
+      //  - completion: an Ed25519 signature by the originator over (waveId, hops, chainHash);
+      //  - stall: the staller's own hop receipt, proving it was an admitted participant.
+      // An outside attacker holding neither can no longer force-terminate a live wave.
+      if (!wave || m.waveId !== wave.id) return
+      const authentic = m.stalled
+        ? verifyReceipt(m.staller, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
+        : verifyWaveEnd(m.by, m.waveId, m.hops, m.chainHash, m.sig)
+      if (!authentic) return
+      finishWave(m.waveId, {
+        stalled: m.stalled,
+        hops: m.hops,
+        chainHash: m.chainHash,
+        byId: m.by
+      })
       return
     }
     if (m.kind === 'add-writer') {
@@ -1044,16 +1087,29 @@ function createWave({
         waveId: token.waveId,
         reason: skipped.size ? 'no-reachable-successor' : 'no successor'
       })
-      floodGossip({ kind: 'wave-end', waveId: token.waveId, by: token.originator, stalled: true })
+      // Carry my hop receipt so peers can tell a genuine dead-end (from an admitted
+      // participant) from a forged stall (an outsider trying to kill the wave).
+      floodGossip({
+        kind: 'wave-end',
+        waveId: token.waveId,
+        by: token.originator,
+        stalled: true,
+        staller: me.id,
+        hopCount: token.hopCount,
+        chainHash: token.prevChainHash,
+        receiptTs: token.timestamp,
+        receiptSig: token.senderReceiptSig
+      })
       goIdle('stalled')
       return
     }
     senders.get(succ.id)(JSON.stringify(token))
     onToken({ event: 'forwarded', waveId: token.waveId, hopCount: token.hopCount, to: succ.id })
 
-    // heal: expect a wave-pos past my hop soon (the successor's hold ACKs it)
+    // heal: expect the peer I forwarded to (succ) to hold the ball soon; its wave-pos is the
+    // ACK. Record succ.id so only *its* position clears the watch (see the wave-pos handler).
     clearTimeout(healTimer)
-    healPending = { waveId: token.waveId, hop: token.hopCount }
+    healPending = { waveId: token.waveId, hop: token.hopCount, succId: succ.id }
     healTimer = setTimeout(() => {
       healPending = null
       skipped.add(succ.id)
@@ -1128,27 +1184,36 @@ function createWave({
   }
 
   function processToken(token) {
+    // Cheap rejects BEFORE the Ed25519 verify, to blunt a token-flood CPU DoS: drop a
+    // competing/losing wave (single active wave at a time), and drop already-seen or
+    // over-cap hops. Identity binding already guaranteed senderPeerId === the connection.
+    if (!shouldAdopt(token.waveId)) return
+    const key = token.waveId + '|' + token.hopCount
+    // Completion only counts for a wave I'm actually running (else a token with
+    // originator=me for a wave I never started could forge a completion).
+    const isCompletion =
+      wave && wave.id === token.waveId && token.originator === me.id && token.hopCount > 0
+    if (!isCompletion && (seen.has(key) || token.hopCount > MAX_HOPS)) return
+
     if (!verifyToken(token)) {
       log('token: bad receipt from', shortId(token.senderPeerId || ''))
       return
     }
-    // Ignore tokens from a competing/losing wave (single active wave at a time).
-    if (!shouldAdopt(token.waveId)) return
 
-    // Completion: the token has returned to its originator. Tell everyone, then finish.
-    if (token.originator === me.id && token.hopCount > 0) {
+    // Completion: the token has returned to its originator. Tell everyone (signed so the
+    // flooded wave-end can't be forged), then finish.
+    if (isCompletion) {
       floodGossip({
         kind: 'wave-end',
         waveId: token.waveId,
         hops: token.hopCount,
         chainHash: token.prevChainHash,
-        by: me.id
+        by: me.id,
+        sig: signWaveEnd(swarm.keyPair, token.waveId, token.hopCount, token.prevChainHash)
       })
       finishWave(token.waveId, { hops: token.hopCount, chainHash: token.prevChainHash })
       return
     }
-    const key = token.waveId + '|' + token.hopCount
-    if (seen.has(key) || token.hopCount > MAX_HOPS) return
     seen.add(key)
 
     // adopt into the race (may switch from a higher-id wave, or catch up if we
@@ -1268,7 +1333,8 @@ function createWave({
       waveId,
       by: me.id,
       roster: [...wave.roster],
-      key: autobaseKey
+      key: autobaseKey,
+      paid: wave.kickoffProof || undefined // so peers adopting via start can re-sync newcomers
     })
     beginRace()
     onToken({ event: 'started', waveId, by: me.id })

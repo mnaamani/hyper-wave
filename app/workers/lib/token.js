@@ -79,6 +79,32 @@ function verifyBurn(fields, sigHex) {
   }
 }
 
+// --- wave-end completion attestation ---------------------------------------
+// A completed wave is announced by its ORIGINATOR flooding a `wave-end`. Because a flood
+// message can be forged by any peer, the originator signs the completion with its ring key
+// so receivers (and the validator's payout) can't be tricked into ending/paying a wave that
+// didn't really finish. Binds (waveId, hops, chainHash) to the originator identity.
+function waveEndHash(waveId, hops, chainHash) {
+  return crypto.hash(b4a.from(`wave-end|${waveId}|${hops}|${chainHash}`))
+}
+
+function signWaveEnd(keyPair, waveId, hops, chainHash) {
+  return b4a.toString(crypto.sign(waveEndHash(waveId, hops, chainHash), keyPair.secretKey), 'hex')
+}
+
+// Verify a completion is validly signed by `originatorHex` over its (waveId, hops, chainHash).
+function verifyWaveEnd(originatorHex, waveId, hops, chainHash, sigHex) {
+  try {
+    return crypto.verify(
+      waveEndHash(waveId, hops, chainHash),
+      b4a.from(sigHex, 'hex'),
+      b4a.from(originatorHex, 'hex')
+    )
+  } catch {
+    return false
+  }
+}
+
 // --- interlocked payout (final-idea.md the golden rule) --------------------
 // The validator reassembles the hop receipts it collected (§wave-proof) and walks them
 // from hop 0, verifying the CHAIN: each hop's receipt must sign the accumulator it carries,
@@ -123,6 +149,8 @@ module.exports = {
   burnHash,
   signBurn,
   verifyBurn,
+  signWaveEnd,
+  verifyWaveEnd,
   longestValidChain,
   payableFromChain
 }

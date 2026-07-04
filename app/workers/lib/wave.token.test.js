@@ -11,6 +11,8 @@ const {
   advanceChain,
   signBurn,
   verifyBurn,
+  signWaveEnd,
+  verifyWaveEnd,
   longestValidChain,
   payableFromChain
 } = require('./token')
@@ -111,6 +113,23 @@ test('burn attestation rejects impersonation and tampering', (t) => {
   t.absent(verifyBurn({ ...burnFields, txHash: 'other' }, sig), 'swapped txHash')
   t.absent(verifyBurn({ ...burnFields, waveId: 'other-wave' }, sig), 'reused for another wave')
   t.absent(verifyBurn({ ...burnFields, amount: 99 }, sig), 'inflated amount')
+})
+
+// --- wave-end completion attestation ---------------------------------------
+test('signWaveEnd/verifyWaveEnd authenticates a completion to the originator', (t) => {
+  const sig = signWaveEnd(kp[0], waveId, 3, 'abc123')
+  t.ok(verifyWaveEnd(id[0], waveId, 3, 'abc123', sig), 'valid completion verifies')
+})
+
+test('wave-end attestation rejects forgery and tampering', (t) => {
+  const sig = signWaveEnd(kp[0], waveId, 3, 'abc123')
+  t.absent(
+    verifyWaveEnd(id[1], waveId, 3, 'abc123', sig),
+    'a non-originator can’t sign a completion'
+  )
+  t.absent(verifyWaveEnd(id[0], waveId, 9, 'abc123', sig), 'tampered hop count')
+  t.absent(verifyWaveEnd(id[0], waveId, 3, 'deadbeef', sig), 'tampered chain hash')
+  t.absent(verifyWaveEnd(id[0], 'other-wave', 3, 'abc123', sig), 'reused for another wave')
 })
 
 // --- interlocked payout (the golden rule) ----------------------------------
