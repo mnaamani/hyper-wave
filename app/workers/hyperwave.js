@@ -71,9 +71,15 @@ pipe.on('data', (data) => {
 const FEE_TRX = 1
 function burnFee(waveId, reason) {
   if (!waveId || !payments) return // busy / no-op join / seed role / wallet not up
+  // On-chain memo commits the burn to this wave + peer (auditable from-chain, replay-proof).
+  const memo = `hyperwave:${waveId}:${wave.me.id}`
   payments
-    .burn(FEE_TRX)
-    .then(({ hash }) => send({ type: 'burn-result', hash, amount: FEE_TRX, waveId, reason }))
+    .burn(FEE_TRX, memo)
+    .then(({ hash }) => {
+      // sign the ring-key attestation binding my identity to this tx + post it to the gallery
+      wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash })
+      send({ type: 'burn-result', hash, amount: FEE_TRX, waveId, reason })
+    })
     .catch((e) => send({ type: 'burn-result', error: e.message, waveId, reason }))
 }
 function handleStartWave() {

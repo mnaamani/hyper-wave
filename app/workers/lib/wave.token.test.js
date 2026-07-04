@@ -4,7 +4,14 @@
 const test = require('brittle')
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
-const { receiptHash, signReceipt, verifyToken, advanceChain } = require('./token')
+const {
+  receiptHash,
+  signReceipt,
+  verifyToken,
+  advanceChain,
+  signBurn,
+  verifyBurn
+} = require('./token')
 
 const ZERO = b4a.toString(b4a.alloc(32), 'hex')
 
@@ -78,4 +85,28 @@ test('receipt cannot be attributed to a different peer', (t) => {
 
 test('receiptHash is stable for identical inputs', (t) => {
   t.ok(b4a.equals(receiptHash(waveId, 1, ZERO, 1000), receiptHash(waveId, 1, ZERO, 1000)))
+})
+
+// --- burn attestation (participation-fee proof) ----------------------------
+const burnFields = {
+  waveId,
+  peerId: id[1],
+  reason: 'join',
+  amount: 1,
+  txHash: 'd6a0dd3fdeadbeef',
+  tronAddress: 'TJbnvY1Qudc6BE48KenG172EV1uEM5QVvJ',
+  burnTs: 1783150000000
+}
+
+test('signBurn/verifyBurn binds the ring peer to its on-chain burn', (t) => {
+  const sig = signBurn(kp[1], burnFields)
+  t.ok(verifyBurn(burnFields, sig), 'valid attestation verifies')
+})
+
+test('burn attestation rejects impersonation and tampering', (t) => {
+  const sig = signBurn(kp[1], burnFields)
+  t.absent(verifyBurn({ ...burnFields, peerId: id[2] }, sig), 'wrong peerId (impersonation)')
+  t.absent(verifyBurn({ ...burnFields, txHash: 'other' }, sig), 'swapped txHash')
+  t.absent(verifyBurn({ ...burnFields, waveId: 'other-wave' }, sig), 'reused for another wave')
+  t.absent(verifyBurn({ ...burnFields, amount: 99 }, sig), 'inflated amount')
 })

@@ -505,6 +505,8 @@ admit a new one. Membership + content are gated by receipts:
   - `{ type: 'wave-selfie', ... }` → append to the view **only if** its `receiptSig`
     verifies (Ed25519) for `(waveId, hopCount, chainHash, receiptTs)` by `peerId`.
     Invalid/unsigned/impersonated entries are dropped identically everywhere.
+  - `{ type: 'burn-proof', ... }` → append **only if** its `sig` verifies (Ed25519) by
+    `peerId` over the burn tuple (§8.4). Same gate, dedicated signature.
 
 ```mermaid
 sequenceDiagram
@@ -540,6 +542,30 @@ Hyperblobs is the scaling path. `address` is the poster's Tron (TRX) wallet, car
 viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → worker
 `pay.send(address, amount)`; §WDK). Ordering (`buildGallery`): one entry per `(waveId,
 peerId)` (newest `timestamp` wins), sorted by `hopCount` then `timestamp`.
+
+### 8.4 `burn-proof` op (participation-fee attestation)
+```json
+{ "type": "burn-proof", "waveId": "<hex16>", "peerId": "<peerId>",
+  "reason": "kickoff" | "join", "amount": 1, "txHash": "<tron-tx-hash>",
+  "tronAddress": "T…", "burnTs": 1719705612080, "sig": "<hex128>" }
+```
+Proves the peer **burned** its participation fee *for this wave*. Two independent bindings
+make this verifiable (the Tron key that signs the burn is a different keypair from the ring
+identity, so both are needed):
+1. **On-chain memo.** The burn tx carries `data = "hyperwave:<waveId>:<peerId>"` (readable via
+   `gettransactionbyid`). The burn *itself names the wave* — a third party can confirm it
+   from-chain, and it can't be an old burn replayed for another wave (each carries its own
+   random `waveId`, unguessable in advance).
+2. **Ring attestation.** `sig` = Ed25519 by `peerId` over
+   `(waveId, peerId, reason, amount, txHash, tronAddress, burnTs)` — binds the ring
+   participant to the on-chain tx + payout address. `apply()` admits the op only if `sig`
+   verifies (§8.2).
+
+A **validator** reading these (`readBurns`) still cross-checks each `txHash` on-chain:
+`to == ` the black hole `T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb`, `amount ≥ fee`, memo commits
+`waveId`, confirmed in a block, and each `txHash` claimed once (dedup). A peer posts its
+burn-proof once it holds the token (has a receipt → can be admitted as a writer), so a
+join-fee payer surfaces its proof even if it never posts a selfie.
 
 ## 9. Constants (reference build)
 

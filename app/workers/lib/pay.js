@@ -42,6 +42,9 @@ async function createPayments({ storageDir, provider = NILE_PROVIDER, log = () =
   const wallet = new WalletManagerTron(seed, { provider })
   const account = await wallet.getAccount(0)
   const address = await account.getAddress() // offline (derived from the seed)
+  // Reuse WDK's own TronWeb (Bare-compatible; a standalone `require('tronweb')` pulls in
+  // ethers/http which Bare lacks) to build the memo'd burn tx, which WDK then signs+sends.
+  const tronweb = account._tronWeb || wallet._tronWeb
   log('wallet ready', address)
 
   return {
@@ -57,11 +60,18 @@ async function createPayments({ storageDir, provider = NILE_PROVIDER, log = () =
       log('sent', amountTrx, 'TRX ->', recipient, 'hash', res.hash)
       return { hash: res.hash, fee: res.fee }
     },
-    // Burn `amountTrx` (send to the black hole — unspendable by anyone). The initiator's
-    // kick-off fee: proves skin in the game without enriching any party.
-    async burn(amountTrx) {
-      const res = await account.sendTransaction({ to: BURN_ADDRESS, value: toSun(amountTrx) })
-      log('burned', amountTrx, 'TRX 🔥 hash', res.hash)
+    // Burn `amountTrx` (send to the black hole — unspendable by anyone), tagging the tx
+    // with an on-chain `memo` so the burn is provably tied to its purpose/wave (readable by
+    // anyone via gettransactionbyid). Builds the tx with the memo, then lets WDK sign+send.
+    async burn(amountTrx, memo) {
+      let tx = await tronweb.transactionBuilder.sendTrx(
+        BURN_ADDRESS,
+        Number(toSun(amountTrx)),
+        address
+      )
+      if (memo) tx = await tronweb.transactionBuilder.addUpdateData(tx, memo, 'utf8')
+      const res = await account.sendTransaction(tx) // prebuilt (has txID) -> WDK signs + broadcasts
+      log('burned', amountTrx, 'TRX 🔥 hash', res.hash, memo ? `memo=${memo}` : '')
       return { hash: res.hash, fee: res.fee }
     },
     dispose() {

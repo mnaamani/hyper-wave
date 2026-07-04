@@ -45,8 +45,11 @@ const wave = createWave({
         // initiator's kick-off fee: burn 1 TRX to the black hole (needs WALLET=1 + funds)
         if (waveId && payments) {
           payments
-            .burn(1)
-            .then(({ hash }) => console.log(`[${name}] BURNED 1 TRX hash=${hash}`))
+            .burn(1, `hyperwave:${waveId}:${wave.me.id}`)
+            .then(({ hash }) => {
+              wave.recordBurn({ reason: 'kickoff', amount: 1, txHash: hash })
+              console.log(`[${name}] BURNED 1 TRX hash=${hash}`)
+            })
             .catch((e) => console.log(`[${name}] burn FAIL`, e.message))
         }
       }, 500)
@@ -54,13 +57,26 @@ const wave = createWave({
   },
   onToken: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
+    // validator: on completion, read the burn-proofs it collected for this wave
+    if (role !== 'peer' && e.event === 'completed') {
+      setTimeout(async () => {
+        const burns = await wave.chainBurns(e.waveId)
+        console.log(
+          `[${name}] BURNS wave=${e.waveId.slice(0, 8)} count=${burns.length} ` +
+            `[${burns.map((b) => b.reason + ':' + b.peerId.slice(0, 6) + ':' + b.txHash.slice(0, 8)).join(', ')}]`
+        )
+      }, 3000)
+    }
     if (role !== 'peer') return // a validator/seed doesn't join or selfie
     if (env.AUTOJOIN && e.event === 'wave-announce' && !e.mine) {
       const joinedId = wave.join()
       if (joinedId && payments) {
         payments
-          .burn(1)
-          .then(({ hash }) => console.log(`[${name}] JOIN-BURNED 1 TRX hash=${hash}`))
+          .burn(1, `hyperwave:${joinedId}:${wave.me.id}`)
+          .then(({ hash }) => {
+            wave.recordBurn({ reason: 'join', amount: 1, txHash: hash })
+            console.log(`[${name}] JOIN-BURNED 1 TRX hash=${hash}`)
+          })
           .catch((err) => console.log(`[${name}] join burn FAIL`, err.message))
       }
     }

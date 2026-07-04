@@ -25,8 +25,15 @@ const {
   RING
 } = require('./chord')
 const { createFlood } = require('./flood')
-const { ZERO_HASH, signReceipt, verifyReceipt, verifyToken, advanceChain } = require('./token')
-const { galleryConfig, readGallery } = require('./gallery')
+const {
+  ZERO_HASH,
+  signReceipt,
+  verifyReceipt,
+  verifyToken,
+  advanceChain,
+  signBurn
+} = require('./token')
+const { galleryConfig, readGallery, readBurns } = require('./gallery')
 
 const MATCH = 'hyperwave:demo-match:v1'
 const PRESENCE_MS = 2000 // heartbeat cadence
@@ -144,6 +151,9 @@ function createWave({
   let stagedSelfie = null // { image, caption } captured in the lobby, awaiting my hop
   let myReceipt = null // my hop's receipt once the token reaches me, awaiting the selfie
   let selfiePosted = false // guard: post my selfie exactly once per wave
+  let pendingBurn = null // signed burn-proof attestation, awaiting a gallery write (my hop)
+  let burnPosted = false // guard: post my burn-proof exactly once per wave
+  let admissionPromise = null // in-flight add-writer request (shared by concurrent posters)
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -631,13 +641,50 @@ function createWave({
     return [...byHop.values()].sort((a, b) => a.hopCount - b.hopCount)
   }
 
+  // (validator) The verified burn-proofs (participation-fee attestations) for a wave, read
+  // from that wave's gallery. Sig-valid by construction (apply gate); the validator still
+  // cross-checks each txHash on-chain (to==black hole, amount, memo commits waveId).
+  async function chainBurns(waveId) {
+    const g = galleries.get(waveId)
+    if (!g) return []
+    await g.update().catch(() => {})
+    return readBurns(g)
+  }
+
   async function emitGallery() {
     if (!base) return
     onGallery(await readGallery(base))
   }
 
-  // Post my selfie to the gallery. Requests writer admission first (anti-spam gate:
-  // the host admits the poster), then appends the entry once writable.
+  // Become an admitted gallery writer: broadcast an add-writer request presenting my
+  // receipt for this wave (the anti-spam gate — the host admits my writer core), then wait
+  // until writable. Shared by the selfie and burn-proof posters — concurrent callers reuse a
+  // single in-flight request (`admissionPromise`) instead of racing two broadcasts + waits.
+  function ensureWriter(receipt) {
+    if (!base) return Promise.resolve(false)
+    if (base.writable) return Promise.resolve(true)
+    if (admissionPromise) return admissionPromise
+    admissionPromise = base.ready().then(() => {
+      if (base.writable) return true
+      broadcast({
+        kind: 'add-writer',
+        key: b4a.toString(base.local.key, 'hex'),
+        peerId: me.id,
+        waveId: receipt.waveId,
+        hopCount: receipt.hopCount,
+        chainHash: receipt.chainHash,
+        receiptTs: receipt.receiptTs,
+        receiptSig: receipt.receiptSig
+      })
+      return waitFor(() => base.writable, 8000)
+    })
+    admissionPromise.finally(() => {
+      admissionPromise = null
+    })
+    return admissionPromise
+  }
+
+  // Post my selfie to the gallery (admission first, then append).
   async function postSelfie({
     waveId,
     hopCount,
@@ -651,24 +698,9 @@ function createWave({
       onToken({ event: 'gallery-error', reason: 'no-gallery-yet' })
       return
     }
-    await base.ready()
-    if (!base.writable) {
-      // ask to be admitted, presenting my receipt for this wave (the anti-spam gate)
-      broadcast({
-        kind: 'add-writer',
-        key: b4a.toString(base.local.key, 'hex'),
-        peerId: me.id,
-        waveId,
-        hopCount,
-        chainHash,
-        receiptTs,
-        receiptSig
-      })
-      const ok = await waitFor(() => base.writable, 8000)
-      if (!ok) {
-        onToken({ event: 'gallery-error', reason: 'not-admitted' })
-        return
-      }
+    if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
+      onToken({ event: 'gallery-error', reason: 'not-admitted' })
+      return
     }
     await base.append({
       type: 'wave-selfie',
@@ -686,6 +718,40 @@ function createWave({
     })
     log('posted selfie hop', hopCount)
     emitGallery()
+  }
+
+  // The worker reports a successful burn (kick-off/join fee). Build + sign the burn-proof
+  // attestation NOW (ring key binds my identity to the on-chain tx), stash it, and post it
+  // to the gallery once I hold the token (become an admitted writer). Fires flushBurnProof
+  // in case the receipt already arrived (e.g. the initiator burns at/after hop 0).
+  function recordBurn({ reason, amount, txHash }) {
+    if (!wave || burnPosted) return
+    const fields = {
+      waveId: wave.id,
+      peerId: me.id,
+      reason,
+      amount,
+      txHash,
+      tronAddress: walletAddress || '',
+      burnTs: Date.now()
+    }
+    pendingBurn = { type: 'burn-proof', ...fields, sig: signBurn(swarm.keyPair, fields) }
+    flushBurnProof()
+  }
+
+  // Post my stashed burn-proof once I have a receipt for this wave (so I can be admitted as
+  // a writer). Works for non-selfie participants too — a relayer that paid the join fee.
+  async function flushBurnProof() {
+    if (burnPosted || !pendingBurn || !myReceipt || !base) return
+    if (pendingBurn.waveId !== myReceipt.waveId) return
+    burnPosted = true
+    const proof = pendingBurn
+    if (!(await ensureWriter(myReceipt))) {
+      burnPosted = false // let a later attempt retry
+      return
+    }
+    await base.append(proof)
+    log('posted burn-proof', proof.reason, shortId(proof.txHash))
   }
 
   function waitFor(pred, timeoutMs) {
@@ -809,6 +875,7 @@ function createWave({
     if (!canSelfieNow()) return
     myReceipt = { waveId, hopCount, receiptSig, chainHash, receiptTs }
     tryPostSelfie()
+    flushBurnProof() // I can now be admitted as a writer — post any stashed burn-proof
   }
 
   // Post my lobby selfie once BOTH the receipt (token reached me) and the staged image
@@ -824,6 +891,9 @@ function createWave({
     stagedSelfie = null
     myReceipt = null
     selfiePosted = false
+    pendingBurn = null
+    burnPosted = false
+    admissionPromise = null
   }
 
   // Emit a holding event; canSelfie tells the renderer this peer is a participant (its
@@ -1158,7 +1228,9 @@ function createWave({
     setWallet: (address) => {
       walletAddress = address || null
     },
+    recordBurn, // a peer reports its paid participation fee -> sign + post burn-proof
     chainProofs, // (validator) collected hop receipts for a wave, ordered by hop
+    chainBurns, // (validator) verified burn-proofs for a wave (from the gallery)
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
     findSuccessor: (target) =>

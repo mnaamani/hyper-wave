@@ -52,4 +52,39 @@ function advanceChain(prevChainHash, receiptSigHex) {
   )
 }
 
-module.exports = { ZERO_HASH, receiptHash, signReceipt, verifyReceipt, verifyToken, advanceChain }
+// --- burn attestation ------------------------------------------------------
+// Bridges the peer's RING identity (Ed25519) to its on-chain burn: the peer signs, with
+// its ring key, a statement binding (waveId, peerId, reason, amount, txHash, tronAddress).
+// The Tron key that signed the burn is a *different* keypair, so this ring-key signature is
+// what ties the burn to the ring participant. The validator also cross-checks txHash on the
+// chain (to==black hole, amount, memo commits waveId) — see final-idea.md payment layer.
+function burnHash({ waveId, peerId, reason, amount, txHash, tronAddress, burnTs }) {
+  return crypto.hash(
+    b4a.from(`${waveId}|${peerId}|${reason}|${amount}|${txHash}|${tronAddress}|${burnTs}`)
+  )
+}
+
+function signBurn(keyPair, fields) {
+  return b4a.toString(crypto.sign(burnHash(fields), keyPair.secretKey), 'hex')
+}
+
+// Verify a burn attestation is a valid Ed25519 signature by `fields.peerId` over the tuple.
+function verifyBurn(fields, sigHex) {
+  try {
+    return crypto.verify(burnHash(fields), b4a.from(sigHex, 'hex'), b4a.from(fields.peerId, 'hex'))
+  } catch {
+    return false
+  }
+}
+
+module.exports = {
+  ZERO_HASH,
+  receiptHash,
+  signReceipt,
+  verifyReceipt,
+  verifyToken,
+  advanceChain,
+  burnHash,
+  signBurn,
+  verifyBurn
+}
