@@ -1,0 +1,29 @@
+{
+  "name": "hyperwave-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HyperWave mobile (Expo + react-native-bare-kit) — hosts the shared engine (hyperwave-lib-core) in a Bare worklet.",
+  "main": "index.js",
+  "scripts": {
+    "bundle": "bare-pack --target ios --target android --linked --out bundles/app.bundle.mjs ../../packages/hyperwave-lib-core/worklet/app.js",
+    "prestart": "npm run bundle",
+    "start": "expo start --dev-client",
+    "ios": "npm run bundle && expo run:ios",
+    "android": "npm run bundle && expo run:android"
+  },
+  "dependencies": {
+    "b4a": "^1.6.7",
+    "expo": "~55.0.23",
+    "framed-stream": "^1.0.1",
+    "hyperwave-lib-core": "*",
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-b4a": "^0.0.4",
+    "react-native-bare-kit": "^0.13.3",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.23.0"
+  },
+  "devDependencies": {
+    "bare-pack": "^1.4.1"
+  }
+}

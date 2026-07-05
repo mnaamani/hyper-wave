@@ -1,0 +1,14 @@
+# Expo / RN
+.expo/
+dist/
+web-build/
+*.log
+
+# bare-pack output (regenerate with `npm run bundle`)
+bundles/
+
+# native projects — Continuous Native Generation regenerates these (`expo prebuild`)
+/ios
+/android
+
+.DS_Store

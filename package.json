@@ -12,8 +12,8 @@
     "test:e2e:local": "npm run test:e2e:local -w hyperwave-lib-core",
     "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-lib-core",
     "start": "npm start -w hyperwave-desktop --",
-    "lint": "prettier --check . && lunte",
-    "format": "prettier --write . && lunte --fix"
+    "lint": "prettier --check . && lunte packages apps/desktop scripts",
+    "format": "prettier --write . && lunte --fix packages apps/desktop scripts"
   },
   "devDependencies": {
     "lunte": "^1.6.0",
