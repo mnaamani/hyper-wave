@@ -35,22 +35,26 @@ function createCore({
 
   // Self-custodial WDK wallet (Tron testnet TRX) for fee burns + gallery tips. Async ESM init;
   // emits `wallet` {address,trx} on ready + every 15s, and wires into the engine (address for
-  // tips/attestations + the on-chain burn verifier = the paid-wave anti-spam gate).
+  // tips/attestations + the on-chain burn verifier = the paid-wave anti-spam gate). A host can
+  // opt out with `config.wallet: false` (e.g. mobile, until WDK-in-worklet is confirmed) — the
+  // engine then runs wallet-less (receipt-only gallery, no burns/paid-gate/tips).
   let payments = null
   let tBalance = null
-  makePayments({ storageDir, seed: config.seed, log: (...a) => log('[wallet]', ...a) })
-    .then(async (pay) => {
-      payments = pay
-      wireWallet(wave, pay)
-      const push = async () =>
-        send({
-          type: 'wallet',
-          ...(await pay.balances().catch(() => ({ address: pay.address, trx: 0 })))
-        })
-      await push()
-      tBalance = setInterval(push, 15000)
-    })
-    .catch((e) => log('[wallet] init failed:', e.message))
+  if (config.wallet !== false) {
+    makePayments({ storageDir, seed: config.seed, log: (...a) => log('[wallet]', ...a) })
+      .then(async (pay) => {
+        payments = pay
+        wireWallet(wave, pay)
+        const push = async () =>
+          send({
+            type: 'wallet',
+            ...(await pay.balances().catch(() => ({ address: pay.address, trx: 0 })))
+          })
+        await push()
+        tBalance = setInterval(push, 15000)
+      })
+      .catch((e) => log('[wallet] init failed:', e.message))
+  }
 
   // Participation fee (fees.js) — burned to the black hole by both initiator (kick-off) and each
   // joiner. `burn-result` -> UI toast.

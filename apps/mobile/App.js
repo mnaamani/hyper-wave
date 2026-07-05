@@ -19,7 +19,9 @@ import { useEngine } from './src/useEngine'
 const MATCH = 'hyperwave-mobile-demo'
 
 export default function App() {
-  const engine = useEngine({ matchId: MATCH, role: 'peer' })
+  // wallet:false for now — WDK-in-worklet is unconfirmed on device; run the wave engine
+  // wallet-less (receipt-only) until it's verified. See apps/mobile/README "what's left".
+  const engine = useEngine({ matchId: MATCH, role: 'peer', wallet: false })
   const { me, peers, phase, gallery, wallet, toast } = engine
   const [joined, setJoined] = useState(false)
 

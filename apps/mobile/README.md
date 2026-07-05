@@ -19,18 +19,26 @@ Expo RN app (this package)                 Bare worklet (hyperwave-lib-core)
   the exact same JSON protocol the desktop renderer uses (`start-wave`, `tip`, `state`,
   `gallery`, `wallet`, …), so the UI is the only new surface.
 
-## Status: ✅ runs on the iOS simulator
+## Status: ✅ runs on the iOS simulator — cross-peer with a desktop peer verified
 
-Verified end-to-end on the iOS 26.5 simulator — the engine identity renders on device
-(`me a5655985 @ 232.6°`), i.e. the worklet booted, the native addons loaded, `createCore`
-initialized, computed the ring angle, and pushed `state` over IPC to the React UI. What works:
+Verified end-to-end on the iOS 26.5 simulator, **interoperating with a desktop peer over the
+public DHT**: a headless desktop peer (`bare lib/wave.run.js` on the same `matchId`) and the
+phone discovered each other (`peers 2` on the phone), the desktop kicked off a wave, and the
+desktop peers' selfies **replicated into the phone's Autobase gallery** (`Gallery (2)`,
+"desktop was here"). Same engine, same protocol, mobile ↔ desktop.
 
-- `bare-pack` packs the whole engine (Hyperswarm/Autobase/WDK) → 7.6 MB (`ws`'s optional native
+What works:
+
+- `bare-pack` packs the whole engine (Hyperswarm/Autobase/WDK) → ~8 MB (`ws`'s optional native
   deps handled with `--defer bufferutil --defer utf-8-validate`).
 - The **native addons are linked** (see below): `udx-native`, `sodium-native`, `rocksdb-native`,
-  … — 41 xcframeworks — so the worklet's `dlopen` succeeds and the engine runs.
+  … — 41 xcframeworks — so the worklet's `dlopen` succeeds and the P2P stack runs.
 - The Expo app builds (87 CocoaPods incl. `react-native-bare-kit`), installs, and launches; the
-  RN UI drives the engine over the IPC protocol.
+  RN UI drives the engine over the IPC protocol; identity + ring angle render on device.
+
+Two mobile-specific fixes were needed and are in place: the worklet resolves the storage dir
+under a **writable** path (a relative `storageDir` isn't writable on mobile → Corestore closed →
+crash), and it survives stray async rejections instead of aborting (`worklet/app.js`).
 
 ## Run it
 
@@ -66,11 +74,12 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
   plain status + gallery list.
 - **Camera capture** — wire `expo-camera` to take the lobby selfie → JPEG data URL →
   `engine.stageSelfie(...)` (the worklet already handles the rest, incl. the gallery blob).
-- **Confirm the wallet in the worklet** — the wave engine runs; verify WDK fully inits on device
-  (the 💰 chip should populate). Then inject the seed from `expo-secure-store` via the init
-  `config.seed` (the core already accepts it, `lib/pay.js`) instead of a `wallet.seed` file.
-- **Storage root** — confirm the writable path for `react-native-bare-kit`'s `bare-fs`
-  (`STORAGE_DIR` in `useEngine.js`).
+- **Wallet in the worklet** — the wave engine runs **wallet-less** for now (`wallet: false` in
+  `App.js`), so no burns/paid-gate/tips on mobile yet. Confirm WDK inits under the worklet (the
+  💰 chip should populate), flip `wallet` back on, then inject the seed from `expo-secure-store`
+  via the init `config.seed` (the core already accepts it, `lib/pay.js`) instead of a
+  `wallet.seed` file. This also keeps the mobile in the same (no-wallet) mode as the demo desktop
+  peer, so the paid-gate doesn't block a mixed-mode wave.
 - **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake
   path (`react-native.config.js`) — wire the equivalent addon step for `npm run android`.
 - **Discovery** — no local DHT on device; you're on the public DHT (~20–35s cold). Pin a
