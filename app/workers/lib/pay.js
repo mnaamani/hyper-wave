@@ -103,11 +103,13 @@ async function createPayments({ storageDir, provider = NILE_PROVIDER, log = () =
         if (expect.minTrx !== undefined && BigInt(v.amount || 0) < toSun(expect.minTrx)) {
           return { ok: false, reason: 'amount-too-low' }
         }
-        if (expect.waveId) {
-          const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : ''
-          if (!memo.includes(expect.waveId)) return { ok: false, reason: 'memo-mismatch' }
+        // Memo is `hyperwave:<waveId>:<peerId>:<commit?>` — check it commits the waveId, and
+        // return the (optional) raffle `commit` so the seed can read the ON-CHAIN commitment.
+        const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : ''
+        if (expect.waveId && !memo.includes(expect.waveId)) {
+          return { ok: false, reason: 'memo-mismatch' }
         }
-        return { ok: true }
+        return { ok: true, commit: memo.split(':')[3] || '' }
       } catch (e) {
         return { ok: false, reason: e.message }
       }

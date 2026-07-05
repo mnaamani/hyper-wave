@@ -1063,10 +1063,18 @@ function createWave({
     if (!g) return
     await g.update().catch(() => {})
     const entries = await readGallery(g)
-    // keep only entries whose reveal matches a lobby commit for that peer
+    // Keep only entries whose reveal matches that peer's commit. The commit is read from the
+    // ON-CHAIN burn memo (authoritative + externally auditable) when the burn is available;
+    // the gossip-recorded commit is only a fallback for the wallet-less/test path.
     const tickets = []
     for (const e of entries) {
-      const commit = commits.get(e.peerId)
+      let commit = commits.get(e.peerId)
+      if (verifyBurnOnChain && e.burnTx) {
+        const r = await verifyBurnOnChain(e.burnTx, { waveId, from: e.address, minTrx: 0 }).catch(
+          () => null
+        )
+        if (r && r.ok && r.commit) commit = r.commit
+      }
       if (!commit || !e.raffleSecret || commitOf(e.raffleSecret) !== commit) continue
       tickets.push({ peerId: e.peerId, secret: e.raffleSecret, address: e.address || '' })
     }
@@ -1557,6 +1565,12 @@ function createWave({
     },
     announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
     recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)
+    // My raffle commitment for the current wave (generated once), so the worker can put it in
+    // the burn memo → the commit is recorded on-chain (auditable), not just gossiped.
+    raffleCommit: () => {
+      const rc = raffleOptIn()
+      return rc ? rc.commit : ''
+    },
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
     findSuccessor: (target) =>

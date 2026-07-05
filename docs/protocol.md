@@ -585,6 +585,7 @@ sequenceDiagram
   "country": "BR", "caption": "Vamos! 🇧🇷", "image": "data:image/jpeg;base64,...",
   "address": "T…", "burn": { /* the poster's §9.0 attestation — verified then dropped */ },
   "raffleSecret": "<hex32>" /* raffle REVEAL, §12 — present when raffle is on */,
+  "burnTx": "<tron-tx-hash>" /* kept from the burn so the on-chain raffle commit is locatable */,
   "timestamp": 1719705650000 }
 ```
 `image` is an inline JPEG data URL (a compressed thumbnail) in the reference build;
@@ -592,7 +593,8 @@ Hyperblobs is the scaling path. `address` is the poster's Tron (TRX) wallet, car
 viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → worker
 `pay.send(address, amount)`; §WDK) — but only if `apply()` finds it backed by the `burn`
 (§8.2), so a tip always reaches the wallet that paid in. Stored form: one entry per
-`(waveId, peerId)`, `burn` stripped, sorted by `hopCount` then `timestamp`.
+`(waveId, peerId)`, the bulky `burn` stripped (its `txHash` kept as `burnTx` for raffle audit),
+sorted by `hopCount` then `timestamp`.
 
 ## 9. Participation fees — burning & verification
 
@@ -644,9 +646,10 @@ level.) Spamming waves or Sybil-joining costs real, irrecoverable value.
 
 A raw burn tx only proves "someone sent TRX to the black hole." The **on-chain memo** makes
 it *"peer P burned specifically for wave W"*: every fee burn carries
-`data = "hyperwave:<waveId>:<peerId>"`, readable via `gettransactionbyid`. Replay across
-waves is impossible — each `waveId` is 16 random bytes, unguessable before the wave exists,
-and the memo is part of the signed tx.
+`data = "hyperwave:<waveId>:<peerId>[:<raffleCommit>]"`, readable via `gettransactionbyid`
+(the `raffleCommit` segment is present only when the raffle is on — §12). Replay across waves
+is impossible — each `waveId` is 16 random bytes, unguessable before the wave exists, and the
+memo is part of the signed tx.
 
 A second binding ties the burn to the ring identity, since the Tron key that signs the tx is a
 **different keypair** from the peer's Ed25519 ring identity: the peer signs the attestation of
@@ -768,18 +771,22 @@ among the wave's gallery participants and pays the prize — a positive incentiv
 participate, on top of burned fees + tips. Fairness is **commit-reveal**, using the wave's two
 phases and **no external randomness beacon** (design + trade-offs: `ideas/raffle.md`).
 
-1. **Commit (lobby).** Each participant generates a 32-byte `secret` and publishes
-   `commit = BLAKE2b(secret)` — ring-signed (`commitSig`) so only it can set its own — in its
-   `wave-join` (joiners) or `wave-announce` (initiator), before anyone reveals.
-2. **Record (seed, lobby only).** The seed records `commit[peerId]` from valid signed commits
-   **while its wave is in the lobby** (the phase gate is the reveal deadline — commits after
-   racing starts are ignored, since reveals happen during racing).
-3. **Reveal (gallery).** Each participant reveals `secret` in its `wave-selfie` entry.
-4. **Draw (seed, after wave-end + `RAFFLE_DELAY_MS`).** Eligible tickets = entries whose
-   `BLAKE2b(raffleSecret) ==` the recorded commit. `seed = BLAKE2b("raffle|" ‖ waveId ‖ sorted
-   secrets)`; `winner = tickets[ uint(BLAKE2b(seed ‖ 0)) mod M ]` (sorted by `peerId`). The
-   seed pays `raffleTrx` to the winner's burn-verified `address`, and emits the full ticket set
-   so anyone can **recompute and audit** the draw.
+1. **Commit (lobby).** Each participant generates a 32-byte `secret` and commits to
+   `commit = BLAKE2b(secret)` **on-chain**, in its fee-burn **memo**
+   (`hyperwave:<waveId>:<peerId>:<commit>`, §9.2), before anyone reveals. The burn happens in
+   the lobby, so the commit is **timestamped on-chain, immutable, and auditable by anyone** —
+   not just held in the seed's memory. (It also rides `wave-join`/`wave-announce`, ring-signed
+   `commitSig`, as a **fallback** the seed uses only when there's no on-chain burn, e.g.
+   wallet-less test runs.)
+2. **Reveal (gallery).** Each participant reveals `secret` in its `wave-selfie` entry, which
+   also carries the burn's `burnTx` so anyone can find the on-chain commit.
+3. **Draw (seed, after wave-end + `RAFFLE_DELAY_MS`).** Eligible tickets = entries whose
+   `BLAKE2b(raffleSecret) ==` that peer's commit, **read from the on-chain memo** via `burnTx`
+   (authoritative; the gossip commit is the wallet-less fallback). `seed = BLAKE2b("raffle|" ‖
+   waveId ‖ sorted secrets)`; `winner = tickets[ uint(BLAKE2b(seed ‖ 0)) mod M ]` (sorted by
+   `peerId`). The seed pays `raffleTrx` to the winner's burn-verified `address`. Because commits
+   and reveals are both public (on-chain + gallery), **anyone can recompute and audit the whole
+   draw** with a Tron node — no trust in the seed's bookkeeping.
 
 A missing/mismatched reveal (a peer that committed but didn't reveal by the draw) **does not
 abort the raffle** — that peer is simply excluded and the draw runs over the remaining valid
@@ -790,11 +797,13 @@ cost of your own ticket, **not** the ability to aim (nor to cancel the draw). Re
 this needs a **VDF (Verifiable Delay Function)** or a threshold scheme (`ideas/raffle.md`).
 
 > **Trust caveat (MVP): sponsor = admitter = seed.** For simplicity one trusted role funds the
-> prize, records commits, and draws. It therefore *could* censor the entry set (it gates who's
-> admitted / whose commit it records). This is acceptable only under the trusted-sponsor +
-> testnet assumption. **Production must separate the admitter (an independent wave originator)
-> from the prize-holder** so the funder can't shape the draw. Also: a paid-entry game of chance
-> is legally a **lottery** in most jurisdictions — keep it testnet, or get legal review.
+> prize and draws. With commits on-chain the **draw math is publicly auditable** (nobody has to
+> trust the seed's RNG), but the seed *could* still **censor the entry set** — it gates who's
+> admitted to the gallery, so it could keep honest peers out. This is acceptable only under the
+> trusted-sponsor + testnet assumption. **Production must separate the admitter (an independent
+> wave originator) from the prize-holder** so the funder can't shape *who's in* the draw. Also:
+> a paid-entry game of chance is legally a **lottery** in most jurisdictions — keep it testnet,
+> or get legal review.
 
 ## Appendix A — app-internal IPC (informative, not on-wire)
 
