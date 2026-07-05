@@ -8,13 +8,13 @@ Read [`protocol.md`](./protocol.md) and [`architecture.md`](./architecture.md) f
 
 ## 1. Problem
 
-Today the ring is a **pure logical overlay**: `angle = f(pubkey)` over *all* peers, with no
+Today the ring is a **pure logical overlay**: `angle = f(pubkey)` over _all_ peers, with no
 relationship to Hyperswarm's actual connection graph. It works only because Hyperswarm
 **fully meshes small swarms**, so every successor edge happens to be a physical connection.
 
-Past the mesh limit Hyperswarm connects each peer to an arbitrary *subset*, and the overlay
-and the physical graph **diverge**: the token can only be forwarded to a *reachable*
-successor, so the ring silently degrades to "next *reachable* clockwise" — skipping peers,
+Past the mesh limit Hyperswarm connects each peer to an arbitrary _subset_, and the overlay
+and the physical graph **diverge**: the token can only be forwarded to a _reachable_
+successor, so the ring silently degrades to "next _reachable_ clockwise" — skipping peers,
 approximate order. Root cause: **the overlay doesn't influence which peers we connect to.**
 
 ## 2. Goal & principles
@@ -23,7 +23,7 @@ Make the wave work at large scale **without a full mesh**, while keeping the tok
 gallery, and lifecycle unchanged behind the existing `successor` seam (`ring.js`).
 
 - **The ring drives connections (Chord).** Each peer deliberately connects to its
-  successor(s), predecessor, and O(log N) *fingers* — not to everyone.
+  successor(s), predecessor, and O(log N) _fingers_ — not to everyone.
 - **Reuse Hyperswarm.** `swarm.peers` (DHT discovery) for ring membership; `swarm.joinPeer(key)`
   to make ring edges physical; `conn.remotePublicKey` for identity (already used).
 - **Isolate the change.** All of it lives behind `successor` / a new `chord` module; the
@@ -36,12 +36,12 @@ Scaling has **two independent axes**; this plan's primary focus is (A).
 **(A) Connectivity, discovery, routing → Chord.** You cannot full-mesh 10k peers. This is
 the concrete work below: O(log N) connections + lookup.
 
-**(B) Propagation *time* → deterministic sweep (a decision, not built here).** A *serial*
+**(B) Propagation _time_ → deterministic sweep (a decision, not built here).** A _serial_
 token lap is inherently `O(N × HOP_DELAY_MS)` — at N=10,000 and 1.2s dwell that's hours,
 which defeats "a wave." Chord fixes connectivity, **not** lap time. For a truly global,
 near-instant wave the propagation model should become the **deterministic angular sweep**
 from the original design: publish `(waveStartTime, angularSpeed, direction)`, and every
-peer *independently* computes when the wave reaches its seat
+peer _independently_ computes when the wave reaches its seat
 (`trigger = start + (angleFromStart / angularSpeed)`), lighting the whole ring in one sweep
 regardless of N — O(1) per peer, no serial passing.
 
@@ -57,23 +57,27 @@ both: serial for intimate waves, sweep for stadium/global moments.
 — the serial token remains the only propagation model, so a genuinely large wave is still
 O(N·dwell). Note the sweep's `(startTime, speed, direction)` params are exactly what the
 **control-plane flood** (§4.6) already delivers to every seat — so the flood is the
-delivery mechanism for *either* model's kickoff; only the per-peer trigger logic differs.
+delivery mechanism for _either_ model's kickoff; only the per-peer trigger logic differs.
 
 ## 4. Chord design (axis A)
 
 ### 4.1 Identifier space
+
 `nodeId(pubkey)` = top 8 bytes of the key as an unsigned 64-bit integer; the ring is
 `mod 2^64`. (`angle` stays for display, derived from the same bytes.) 64 bits gives finger
 headroom without BigInt-heavy math getting silly; revisit if collisions matter at extreme N.
 
 ### 4.2 Membership discovery
+
 - Seed the peer set from **`swarm.peers`** (PeerInfo public keys on the topic) and refresh
   on `swarm.on('update')` — DHT discovery gives ring members before/without gossip.
 - Liveness + country ride the **`pointers` heartbeat** to neighbours (no separate presence
   message). Drop the O(N) full `peers` snapshot (§4.6).
 
 ### 4.3 Pointers & connections (the core change)
+
 Maintain, per node:
+
 - **successor list** — the next `k` nodes clockwise (k≈3) for fault tolerance;
 - **predecessor**;
 - **finger table** — `finger[i]` = first node ≥ `(nodeId + 2^i) mod 2^64`, for i in 0..63.
@@ -82,6 +86,7 @@ Maintain, per node:
 Stop depending on Hyperswarm's incidental meshing for the ring.
 
 ### 4.4 Stabilization (Chord)
+
 - **stabilize** (periodic): ask successor for its predecessor `x`; if `x` is between me and
   my successor, adopt `x` as successor; then notify the successor of me.
 - **fixFingers** (periodic): refresh one finger per tick via `findSuccessor`.
@@ -89,6 +94,7 @@ Stop depending on Hyperswarm's incidental meshing for the ring.
 - **churn:** on a connection close, promote the next successor-list entry and re-stabilize.
 
 ### 4.5 Routing / lookup — **implemented**
+
 `findSuccessor(target)` = standard Chord lookup: route the query through fingers,
 O(log N) hops, so it resolves to the correct successor **even when no single peer knows the
 whole ring** (the partial-knowledge case that a purely local computation gets wrong).
@@ -96,10 +102,10 @@ whole ring** (the partial-knowledge case that a purely local computation gets wr
 - **Pure core** (`chord.js`): `findSuccessorStep(me, successor, known, target)` is the per-hop
   decision — answer if `target ∈ (me, successor]`, else forward to `closestPrecedingNode`
   (the finger closest below the target). With a full finger table it converges in O(log N);
-  with only a successor pointer it degrades to a *correct* linear walk. Brittle-tested,
+  with only a successor pointer it degrades to a _correct_ linear walk. Brittle-tested,
   including a simulation over 64-node partial-knowledge networks (correct in ≤ 5 hops).
 - **Transport** (`wave.js`): `find-succ` / `find-succ-reply` messages. `findSuccessorRemote`
-  sends the query to the closest preceding *connected* finger; each hop forwards along
+  sends the query to the closest preceding _connected_ finger; each hop forwards along
   connected fingers and the reply **retraces the same path** back to the origin (no ad-hoc
   connections), with a hop cap + timeout. Exposed as `wave.findSuccessor(target)`.
 - **Consumers:** at **join time**, once a peer gets its first connection it places itself in
@@ -110,16 +116,17 @@ whole ring** (the partial-knowledge case that a purely local computation gets wr
   where local knowledge already resolves the lookup with zero hops).
 
 Uses: placing where a token starts / where a joining node inserts / routing a control message
-to a specific seat. The token still walks successor→successor for the *visual* wave (axis B).
+to a specific seat. The token still walks successor→successor for the _visual_ wave (axis B).
 
 ### 4.6 Gossip slimming & flooding
+
 Two changes, both implemented:
 
 - **Slim the membership plane.** Replace the O(N) `peers` snapshot with **pointer exchange**
   (successor-list + predecessor), O(k + log N), sent only to neighbours; `pointers` doubles
   as the liveness heartbeat (country + role ride it — no separate presence message).
   Membership is DHT-discovered but **liveness-gated** — `swarm.peers` drives
-  *who we dial* (pinning), while a ring **seat** requires a real connection or direct gossip,
+  _who we dial_ (pinning), while a ring **seat** requires a real connection or direct gossip,
   so a stale announce can't become a ghost seat.
 - **Flood the lifecycle plane.** The one-hop broadcast that §4.6 originally kept for `wave-*`
   only works on a full mesh — past the mesh limit an announce would reach ~1% of a partial
@@ -134,6 +141,7 @@ Two changes, both implemented:
 flood has already passed.
 
 ### 4.7 Gallery replication over a partial mesh — **reach verified; persistence open**
+
 `Corestore.replicate(conn)` runs on every connection, and the gallery Autobase is opened by
 essentially every peer that sees the wave (`openGallery` fires on `wave-start`, inside
 `processToken` so even non-roster **relayers** open it, and on `wave-sync`) — so intermediate
@@ -141,20 +149,20 @@ peers hold the cores and can re-serve them. Selfie images are **inline** (JSON d
 separate Hyperblobs), so this is the only core set to propagate.
 
 **Transitive reach is now proven** (`gallery.replication.test.js`): over a **line** topology
-A—B—C wired A↔B and B↔C but *not* A↔C, C becomes a writer and converges to A's selfie **purely
+A—B—C wired A↔B and B↔C but _not_ A↔C, C becomes a writer and converges to A's selfie **purely
 through B**, and A receives C's selfie through B. So Hypercore/Corestore does forward the
 gallery along connected (ring/finger) paths when intermediates keep it open — no full mesh
 required.
 
 **Persistence — addressed by a seed role.** A regular peer keeps only the current wave's
 gallery open and wipes its store per run, so galleries would vanish as peers leave. A
-**validator/seed** (`role: 'validator'`, `createWave`) instead keeps its store *and* retains
+**validator/seed** (`role: 'validator'`, `createWave`) instead keeps its store _and_ retains
 **every** gallery it opens (`galleries` map — never closed, updated each tick), so it can keep
 serving them after participants disconnect. It advertises `role` in its `pointers` heartbeat; peers pin any
 seed (`seedPeers`) so it's a **well-connected** replication hub. A seed never selfies or starts
 waves — it relays like any peer and archives. Verified in `gallery.replication.test.js`: a
-latecomer connected *only* to the seed gets the full gallery after the originator has left.
-(Convergence *lag* at large depth remains unmeasured.)
+latecomer connected _only_ to the seed gets the full gallery after the originator has left.
+(Convergence _lag_ at large depth remains unmeasured.)
 
 ## 5. Migration behind the seam
 
@@ -171,7 +179,7 @@ flowchart LR
   Seam --> Wave["token race · gallery · lifecycle (unchanged)"]
 ```
 
-`ring.js` keeps exposing "successor"; only *how it's computed* changes (full-ring sort →
+`ring.js` keeps exposing "successor"; only _how it's computed_ changes (full-ring sort →
 Chord pointer). `pickReachable` collapses to "the successor pointer" (reachable by
 construction). `wave.js` is untouched.
 
@@ -182,7 +190,7 @@ construction). `wave.js` is untouched.
    `swarm.peers` (PeerInfo keyed by hex key) into the ring, fired on `swarm.on('update')`,
    after `discovery.flushed()`, and each `RINGUPDATE_MS` tick; peers are refreshed while
    discoverable and TTL-pruned once Hyperswarm GCs them. Forwarding still targets only
-   *connected* peers (`pickReachable ∩ senders`), so it's purely additive.
+   _connected_ peers (`pickReachable ∩ senders`), so it's purely additive.
 2. **`joinPeer` successor + predecessor (+ successor-list)** — make ring edges physical;
    keep full-ring gossip as a fallback initially. **✅ Done:** pure `workers/lib/chord.js`
    (`nodeId`/`successors`/`predecessor`/`connectionTargets`, brittle-tested in
@@ -195,7 +203,7 @@ construction). `wave.js` is untouched.
    of a keyspace position) and `fingers(ids, myId)` (finger[i] = successor of `myNid + 2^i`,
    i in 0..63, deduped to O(log N) distinct nodes), composed into `pinTargets` = successor-
    list ∪ predecessor ∪ fingers. `wave.js` `maintainNeighbours()` now pins `pinTargets`;
-   recomputing the fingers on each topology refresh *is* `fixFingers`. Brittle-tested in
+   recomputing the fingers on each topology refresh _is_ `fixFingers`. Brittle-tested in
    `chord.test.js`. The finger set spans the ring so reachability no longer depends on the
    incidental mesh (which remains only until gossip is slimmed in Phase 4).
 4. **`stabilize` + churn handling + slim gossip** — remove the O(N) `peers` snapshot.
@@ -222,11 +230,11 @@ construction). `wave.js` is untouched.
   disconnected) — Hyperswarm full-meshes small swarms, so this is how we prove **relay
   reach** without the transport. Asserts full reach in the connected component, exactly-once
   dedup, sends ≤ 2·|E|, and diameter-ish rounds (e.g. N=200 partial mesh → all 200 in ~6
-  rounds; a disconnected component is correctly *not* reached).
+  rounds; a disconnected component is correctly _not_ reached).
 - **Line-topology gallery replication + seed persistence** (`gallery.replication.test.js`):
   real Corestores/Autobases with no swarm. (1) A↔B, B↔C (no A↔C) — the gallery replicates
-  *transitively* (C converges to A's writes through B). (2) originator→seed, originator leaves,
-  a latecomer connected *only* to the seed still gets the full gallery. The §4.7 reach +
+  _transitively_ (C converges to A's writes through B). (2) originator→seed, originator leaves,
+  a latecomer connected _only_ to the seed still gets the full gallery. The §4.7 reach +
   persistence tests.
 - **Local DHT integration** (`bootstrap.js`): N processes; assert the ring converges (every
   peer's successor is correct), a token completes a full lap visiting all seats, and the
@@ -245,19 +253,20 @@ things that decide whether this actually works at scale — in priority order:
    samples membership. Wired at **join time** (a peer routes `findSuccessor(me)` on its first
    connection to place itself, Chord `n.join`) and as a periodic `repairSuccessor`; both feed
    routed results back into pinning. Verified over simulated 64-node partial-knowledge networks
-   (≤ 5 hops) and end-to-end on the local DHT incl. a late joiner. *Still to harden:* validate
+   (≤ 5 hops) and end-to-end on the local DHT incl. a late joiner. _Still to harden:_ validate
    convergence under real large-N churn (can't force a partial mesh locally).
 2. **Propagation at scale — build the sweep (§3B / Phase 5).** The serial token is O(N·dwell)
-   ≈ hours at N=10k, so there is currently *no* working large-N wave. The deterministic
+   ≈ hours at N=10k, so there is currently _no_ working large-N wave. The deterministic
    angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely
    global wave; its kickoff already has a delivery mechanism (the §4.6 flood).
-3. ~~**Gallery persistence via a seed (§4.7).**~~ **Done** — transitive reach *and* persistence
+3. ~~**Gallery persistence via a seed (§4.7).**~~ **Done** — transitive reach _and_ persistence
    are covered: a **validator/seed** role (`role: 'validator'`) retains every gallery and is
    pinned by peers as a well-connected hub, so galleries survive participants leaving
    (`gallery.replication.test.js`). Remaining: the payment/proof-validation layer that attaches
    to this same seed instance (WDK — out of scope here), and convergence-lag measurement.
 
 Secondary / masked-for-now:
+
 - The `successor` seam was **not** cleanly switched to `successor-list[0]` (§5) — `wave.js`
   still forwards via full-ring `nextClockwise`/`pickReachable`; it works only because the
   true successor is pinned+connected, an implicit coupling unverified at partial-neighbourhood

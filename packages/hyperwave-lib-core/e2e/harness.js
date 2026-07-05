@@ -1,5 +1,5 @@
 // End-to-end test harness. Runs the REAL app: it spawns a local DHT bootstrap and N actual
-// `bare workers/lib/wave.run.js` peer processes, then lets a test await their log lines /
+// `bare lib/wave.run.js` peer processes, then lets a test await their log lines /
 // structured events (instead of sleeping) and asserts on the outcome. The harness itself runs
 // under Node (for ergonomic child-process orchestration); the processes under test are Bare —
 // the same binary the app ships. Used by e2e/*.e2e.js, run with `npm run test:e2e:local`.
@@ -15,7 +15,7 @@ const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
 
-const APP_DIR = path.join(__dirname, '..') // e2e/ lives under app/; spawn with cwd = app/
+const CORE_DIR = path.join(__dirname, '..') // e2e/ lives in the core package; spawn with cwd here
 const BARE = process.env.BARE_BIN || 'bare' // same runtime `npm test` uses
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -32,7 +32,11 @@ class Proc {
     // spawns the native runtime as a child, so killing the wrapper PID alone would orphan the
     // real process (and a "killed" peer would keep running — breaking the healing test). We
     // kill the whole group instead (kill() below).
-    this.proc = spawn(BARE, args, { cwd: APP_DIR, env: { ...process.env, ...env }, detached: true })
+    this.proc = spawn(BARE, args, {
+      cwd: CORE_DIR,
+      env: { ...process.env, ...env },
+      detached: true
+    })
     this.proc.stdout.setEncoding('utf8')
     this.proc.stdout.on('data', (chunk) => this._ingest(chunk))
     this.proc.stderr.on('data', () => {}) // swallow (bare prints diagnostics here)
@@ -125,7 +129,7 @@ class Cluster {
   }
 
   async start() {
-    this.boot = new Proc('boot', ['workers/lib/bootstrap.js'], {})
+    this.boot = new Proc('boot', ['lib/bootstrap.js'], {})
     this.procs.push(this.boot)
     const m = await this.boot.waitForLine(/BOOTSTRAP 127\.0\.0\.1:(\d+)/, 15000)
     this.port = m[1]
@@ -144,7 +148,7 @@ class Cluster {
     const dir = path.join(this.root, name)
     fs.mkdirSync(dir, { recursive: true })
     if (seed) fs.writeFileSync(path.join(dir, 'wallet.seed'), seed.trim())
-    const p = new Proc(name, ['workers/lib/wave.run.js', name, dir], {
+    const p = new Proc(name, ['lib/wave.run.js', name, dir], {
       HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}`,
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,

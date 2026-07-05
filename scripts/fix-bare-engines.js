@@ -14,12 +14,21 @@
 const fs = require('fs')
 const path = require('path')
 
-const NODE_MODULES = path.join(__dirname, '..', 'node_modules')
+// Monorepo: npm hoists shared deps (WDK + its @noble transitive deps) to the ROOT node_modules,
+// but stragglers can land in a workspace's own node_modules on a version conflict. Scan the root
+// and each workspace so the GUI (pear-runtime) resolver never trips on an unpatched engines range.
+const ROOT = path.join(__dirname, '..')
+const NODE_MODULES = path.join(ROOT, 'node_modules')
+const ROOTS = [
+  NODE_MODULES,
+  path.join(ROOT, 'apps', 'desktop', 'node_modules'),
+  path.join(ROOT, 'packages', 'hyperwave-lib-core', 'node_modules')
+]
 const SAFE = '>=0.0.0' // always satisfied — removes the (advisory) constraint, stays parseable
 
 // Use bare-semver ITSELF as the oracle: a range is a problem iff bare-semver can't parse it
-// (the same check the pear-runtime resolver runs). Covers `^`, `||`, `~`, `x`, spaces after
-// operators (`>= 16`), hyphen ranges, etc. — no need to enumerate the syntaxes by hand.
+// (the same check the pear-runtime resolver runs). Covers spaces after operators (`>= 16`),
+// hyphen ranges, etc. — no need to enumerate the syntaxes by hand.
 let semver = null
 let probe = null // a high version so `satisfies` reaches (and eagerly parses) the range
 try {
@@ -27,13 +36,21 @@ try {
   probe = new semver.Version(999, 0, 0)
 } catch {}
 
-function bareCanParse(range) {
-  if (!semver || !probe) return true // no oracle available — leave it alone
+// Belt-and-suspenders: the oracle reflects the bare-semver in *these* node_modules, but the GUI
+// resolves against pear-runtime's OWN (possibly older/minimal) bare-semver. A newer oracle can
+// deem `^14.21.3 || >=16` (the @noble ranges) parseable while pear-runtime's still chokes on it.
+// So ALSO treat any range using the constructs a minimal parser trips on as a problem. Over-
+// normalizing is harmless — `engines` is advisory metadata; the code runs fine under Bare.
+const TRICKY = /[\^~*]|\|\|/ // caret, tilde, star, or ||
+
+function needsNormalizing(range) {
+  if (TRICKY.test(range)) return true
+  if (!semver || !probe) return false // no oracle and not obviously tricky — leave it alone
   try {
     semver.satisfies(probe, range) // throws INVALID_VERSION iff the range is unparseable
-    return true
-  } catch {
     return false
+  } catch {
+    return true
   }
 }
 
@@ -73,7 +90,7 @@ function fixPackage(pkgDir) {
   if (!eng || typeof eng !== 'object') return
   let changed = false
   for (const [k, v] of Object.entries(eng)) {
-    if (typeof v === 'string' && !bareCanParse(v)) {
+    if (typeof v === 'string' && needsNormalizing(v)) {
       eng[k] = SAFE
       changed = true
     }
@@ -81,11 +98,11 @@ function fixPackage(pkgDir) {
   if (changed) {
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n')
     fixed++
-    console.log(`[fix-bare-engines] normalized engines in ${path.relative(NODE_MODULES, file)}`)
+    console.log(`[fix-bare-engines] normalized engines in ${path.relative(ROOT, file)}`)
   }
 }
 
-if (fs.existsSync(NODE_MODULES)) {
-  walk(NODE_MODULES)
-  console.log(`[fix-bare-engines] done (${fixed} package.json normalized)`)
+for (const nm of ROOTS) {
+  if (fs.existsSync(nm)) walk(nm)
 }
+console.log(`[fix-bare-engines] done (${fixed} package.json normalized)`)

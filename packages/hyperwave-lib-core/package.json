@@ -1,0 +1,29 @@
+{
+  "name": "hyperwave-lib-core",
+  "version": "1.0.0",
+  "description": "The reusable HyperWave Bare engine: P2P wave (Hyperswarm/Autobase) + WDK payments, host-agnostic. Hosted by the desktop Electron worker and a react-native-bare-kit worklet.",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "bare test.js",
+    "test:e2e:local": "node e2e/wave.local.e2e.js",
+    "test:e2e:onchain": "node e2e/wave.onchain.e2e.js"
+  },
+  "dependencies": {
+    "@tetherto/wdk": "^1.0.0-beta.13",
+    "@tetherto/wdk-wallet-tron": "^1.0.0-beta.8",
+    "autobase": "^7.28.1",
+    "b4a": "^1.8.1",
+    "compact-encoding": "^3.3.0",
+    "corestore": "^7.9.1",
+    "framed-stream": "^1.0.1",
+    "hypercore-crypto": "^3.7.0",
+    "hyperswarm": "^4.17.0",
+    "protomux": "^3.11.0"
+  },
+  "devDependencies": {
+    "@hyperswarm/testnet": "^3.1.4",
+    "brittle": "^4.0.2"
+  }
+}

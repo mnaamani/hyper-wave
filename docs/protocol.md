@@ -28,14 +28,14 @@ same logic.
 
 ## 2. Cryptographic primitives
 
-| Primitive | Algorithm | Encoding on the wire |
-|---|---|---|
-| Key pair | Ed25519 | — |
-| Peer id (`peerId`, `id`, `holder`, `by`, `senderPeerId`) | Ed25519 public key (32 bytes) | lowercase hex (64 chars) |
-| Hash (`crypto.hash`) | BLAKE2b-256 (32 bytes) | lowercase hex (64 chars) |
-| Signature (`receiptSig`) | Ed25519 sign/verify | lowercase hex (128 chars) |
-| `waveId` | 16 random bytes | lowercase hex (32 chars) |
-| `timestamp`, `hopCount` | integers | JSON numbers (base-10) |
+| Primitive                                                | Algorithm                     | Encoding on the wire      |
+| -------------------------------------------------------- | ----------------------------- | ------------------------- |
+| Key pair                                                 | Ed25519                       | —                         |
+| Peer id (`peerId`, `id`, `holder`, `by`, `senderPeerId`) | Ed25519 public key (32 bytes) | lowercase hex (64 chars)  |
+| Hash (`crypto.hash`)                                     | BLAKE2b-256 (32 bytes)        | lowercase hex (64 chars)  |
+| Signature (`receiptSig`)                                 | Ed25519 sign/verify           | lowercase hex (128 chars) |
+| `waveId`                                                 | 16 random bytes               | lowercase hex (32 chars)  |
+| `timestamp`, `hopCount`                                  | integers                      | JSON numbers (base-10)    |
 
 Hex is lowercase throughout. Byte concatenation is raw bytes (not hex strings).
 
@@ -118,15 +118,16 @@ is directly connected to ~its connection-limit's worth of a random subset, so a 
 one-hop broadcast reaches only a fraction of the swarm. Different message classes are
 propagated differently to match what each needs:
 
-| Class | Messages | Fanout |
-|---|---|---|
-| **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end` | every peer |
-| **One-hop broadcast** | `wave-pos`, `add-writer` | direct neighbours only |
-| **Neighbour-scoped** | `pointers` (the heartbeat) | pinned ring neighbours (O(k + log N)) |
-| **Unicast** | `token`, `wave-sync` | one specific peer |
+| Class                       | Messages                                               | Fanout                                |
+| --------------------------- | ------------------------------------------------------ | ------------------------------------- |
+| **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end` | every peer                            |
+| **One-hop broadcast**       | `wave-pos`, `add-writer`                               | direct neighbours only                |
+| **Neighbour-scoped**        | `pointers` (the heartbeat)                             | pinned ring neighbours (O(k + log N)) |
+| **Unicast**                 | `token`, `wave-sync`                                   | one specific peer                     |
 
-**Flood (epidemic broadcast).** The wave *lifecycle* messages must reach every seat, so they
+**Flood (epidemic broadcast).** The wave _lifecycle_ messages must reach every seat, so they
 are relayed hop-to-hop:
+
 - The originator stamps the message with a unique `mid` (random id) and broadcasts it to all
   direct connections.
 - On **first** receipt of a given `mid`, a peer records it, **re-broadcasts** to its other
@@ -147,11 +148,11 @@ nice-to-have. `add-writer` is one-hop today; gallery admission across a partial 
 tracked with gallery replication (`scalable-topology.md` §4.7).
 
 **Unicast.** The **token** is sent only to the current successor and deliberately relayed
-**hop by hop** as the wave mechanic — each holder *re-stamps* it with a fresh receipt before
+**hop by hop** as the wave mechanic — each holder _re-stamps_ it with a fresh receipt before
 forwarding (§6). **`wave-sync`** is sent point-to-point to a newcomer on connect (§7.4).
 
 **Membership** is **DHT-discovered but liveness-gated.** `swarm.peers` (Hyperswarm's PeerInfo
-set on the topic) drives *which peers we dial* (Chord pinning), not the visible ring — a DHT
+set on the topic) drives _which peers we dial_ (Chord pinning), not the visible ring — a DHT
 announcement alone is just "this key advertised the topic once", so a stale announce from a
 since-closed instance is never shown as a seat. A **seat requires real liveness**: a live
 connection or direct gossip. On top of that, a slim **pointer exchange** (`pointers`: each
@@ -175,12 +176,12 @@ trusted from the wire; `country` is a cosmetic ISO-3166-1 alpha-2 code (or null)
 
 Inputs that build the map:
 
-| Event | Effect |
-|---|---|
-| **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source. |
-| connection **open** | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor); lift any churn cooldown. A direct connection is authoritative liveness. |
-| connection **close** | delete the peer (and its reachable mark); set a `goneUntil` cooldown (`TTL_MS`) so DHT re-seeding can't immediately resurrect the dead peer. |
-| `pointers { id, country, role, succ: [id…], pred: id }` | `upsert(id, now, country)` (the heartbeat); note `role` validator/seed; upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step. |
+| Event                                                                            | Effect                                                                                                                                                          |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source.                                                                                |
+| connection **open**                                                              | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor); lift any churn cooldown. A direct connection is authoritative liveness.            |
+| connection **close**                                                             | delete the peer (and its reachable mark); set a `goneUntil` cooldown (`TTL_MS`) so DHT re-seeding can't immediately resurrect the dead peer.                    |
+| `pointers { id, country, role, succ: [id…], pred: id }`                          | `upsert(id, now, country)` (the heartbeat); note `role` validator/seed; upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step. |
 
 ```
 upsert(id, lastSeen, country):
@@ -198,11 +199,11 @@ from the id.
 **Liveness, ring, successor.** A peer is **live** if `now − lastSeen < TTL_MS`. The **ring**
 is the live peers sorted by angle; the **successor** is the next live peer clockwise
 (§2.1). A direct disconnect removes a peer immediately (and cools it down against DHT
-re-seeding); the TTL only expires peers known *indirectly* (a `pointers` discovery hint, or
+re-seeding); the TTL only expires peers known _indirectly_ (a `pointers` discovery hint, or
 a `swarm.peers` entry that has since gone) once they stop being refreshed.
 
-**Reachable vs known.** A peer may be *known* (in the map, e.g. DHT-discovered or a
-`pointers` hint) without being *reachable* (no direct connection). The token is only
+**Reachable vs known.** A peer may be _known_ (in the map, e.g. DHT-discovered or a
+`pointers` hint) without being _reachable_ (no direct connection). The token is only
 forwarded to a **reachable** live successor; healing (§7.3) skips known-but-unreachable peers.
 
 ```mermaid
@@ -219,17 +220,19 @@ flowchart LR
 ```
 
 On connect, a peer **greets** the newcomer with its `pointers` and — if a wave is active —
-a `wave-sync` (§7.4), so the newcomer's map *and* wave state converge immediately.
+a `wave-sync` (§7.4), so the newcomer's map _and_ wave state converge immediately.
 
 ## 5. Gossip message catalog
 
 All are JSON objects on the `hyperwave/gossip` channel. Unknown `kind`s are ignored.
 
 ### pointers — to pinned neighbours, every `HEARTBEAT_MS`
+
 ```json
 { "kind": "pointers", "id": "<peerId>", "country": "BR" | null, "role": "peer" | "validator",
   "succ": ["<peerId>", ...], "pred": "<peerId>" | null }
 ```
+
 The heartbeat **and** the Chord pointer exchange in one message, sent only to pinned ring
 neighbours (successor-list + predecessor + fingers), not every connection. Carries the
 sender's own pointers — successor-list (`succ`, ≤ `K_SUCCESSORS`) + predecessor (`pred`) —
@@ -245,11 +248,20 @@ The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries
 `mid` (random hex id); receivers relay on first sight and drop repeats.
 
 ### wave-announce — flooded (originator, on kick-off)
+
 ```json
-{ "kind": "wave-announce", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>", "lobbyMs": 15000,
-  "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ },
-  "commit": "<hex32>", "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */ }
+{
+  "kind": "wave-announce",
+  "mid": "<hex8>",
+  "waveId": "<hex16>",
+  "by": "<peerId>",
+  "lobbyMs": 15000,
+  "paid": {/* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */},
+  "commit": "<hex32>",
+  "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */
+}
 ```
+
 Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`. `commit`
 is the initiator's raffle commitment (it's a participant too); see §12.
 
@@ -264,20 +276,30 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
 — headless/tests — enforcement is off and waves announce immediately, unpaid.)
 
 ### wave-join — flooded (a peer opting in during lobby)
+
 ```json
-{ "kind": "wave-join", "mid": "<hex8>", "waveId": "<hex16>", "peerId": "<peerId>",
-  "commit": "<hex32>", "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */ }
+{
+  "kind": "wave-join",
+  "mid": "<hex8>",
+  "waveId": "<hex16>",
+  "peerId": "<peerId>",
+  "commit": "<hex32>",
+  "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */
+}
 ```
+
 Receiver adds `peerId` to the wave's roster (if it's the current wave). Flooded so it reaches
 the initiator (which assembles the roster) even across a partial mesh. `commit` is the
 joiner's raffle commitment; a sponsor/seed records it during the lobby (§12).
 
 ### wave-start — flooded (originator, when the lobby closes)
+
 ```json
 { "kind": "wave-start", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
   "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>", "keySig": "<hex64>",
   "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ } }
 ```
+
 Finalizes the roster and begins the race. `key` is the wave's gallery Autobase bootstrap key
 (§8); `keySig` is the originator's Ed25519 signature over `(waveId, key)` — receivers verify
 it against the wave's originator before opening the gallery, so a relay can't swap the
@@ -287,12 +309,22 @@ it against the wave's originator before opening the gallery, so a relay can't sw
 `wave-start` re-authenticate a later `wave-sync` to a newcomer.
 
 ### token — DIRECT to the successor (the ⚽)
+
 ```json
-{ "kind": "token", "waveId": "<hex16>", "originator": "<peerId>",
-  "hopCount": 3, "prevChainHash": "<hex32>",
-  "senderPeerId": "<peerId>", "senderReceiptSig": "<hex64>",
-  "timestamp": 1719705612080, "autobaseKey": "<autobaseKeyHex>", "autobaseKeySig": "<hex64>" }
+{
+  "kind": "token",
+  "waveId": "<hex16>",
+  "originator": "<peerId>",
+  "hopCount": 3,
+  "prevChainHash": "<hex32>",
+  "senderPeerId": "<peerId>",
+  "senderReceiptSig": "<hex64>",
+  "timestamp": 1719705612080,
+  "autobaseKey": "<autobaseKeyHex>",
+  "autobaseKeySig": "<hex64>"
+}
 ```
+
 `autobaseKeySig` is the originator's signature over the gallery key (as in `wave-start`),
 carried so a peer catching up via the token — and re-stamped hop to hop — still verifies the
 key rather than trusting a forwarder (§8.1). The token as forwarded by `senderPeerId` at hop
@@ -300,9 +332,11 @@ key rather than trusting a forwarder (§8.1). The token as forwarded by `senderP
 sender's receipt over `(waveId, hopCount, prevChainHash, timestamp)`. Processing: §6.
 
 ### wave-pos — one-hop broadcast (a peer when it becomes the holder)
+
 ```json
 { "kind": "wave-pos", "waveId": "<hex16>", "holder": "<peerId>", "hopCount": 3 }
 ```
+
 Tells direct neighbours the ball is now at `holder` (so they can animate it). Also serves as
 the **ACK** that healing (§7.3) waits for — the predecessor is a pinned neighbour, so it's
 received without needing a flood. Deliberately **not** relayed (emitted every hop). `holder`
@@ -310,6 +344,7 @@ is connection-bound (§11), and healing only accepts the ACK when `holder` is th
 successor** it forwarded to, so a bogus `wave-pos` can't suppress healing of a dead successor.
 
 ### wave-end — flooded (originator on completion, or a participant on a dead-end stall)
+
 ```json
 // completion (by the originator):
 { "kind": "wave-end", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
@@ -319,6 +354,7 @@ successor** it forwarded to, so a bogus `wave-pos` can't suppress healing of a d
   "stalled": true, "staller": "<peerId>", "hopCount": 5, "chainHash": "<hex32>",
   "receiptTs": 1719705612080, "receiptSig": "<hex64>" }
 ```
+
 Ends the wave for everyone. Because it is flooded (forgeable by any relay), it is honoured
 only with proof it's genuine (§11): a **completion** carries `sig`, the originator's Ed25519
 signature over `(waveId, hops, chainHash)`; a **stall** carries the staller's own hop
@@ -326,22 +362,33 @@ signature over `(waveId, hops, chainHash)`; a **stall** carries the staller's ow
 holding neither can no longer force-terminate a live wave.
 
 ### add-writer — one-hop broadcast (a peer requesting gallery write access)
+
 ```json
-{ "kind": "add-writer", "key": "<requesterAutobaseLocalKeyHex>", "peerId": "<peerId>",
-  "waveId": "<hex16>", "hopCount": 3, "chainHash": "<hex32>",
-  "receiptTs": 1719705612080, "receiptSig": "<hex64>",
-  "burn": { /* the requester's fee-burn attestation, §9.0 — present when the gate is enforced */ } }
+{
+  "kind": "add-writer",
+  "key": "<requesterAutobaseLocalKeyHex>",
+  "peerId": "<peerId>",
+  "waveId": "<hex16>",
+  "hopCount": 3,
+  "chainHash": "<hex32>",
+  "receiptTs": 1719705612080,
+  "receiptSig": "<hex64>",
+  "burn": {/* the requester's fee-burn attestation, §9.0 — present when the gate is enforced */}
+}
 ```
+
 Asks the gallery host to admit `key` as an Autobase writer, presenting a valid receipt **and**
 the requester's fee-burn attestation (§8.2). Any current writer verifies the receipt, then
 verifies the burn on-chain, and only then appends an `add-writer` op.
 
 ### wave-sync — DIRECT to a newly-connected peer (join-time state)
+
 ```json
 { "kind": "wave-sync", "waveId": "<hex16>", "phase": "lobby" | "racing",
   "by": "<peerId>", "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>|null",
   "keySig": "<hex64>", "lobbyMsLeft": 8000 }
 ```
+
 Lets a peer joining mid-wave sync (§7.4). `keySig` carries the originator's gallery-key
 signature (§8.1) so the newcomer verifies the key. When the paid-wave gate is enforced, a `wave-sync`
 must carry the kick-off `paid` proof (§9.0) **for either phase** — including `racing` — and is
@@ -360,7 +407,7 @@ connection it arrived on, §11 — else drop):
    **before** the expensive signature verify, so a token flood can't force unbounded Ed25519
    work.
 3. **Verify:** check `senderReceiptSig` against `receiptHash(waveId, hopCount, prevChainHash,
-   timestamp)` and `senderPeerId`. If invalid, drop.
+timestamp)` and `senderPeerId`. If invalid, drop.
 4. **Completion:** if I am **running** this wave (`wave.id == waveId`), `originator == me`, and
    `hopCount > 0`, the token has returned: flood `wave-end { hops, chainHash, by: me, sig }`
    where `sig` signs the completion (§11), finish the wave locally, stop. (Requiring that I'm
@@ -369,8 +416,8 @@ connection it arrived on, §11 — else drop):
 5. **Adopt & learn gallery:** ensure engaged with this wave and `racing` (a peer that
    missed announce/start catches up here); open the gallery from `autobaseKey`.
 6. **Advance & stamp:** compute `newChainHash = advanceChain(prevChainHash,
-   senderReceiptSig)`, `hopCount' = hopCount + 1`, and a fresh receipt over `(waveId,
-   hopCount', newChainHash, now)`. This is *my* hop.
+senderReceiptSig)`, `hopCount' = hopCount + 1`, and a fresh receipt over `(waveId,
+hopCount', newChainHash, now)`. This is _my_ hop.
 7. **Hold & forward:**
    - Broadcast `wave-pos { holder: me, hopCount' }`.
    - If I'm in the roster, **post my staged selfie now** (see below): I have my receipt for
@@ -380,6 +427,7 @@ connection it arrived on, §11 — else drop):
 
 **The selfie is captured up-front, in the lobby.** The token must never wait on a human, so
 capture and posting are split:
+
 - **Capture (lobby, synchronized):** when a peer opts in, the renderer opens the camera and
   shows a countdown to kickoff. At kickoff (or on a manual press) it grabs one frame and
   **stages** it to the worker (`stage-selfie` command → `stagedSelfie`). Everyone captures
@@ -457,6 +505,7 @@ sequenceDiagram
 gossip. Each hop the holder broadcasts `wave-pos`, and — if in the roster — takes a selfie.)
 
 ### 7.1 Adoption & tie-break (`shouldAdopt(waveId)`)
+
 - If `waveId ∈ endedWaves` → **reject** (a finished wave never restarts).
 - If idle, or `waveId == wave.id` → **accept**.
 - Else accept **iff `waveId < wave.id`** (lexicographic on hex). Lower id wins, so
@@ -464,14 +513,16 @@ gossip. Each hop the holder broadcasts `wave-pos`, and — if in the roster — 
   wave, the old one is abandoned (added to `endedWaves`).
 
 ### 7.2 Roles in a wave
+
 - **Originator:** the peer that called `startWave` — sends `wave-announce`, runs the lobby
   timer, sends `wave-start`, starts the token at hop 0, and detects completion.
 - **Joiner (roster):** opted in during the lobby; gets a selfie prompt.
 - **Spectator:** engaged with the wave but not in the roster; relays the token if it
-  passes, but no selfie prompt. (The ball visits *everyone*, keeping the full-ring
+  passes, but no selfie prompt. (The ball visits _everyone_, keeping the full-ring
   visual; only the roster selfies.)
 
 ### 7.3 Healing
+
 When forwarding, pick the **next reachable peer clockwise** (directly connected, not
 already skipped). After forwarding, watch for the wave to advance past my hop — a `wave-pos`
 **from that specific successor** is the ACK (a position from any other peer is ignored for
@@ -495,14 +546,17 @@ sequenceDiagram
 ```
 
 ### 7.4 Join-time sync
+
 Lifecycle broadcasts fire once, so a peer connecting mid-wave would miss them. On each new
 connection, existing peers send a **direct** `wave-sync`. The newcomer:
+
 - `phase: lobby` → enter the lobby (join window with `lobbyMsLeft` remaining), merge roster.
 - `phase: racing` → open the gallery from `key` and go straight to `racing` (spectator
   unless it holds the token).
-Either way it's now engaged, so it can't start a competing wave.
+  Either way it's now engaged, so it can't start a competing wave.
 
 ### 7.5 Ending & anti-revival
+
 A wave ends on completion (originator), a stall, `wave-end`, or the `WAVE_TIMEOUT_MS`
 fallback. On ending: add `waveId` to `endedWaves`, clear `seen`, return to idle. Because
 `endedWaves` blocks re-adoption, a straggler token/gossip can't revive a finished wave.
@@ -513,12 +567,13 @@ Each wave has its own gallery: an **Autobase** (Holepunch multi-writer append lo
 deterministic linearized view), namespaced per wave so it starts empty.
 
 ### 8.1 Setup & the signed gallery key
+
 - The **originator** creates the Autobase (bootstrap key = null → its own key), and
   publishes the resulting **`autobaseKey`** (hex) in `wave-start` and in every `token`.
 - **The key is signed.** The originator also publishes `keySig` = Ed25519 over
   `(waveId, autobaseKey)`; a peer opens the gallery only after verifying it against the wave's
   originator (and rejects a key whose claimed originator doesn't match the one it already
-  adopted). The key travels on *unsigned, relayed/re-stamped* fields, so without this a
+  adopted). The key travels on _unsigned, relayed/re-stamped_ fields, so without this a
   malicious relay could swap it and point peers at an attacker-controlled Autobase — the
   signature makes that a detectable forgery. (Pure integrity; independent of payments.)
 - Other peers **open** the same Autobase by that bootstrap key. It replicates over the
@@ -527,10 +582,12 @@ deterministic linearized view), namespaced per wave so it starts empty.
   entries (one per peer, in hop/timestamp order; see §8.2–§8.3).
 
 ### 8.2 Writer admission: optimistic, verified where it pays off
+
 Autobase writes only count from keys in the writer set, and only an existing writer can admit
 a new one. Admission is **optimistic** — deliberately **no per-participant on-chain check on
 the write path**, because that would be O(N) REST calls concentrated on the admitter and
 doesn't scale:
+
 - **Admission:** to post, a non-writer broadcasts `add-writer` with its Autobase local key, a
   valid receipt for the current wave, **and its fee-burn attestation** (§9.0). A current writer
   (initially the originator) checks: the receipt verifies (authenticity; `peerId` is
@@ -538,7 +595,7 @@ doesn't scale:
   (`burnAuthorizes`) — a cheap local check. It does **not** verify the burn on-chain here. It
   then appends the `add-writer` op.
 - **The burn is verified only where it matters:** at **raffle payout** (the seed verifies the
-  *winner's* burn on-chain — the winner walk, §12), and by **tippers/auditors** at their own
+  _winner's_ burn on-chain — the winner walk, §12), and by **tippers/auditors** at their own
   pace via the entry's `burnTx`. So on-chain reads are O(1)-ish per wave, not O(N).
 - **Spam is bounded locally** so optimistic admission can't be abused: **one entry per peer**
   (dedup in `apply()`) **+ a byte-size cap** on the entry (image ≤ `MAX_IMAGE_BYTES`, caption ≤
@@ -574,21 +631,33 @@ sequenceDiagram
 > so every peer independently drops unsigned/impersonated/oversized/duplicate entries — that's
 > what bounds the gallery under optimistic admission. The **on-chain burn** is proof-of-payment
 > but it's checked **lazily, off the hot path** (winner at payout; anyone via `burnTx`), so a
-> gallery seat is cheap to take but its *value* (winning the raffle, being worth a tip) still
+> gallery seat is cheap to take but its _value_ (winning the raffle, being worth a tip) still
 > requires a real burn. This trades the old hard "no unpaid write, ever" gate for a **soft,
 > publicly-detectable** one — a deliberate scale trade-off. When enforcement is off (no wallet
 > / tests) admission is receipt-only.
 
 ### 8.3 `wave-selfie` op (Autobase entry)
+
 ```json
-{ "type": "wave-selfie", "waveId": "<hex16>", "peerId": "<peerId>",
-  "hopCount": 3, "receiptSig": "<hex64>", "chainHash": "<hex32>", "receiptTs": 1719705612080,
-  "country": "BR", "caption": "Vamos! 🇧🇷", "image": "data:image/jpeg;base64,...",
-  "address": "T…", "burn": { /* the poster's §9.0 attestation — verified then dropped */ },
+{
+  "type": "wave-selfie",
+  "waveId": "<hex16>",
+  "peerId": "<peerId>",
+  "hopCount": 3,
+  "receiptSig": "<hex64>",
+  "chainHash": "<hex32>",
+  "receiptTs": 1719705612080,
+  "country": "BR",
+  "caption": "Vamos! 🇧🇷",
+  "image": "data:image/jpeg;base64,...",
+  "address": "T…",
+  "burn": {/* the poster's §9.0 attestation — verified then dropped */},
   "raffleSecret": "<hex32>" /* raffle REVEAL, §12 — present when raffle is on */,
   "burnTx": "<tron-tx-hash>" /* kept from the burn so the on-chain raffle commit is locatable */,
-  "timestamp": 1719705650000 }
+  "timestamp": 1719705650000
+}
 ```
+
 `image` is an inline JPEG data URL (a compressed thumbnail) in the reference build;
 Hyperblobs is the scaling path. `address` is the poster's Tron (TRX) wallet, carried so a
 viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → worker
@@ -608,17 +677,21 @@ admission gate, §8.2). (Wire details: the paid-wave gate on
 `wave-announce`/`wave-start`/`wave-sync` §5; the admission gate on `add-writer` §8.2.)
 
 ### 9.0 Fee-burn attestation
+
 A fee burn is attested by a signed proof. The **kick-off** attestation is carried as the
 `paid` field on `wave-announce` / `wave-start` / `wave-sync`; a **join** attestation is
 carried as the `burn` field on `add-writer` (§8.2). It is **not** an on-wire gallery entry:
+
 ```json
 { "waveId": "<hex16>", "peerId": "<peerId>", "reason": "kickoff" | "join", "amount": 1,
   "txHash": "<tron-tx-hash>", "tronAddress": "T…", "burnTs": 1719705612080, "sig": "<hex128>" }
 ```
+
 Two independent bindings make it verifiable (the Tron key that signs the burn is a different
 keypair from the ring identity, so both are needed):
+
 1. **On-chain memo.** The burn tx carries `data = "hyperwave:<waveId>:<peerId>"` (readable via
-   `gettransactionbyid`). The burn *itself names the wave* — a third party can confirm it
+   `gettransactionbyid`). The burn _itself names the wave_ — a third party can confirm it
    from-chain, and it can't be an old burn replayed for another wave (each carries its own
    random `waveId`, unguessable in advance).
 2. **Ring attestation.** `sig` = Ed25519 by `peerId` over
@@ -636,7 +709,7 @@ black-hole address
 T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb        (base58check of the all-zero EVM address)
 ```
 
-for which no private key exists — the funds are provably unspendable by *anyone*. This is
+for which no private key exists — the funds are provably unspendable by _anyone_. This is
 deliberate: the fee creates **skin in the game with no beneficiary**. Nobody (not the
 validator, not the initiator) profits from fees, so there is no censorship or collusion
 incentive, no custodial ledger, and no refund path to dispute. (Tron rejects zero-amount
@@ -646,7 +719,7 @@ level.) Spamming waves or Sybil-joining costs real, irrecoverable value.
 ### 9.2 Binding a burn to its wave and its peer
 
 A raw burn tx only proves "someone sent TRX to the black hole." The **on-chain memo** makes
-it *"peer P burned specifically for wave W"*: every fee burn carries
+it _"peer P burned specifically for wave W"_: every fee burn carries
 `data = "hyperwave:<waveId>:<peerId>[:<raffleCommit>]"`, readable via `gettransactionbyid`
 (the `raffleCommit` segment is present only when the raffle is on — §12). Replay across waves
 is impossible — each `waveId` is 16 random bytes, unguessable before the wave exists, and the
@@ -679,21 +752,21 @@ the gate (waves announce immediately, unpaid).
 
 ## 10. Constants (reference build)
 
-| Constant | Value | Meaning |
-|---|---|---|
-| `HEARTBEAT_MS` | 2000 | pointers-heartbeat cadence |
-| `RINGUPDATE_MS` | 4000 | re-pin + gallery-pull maintenance cadence |
-| `TTL_MS` | 12000 | drop a peer not refreshed within this |
-| `HOP_DELAY_MS` | 250 | per-hop dwell (visible roll pace; selfie is decoupled, §6) |
-| `LOBBY_MS` | 15000 | lobby / opt-in window |
-| `WAVE_TIMEOUT_MS` | 90000 | force-idle if a wave doesn't finish |
-| `HEAL_TIMEOUT_MS` | 3000 | no advance past my hop ⇒ skip successor |
-| `MAX_HOPS` | 5000 | runaway-token safety cap |
-| `MAX_IMAGE_BYTES` | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2) |
-| `MAX_CAPTION_BYTES` | 512 | per-selfie caption cap |
-| `ADMIT_TIMEOUT_MS` | 25000 | give up requesting gallery admission (re-broadcasts every 3s) |
-| `RAFFLE_DELAY_MS` | 5000 | settle delay after wave-end before the seed draws the raffle (§12) |
-| `raffleTrx` | 0 | raffle prize per wave (seed-only; 0 = raffle off) |
+| Constant            | Value  | Meaning                                                               |
+| ------------------- | ------ | --------------------------------------------------------------------- |
+| `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                            |
+| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                             |
+| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                 |
+| `HOP_DELAY_MS`      | 250    | per-hop dwell (visible roll pace; selfie is decoupled, §6)            |
+| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                 |
+| `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                   |
+| `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                               |
+| `MAX_HOPS`          | 5000   | runaway-token safety cap                                              |
+| `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2) |
+| `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                |
+| `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)         |
+| `RAFFLE_DELAY_MS`   | 5000   | settle delay after wave-end before the seed draws the raffle (§12)    |
+| `raffleTrx`         | 0      | raffle prize per wave (seed-only; 0 = raffle off)                     |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.
@@ -701,19 +774,21 @@ same ballpark for interop but exact values aren't required to match.
 ## 11. Security & trust notes
 
 ### 11.1 Foundations
+
 - **Angle/seat** is bound to the public key and can't be forged without grinding keys.
 - **Receipts** authenticate each hop and each gallery entry to a peer identity; the
   **chain accumulator** lets an observer reconstruct/verify hop order from collected
   receipts.
 - The **gallery write-gate** is authenticity, not proof-of-participation (§8.2). A malicious
-  fork can drop/ignore anything locally (open P2P); the protocol keeps *honest* peers
+  fork can drop/ignore anything locally (open P2P); the protocol keeps _honest_ peers
   consistent. There are **no sponsor rewards**, so there is nothing to steal by faking
   participation — the only money flows are burned fees (nobody profits) and voluntary tips
   (paid directly, peer to peer). This removes the whole class of reward-gaming attacks.
 - Country is cosmetic and self-reported.
 
 ### 11.2 Adversarial hardening (against a modified client)
-The transport (Noise over Hyperswarm) authenticates *who* a message came from, but the
+
+The transport (Noise over Hyperswarm) authenticates _who_ a message came from, but the
 application logic must actually **use** that rather than trust self-reported fields. The
 following guards keep a hostile peer running a modified app from disrupting honest peers:
 
@@ -727,13 +802,13 @@ following guards keep a hostile peer running a modified app from disrupting hone
 - **Authenticated lifecycle termination.** `wave-end` is flooded (forgeable by any relay), so
   it is honoured only with proof: a **completion** carries the originator's Ed25519 signature
   over `(waveId, hops, chainHash)`; a **stall** carries the staller's own hop receipt. An
-  outsider holding neither can't force-terminate a live wave. (A malicious *admitted*
+  outsider holding neither can't force-terminate a live wave. (A malicious _admitted_
   participant can still stall a wave it's part of — but it could already do that by simply not
   forwarding; no new power.)
 - **Paid-gate on every adoption path.** When enforced, `wave-announce`, `wave-start`, and
   `wave-sync` (both lobby **and** racing) are all gated on a valid kick-off burn-proof, so no
   single message shape can push a peer into an unpaid/forged wave.
-- **Optimistic gallery admission, bounded locally.** Admission requires a *signed* burn
+- **Optimistic gallery admission, bounded locally.** Admission requires a _signed_ burn
   attestation but **no on-chain check on the write path** (that's O(N) reads on the admitter,
   §8.2). Spam is bounded deterministically instead — **one entry per peer + a byte-size cap** —
   and the burn is verified where it has value: at raffle payout (the winner) and by tippers.
@@ -753,14 +828,15 @@ following guards keep a hostile peer running a modified app from disrupting hone
   checks before the Ed25519 verify (§6), limiting the CPU a token flood can extract.
 
 ### 11.3 Known residual risks (hardening backlog)
+
 - **No per-connection rate limiting.** Gossip has flood-dedup, `seen`/`MAX_HOPS` caps, and the
   cheap-before-verify ordering, but not yet a per-peer message budget; a peer can still spend a
   connection's bandwidth/CPU. With optimistic admission this matters more (gallery seats are
   cheap now — only signature + one-per-peer + byte cap), so a per-connection token bucket is the
-  natural cap on *how many* add-writer/selfie a single peer can push.
+  natural cap on _how many_ add-writer/selfie a single peer can push.
 - **Optimistic admission is a soft gate.** Since the burn isn't checked on the write path
   (§8.2), the gallery can hold unpaid entries until they're caught (raffle payout / a tipper /
-  an auditor via `burnTx`). They win nothing and are detectable, but they *do* consume
+  an auditor via `burnTx`). They win nothing and are detectable, but they _do_ consume
   (bounded) storage. Acceptable for the MVP scale; pair with the rate limit above at scale.
 - **Wallet-less mode is unauthenticated by design.** All paid-gate guarantees hold only when a
   wallet is present (`enforcePaid`); an unfunded demo/test run accepts unpaid waves and
@@ -785,13 +861,13 @@ phases and **no external randomness beacon** (design + trade-offs: `ideas/raffle
 3. **Draw + winner walk (seed, after wave-end + `RAFFLE_DELAY_MS`).** Eligible tickets =
    entries whose `BLAKE2b(raffleSecret) ==` the commit the seed **cached from lobby gossip**
    (in memory — no per-participant REST fetch at draw time). `seed = BLAKE2b("raffle|" ‖ waveId
-   ‖ sorted secrets)`, then a deterministic **ranking**: each ticket keyed by
+‖ sorted secrets)`, then a deterministic **ranking**: each ticket keyed by
    `BLAKE2b(seed ‖ peerId)`, sorted ascending. The seed walks the ranking and pays the **first
    candidate whose fee burn verifies ON-CHAIN** (`verifyBurnTx` on the entry's `burnTx`) — this
    is where admission's deferred burn check happens, and it costs **one on-chain read for the
    winner** (plus one per fake-burn entry ranked above it, if any). Usually it's `order[0]`.
 
-**Accountability.** The seed draws from its fast in-memory cache; the *authoritative* commits
+**Accountability.** The seed draws from its fast in-memory cache; the _authoritative_ commits
 are the on-chain memos and the burns are on-chain too. So **anyone can later recompute** the
 seed + ranking (from the public reveals) and re-verify the walk on-chain, and **catch a seed
 that dropped a validly-committed participant, skipped a candidate whose burn was actually
@@ -802,16 +878,16 @@ A missing/mismatched reveal (a peer that committed but didn't reveal by the draw
 abort the raffle** — that peer is simply excluded and the draw runs over the remaining valid
 reveals (no eligible tickets → no winner, a no-op). Because each peer commits before seeing
 others, it can't choose a secret to steer the draw; the residual is a **last-revealer abort**:
-withholding your reveal removes you and shifts the seed — a *bounded, binary* re-roll at the
+withholding your reveal removes you and shifts the seed — a _bounded, binary_ re-roll at the
 cost of your own ticket, **not** the ability to aim (nor to cancel the draw). Removing even
 this needs a **VDF (Verifiable Delay Function)** or a threshold scheme (`ideas/raffle.md`).
 
 > **Trust caveat (MVP): sponsor = admitter = seed.** For simplicity one trusted role funds the
 > prize and draws. With commits on-chain the **draw math is publicly auditable** (nobody has to
-> trust the seed's RNG), but the seed *could* still **censor the entry set** — it gates who's
+> trust the seed's RNG), but the seed _could_ still **censor the entry set** — it gates who's
 > admitted to the gallery, so it could keep honest peers out. This is acceptable only under the
 > trusted-sponsor + testnet assumption. **Production must separate the admitter (an independent
-> wave originator) from the prize-holder** so the funder can't shape *who's in* the draw. Also:
+> wave originator) from the prize-holder** so the funder can't shape _who's in_ the draw. Also:
 > a paid-entry game of chance is legally a **lottery** in most jurisdictions — keep it testnet,
 > or get legal review.
 

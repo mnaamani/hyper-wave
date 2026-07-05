@@ -1,2 +1,11 @@
+# dependencies + build output (matched at any depth: root + every workspace)
+node_modules/
+out/
+bundles/
+
+# local-only design/notes + spikes
 ideas/
 spike/
+DEMO.md
+VULN.md
+presentation/

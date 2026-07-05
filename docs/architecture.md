@@ -42,12 +42,12 @@ model: Chromium can't run the Holepunch P2P stack, so the networking lives in a 
 worker (Holepunch's JS runtime), and the Electron **main** process brokers between the
 sandboxed renderer and the worker.
 
-| Layer | Runtime | Module format | Responsibility |
-|---|---|---|---|
-| **Main** (`electron/main.js`) | Node.js (Electron) | CJS | Create the window; allow `media` (webcam); spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers. Essentially unmodified template + one permission line. |
-| **Renderer** (`renderer/`) | Chromium, sandboxed | **ESM** | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto. |
-| **Worker** (`workers/hyperwave.js` + `lib/`) | **Bare** | CJS | All protocol/state: Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing — plus the WDK wallet (fee burns, tips). WDK is ESM-only, so `pay.js` bridges via dynamic `import()`. |
-| **Updater** (`workers/main.js`) | Bare | CJS | Template's OTA auto-update; unrelated to the wave. |
+| Layer                                        | Runtime             | Module format | Responsibility                                                                                                                                                                                                           |
+| -------------------------------------------- | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Main** (`electron/main.js`)                | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers. Essentially unmodified template + one permission line.                                      |
+| **Renderer** (`renderer/`)                   | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                         |
+| **Worker** (`workers/hyperwave.js` + `lib/`) | **Bare**            | CJS           | All protocol/state: Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing — plus the WDK wallet (fee burns, tips). WDK is ESM-only, so `pay.js` bridges via dynamic `import()`. |
+| **Updater** (`workers/main.js`)              | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                       |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
 
@@ -80,15 +80,15 @@ preload `bridge` (`onWorkerIPC` / `writeWorkerIPC`). See `electron/preload.js`.
 
 - **Protocol & authoritative state → worker.** Anything that defines correctness on the
   wire (discovery, the ring, the token/receipt chain, lobby/roster, the gallery + its
-  write-gate, healing) lives in the worker. Guards are *enforced* here: e.g. "one wave at
+  write-gate, healing) lives in the worker. Guards are _enforced_ here: e.g. "one wave at
   a time" is enforced by `wave.js`, not by hiding a button.
 - **Presentation, user input, device APIs → renderer.** Canvas drawing, countdown
   animations, the webcam (`getUserMedia` — Chromium only), the gallery slideshow, and
-  the flag rendering (`flagOf`) live in the renderer. The renderer holds only *derived*
+  the flag rendering (`flagOf`) live in the renderer. The renderer holds only _derived_
   UI state (e.g. `waveActive` to hide a button); the worker remains the source of truth.
 - **Borderline, intentionally renderer-side:** country **persistence** (`localStorage`)
   and the proof-window **capture timing** are user/UI preferences; the worker only stores
-  the country *code* and doesn't care when a selfie is taken (selfies are optional).
+  the country _code_ and doesn't care when a selfie is taken (selfies are optional).
 
 The worker computes ring **angles** (from peer public keys) and the **successor**, and
 sends them in `state`; the renderer consumes them for drawing and never recomputes them —
@@ -156,7 +156,7 @@ app/
 - **The renderer is ESM** (`import`/`export`) — it works over `file://` in the Electron
   renderer.
 
-Bare *can* run ESM (`.mjs`), but the workers are kept CJS: converting is all-or-nothing
+Bare _can_ run ESM (`.mjs`), but the workers are kept CJS: converting is all-or-nothing
 across the require/import graph (`require()` of an ESM module throws), and the ESM
 worker-entry boot under `pear-runtime` is unverified. The mix (Bare=CJS, browser=ESM) is
 intentional and conventional.
