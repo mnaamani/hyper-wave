@@ -775,15 +775,19 @@ phases and **no external randomness beacon** (design + trade-offs: `ideas/raffle
    **while its wave is in the lobby** (the phase gate is the reveal deadline — commits after
    racing starts are ignored, since reveals happen during racing).
 3. **Reveal (gallery).** Each participant reveals `secret` in its `wave-selfie` entry.
-4. **Draw (seed, after wave-end).** Eligible tickets = entries whose `BLAKE2b(raffleSecret) ==`
-   the recorded commit. `seed = BLAKE2b("raffle|" ‖ waveId ‖ sorted secrets)`;
-   `winner = tickets[ uint(BLAKE2b(seed ‖ 0)) mod M ]` (sorted by `peerId`). The seed pays
-   `raffleTrx` to the winner's burn-verified `address`, and emits the full ticket set so
-   anyone can **recompute and audit** the draw.
+4. **Draw (seed, after wave-end + `RAFFLE_DELAY_MS`).** Eligible tickets = entries whose
+   `BLAKE2b(raffleSecret) ==` the recorded commit. `seed = BLAKE2b("raffle|" ‖ waveId ‖ sorted
+   secrets)`; `winner = tickets[ uint(BLAKE2b(seed ‖ 0)) mod M ]` (sorted by `peerId`). The
+   seed pays `raffleTrx` to the winner's burn-verified `address`, and emits the full ticket set
+   so anyone can **recompute and audit** the draw.
 
-Because each peer commits before seeing others, it can't choose a secret to steer the draw;
-the residual is a **last-revealer abort** (withhold your reveal to force a *bounded, binary*
-re-roll, at the cost of your own ticket) — not the ability to aim.
+A missing/mismatched reveal (a peer that committed but didn't reveal by the draw) **does not
+abort the raffle** — that peer is simply excluded and the draw runs over the remaining valid
+reveals (no eligible tickets → no winner, a no-op). Because each peer commits before seeing
+others, it can't choose a secret to steer the draw; the residual is a **last-revealer abort**:
+withholding your reveal removes you and shifts the seed — a *bounded, binary* re-roll at the
+cost of your own ticket, **not** the ability to aim (nor to cancel the draw). Removing even
+this needs a **VDF (Verifiable Delay Function)** or a threshold scheme (`ideas/raffle.md`).
 
 > **Trust caveat (MVP): sponsor = admitter = seed.** For simplicity one trusted role funds the
 > prize, records commits, and draws. It therefore *could* censor the entry set (it gates who's

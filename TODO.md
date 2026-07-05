@@ -104,8 +104,9 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       through the originator/seed; harden with quorum admission or proof-in-the-op if needed.
 - [ ] Raffle production hardening (`ideas/raffle.md`): **separate the admitter (independent
       wave originator) from the prize-holder** so the sponsor can't censor the entry set;
-      escrow/contract custody instead of the trusted sponsor wallet; a VDF or threshold to
-      remove the last-revealer abort; legal review (a paid game of chance is a lottery). Also:
+      escrow/contract custody instead of the trusted sponsor wallet; a VDF (Verifiable Delay
+      Function) or threshold scheme to remove the last-revealer abort; legal review (a paid game
+      of chance is a lottery). Also:
       k-winners/tiered prizes (`raffleDraw` already supports `i`).
 
 ### Remaining hardening (scalable-topology §8)
