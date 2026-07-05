@@ -247,9 +247,11 @@ The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries
 ### wave-announce — flooded (originator, on kick-off)
 ```json
 { "kind": "wave-announce", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>", "lobbyMs": 15000,
-  "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ } }
+  "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ },
+  "commit": "<hex32>", "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */ }
 ```
-Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`.
+Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`. `commit`
+is the initiator's raffle commitment (it's a participant too); see §12.
 
 **Paid-wave gate (anti-spam).** When enforced (every instance has a wallet), the initiator
 **does not announce until it has burned the kick-off fee and confirmed it on-chain** — the
@@ -263,10 +265,12 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
 
 ### wave-join — flooded (a peer opting in during lobby)
 ```json
-{ "kind": "wave-join", "mid": "<hex8>", "waveId": "<hex16>", "peerId": "<peerId>" }
+{ "kind": "wave-join", "mid": "<hex8>", "waveId": "<hex16>", "peerId": "<peerId>",
+  "commit": "<hex32>", "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */ }
 ```
 Receiver adds `peerId` to the wave's roster (if it's the current wave). Flooded so it reaches
-the initiator (which assembles the roster) even across a partial mesh.
+the initiator (which assembles the roster) even across a partial mesh. `commit` is the
+joiner's raffle commitment; a sponsor/seed records it during the lobby (§12).
 
 ### wave-start — flooded (originator, when the lobby closes)
 ```json
@@ -580,6 +584,7 @@ sequenceDiagram
   "hopCount": 3, "receiptSig": "<hex64>", "chainHash": "<hex32>", "receiptTs": 1719705612080,
   "country": "BR", "caption": "Vamos! 🇧🇷", "image": "data:image/jpeg;base64,...",
   "address": "T…", "burn": { /* the poster's §9.0 attestation — verified then dropped */ },
+  "raffleSecret": "<hex32>" /* raffle REVEAL, §12 — present when raffle is on */,
   "timestamp": 1719705650000 }
 ```
 `image` is an inline JPEG data URL (a compressed thumbnail) in the reference build;
@@ -681,6 +686,8 @@ the gate (waves announce immediately, unpaid).
 | `HEAL_TIMEOUT_MS` | 3000 | no advance past my hop ⇒ skip successor |
 | `MAX_HOPS` | 5000 | runaway-token safety cap |
 | `ADMIT_TIMEOUT_MS` | 25000 | give up requesting gallery admission (re-broadcasts every 3s) |
+| `RAFFLE_DELAY_MS` | 5000 | settle delay after wave-end before the seed draws the raffle (§12) |
+| `raffleTrx` | 0 | raffle prize per wave (seed-only; 0 = raffle off) |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.
@@ -754,6 +761,37 @@ following guards keep a hostile peer running a modified app from disrupting hone
   accepts unpaid waves and receipt-only gallery admission so the lifecycle can be exercised
   without on-chain calls. Don't mistake that mode for the security model.
 
+## 12. Raffle — optional sponsor incentive (commit-reveal)
+
+Off by default. A **sponsor/seed** with a funded wallet (`raffleTrx > 0`) draws one winner
+among the wave's gallery participants and pays the prize — a positive incentive to
+participate, on top of burned fees + tips. Fairness is **commit-reveal**, using the wave's two
+phases and **no external randomness beacon** (design + trade-offs: `ideas/raffle.md`).
+
+1. **Commit (lobby).** Each participant generates a 32-byte `secret` and publishes
+   `commit = BLAKE2b(secret)` — ring-signed (`commitSig`) so only it can set its own — in its
+   `wave-join` (joiners) or `wave-announce` (initiator), before anyone reveals.
+2. **Record (seed, lobby only).** The seed records `commit[peerId]` from valid signed commits
+   **while its wave is in the lobby** (the phase gate is the reveal deadline — commits after
+   racing starts are ignored, since reveals happen during racing).
+3. **Reveal (gallery).** Each participant reveals `secret` in its `wave-selfie` entry.
+4. **Draw (seed, after wave-end).** Eligible tickets = entries whose `BLAKE2b(raffleSecret) ==`
+   the recorded commit. `seed = BLAKE2b("raffle|" ‖ waveId ‖ sorted secrets)`;
+   `winner = tickets[ uint(BLAKE2b(seed ‖ 0)) mod M ]` (sorted by `peerId`). The seed pays
+   `raffleTrx` to the winner's burn-verified `address`, and emits the full ticket set so
+   anyone can **recompute and audit** the draw.
+
+Because each peer commits before seeing others, it can't choose a secret to steer the draw;
+the residual is a **last-revealer abort** (withhold your reveal to force a *bounded, binary*
+re-roll, at the cost of your own ticket) — not the ability to aim.
+
+> **Trust caveat (MVP): sponsor = admitter = seed.** For simplicity one trusted role funds the
+> prize, records commits, and draws. It therefore *could* censor the entry set (it gates who's
+> admitted / whose commit it records). This is acceptable only under the trusted-sponsor +
+> testnet assumption. **Production must separate the admitter (an independent wave originator)
+> from the prize-holder** so the funder can't shape the draw. Also: a paid-entry game of chance
+> is legally a **lottery** in most jurisdictions — keep it testnet, or get legal review.
+
 ## Appendix A — app-internal IPC (informative, not on-wire)
 
 The reference build splits worker (protocol) from renderer (UI); they exchange these over
@@ -777,4 +815,5 @@ announcing), `wave-verified` (kick-off burn proven — join is now allowed), `wa
 (kick-off failed verification — wave abandoned), `join-blocked {reason}` (tried to join
 before the kick-off is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
-`position`, `forwarded`, `completed`, `healed`, `stalled`, `gallery-error`.
+`position`, `forwarded`, `completed`, `healed`, `stalled`, `gallery-error`; and (seed, when
+the raffle is on) `raffle-draw {tickets,seed,winner}` + `raffle-win {winner,address,amount,hash}`.

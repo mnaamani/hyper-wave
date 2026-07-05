@@ -59,6 +59,14 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       `wave-proof` receipt collection, the golden-rule chain-walk (`longestValidChain` /
       `payableFromChain`), and the gallery `burn-proof` op. The validator role is now purely
       a gallery archivist. Kills the sybil-payout risk class outright (nothing to steal).
+- [x] **Sponsor-funded raffle** (positive incentive re-added, off by default; `raffleTrx` /
+      `HYPERWAVE_RAFFLE_TRX` on a seed) — `runRaffle` draws ONE winner among gallery
+      participants via internal **commit-reveal** (no external beacon: commit rides
+      `wave-join`/`wave-announce` in the lobby, reveal rides the selfie, seed folds secrets into
+      a deterministic auditable draw) and pays the burn-verified address. Verified live on Nile.
+      See `ideas/raffle.md` + `docs/protocol.md` §12. **MVP: sponsor = admitter = seed** (one
+      trusted role) — production must separate the admitter from the prize-holder; testnet-only
+      (a paid game of chance is legally a lottery).
 - [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
       semver can't parse (`scripts/fix-bare-engines.js`)
 
@@ -94,6 +102,11 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 - [ ] Byzantine admitter: burn-gated admission is enforced by the admitting writer, so a
       malicious *already-admitted* writer could admit a non-payer. Fine while admissions route
       through the originator/seed; harden with quorum admission or proof-in-the-op if needed.
+- [ ] Raffle production hardening (`ideas/raffle.md`): **separate the admitter (independent
+      wave originator) from the prize-holder** so the sponsor can't censor the entry set;
+      escrow/contract custody instead of the trusted sponsor wallet; a VDF or threshold to
+      remove the last-revealer abort; legal review (a paid game of chance is a lottery). Also:
+      k-winners/tiered prizes (`raffleDraw` already supports `i`).
 
 ### Remaining hardening (scalable-topology §8)
 - [ ] Validate Chord convergence under real large-N churn (can't force a partial mesh

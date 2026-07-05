@@ -39,10 +39,15 @@ async function confirmBurn(payments, waveId, hash) {
   return false
 }
 
-// Wire a ready wallet into the engine: my address (gallery tips / attestations) and the
-// on-chain burn verifier (enables the paid-wave anti-spam gate).
+// Wire a ready wallet into the engine: my address (gallery tips / attestations), the on-chain
+// burn verifier (enables the paid-wave anti-spam gate), and the reward sender (used by a
+// sponsor/seed to pay the raffle prize).
 function wireWallet(wave, payments) {
-  wave.setWallet(payments.address, (txHash, expect) => payments.verifyBurnTx(txHash, expect))
+  wave.setWallet(
+    payments.address,
+    (txHash, expect) => payments.verifyBurnTx(txHash, expect),
+    (addr, amt) => payments.send(addr, amt)
+  )
 }
 
 module.exports = { FEE_TRX, burnMemo, payFee, confirmBurn, wireWallet }

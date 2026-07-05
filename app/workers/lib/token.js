@@ -142,6 +142,59 @@ function verifyWaveEnd(originatorHex, waveId, hops, chainHash, sigHex) {
   }
 }
 
+// --- raffle: commit-reveal + the draw (ideas/raffle.md) --------------------
+// A sponsor-funded raffle picks one winner among the wave's (burn-gated) gallery entries.
+// Fairness = commit-reveal, using the wave's two phases: each participant COMMITS to a hidden
+// secret during the lobby (before anyone reveals), then REVEALS it in its gallery selfie. The
+// draw seed folds every revealed secret, so no participant — having committed before seeing
+// others — can steer the outcome (the residual is a last-revealer *abort*, bounded by a reveal
+// deadline; see the doc). Pure + deterministic here so anyone can recompute and audit the draw.
+
+// The public commitment to a hidden 32-byte secret.
+function commitOf(secretHex) {
+  return b4a.toString(crypto.hash(b4a.from(secretHex, 'hex')), 'hex')
+}
+
+// A participant signs its commitment with its ring key so only it can set its own commit
+// (the commit rides flooded gossip where peerId isn't connection-bound).
+function commitSigHash(waveId, peerId, commit) {
+  return crypto.hash(b4a.from(`raffle-commit|${waveId}|${peerId}|${commit}`))
+}
+function signCommit(keyPair, waveId, peerId, commit) {
+  return b4a.toString(crypto.sign(commitSigHash(waveId, peerId, commit), keyPair.secretKey), 'hex')
+}
+function verifyCommit(waveId, peerId, commit, sigHex) {
+  try {
+    return crypto.verify(
+      commitSigHash(waveId, peerId, commit),
+      b4a.from(sigHex, 'hex'),
+      b4a.from(peerId, 'hex')
+    )
+  } catch {
+    return false
+  }
+}
+
+// The draw. `tickets` = eligible entries [{ peerId, secret }] whose reveal matched their
+// commit. Deterministic: sort by peerId, fold the secrets into a seed, and pick winner `i`
+// (0 for a single winner) as uint(H(seed|i)) mod M. Returns { seed, index, winner } — anyone
+// with the same tickets recomputes the same winner. Empty ticket set → index -1, winner null.
+function raffleDraw(waveId, tickets, i = 0) {
+  const sorted = [...tickets].sort((a, b) =>
+    a.peerId < b.peerId ? -1 : a.peerId > b.peerId ? 1 : 0
+  )
+  const seed = b4a.toString(
+    crypto.hash(b4a.from(`raffle|${waveId}|` + sorted.map((t) => t.secret).join('|'))),
+    'hex'
+  )
+  if (sorted.length === 0) return { seed, index: -1, winner: null }
+  const h = crypto.hash(b4a.from(`${seed}|${i}`))
+  let n = 0n
+  for (let k = 0; k < 8; k++) n = (n << 8n) | BigInt(h[k]) // top 8 bytes as a u64
+  const index = Number(n % BigInt(sorted.length))
+  return { seed, index, winner: sorted[index] }
+}
+
 module.exports = {
   ZERO_HASH,
   receiptHash,
@@ -156,5 +209,9 @@ module.exports = {
   signGalleryKey,
   verifyGalleryKey,
   signWaveEnd,
-  verifyWaveEnd
+  verifyWaveEnd,
+  commitOf,
+  signCommit,
+  verifyCommit,
+  raffleDraw
 }

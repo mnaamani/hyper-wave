@@ -15,7 +15,11 @@ const {
   signGalleryKey,
   verifyGalleryKey,
   signWaveEnd,
-  verifyWaveEnd
+  verifyWaveEnd,
+  commitOf,
+  signCommit,
+  verifyCommit,
+  raffleDraw
 } = require('./token')
 
 const ZERO = b4a.toString(b4a.alloc(32), 'hex')
@@ -134,6 +138,46 @@ test('signGalleryKey/verifyGalleryKey binds the gallery key to the originator', 
   t.absent(verifyGalleryKey(id[1], waveId, key, sig), 'a non-originator can’t vouch for the key')
   t.absent(verifyGalleryKey(id[0], waveId, 'deadbeef', sig), 'a swapped key is rejected')
   t.absent(verifyGalleryKey(id[0], 'other-wave', key, sig), 'not reusable for another wave')
+})
+
+// --- raffle: commit-reveal + the draw --------------------------------------
+test('signCommit/verifyCommit — only the peer can set its own commit', (t) => {
+  const secret = b4a.toString(crypto.randomBytes(32), 'hex')
+  const commit = commitOf(secret)
+  const sig = signCommit(kp[1], waveId, id[1], commit)
+  t.ok(verifyCommit(waveId, id[1], commit, sig), 'valid signed commit verifies')
+  t.absent(verifyCommit(waveId, id[2], commit, sig), 'another peer can’t claim this commit')
+  t.absent(verifyCommit(waveId, id[1], commitOf(secret + '00'), sig), 'commit can’t be swapped')
+  t.absent(verifyCommit('other-wave', id[1], commit, sig), 'not reusable for another wave')
+})
+
+test('raffleDraw is deterministic and index-in-range', (t) => {
+  const tickets = [
+    { peerId: id[2], secret: 'aa' },
+    { peerId: id[0], secret: 'bb' },
+    { peerId: id[1], secret: 'cc' }
+  ]
+  const a = raffleDraw(waveId, tickets)
+  const b = raffleDraw(waveId, [...tickets].reverse()) // order-independent (sorted by peerId)
+  t.is(a.seed, b.seed, 'seed is independent of input order')
+  t.is(a.winner.peerId, b.winner.peerId, 'same winner regardless of input order')
+  t.ok(a.index >= 0 && a.index < 3, 'index within range')
+  t.not(raffleDraw(waveId, tickets).seed, raffleDraw('other', tickets).seed, 'seed binds waveId')
+})
+
+test('raffleDraw changes the winner when a revealed secret changes (unpredictable)', (t) => {
+  const base = [
+    { peerId: id[0], secret: '01' },
+    { peerId: id[1], secret: '02' },
+    { peerId: id[2], secret: '03' }
+  ]
+  const seeds = new Set()
+  for (const s of ['02', 'ff', 'ab', '7c']) {
+    const tix = [base[0], { peerId: id[1], secret: s }, base[2]]
+    seeds.add(raffleDraw(waveId, tix).seed)
+  }
+  t.is(seeds.size, 4, 'each distinct reveal set yields a distinct seed')
+  t.is(raffleDraw(waveId, []).winner, null, 'empty ticket set has no winner')
 })
 
 // --- wave-end completion attestation ---------------------------------------

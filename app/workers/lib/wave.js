@@ -40,7 +40,11 @@ const {
   signGalleryKey,
   verifyGalleryKey,
   signWaveEnd,
-  verifyWaveEnd
+  verifyWaveEnd,
+  commitOf,
+  signCommit,
+  verifyCommit,
+  raffleDraw
 } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
 
@@ -110,6 +114,9 @@ const PAY_TIMEOUT_MS = 60000
 const ADMIT_TIMEOUT_MS = 25000
 const ADMIT_RETRY_MS = 3000
 const BURN_WAIT_MS = 10000
+// Raffle (ideas/raffle.md): settle delay after a wave ends before the seed draws, so late
+// selfie reveals have replicated into its gallery first.
+const RAFFLE_DELAY_MS = 5000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -144,7 +151,12 @@ function createWave({
   // on-chain. `verifyBurnTx(txHash, {waveId, from, minTrx}) -> {ok}` is the on-chain check
   // (provided by the payment layer once the wallet is up; off by default so no-wallet
   // headless/tests behave as before — waves announce immediately, unpaid).
-  verifyBurnTx = null
+  verifyBurnTx = null,
+  // Sponsor-funded raffle (ideas/raffle.md): if > 0 and this instance is a seed/sponsor, after
+  // each wave it draws one winner among the gallery participants (commit-reveal) and pays them
+  // `raffleTrx` from its own wallet. 0 = off. The seed here is BOTH sponsor and entry-recorder;
+  // production should separate those powers (see the doc).
+  raffleTrx = 0
 }) {
   // A validator/seed is a first-class swarm peer whose job is to make the gallery survive:
   // it opens every wave's gallery and RETAINS it (never closes, store not wiped), so it can
@@ -169,6 +181,9 @@ function createWave({
   let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
+  let payReward = null // (sponsor/seed) send TRX to an address — used only for the raffle prize
+  const paidRaffles = new Set() // (seed) waves already drawn — draw exactly once
+  const raffleCommits = new Map() // (seed) waveId -> Map(peerId -> commit), from lobby gossip
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -205,6 +220,11 @@ function createWave({
   let stagedSelfie = null // { image, caption } captured in the lobby, awaiting my hop
   let myReceipt = null // my hop's receipt once the token reaches me, awaiting the selfie
   let selfiePosted = false // guard: post my selfie exactly once per wave
+  // Raffle commit-reveal (ideas/raffle.md): as a participant I COMMIT to a hidden secret when I
+  // opt in (lobby), publish the commit in wave-join/announce, and REVEAL the secret in my selfie.
+  let myRaffleSecret = null // 32 random bytes (hex); revealed in my gallery entry
+  let myRaffleCommit = null // H(secret); published in the lobby, before anyone reveals
+  let myRaffleCommitSig = null // ring signature so only I can set my commit
   let admissionPromise = null // in-flight add-writer request (dedup concurrent callers)
   let myBurnProof = null // my signed fee-burn attestation — my gallery-admission ticket
   const admittedKeys = new Set() // (admitter) writer core keys I've already admitted this wave
@@ -399,11 +419,13 @@ function createWave({
         wave.kickoffProof = m.paid
         verifyKickoff(m.waveId, m.paid)
       }
+      recordRaffleCommit(m.waveId, m.by, m.commit, m.commitSig) // the initiator is a participant too
       return
     }
     if (m.kind === 'wave-join') {
       if (wave && m.waveId === wave.id && m.peerId) {
         wave.roster.add(m.peerId)
+        recordRaffleCommit(m.waveId, m.peerId, m.commit, m.commitSig)
         onToken({ event: 'roster', waveId: wave.id, count: wave.roster.size })
       }
       return
@@ -814,11 +836,12 @@ function createWave({
       onToken({ event: 'gallery-error', reason: 'no-gallery-yet' })
       return
     }
-    // Capture the burn proof NOW, before the admission await: in a fast (few-peer) wave the
-    // race can complete during ensureWriter, and goIdle→resetSelfie would clear myBurnProof
-    // before the append — stripping our own tip address. The staged image/receipt are already
-    // captured as args; the burn is the last closure read that must be pinned too.
+    // Capture closure state NOW, before the admission await: in a fast (few-peer) wave the
+    // race can complete during ensureWriter, and goIdle→resetSelfie would clear these before
+    // the append — dropping our own tip address / raffle reveal. (The staged image/receipt are
+    // already captured as args.)
     const burnProof = myBurnProof
+    const raffleSecret = myRaffleSecret
     if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
       onToken({ event: 'gallery-error', reason: 'not-admitted' })
       return
@@ -839,6 +862,10 @@ function createWave({
       // burn came from, so a tip always reaches the wallet that paid in (§ tip-address gate).
       // It's verified then dropped from the stored entry (kept lean); `tronAddress === address`.
       burn: burnProof || undefined,
+      // raffle REVEAL: my secret, whose H(secret) I committed to in the lobby. The seed folds
+      // every revealed secret into the draw seed (ideas/raffle.md); I couldn't have chosen it
+      // to steer the outcome because I committed before anyone revealed.
+      raffleSecret: raffleSecret || undefined,
       timestamp: Date.now()
     })
     log('posted selfie hop', hopCount)
@@ -938,6 +965,19 @@ function createWave({
     })
   }
 
+  // My raffle commitment for the current wave (generated once): a hidden secret + its published
+  // commit H(secret) + a ring signature so only I can set it. Returns { commit, commitSig } to
+  // broadcast in the lobby (before anyone reveals); the secret is revealed later in my selfie.
+  function raffleOptIn() {
+    if (!wave) return null
+    if (!myRaffleSecret) {
+      myRaffleSecret = b4a.toString(crypto.randomBytes(32), 'hex')
+      myRaffleCommit = commitOf(myRaffleSecret)
+      myRaffleCommitSig = signCommit(swarm.keyPair, wave.id, me.id, myRaffleCommit)
+    }
+    return { commit: myRaffleCommit, commitSig: myRaffleCommitSig }
+  }
+
   // Opt in to the current lobby (renderer command / harness). Returns the joined waveId
   // (so the worker can charge the join fee on a real opt-in), or null if it was a no-op.
   function join() {
@@ -949,7 +989,14 @@ function createWave({
     }
     wave.joined = true
     wave.roster.add(me.id)
-    floodGossip({ kind: 'wave-join', waveId: wave.id, peerId: me.id })
+    const rc = raffleOptIn() // commit to my raffle secret in the lobby (revealed in my selfie)
+    floodGossip({
+      kind: 'wave-join',
+      waveId: wave.id,
+      peerId: me.id,
+      commit: rc.commit,
+      commitSig: rc.commitSig
+    })
     onToken({ event: 'joined', waveId: wave.id, count: wave.roster.size })
     return wave.id
   }
@@ -981,7 +1028,75 @@ function createWave({
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
     if (stalled) onToken({ event: 'stalled', waveId, reason: 'no successor' })
     else onToken({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
+    // Sponsor/seed: after a short settle (so late selfie reveals land), draw the raffle. Reads
+    // the retained gallery + recorded commits by waveId, so goIdle clearing `wave` is fine.
+    // The draw runs whenever raffle is enabled; payment happens only if a wallet is wired.
+    if (isSeed && raffleTrx > 0) {
+      setTimeout(() => runRaffle(waveId).catch(() => {}), RAFFLE_DELAY_MS)
+    }
     goIdle(stalled ? 'stalled' : 'ended')
+  }
+
+  // (Seed) Record a participant's raffle commitment, seen in lobby gossip (wave-announce /
+  // wave-join). Only while the wave is in its lobby (before any reveal), only a
+  // validly-signed commit by that peer, first-write-wins. This is the pre-reveal binding: a
+  // peer commits before anyone reveals, so it can't choose a secret to steer the draw.
+  function recordRaffleCommit(waveId, peerId, commit, commitSig) {
+    if (!isSeed || raffleTrx <= 0 || !commit || !peerId) return
+    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return // reveals happen in racing
+    if (!verifyCommit(waveId, peerId, commit, commitSig)) return
+    let byPeer = raffleCommits.get(waveId)
+    if (!byPeer) raffleCommits.set(waveId, (byPeer = new Map()))
+    if (!byPeer.has(peerId)) byPeer.set(peerId, commit) // first commit wins (can't be changed)
+  }
+
+  // (Seed/sponsor) Draw + pay the raffle for a finished wave. Eligible tickets = gallery
+  // entries whose revealed `raffleSecret` matches the commit that peer published in the lobby.
+  // Deterministic + auditable: raffleDraw folds the revealed secrets into a seed and picks the
+  // winner; the seed emits the full ticket set so anyone can recompute. Pays exactly once.
+  async function runRaffle(waveId) {
+    if (paidRaffles.has(waveId)) return
+    paidRaffles.add(waveId)
+    const commits = raffleCommits.get(waveId) || new Map()
+    raffleCommits.delete(waveId)
+    const g = galleries.get(waveId)
+    if (!g) return
+    await g.update().catch(() => {})
+    const entries = await readGallery(g)
+    // keep only entries whose reveal matches a lobby commit for that peer
+    const tickets = []
+    for (const e of entries) {
+      const commit = commits.get(e.peerId)
+      if (!commit || !e.raffleSecret || commitOf(e.raffleSecret) !== commit) continue
+      tickets.push({ peerId: e.peerId, secret: e.raffleSecret, address: e.address || '' })
+    }
+    const { seed, winner } = raffleDraw(waveId, tickets)
+    onToken({
+      event: 'raffle-draw',
+      waveId,
+      tickets: tickets.length,
+      seed,
+      winner: winner ? winner.peerId : null
+    })
+    if (!winner) return log('raffle: no eligible tickets for wave', shortId(waveId))
+    if (!payReward) return log('raffle: winner', shortId(winner.peerId), '(no wallet — not paid)')
+    if (!winner.address) return log('raffle: winner has no payout address', shortId(winner.peerId))
+    if (winner.peerId === me.id) return // sponsor never wins its own draw (it doesn't selfie)
+    try {
+      const { hash } = await payReward(winner.address, raffleTrx)
+      log('raffle: paid', raffleTrx, 'TRX ->', shortId(winner.peerId), 'tx', hash)
+      onToken({
+        event: 'raffle-win',
+        waveId,
+        winner: winner.peerId,
+        address: winner.address,
+        amount: raffleTrx,
+        tickets: tickets.length,
+        hash
+      })
+    } catch (e) {
+      onToken({ event: 'raffle-error', waveId, error: e.message })
+    }
   }
 
   // Am I opted in to the current wave (a roster member who took a lobby selfie)?
@@ -1022,6 +1137,11 @@ function createWave({
     myBurnProof = null
     admittedKeys.clear()
     admittingKeys.clear()
+    myRaffleSecret = null
+    myRaffleCommit = null
+    myRaffleCommitSig = null
+    // NB: raffleCommits is keyed per-wave and consumed by the *delayed* runRaffle after
+    // goIdle, so it is NOT cleared here — runRaffle deletes its own wave's entry when done.
   }
 
   // Emit a holding event; canSelfie tells the renderer this peer is a participant (its
@@ -1212,10 +1332,20 @@ function createWave({
   }
 
   // Flood the wave-announce (carrying the kick-off `paid` proof when present) and start the
-  // lobby→race timer. Shared by the paid and unpaid initiator paths.
+  // lobby→race timer. Shared by the paid and unpaid initiator paths. The initiator is a
+  // participant too, so it publishes its own raffle commit here (in the lobby).
   function doAnnounce(waveId, paidProof) {
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '')
-    floodGossip({ kind: 'wave-announce', waveId, by: me.id, lobbyMs, paid: paidProof || undefined })
+    const rc = raffleOptIn()
+    floodGossip({
+      kind: 'wave-announce',
+      waveId,
+      by: me.id,
+      lobbyMs,
+      paid: paidProof || undefined,
+      commit: rc ? rc.commit : undefined,
+      commitSig: rc ? rc.commitSig : undefined
+    })
     clearTimeout(lobbyTimer)
     lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs)
   }
@@ -1415,13 +1545,15 @@ function createWave({
     setCountry,
     stageSelfie,
     // Wire the payment layer once the wallet is up: my address (for gallery tips /
-    // attestations) and the on-chain burn verifier (enables the paid-wave anti-spam gate).
-    setWallet: (address, verifier) => {
+    // attestations), the on-chain burn verifier (enables the paid-wave anti-spam gate), and —
+    // for a sponsor/seed running a raffle — the reward sender (pays the prize).
+    setWallet: (address, verifier, rewarder) => {
       walletAddress = address || null
       if (verifier) {
         verifyBurnOnChain = verifier
         enforcePaid = true
       }
+      if (rewarder) payReward = rewarder
     },
     announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
     recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)

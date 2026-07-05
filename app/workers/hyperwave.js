@@ -27,6 +27,7 @@ const wave = createWave({
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
   role: env.HYPERWAVE_ROLE || 'peer', // 'validator'/'seed' runs this instance as a gallery seed
+  raffleTrx: env.HYPERWAVE_RAFFLE_TRX ? Number(env.HYPERWAVE_RAFFLE_TRX) : 0, // seed-only prize
   onState: (state) => send({ type: 'state', ...state }),
   onToken: (event) => send({ type: 'token', ...event }),
   onGallery: (items) => send({ type: 'gallery', items }),

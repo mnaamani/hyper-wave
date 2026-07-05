@@ -149,6 +149,12 @@ ipc.on('token', (e) => {
     case 'stalled':
       hud.status(`⚠️ wave stalled (${e.reason})`)
       break
+    case 'raffle-win':
+      // sponsor/seed drew a winner among the gallery participants (commit-reveal draw)
+      hud.status(
+        `🎉 raffle winner: ${e.winner.slice(0, 8)}… — ${e.amount} TRX (of ${e.tickets} tickets, tx ${e.hash.slice(0, 8)}…)`
+      )
+      break
   }
 })
 
