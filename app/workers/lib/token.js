@@ -175,11 +175,14 @@ function verifyCommit(waveId, peerId, commit, sigHex) {
   }
 }
 
-// The draw. `tickets` = eligible entries [{ peerId, secret }] whose reveal matched their
-// commit. Deterministic: sort by peerId, fold the secrets into a seed, and pick winner `i`
-// (0 for a single winner) as uint(H(seed|i)) mod M. Returns { seed, index, winner } — anyone
-// with the same tickets recomputes the same winner. Empty ticket set → index -1, winner null.
-function raffleDraw(waveId, tickets, i = 0) {
+// The draw. `tickets` = eligible entries [{ peerId, secret, ... }] whose reveal matched their
+// commit. Deterministic: fold the secrets (in peerId order) into a `seed`, then produce a
+// deterministic RANKING of the tickets — each keyed by H(seed|peerId), sorted ascending. The
+// winner is `order[0]`; a payer that must skip an ineligible winner (e.g. its burn doesn't
+// verify — admission is optimistic) walks down `order`, and that walk is itself auditable
+// (skipping a valid earlier candidate is detectable). Anyone with the same tickets recomputes
+// the same seed + order. Returns { seed, order, winner: order[0] | null }.
+function raffleDraw(waveId, tickets) {
   const sorted = [...tickets].sort((a, b) =>
     a.peerId < b.peerId ? -1 : a.peerId > b.peerId ? 1 : 0
   )
@@ -187,12 +190,11 @@ function raffleDraw(waveId, tickets, i = 0) {
     crypto.hash(b4a.from(`raffle|${waveId}|` + sorted.map((t) => t.secret).join('|'))),
     'hex'
   )
-  if (sorted.length === 0) return { seed, index: -1, winner: null }
-  const h = crypto.hash(b4a.from(`${seed}|${i}`))
-  let n = 0n
-  for (let k = 0; k < 8; k++) n = (n << 8n) | BigInt(h[k]) // top 8 bytes as a u64
-  const index = Number(n % BigInt(sorted.length))
-  return { seed, index, winner: sorted[index] }
+  const order = tickets
+    .map((t) => ({ t, k: b4a.toString(crypto.hash(b4a.from(`${seed}|${t.peerId}`)), 'hex') }))
+    .sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0))
+    .map((x) => x.t)
+  return { seed, order, winner: order[0] || null }
 }
 
 module.exports = {

@@ -45,10 +45,12 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       skin in the game with no beneficiary; on-chain memo `hyperwave:<waveId>:<peerId>`
 - [x] Paid-wave anti-spam gate: no announce until the kick-off burn is on-chain (carried as
       the signed `paid` proof); peers ignore unproven announces and verify before joining
-- [x] **Burn-gated gallery admission**: `add-writer` carries the join burn attestation; the
-      admitter runs `burnAuthorizes` + verifies the burn on-chain before granting write access
-      — a gallery seat requires a real burn, so every tippable selfie is from a peer who paid
-      in (bounds the gallery to one entry per burn). Verified live end-to-end on Nile.
+- [x] **Optimistic gallery admission** (scales without a Tron node/indexer): `add-writer`
+      carries the join burn attestation; the admitter checks only the *signature*
+      (`burnAuthorizes`) — **no on-chain call on the write path** (that was O(N) reads on the
+      admitter). The burn is verified where it pays off: at raffle payout (winner walk) + by
+      tippers via `burnTx`. Spam bounded by one-entry-per-peer + a byte-size cap
+      (`MAX_IMAGE_BYTES`/`MAX_CAPTION_BYTES`). Soft, publicly-detectable gate; verified live.
 - [x] **Signed gallery key**: originator signs `(waveId, autobaseKey)` (`signGalleryKey`);
       peers verify before opening — a relay can't swap the unsigned key to a rogue Autobase
 - [x] **Tip address bound to the burn**: `apply()` keeps a selfie's tip `address` only if a
@@ -90,29 +92,20 @@ independent per-seat proofs). Decision deliberately parked — the serial token 
 for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Adversarial hardening still open (`docs/protocol.md` §11.3)
-- [ ] Per-connection rate limiting (token buckets per message kind) + a byte-size cap on the
-      inline selfie `image` + bounds on auxiliary maps (`seen`/`endedWaves`/`routed`/
-      `lookupRoute`/`goneUntil`). (Gallery entry *count* is already bounded — one per burn.)
+- [ ] Per-connection rate limiting (token buckets per message kind) + bounds on auxiliary maps
+      (`seen`/`endedWaves`/`routed`/`lookupRoute`/`goneUntil`). More important now that
+      admission is optimistic (gallery seats are cheap) — the token bucket caps how many
+      add-writer/selfie one peer can push. (Per-entry byte cap already done.)
 - [ ] Ban peers by IP for invalid protocol messages: track per-connection violations (bad
       JSON, failed signature/identity-binding checks, forged gallery keys, spoofed sender ids)
       and, past a threshold, drop + block the peer at the transport layer (Hyperswarm `ban` /
       `swarm.leavePeer` by remote key; consider IP-level so a peer can't just rekey). Turns the
       per-message drops above into an escalating penalty, so a modified client that keeps
       sending garbage gets cut off rather than re-processed each time.
-- [ ] Byzantine admitter: burn-gated admission is enforced by the admitting writer, so a
-      malicious *already-admitted* writer could admit a non-payer. Fine while admissions route
-      through the originator/seed; harden with quorum admission or proof-in-the-op if needed.
-- [ ] **On-chain burn-verification rate at scale** (same shape as the raffle's REST-throttle
-      problem). Two hotspots that grow with participants N: (a) every joiner verifies the *same*
-      kick-off burn (N reads of 1 immutable tx) — trivially fixed by a **caching RPC proxy/CDN**
-      (deterministic result), no protocol change; (b) the admitter verifies each join burn
-      (1 node × N distinct txs) — concentrated. Keep the *hard* gate but cut the rate:
-      **distribute admission across admitted writers** (the cascade already exists — route
-      add-writer to the nearest writer), and/or run a **local Tron node / indexer / block-event
-      subscription** at the hub instead of polling `getTransaction` per burn. A raffle-style
-      inversion (admit optimistically on the signed attestation, verify lazily + prune via the
-      `burnTx` already in each entry) is possible but downgrades the hard anti-spam gate to a
-      soft, detectable one — a deliberate extreme-scale trade-off, pair with rate limiting.
+- [ ] Kick-off verification rate: every joiner still reads the *same* kick-off burn on-chain
+      (N reads of 1 immutable tx). Not a concentration bottleneck (distributed, 1 read/joiner)
+      and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
+      the anti-*wave*-spam gate; making it optimistic would re-open free wave-spam).
 - [ ] Raffle production hardening (`ideas/raffle.md`): **separate the admitter (independent
       wave originator) from the prize-holder** so the sponsor can't censor the entry set;
       escrow/contract custody instead of the trusted sponsor wallet; a VDF (Verifiable Delay

@@ -45,7 +45,7 @@ const wave = createWave({
     if (e.event === 'raffle-draw') {
       console.log(
         `[${name}] RAFFLE-DRAW wave=${e.waveId.slice(0, 8)} tickets=${e.tickets} ` +
-          `seed=${e.seed.slice(0, 8)} winner=${e.winner ? e.winner.slice(0, 8) : 'none'}`
+          `seed=${e.seed.slice(0, 8)} top=${e.top ? e.top.slice(0, 8) : 'none'}`
       )
     }
     if (e.event === 'raffle-win') {

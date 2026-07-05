@@ -228,7 +228,6 @@ function createWave({
   let admissionPromise = null // in-flight add-writer request (dedup concurrent callers)
   let myBurnProof = null // my signed fee-burn attestation — my gallery-admission ticket
   const admittedKeys = new Set() // (admitter) writer core keys I've already admitted this wave
-  const admittingKeys = new Set() // (admitter) keys with an on-chain burn check currently in flight
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -735,39 +734,24 @@ function createWave({
     onGallery(await readGallery(base))
   }
 
-  // (Admitter side) Grant gallery write access — the anti-spam gate. Only a current writer
-  // (the originator, or an already-admitted writer) admits, and only if the requester proves:
+  // (Admitter side) Grant gallery write access — OPTIMISTIC admission. Only a current writer
+  // (the originator, or an already-admitted writer) admits, and only if the requester presents:
   //   1. a valid hop receipt for the current wave (authenticity, connection-bound peerId), and
-  //   2. a fee-burn attestation bound to that peerId + wave (burnAuthorizes), whose txHash the
-  //      admitter then verifies ON-CHAIN (verifyBurnOnChain) — a real, unspendable burn.
-  // So every gallery entry is backed by a real burn: no burn, no seat. Because tips go to
-  // gallery entries, a tip therefore always reaches a peer who paid in. When enforcement is off
-  // (no wallet / tests) the burn checks are skipped, matching the paid-gate. The on-chain step
-  // is non-deterministic, so it's the admitter that vouches (apply() can't do network I/O);
-  // this holds while admissions route through an honest well-connected writer (originator/seed).
-  async function admitWriter(m) {
+  //   2. a fee-burn attestation SIGNED for that peerId + wave (burnAuthorizes) — carrying the
+  //      txHash + tip address, but NOT verified on-chain here.
+  // We deliberately do *not* verify the burn on-chain at admission: that's O(N) REST calls
+  // concentrated on the admitter and doesn't scale. Instead the burn is verified only when it
+  // pays off — at raffle payout (the winner walk, runRaffle) — and by tippers/auditors via the
+  // entry's `burnTx`. Spam is bounded locally: one entry per peer + a byte-size cap on the
+  // image (gallery.js apply). So a fake-burn entry is cheap to make but wins nothing (excluded
+  // at payout, worthless to tip) and is publicly detectable. Fully local + synchronous.
+  function admitWriter(m) {
     if (!base || !base.writable || !m.key || m.waveId !== currentWaveId) return
-    if (admittedKeys.has(m.key) || admittingKeys.has(m.key)) return // done / on-chain check in flight
+    if (admittedKeys.has(m.key)) return
     if (!verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)) {
       return
     }
-    if (enforcePaid) {
-      if (!burnAuthorizes(m.burn, m.peerId, m.waveId)) return // no valid burn ticket
-      if (verifyBurnOnChain) {
-        admittingKeys.add(m.key) // dedup concurrent re-broadcasts while this check runs
-        const r = await verifyBurnOnChain(m.burn.txHash, {
-          waveId: m.waveId,
-          from: m.burn.tronAddress,
-          minTrx: m.burn.amount
-        }).catch(() => null)
-        admittingKeys.delete(m.key)
-        if (!r || !r.ok) {
-          return log('add-writer: burn not verified', shortId(m.peerId), r && r.reason)
-        }
-      }
-      // re-check after the await — the wave may have moved on
-      if (!base || !base.writable || m.waveId !== currentWaveId || admittedKeys.has(m.key)) return
-    }
+    if (enforcePaid && !burnAuthorizes(m.burn, m.peerId, m.waveId)) return // needs a signed burn attestation
     admittedKeys.add(m.key)
     base.append({ type: 'add-writer', key: m.key })
     log('admitted gallery writer', shortId(m.peerId))
@@ -1050,12 +1034,14 @@ function createWave({
     if (!byPeer.has(peerId)) byPeer.set(peerId, commit) // first commit wins (can't be changed)
   }
 
-  // (Seed/sponsor) Draw + pay the raffle for a finished wave. Eligible tickets = gallery
-  // entries whose revealed `raffleSecret` matches the commit that peer published in the lobby.
-  // Deterministic: raffleDraw folds the revealed secrets into a seed and picks the winner.
-  // Publicly auditable AFTER THE FACT (not from the seed's word): commits are on-chain in the
-  // burn memos + reveals are in the gallery, so anyone can recompute the eligible set and the
-  // winner from the chain + gallery. Pays exactly once.
+  // (Seed/sponsor) Draw + pay the raffle for a finished wave. Eligible tickets = gallery entries
+  // whose revealed `raffleSecret` matches the commit that peer cached from lobby gossip.
+  // raffleDraw folds the reveals into a seed and a deterministic ranking; the seed then walks
+  // the ranking and pays the FIRST candidate whose burn verifies ON-CHAIN — because admission
+  // was optimistic (no burn check at write time), the burn is verified here, and only for the
+  // winner (+ any fake-burn entries ranked above it). So on-chain reads are O(1)-ish per wave,
+  // not O(participants). Fully auditable: anyone recomputes the seed + ranking from the reveals,
+  // and the walk (skip a candidate only if its burn is really invalid) is checkable on-chain.
   async function runRaffle(waveId) {
     if (paidRaffles.has(waveId)) return
     paidRaffles.add(waveId)
@@ -1065,28 +1051,46 @@ function createWave({
     if (!g) return
     await g.update().catch(() => {})
     const entries = await readGallery(g)
-    // Keep only entries whose reveal matches that peer's commit. The seed uses the commits it
-    // cached from LOBBY GOSSIP (in memory) — fast, no per-participant on-chain REST fetch (which
-    // would be slow and hit rate limits). The same commit is ALSO written on-chain in each
-    // burn memo (`hyperwave:…:<commit>`, kept locatable via `burnTx`), so anyone can later
-    // recompute the eligible set from the chain + gallery and hold the seed accountable if it
-    // dropped a validly-committed participant. Accountability lives on-chain; the hot draw path
-    // stays in memory (ideas/raffle.md).
     const tickets = []
     for (const e of entries) {
       const commit = commits.get(e.peerId)
       if (!commit || !e.raffleSecret || commitOf(e.raffleSecret) !== commit) continue
-      tickets.push({ peerId: e.peerId, secret: e.raffleSecret, address: e.address || '' })
+      tickets.push({
+        peerId: e.peerId,
+        secret: e.raffleSecret,
+        address: e.address || '',
+        burnTx: e.burnTx || ''
+      })
     }
-    const { seed, winner } = raffleDraw(waveId, tickets)
+    const { seed, order } = raffleDraw(waveId, tickets)
     onToken({
       event: 'raffle-draw',
       waveId,
       tickets: tickets.length,
       seed,
-      winner: winner ? winner.peerId : null
+      top: order[0] ? order[0].peerId : null
     })
-    if (!winner) return log('raffle: no eligible tickets for wave', shortId(waveId))
+    if (order.length === 0) return log('raffle: no eligible tickets for wave', shortId(waveId))
+    // Walk the ranking; the winner is the first candidate whose fee burn verifies on-chain.
+    let winner = null
+    for (const cand of order) {
+      if (verifyBurnOnChain) {
+        const r = cand.burnTx
+          ? await verifyBurnOnChain(cand.burnTx, {
+              waveId,
+              from: cand.address,
+              minTrx: 1
+            }).catch(() => null)
+          : null
+        if (!r || !r.ok) {
+          log('raffle: skipping unverified burn', shortId(cand.peerId), r && r.reason)
+          continue // fake / unpaid / unconfirmed burn — not a valid winner
+        }
+      }
+      winner = cand
+      break
+    }
+    if (!winner) return log('raffle: no candidate with a verified burn for wave', shortId(waveId))
     if (!payReward) return log('raffle: winner', shortId(winner.peerId), '(no wallet — not paid)')
     if (!winner.address) return log('raffle: winner has no payout address', shortId(winner.peerId))
     if (winner.peerId === me.id) return // sponsor never wins its own draw (it doesn't selfie)
@@ -1144,7 +1148,6 @@ function createWave({
     admissionPromise = null
     myBurnProof = null
     admittedKeys.clear()
-    admittingKeys.clear()
     myRaffleSecret = null
     myRaffleCommit = null
     myRaffleCommitSig = null

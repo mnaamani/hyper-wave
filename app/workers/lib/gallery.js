@@ -5,6 +5,14 @@
 const b4a = require('b4a')
 const { verifyReceipt, burnAuthorizes } = require('./token')
 
+// Per-entry write budget (deterministic, enforced in apply on every peer). With OPTIMISTIC
+// admission a gallery seat no longer costs a verified on-chain burn, so bound what a seat can
+// write: one entry per peer (dedup below) + these size caps. Keeps a modified client from
+// bloating the replicated/retained gallery. The inline selfie image (a JPEG data URL) is the
+// dominant field; caption is short. Oversized entries are dropped (not truncated).
+const MAX_IMAGE_BYTES = 256 * 1024 // ~256 KB data-URL string (≈190 KB image after base64)
+const MAX_CAPTION_BYTES = 512
+
 // A selfie is admitted to the gallery only if it carries a receipt validly signed
 // by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
 // Runs in apply() so every peer enforces it identically. (Authenticity, not proof
@@ -54,6 +62,9 @@ function galleryConfig() {
           continue
         }
         if (op?.type !== 'wave-selfie' || !selfieHasValidReceipt(op)) continue
+        // size cap (optimistic admission → bound each seat's write); drop oversized entries
+        if ((op.image || '').length > MAX_IMAGE_BYTES) continue
+        if ((op.caption || '').length > MAX_CAPTION_BYTES) continue
         if (seen === null) {
           seen = new Set()
           for (let i = 0; i < view.length; i++) {

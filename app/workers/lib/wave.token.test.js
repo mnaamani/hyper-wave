@@ -151,21 +151,30 @@ test('signCommit/verifyCommit — only the peer can set its own commit', (t) => 
   t.absent(verifyCommit('other-wave', id[1], commit, sig), 'not reusable for another wave')
 })
 
-test('raffleDraw is deterministic and index-in-range', (t) => {
+test('raffleDraw yields a deterministic ranking (a full permutation of the tickets)', (t) => {
   const tickets = [
     { peerId: id[2], secret: 'aa' },
     { peerId: id[0], secret: 'bb' },
     { peerId: id[1], secret: 'cc' }
   ]
   const a = raffleDraw(waveId, tickets)
-  const b = raffleDraw(waveId, [...tickets].reverse()) // order-independent (sorted by peerId)
+  const b = raffleDraw(waveId, [...tickets].reverse()) // order-independent (seed sorts by peerId)
   t.is(a.seed, b.seed, 'seed is independent of input order')
-  t.is(a.winner.peerId, b.winner.peerId, 'same winner regardless of input order')
-  t.ok(a.index >= 0 && a.index < 3, 'index within range')
+  t.alike(
+    a.order.map((x) => x.peerId),
+    b.order.map((x) => x.peerId),
+    'the ranking is independent of input order'
+  )
+  t.is(a.winner.peerId, a.order[0].peerId, 'winner = order[0]')
+  t.is(
+    new Set(a.order.map((x) => x.peerId)).size,
+    3,
+    'ranking is a permutation (all tickets, once)'
+  )
   t.not(raffleDraw(waveId, tickets).seed, raffleDraw('other', tickets).seed, 'seed binds waveId')
 })
 
-test('raffleDraw changes the winner when a revealed secret changes (unpredictable)', (t) => {
+test('raffleDraw changes the seed/ranking when a revealed secret changes (unpredictable)', (t) => {
   const base = [
     { peerId: id[0], secret: '01' },
     { peerId: id[1], secret: '02' },
@@ -177,7 +186,9 @@ test('raffleDraw changes the winner when a revealed secret changes (unpredictabl
     seeds.add(raffleDraw(waveId, tix).seed)
   }
   t.is(seeds.size, 4, 'each distinct reveal set yields a distinct seed')
-  t.is(raffleDraw(waveId, []).winner, null, 'empty ticket set has no winner')
+  const empty = raffleDraw(waveId, [])
+  t.is(empty.winner, null, 'empty ticket set has no winner')
+  t.is(empty.order.length, 0, 'empty ticket set has an empty ranking')
 })
 
 // --- wave-end completion attestation ---------------------------------------

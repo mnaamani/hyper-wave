@@ -74,6 +74,15 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
   await base.update()
   t.is((await readGallery(base)).length, 2, 'impersonated selfie dropped')
 
+  // size cap: an oversized image is dropped (bounds each seat under optimistic admission).
+  // Use a fresh peer so it's not blocked by the one-entry-per-peer dedup.
+  const big = crypto.keyPair()
+  const huge = selfie(big, 4, 'huge', 500)
+  huge.image = 'x'.repeat(256 * 1024 + 1)
+  await base.append(huge)
+  await base.update()
+  t.is((await readGallery(base)).length, 2, 'oversized-image selfie dropped')
+
   // add-writer op is accepted by apply() without throwing
   await base.append({ type: 'add-writer', key: b4a.toString(crypto.keyPair().publicKey, 'hex') })
   await base.update()
