@@ -11,6 +11,7 @@
   "private": true,
   "scripts": {
     "test": "bare test.js",
+    "test:e2e:local": "node e2e/wave.local.e2e.js",
     "lint": "prettier --check . && lunte",
     "format": "prettier --write . && lunte --fix",
     "start": "electron-forge start -- --no-updates",

@@ -71,6 +71,13 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       (a paid game of chance is legally a lottery).
 - [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
       semver can't parse (`scripts/fix-bare-engines.js`)
+- [x] **End-to-end integration tests** (`app/e2e/`): a Node+brittle harness spawns a local DHT
+      + N real `wave.run.js` peers and drives full waves, asserting on the protocol's structured
+      event stream (poll-until-event, no sleeps; process-group teardown). Local suite (no wallet
+      / no on-chain, deterministic): 8-peer gallery convergence, self-healing under 2 mid-race
+      kills, raffle draw over all N. `npm run test:e2e:local`; runs in GitHub Actions
+      (`.github/workflows/ci.yml`) alongside unit tests. On-chain tier (paid gate / burns /
+      raffle payout / tips) still TODO — needs funded-wallet secrets + a gated nightly workflow.
 
 ### Adversarial hardening (against a modified client) — `docs/protocol.md` §11.2
 - [x] Identity binding: a self-describing gossip field (`pointers.id`, `wave-pos.holder`,

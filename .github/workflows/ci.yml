@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # `bare` is the worker's real runtime; unit + e2e tests both drive it.
+      - name: Install the Bare runtime
+        run: npm install -g bare-runtime
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint + format check
+        run: npm run lint
+
+      - name: Unit tests (brittle, under Bare)
+        run: npm test
+
+      # Real end-to-end: spawns a local DHT + N bare peers and drives full waves. No wallets /
+      # no on-chain, so it's deterministic and secret-free. Turn E2E_PEERS down if a runner is
+      # constrained. (The paid-wave / raffle-payout on-chain suite runs separately — it needs
+      # funded testnet wallets as secrets and is gated to manual/nightly.)
+      - name: Local end-to-end tests
+        run: npm run test:e2e:local
+        env:
+          E2E_PEERS: 8
