@@ -102,6 +102,17 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 - [ ] Byzantine admitter: burn-gated admission is enforced by the admitting writer, so a
       malicious *already-admitted* writer could admit a non-payer. Fine while admissions route
       through the originator/seed; harden with quorum admission or proof-in-the-op if needed.
+- [ ] **On-chain burn-verification rate at scale** (same shape as the raffle's REST-throttle
+      problem). Two hotspots that grow with participants N: (a) every joiner verifies the *same*
+      kick-off burn (N reads of 1 immutable tx) — trivially fixed by a **caching RPC proxy/CDN**
+      (deterministic result), no protocol change; (b) the admitter verifies each join burn
+      (1 node × N distinct txs) — concentrated. Keep the *hard* gate but cut the rate:
+      **distribute admission across admitted writers** (the cascade already exists — route
+      add-writer to the nearest writer), and/or run a **local Tron node / indexer / block-event
+      subscription** at the hub instead of polling `getTransaction` per burn. A raffle-style
+      inversion (admit optimistically on the signed attestation, verify lazily + prune via the
+      `burnTx` already in each entry) is possible but downgrades the hard anti-spam gate to a
+      soft, detectable one — a deliberate extreme-scale trade-off, pair with rate limiting.
 - [ ] Raffle production hardening (`ideas/raffle.md`): **separate the admitter (independent
       wave originator) from the prize-holder** so the sponsor can't censor the entry set;
       escrow/contract custody instead of the trusted sponsor wallet; a VDF (Verifiable Delay
