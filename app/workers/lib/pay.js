@@ -21,20 +21,29 @@ const BURN_ADDRESS = 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb'
 const toSun = (trx) => BigInt(Math.round(Number(trx) * SUN))
 const fromSun = (raw) => Number(raw) / SUN
 
-async function createPayments({ storageDir, provider = NILE_PROVIDER, log = () => {} } = {}) {
+async function createPayments({
+  storageDir,
+  seed: injectedSeed,
+  provider = NILE_PROVIDER,
+  log = () => {}
+} = {}) {
   const { default: WDK } = await import('@tetherto/wdk')
   const { default: WalletManagerTron } = await import('@tetherto/wdk-wallet-tron')
 
-  // Persist the seed alongside (but outside) the per-run hyperwave store that wave.js wipes,
-  // so the wallet is self-custodial and survives restarts.
+  // Seed precedence: injected -> file -> generate+persist. A mobile host injects the seed from
+  // secure storage (Keychain/Keystore) and never touches the filesystem; desktop persists it in
+  // a file alongside (but outside) the per-run hyperwave store that wave.js wipes, so the wallet
+  // is self-custodial and survives restarts.
   try {
     fs.mkdirSync(storageDir, { recursive: true })
   } catch {}
   const seedFile = storageDir + '/wallet.seed'
-  let seed
-  try {
-    seed = fs.readFileSync(seedFile, 'utf8').trim()
-  } catch {}
+  let seed = injectedSeed && injectedSeed.trim()
+  if (!seed) {
+    try {
+      seed = fs.readFileSync(seedFile, 'utf8').trim()
+    } catch {}
+  }
   if (!seed) {
     seed = WDK.getRandomSeedPhrase()
     fs.writeFileSync(seedFile, seed)
