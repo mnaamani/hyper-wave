@@ -771,22 +771,27 @@ among the wave's gallery participants and pays the prize — a positive incentiv
 participate, on top of burned fees + tips. Fairness is **commit-reveal**, using the wave's two
 phases and **no external randomness beacon** (design + trade-offs: `ideas/raffle.md`).
 
-1. **Commit (lobby).** Each participant generates a 32-byte `secret` and commits to
-   `commit = BLAKE2b(secret)` **on-chain**, in its fee-burn **memo**
-   (`hyperwave:<waveId>:<peerId>:<commit>`, §9.2), before anyone reveals. The burn happens in
-   the lobby, so the commit is **timestamped on-chain, immutable, and auditable by anyone** —
-   not just held in the seed's memory. (It also rides `wave-join`/`wave-announce`, ring-signed
-   `commitSig`, as a **fallback** the seed uses only when there's no on-chain burn, e.g.
-   wallet-less test runs.)
+1. **Commit (lobby).** Each participant generates a 32-byte `secret` and publishes
+   `commit = BLAKE2b(secret)` in the lobby **two ways**: (a) as a ring-signed `commit`/`commitSig`
+   on its `wave-join` / `wave-announce` gossip — which the seed caches **in memory** while its
+   wave is in the lobby (the phase gate is the reveal deadline); and (b) **on-chain**, in its
+   fee-burn **memo** (`hyperwave:<waveId>:<peerId>:<commit>`, §9.2), timestamped in the lobby and
+   immutable. Both hold the same value.
 2. **Reveal (gallery).** Each participant reveals `secret` in its `wave-selfie` entry, which
-   also carries the burn's `burnTx` so anyone can find the on-chain commit.
+   also carries the burn's `burnTx` so anyone can locate the on-chain commit.
 3. **Draw (seed, after wave-end + `RAFFLE_DELAY_MS`).** Eligible tickets = entries whose
-   `BLAKE2b(raffleSecret) ==` that peer's commit, **read from the on-chain memo** via `burnTx`
-   (authoritative; the gossip commit is the wallet-less fallback). `seed = BLAKE2b("raffle|" ‖
-   waveId ‖ sorted secrets)`; `winner = tickets[ uint(BLAKE2b(seed ‖ 0)) mod M ]` (sorted by
-   `peerId`). The seed pays `raffleTrx` to the winner's burn-verified `address`. Because commits
-   and reveals are both public (on-chain + gallery), **anyone can recompute and audit the whole
-   draw** with a Tron node — no trust in the seed's bookkeeping.
+   `BLAKE2b(raffleSecret) ==` the commit the seed **cached from lobby gossip** (in memory — the
+   seed does **not** fetch each commit over REST at draw time, which would be slow and
+   rate-limited). `seed = BLAKE2b("raffle|" ‖ waveId ‖ sorted secrets)`;
+   `winner = tickets[ uint(BLAKE2b(seed ‖ 0)) mod M ]` (sorted by `peerId`). The seed pays
+   `raffleTrx` to the winner's burn-verified `address`.
+
+**Accountability (why the on-chain commit still matters).** The seed draws from its fast
+in-memory cache, but the *authoritative* commits are the on-chain memos. Because both commits
+(on-chain) and reveals (gallery) are public, **anyone can later recompute the eligible set and
+the winner** from a Tron node + the gallery, and **catch a seed that dropped a
+validly-committed participant** or paid the wrong winner. So the draw is a fast in-memory
+computation, kept honest by an on-chain audit trail (a deterrent), not by trusting the seed.
 
 A missing/mismatched reveal (a peer that committed but didn't reveal by the draw) **does not
 abort the raffle** — that peer is simply excluded and the draw runs over the remaining valid

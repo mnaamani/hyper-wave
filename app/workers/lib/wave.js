@@ -1052,8 +1052,10 @@ function createWave({
 
   // (Seed/sponsor) Draw + pay the raffle for a finished wave. Eligible tickets = gallery
   // entries whose revealed `raffleSecret` matches the commit that peer published in the lobby.
-  // Deterministic + auditable: raffleDraw folds the revealed secrets into a seed and picks the
-  // winner; the seed emits the full ticket set so anyone can recompute. Pays exactly once.
+  // Deterministic: raffleDraw folds the revealed secrets into a seed and picks the winner.
+  // Publicly auditable AFTER THE FACT (not from the seed's word): commits are on-chain in the
+  // burn memos + reveals are in the gallery, so anyone can recompute the eligible set and the
+  // winner from the chain + gallery. Pays exactly once.
   async function runRaffle(waveId) {
     if (paidRaffles.has(waveId)) return
     paidRaffles.add(waveId)
@@ -1063,18 +1065,16 @@ function createWave({
     if (!g) return
     await g.update().catch(() => {})
     const entries = await readGallery(g)
-    // Keep only entries whose reveal matches that peer's commit. The commit is read from the
-    // ON-CHAIN burn memo (authoritative + externally auditable) when the burn is available;
-    // the gossip-recorded commit is only a fallback for the wallet-less/test path.
+    // Keep only entries whose reveal matches that peer's commit. The seed uses the commits it
+    // cached from LOBBY GOSSIP (in memory) — fast, no per-participant on-chain REST fetch (which
+    // would be slow and hit rate limits). The same commit is ALSO written on-chain in each
+    // burn memo (`hyperwave:…:<commit>`, kept locatable via `burnTx`), so anyone can later
+    // recompute the eligible set from the chain + gallery and hold the seed accountable if it
+    // dropped a validly-committed participant. Accountability lives on-chain; the hot draw path
+    // stays in memory (ideas/raffle.md).
     const tickets = []
     for (const e of entries) {
-      let commit = commits.get(e.peerId)
-      if (verifyBurnOnChain && e.burnTx) {
-        const r = await verifyBurnOnChain(e.burnTx, { waveId, from: e.address, minTrx: 0 }).catch(
-          () => null
-        )
-        if (r && r.ok && r.commit) commit = r.commit
-      }
+      const commit = commits.get(e.peerId)
       if (!commit || !e.raffleSecret || commitOf(e.raffleSecret) !== commit) continue
       tickets.push({ peerId: e.peerId, secret: e.raffleSecret, address: e.address || '' })
     }
