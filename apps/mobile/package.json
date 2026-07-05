@@ -5,7 +5,7 @@
   "description": "HyperWave mobile (Expo + react-native-bare-kit) — hosts the shared engine (hyperwave-lib-core) in a Bare worklet.",
   "main": "index.js",
   "scripts": {
-    "bundle": "bare-pack --target ios --target android --linked --out bundles/app.bundle.mjs ../../packages/hyperwave-lib-core/worklet/app.js",
+    "bundle": "bare-pack --target ios --target android --linked --defer bufferutil --defer utf-8-validate --out bundles/app.bundle.mjs ../../packages/hyperwave-lib-core/worklet/app.js",
     "prestart": "npm run bundle",
     "start": "expo start --dev-client",
     "ios": "npm run bundle && expo run:ios",

@@ -33,10 +33,30 @@ npm run ios             # or: npm run android   (prebuilds native + launches a d
 
 `npm start` / `npm run ios` / `npm run android` re-run `npm run bundle` first.
 
-## What's left (this is a scaffold)
+## Status (verified on the iOS 26.5 simulator)
 
-The engine + IPC wiring is real and complete; the following are the remaining mobile-native
-pieces, none of which touch the engine:
+Confirmed working end-to-end up to the native-addon boundary: the engine **bundles** for
+Bare-on-mobile (`bare-pack` → 7.6 MB, incl. Hyperswarm/Autobase/WDK — `ws`'s optional native
+deps are handled with `--defer bufferutil --defer utf-8-validate`), the Expo app **builds** (87
+CocoaPods incl. `react-native-bare-kit`), **installs**, **launches**, and the **worklet boots**
+and executes the engine bundle (Metro: `Bundled … 721 modules`).
+
+It then **crashes on the first native addon**: `ADDON_NOT_FOUND: udx-native` — see below.
+
+## What's left
+
+### 1. Link the Bare native addons for iOS/Android (the blocker) 🔴
+
+`react-native-bare-kit` ships only `BareKit.xcframework` (the Bare runtime) — **not** the native
+addons. The engine needs at least **`udx-native`** (Hyperswarm's UDP transport) and
+**`sodium-native`** (hypercore crypto), which have no iOS/Android slices, so the worklet's
+`dlopen('udx-native…')` fails. `bare-pack --linked` correctly emits these as _linked_ addons
+expecting the native host to provide them; they must be **cross-compiled for the target**
+(iOS-simulator-arm64, iOS-arm64, Android ABIs) with `bare-make` and added as xcframeworks/`.so`s
+to the native build — the same native-addon step Keet does. This is a real integration task, not
+a config tweak, and gates everything networking-related. Everything above this line is done.
+
+### 2. The rest (none of which touch the engine)
 
 - **Rich UI** — the ring canvas, the rolling ⚽, and the centre-selfie player (desktop's
   `renderer/app.js`) reimplemented in RN (`react-native-svg` or Skia). This scaffold shows a
