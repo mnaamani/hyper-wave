@@ -136,11 +136,14 @@ class Cluster {
     return this
   }
 
-  // Launch a peer (or seed) with its own storage dir + wallet. `env` overrides (ROLE, START,
-  // AUTOJOIN, AUTOSELFIE, HYPERWAVE_RAFFLE_TRX, …). Returns the Proc.
-  launch(name, env = {}) {
+  // Launch a peer (or seed) with its own storage dir. `env` overrides (ROLE, START, AUTOJOIN,
+  // AUTOSELFIE, WALLET, HYPERWAVE_RAFFLE_TRX, …). `seed` (a BIP39 mnemonic) is written to the
+  // storage dir's `wallet.seed` so the wallet is a specific FUNDED one (for the on-chain tier);
+  // omit it for the local no-wallet tier. Returns the Proc.
+  launch(name, env = {}, seed = null) {
     const dir = path.join(this.root, name)
     fs.mkdirSync(dir, { recursive: true })
+    if (seed) fs.writeFileSync(path.join(dir, 'wallet.seed'), seed.trim())
     const p = new Proc(name, ['workers/lib/wave.run.js', name, dir], {
       HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}`,
       HYPERWAVE_MATCH: this.match,

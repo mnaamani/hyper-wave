@@ -10,21 +10,29 @@ same binary the app ships.
 
 ## Two tiers
 
-| Suite                   | What it exercises                                                                                                                                       | Deps                                                  | When                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------- |
-| **`wave.local.e2e.js`** | discovery, ring/token race across N hops, gossip flooding, gallery replication + seed archival, self-healing under churn, commit-reveal raffle **draw** | none — local DHT, **no wallets / no on-chain**        | every push (CI)         |
-| _on-chain_ (planned)    | paid-wave gate, real burns, optimistic-admission + raffle **payout**, tips                                                                              | funded testnet wallets (secrets), Nile RPC, costs TRX | manual / nightly, gated |
+| Suite                     | What it exercises                                                                                                                                       | Deps                                                  | When                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------- |
+| **`wave.local.e2e.js`**   | discovery, ring/token race across N hops, gossip flooding, gallery replication + seed archival, self-healing under churn, commit-reveal raffle **draw** | none — local DHT, **no wallets / no on-chain**        | every push (CI)         |
+| **`wave.onchain.e2e.js`** | paid-wave gate, real fee burns, on-chain kick-off verification, optimistic admission, raffle **payout** (on-chain winner check + real TRX transfer)     | funded testnet wallets (secrets), Nile RPC, costs TRX | manual / nightly, gated |
 
 The local suite is deterministic and secret-free, so it guards every change in CI
 (`.github/workflows/ci.yml`). The on-chain suite is a real external-testnet integration test —
-it needs seed phrases as CI secrets and costs testnet TRX, so it stays gated.
+it needs funded wallet mnemonics as secrets and costs testnet TRX, so it stays gated
+(`.github/workflows/e2e-onchain.yml`: manual dispatch + nightly).
 
 ## Running
 
 ```bash
 cd app
-npm run test:e2e:local          # 8 peers (default)
+npm run test:e2e:local               # 8 peers (default)
 E2E_PEERS=4 npm run test:e2e:local   # fewer peers (faster / constrained box)
+
+# on-chain tier — needs three funded Nile mnemonics; skips itself if unset:
+E2E_ONCHAIN=1 \
+  HYPERWAVE_E2E_SEED_SPONSOR="word word …" \  # seed/sponsor, pays the prize (well-funded)
+  HYPERWAVE_E2E_SEED_1="word word …" \        # initiator P1 (kick-off burn)
+  HYPERWAVE_E2E_SEED_2="word word …" \        # joiner P2 (join burn)
+  npm run test:e2e:onchain
 ```
 
 Each scenario reads like what it tests, e.g. _"the wave heals when peers die mid-race"_.

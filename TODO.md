@@ -76,8 +76,11 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       event stream (poll-until-event, no sleeps; process-group teardown). Local suite (no wallet
       / no on-chain, deterministic): 8-peer gallery convergence, self-healing under 2 mid-race
       kills, raffle draw over all N. `npm run test:e2e:local`; runs in GitHub Actions
-      (`.github/workflows/ci.yml`) alongside unit tests. On-chain tier (paid gate / burns /
-      raffle payout / tips) still TODO — needs funded-wallet secrets + a gated nightly workflow.
+      (`.github/workflows/ci.yml`) alongside unit tests. **On-chain tier** (`wave.onchain.e2e.js`,
+      `npm run test:e2e:onchain`): enforced wave on Nile — paid gate → real kick-off/join burns →
+      on-chain kick-off verification → optimistic admission → raffle payout (on-chain winner
+      check + real TRX transfer). Gated on funded-wallet secrets, runs manual/nightly
+      (`.github/workflows/e2e-onchain.yml`). Verified live (8/8 asserts, ~38s).
 
 ### Adversarial hardening (against a modified client) — `docs/protocol.md` §11.2
 - [x] Identity binding: a self-describing gossip field (`pointers.id`, `wave-pos.holder`,
@@ -117,8 +120,24 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       wave originator) from the prize-holder** so the sponsor can't censor the entry set;
       escrow/contract custody instead of the trusted sponsor wallet; a VDF (Verifiable Delay
       Function) or threshold scheme to remove the last-revealer abort; legal review (a paid game
-      of chance is a lottery). Also:
-      k-winners/tiered prizes (`raffleDraw` already supports `i`).
+      of chance is a lottery). Also: k-winners/tiered prizes (`raffleDraw` returns the full
+      ranking, so the top-k of the winner walk are the winners).
+
+### Future features / ideas
+- [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
+      `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
+      commit `hyperwave:<waveId>:<peerId>[:<commit>]` in an **`OP_RETURN`** output (≤ 80 bytes —
+      the raffle commit is 32B, fits with the ids trimmed/hashed). "Burn" = an output to a
+      provably-unspendable script (`OP_RETURN` itself is unspendable, or a known burn address);
+      `verifyBurnTx` becomes a chain-specific check of the tx's outputs + `OP_RETURN` data.
+      Keep the ring-key attestation chain-agnostic; make the verifier pluggable per chain.
+- [ ] **Bloom filter to minimize selfie re-use.** A peer can re-post the same image across
+      waves (or lift someone else's). Maintain a space-efficient bloom filter of seen
+      selfie-image hashes (per-seed across waves, and/or gossiped) and reject a `wave-selfie`
+      whose image hash is probably-already-seen — cheap "have I seen this image?" at scale
+      without storing every hash. False positives (rare) just ask the peer to re-shoot; no false
+      negatives. Complements the per-entry byte cap + one-per-peer dedup (bounds *content* reuse,
+      not just count). Pairs well with a lightweight perceptual hash to catch near-duplicates.
 
 ### Remaining hardening (scalable-topology §8)
 - [ ] Validate Chord convergence under real large-N churn (can't force a partial mesh

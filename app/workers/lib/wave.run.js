@@ -36,6 +36,9 @@ const wave = createWave({
         `succ=${s.successor ? s.successor.id.slice(0, 8) + '@' + s.successor.angle.toFixed(1) : 'none'}`
     )
     if (role === 'peer' && env.START && !started && s.peers.length >= Number(env.START)) {
+      // With WALLET=1, wait for the wallet before kicking off — else startWave runs with the
+      // paid-gate still off and announces an UNPAID wave (races wallet init vs discovery).
+      if (env.WALLET && !payments) return
       started = true
       setTimeout(() => kickOff(), 500)
     }
