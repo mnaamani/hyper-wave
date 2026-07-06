@@ -35,6 +35,7 @@ if (typeof Bare !== 'undefined' && Bare.on) {
   })
 }
 
+// RN host -> Worker commands.
 let core = null
 pipe.on('data', (data) => {
   let msg
@@ -43,7 +44,7 @@ pipe.on('data', (data) => {
   } catch {
     return
   }
-  // First message from the RN host is the init: storageDir + config (matchId, role, seed, …).
+  // First message from the RN host should be the init: storageDir + config (matchId, role, seed, ...)
   if (msg.type === 'init' && !core) {
     core = hyperwave.init({
       storageDir: resolveStorage(msg.storageDir),
@@ -52,5 +53,8 @@ pipe.on('data', (data) => {
     })
   } else if (core) {
     core.onMessage(msg)
+  } else {
+    // RN host did not yet send an init message, so whatever this message is, its too early to be sending.
+    console.warn(`Dropped message of type ${msg.type}. Init message not yet received`)
   }
 })
