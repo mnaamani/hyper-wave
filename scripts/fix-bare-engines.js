@@ -38,10 +38,12 @@ try {
 
 // Belt-and-suspenders: the oracle reflects the bare-semver in *these* node_modules, but the GUI
 // resolves against pear-runtime's OWN (possibly older/minimal) bare-semver. A newer oracle can
-// deem `^14.21.3 || >=16` (the @noble ranges) parseable while pear-runtime's still chokes on it.
-// So ALSO treat any range using the constructs a minimal parser trips on as a problem. Over-
+// deem ranges like `^14.21.3 || >=16` or `>= 16` parseable while pear-runtime's still chokes on
+// them. So ALSO treat any range using a construct a minimal parser trips on as a problem. Over-
 // normalizing is harmless — `engines` is advisory metadata; the code runs fine under Bare.
-const TRICKY = /[\^~*]|\|\|/ // caret, tilde, star, or ||
+// Covers: caret / tilde / star, `||`, x-ranges, hyphen ranges, and a SPACE AFTER A COMPARATOR
+// (`>= 16`, `< 20`) — the last is the one that regressed the desktop wallet.
+const TRICKY = /[\^~*]|\|\||\bx\b|\s-\s|[<>=]=?\s/i
 
 function needsNormalizing(range) {
   if (TRICKY.test(range)) return true
