@@ -118,12 +118,12 @@ is directly connected to ~its connection-limit's worth of a random subset, so a 
 one-hop broadcast reaches only a fraction of the swarm. Different message classes are
 propagated differently to match what each needs:
 
-| Class                       | Messages                                               | Fanout                                |
-| --------------------------- | ------------------------------------------------------ | ------------------------------------- |
-| **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end` | every peer                            |
-| **One-hop broadcast**       | `wave-pos`, `add-writer`                               | direct neighbours only                |
-| **Neighbour-scoped**        | `pointers` (the heartbeat)                             | pinned ring neighbours (O(k + log N)) |
-| **Unicast**                 | `token`, `wave-sync`                                   | one specific peer                     |
+| Class                       | Messages                                                             | Fanout                                |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------------------- |
+| **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start`, `wave-end`, `add-writer` | every peer                            |
+| **One-hop broadcast**       | `wave-pos`                                                           | direct neighbours only                |
+| **Neighbour-scoped**        | `pointers` (the heartbeat)                                           | pinned ring neighbours (O(k + log N)) |
+| **Unicast**                 | `token`, `wave-sync`                                                 | one specific peer                     |
 
 **Flood (epidemic broadcast).** The wave _lifecycle_ messages must reach every seat, so they
 are relayed hop-to-hop:
@@ -144,8 +144,12 @@ are relayed hop-to-hop:
 **One-hop broadcast (no relay).** `wave-pos` is emitted every hop (~`HOP_DELAY_MS`); flooding
 it would be a storm, and it doesn't need to reach everyone — its role as the heal-ACK only
 needs to reach the **predecessor** (a pinned neighbour), and distant ball-animation is a
-nice-to-have. `add-writer` is one-hop today; gallery admission across a partial mesh is
-tracked with gallery replication (`scalable-topology.md` §4.7).
+nice-to-have. `add-writer` **is now flooded** (each `ADMIT_RETRY_MS` retry re-stamps a fresh
+`mid` so it re-blankets the mesh): a gallery seat is granted only by a current writer, so on a
+sparse mesh — especially after peers die and churn connections mid-wave — a requester may not
+be directly connected to any writer, and a one-hop request would silently fail to admit. It's
+authenticated by its **carried receipt signature** (`admitWriter` → `verifyReceipt`), not the
+connection, so relaying stays sound (see §11.2).
 
 **Unicast.** The **token** is sent only to the current successor and deliberately relayed
 **hop by hop** as the wave mechanic — each holder _re-stamps_ it with a fresh receipt before
@@ -361,7 +365,7 @@ signature over `(waveId, hops, chainHash)`; a **stall** carries the staller's ow
 `receiptSig`, proving it was an admitted participant that hit a dead end. An outside attacker
 holding neither can no longer force-terminate a live wave.
 
-### add-writer — one-hop broadcast (a peer requesting gallery write access)
+### add-writer — flooded (a peer requesting gallery write access)
 
 ```json
 {
@@ -378,8 +382,11 @@ holding neither can no longer force-terminate a live wave.
 ```
 
 Asks the gallery host to admit `key` as an Autobase writer, presenting a valid receipt **and**
-the requester's fee-burn attestation (§8.2). Any current writer verifies the receipt, then
-verifies the burn on-chain, and only then appends an `add-writer` op.
+the requester's fee-burn attestation (§8.2). Flooded (relayed + dedup) so it reaches a current
+writer even when the requester isn't directly connected to one. Any current writer verifies the
+receipt (`verifyReceipt` binds it to `peerId`, so relaying is sound), checks the burn
+attestation signature (optimistic — no on-chain call on the write path), and only then appends
+an `add-writer` op.
 
 ### wave-sync — DIRECT to a newly-connected peer (join-time state)
 

@@ -6,7 +6,9 @@
 //
 // Design notes:
 //  - No fixed sleeps. `waitForEvent` / `waitForLine` / `waitForGallery` resolve the instant the
-//    condition is met, or reject with the tail of the output on timeout — fast AND non-flaky.
+//    condition is met, or resolve `false` (logging the output tail as a diagnostic) on timeout —
+//    fast AND non-flaky. Resolving falsy (not rejecting) means a timed-out `t.ok(await …)` fails
+//    just its own assertion instead of crashing the whole run with an unhandled rejection.
 //  - `wave.run.js` already prints structured events as `[name] TOKEN {json}`; we parse those,
 //    so assertions read against the protocol's own event stream, not brittle prose.
 //  - Teardown kills tracked PIDs (never `pkill`), so it can't touch unrelated processes.
@@ -62,19 +64,27 @@ class Proc {
     }
   }
 
+  // On timeout, RESOLVE `false` (don't reject): the callers wrap every waiter in
+  // `t.ok(await …)`, so a falsy result fails just that assertion, whereas a rejection becomes
+  // an unhandled promise rejection that crashes the process and aborts the rest of the suite —
+  // catastrophic for one flaky timeout. `false` (not `null`) is the safe sentinel: property
+  // access on it (`draw.tickets` for the `const x = await waitForEvent()` callers) yields
+  // `undefined` rather than throwing. The tail is logged as a TAP diagnostic so a timeout is
+  // still diagnosable.
   _wait(ready, value, ms, what) {
     if (ready()) return Promise.resolve(value())
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const w = { ready, value, resolve }
       w.timer = setTimeout(() => {
         this._waiters.delete(w)
-        reject(new Error(`${this.name}: timed out (${ms}ms) waiting for ${what}\n` + this.tail()))
+        console.error(`# ${this.name}: timed out (${ms}ms) waiting for ${what}\n` + this.tail())
+        resolve(false)
       }, ms)
       this._waiters.add(w)
     })
   }
 
-  // Resolve when the accumulated stdout matches `re`; returns the match. Rejects on timeout.
+  // Resolve when the accumulated stdout matches `re`; returns the match, or `false` on timeout.
   waitForLine(re, ms = 30000) {
     return this._wait(
       () => re.test(this.out),

@@ -74,7 +74,17 @@ const K_SUCCESSORS = 3
 // neighbours). At scale Hyperswarm is only a partial random mesh, so these are
 // flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1). The chatty
 // `wave-pos` is deliberately NOT relayed (its heal-ACK only needs the predecessor).
-const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start', 'wave-end'])
+// add-writer floods too: a gallery seat is granted only by a current writer, so on a sparse
+// (Chord) mesh — especially after peers die and churn connections — a requester may not be
+// directly connected to any writer. Relaying lets the request reach one several hops away.
+// Authenticity is the carried receipt signature (admitWriter → verifyReceipt), not the hop.
+const RELAYED_KINDS = new Set([
+  'wave-announce',
+  'wave-join',
+  'wave-start',
+  'wave-end',
+  'add-writer'
+])
 // Identity binding: for a message that describes its OWN sender, the claimed id must equal
 // the Noise-authenticated connection id it arrived on (`fromId`). Hyperswarm authenticates
 // *who* we're talking to; without this the app would still believe whatever a modified
@@ -86,12 +96,17 @@ const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start', 'wave
 const SELF_ID_FIELD = {
   pointers: 'id', // the heartbeat sender
   'wave-pos': 'holder', // whoever currently holds the ball (broadcast by the holder)
-  token: 'senderPeerId', // the immediate forwarder (re-stamped every hop)
-  'add-writer': 'peerId' // the writer-admission requester
+  token: 'senderPeerId' // the immediate forwarder (re-stamped every hop)
+  // NB: add-writer is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its `peerId`
+  // is a third party; it's authenticated by its carried receipt signature (admitWriter), not
+  // the connection. Binding it to `fromId` would make every relay drop it.
 }
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096
+// Cap on buffered pre-adoption raffle commits (across un-adopted waveIds). Cleared wholesale
+// when exceeded — a bound against a seed being flooded with commits for waves it never joins.
+const PENDING_COMMIT_CAP = 1024
 // Distributed findSuccessor routing (§4.5): safety cap on lookup hops (O(log N)
 // expected), how long the origin waits for a reply, and how long a routing-discovered
 // successor stays a pin candidate.
@@ -184,6 +199,9 @@ function createWave({
   let payReward = null // (sponsor/seed) send TRX to an address — used only for the raffle prize
   const paidRaffles = new Set() // (seed) waves already drawn — draw exactly once
   const raffleCommits = new Map() // (seed) waveId -> Map(peerId -> commit), from lobby gossip
+  // (seed) waveId -> Map(peerId -> commit): valid commits that flooded in BEFORE I adopted the
+  // wave (gossip isn't ordered), held until enterLobby flushes them into raffleCommits.
+  const pendingCommits = new Map()
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -736,7 +754,8 @@ function createWave({
 
   // (Admitter side) Grant gallery write access — OPTIMISTIC admission. Only a current writer
   // (the originator, or an already-admitted writer) admits, and only if the requester presents:
-  //   1. a valid hop receipt for the current wave (authenticity, connection-bound peerId), and
+  //   1. a valid hop receipt for the current wave (authenticity: the receipt signature binds
+  //      the request to peerId, so it stays sound even when flooded through relays), and
   //   2. a fee-burn attestation SIGNED for that peerId + wave (burnAuthorizes) — carrying the
   //      txHash + tip address, but NOT verified on-chain here.
   // We deliberately do *not* verify the burn on-chain at admission: that's O(N) REST calls
@@ -778,9 +797,11 @@ function createWave({
     return admissionPromise
   }
 
-  // Broadcast add-writer and wait until admitted, re-broadcasting every ADMIT_RETRY_MS. The
-  // burn (my admission ticket) is pinned into the request now, so a later resetSelfie can't
-  // blank it mid-wait. Resolves true once writable, false on timeout.
+  // Flood add-writer and wait until admitted, re-flooding every ADMIT_RETRY_MS (each retry gets
+  // a fresh flood id via floodGossip, so it re-blankets the mesh rather than being deduped away
+  // — the reach a churny post-heal topology needs). The burn (my admission ticket) is pinned
+  // into the request now, so a later resetSelfie can't blank it mid-wait. Resolves true once
+  // writable, false on timeout.
   function requestAdmission(receipt) {
     return new Promise((resolve) => {
       if (base.writable) return resolve(true)
@@ -799,7 +820,7 @@ function createWave({
       const tick = () => {
         if (base.writable) return resolve(true)
         if (Date.now() - started > ADMIT_TIMEOUT_MS) return resolve(false)
-        broadcast(req)
+        floodGossip(req) // re-stamps req.mid each tick → floods anew across the partial mesh
         setTimeout(tick, ADMIT_RETRY_MS)
       }
       tick()
@@ -932,6 +953,15 @@ function createWave({
       keySig: null // originator's signature over (waveId, galleryKey); set when we learn the key
     }
     if (mine) wave.roster.add(me.id)
+    // Flush any raffle commits that flooded in before I adopted this wave (recordRaffleCommit
+    // buffers them because gossip isn't ordered). Do it now that `wave` is in the lobby phase.
+    const buffered = pendingCommits.get(waveId)
+    if (buffered) {
+      pendingCommits.delete(waveId)
+      if (isSeed && raffleTrx > 0) {
+        for (const [pid, c] of buffered) storeRaffleCommit(waveId, pid, c)
+      }
+    }
     lobbyEndsAt = Date.now() + dur
     // fallback: if the race never starts (initiator vanished), drop back to idle
     clearTimeout(lobbyTimer)
@@ -1027,11 +1057,27 @@ function createWave({
   // peer commits before anyone reveals, so it can't choose a secret to steer the draw.
   function recordRaffleCommit(waveId, peerId, commit, commitSig) {
     if (!isSeed || raffleTrx <= 0 || !commit || !peerId) return
-    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return // reveals happen in racing
+    if (endedWaves.has(waveId)) return // wave already over — too late to enter the draw
     if (!verifyCommit(waveId, peerId, commit, commitSig)) return
+    // wave-join/announce commit gossip floods independently of the announce that makes me adopt
+    // the wave, so a valid commit can reach me before I'm in this wave's lobby. Buffer it (flushed
+    // by enterLobby) — otherwise that participant is silently dropped from the draw (see e2e).
+    if (!wave || wave.id !== waveId) {
+      if (pendingCommits.size > PENDING_COMMIT_CAP) pendingCommits.clear()
+      let buf = pendingCommits.get(waveId)
+      if (!buf) pendingCommits.set(waveId, (buf = new Map()))
+      if (!buf.has(peerId)) buf.set(peerId, commit)
+      return
+    }
+    if (wave.phase !== 'lobby') return // reveals happen in racing — too late for a new commit
+    storeRaffleCommit(waveId, peerId, commit)
+  }
+
+  // Insert a verified commit into the draw set. First commit per peer wins (can't be changed).
+  function storeRaffleCommit(waveId, peerId, commit) {
     let byPeer = raffleCommits.get(waveId)
     if (!byPeer) raffleCommits.set(waveId, (byPeer = new Map()))
-    if (!byPeer.has(peerId)) byPeer.set(peerId, commit) // first commit wins (can't be changed)
+    if (!byPeer.has(peerId)) byPeer.set(peerId, commit)
   }
 
   // (Seed/sponsor) Draw + pay the raffle for a finished wave. Eligible tickets = gallery entries
