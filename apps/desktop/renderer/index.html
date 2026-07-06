@@ -130,14 +130,49 @@
         font-family: ui-monospace, Menlo, monospace;
       }
       #wallet {
+        display: none; /* revealed by hud.walletStatus once the wallet is ready */
+        align-items: center;
+        gap: 8px;
         font-size: 12px;
         font-family: ui-monospace, Menlo, monospace;
         color: #7fe3a0;
         opacity: 0.85;
         margin-top: 2px;
       }
-      #wallet:empty {
-        display: none;
+      #wallet.ready {
+        display: inline-flex;
+      }
+      #wallet button {
+        font-family: inherit;
+        font-size: 11px;
+        padding: 2px 9px;
+        border: 1px solid #2f5f43;
+        border-radius: 999px;
+        background: #123020;
+        color: #9fe8b8;
+        cursor: pointer;
+      }
+      #wallet button:hover {
+        background: #1a4530;
+      }
+      /* refresh is an icon-only button (no pill), so the spin reads cleanly */
+      #wallet-refresh {
+        border: none;
+        background: none;
+        padding: 2px 3px;
+        font-size: 13px;
+      }
+      #wallet-refresh:hover {
+        background: none;
+        opacity: 0.7;
+      }
+      @keyframes hw-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      #wallet-refresh.spin {
+        animation: hw-spin 0.6s linear;
       }
       #tip {
         display: none;
@@ -367,7 +402,14 @@
     <div id="status">connecting…</div>
     <div id="wave-status"></div>
     <div id="me"></div>
-    <div id="wallet" title="Your self-custodial TRX wallet (Tron testnet)"></div>
+    <div id="wallet" title="Your self-custodial TRX wallet (Tron testnet)">
+      <span id="wallet-text"></span>
+      <button id="wallet-refresh" title="Re-check your balance">🔄</button>
+      <button id="wallet-copy" title="Copy your wallet address">📋 Copy</button>
+      <button id="wallet-faucet" title="Get free testnet TRX from the Nile faucet">
+        💧 Get test TRX
+      </button>
+    </div>
     <div class="field">
       <canvas id="ring" width="440" height="440"></canvas>
       <div id="center">

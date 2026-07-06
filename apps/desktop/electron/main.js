@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron')
 const os = require('os')
 const path = require('path')
 const PearRuntime = require('pear-runtime')
@@ -39,6 +39,16 @@ ipcMain.on('pkg', (evt) => {
 // this to gate a dev-only debug handle; app.isPackaged lives in main, so expose it over the bridge.
 ipcMain.on('isPackaged', (evt) => {
   evt.returnValue = app.isPackaged
+})
+
+// Copy text to the OS clipboard (e.g. the wallet address). The renderer is sandboxed, so it goes
+// through main rather than navigator.clipboard.
+ipcMain.handle('copy-text', (_evt, text) => clipboard.writeText(String(text ?? '')))
+
+// Open a URL in the user's default browser (e.g. the Nile faucet). Restricted to http(s) so a
+// compromised renderer can't ask main to open file:// or other schemes.
+ipcMain.handle('open-external', (_evt, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) return shell.openExternal(url)
 })
 
 function getAppPath() {

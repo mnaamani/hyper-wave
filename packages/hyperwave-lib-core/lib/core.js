@@ -42,18 +42,19 @@ function init({
   // engine then runs wallet-less (receipt-only gallery, no burns/paid-gate/tips).
   let payments = null
   let tBalance = null
+  let pushBalance = null // re-fetch the balance + send a `wallet` msg; set once the wallet is up
   if (config.wallet !== false) {
     makePayments({ storageDir, seed: config.seed, log: (...a) => log('[wallet]', ...a) })
       .then(async (pay) => {
         payments = pay
         wireWallet(wave, pay)
-        const push = async () =>
+        pushBalance = async () =>
           send({
             type: 'wallet',
             ...(await pay.balances().catch(() => ({ address: pay.address, trx: 0 })))
           })
-        await push()
-        tBalance = setInterval(push, 15000)
+        await pushBalance()
+        tBalance = setInterval(pushBalance, 15000)
       })
       .catch((e) => {
         log('[wallet] init failed:', e.message)
@@ -142,6 +143,7 @@ function init({
     else if (msg.type === 'set-country') wave.setCountry(msg.country)
     else if (msg.type === 'stage-selfie') wave.stageSelfie(msg.selfie)
     else if (msg.type === 'tip') handleTip(msg)
+    else if (msg.type === 'refresh-wallet') pushBalance?.() // manual balance re-check (after funding)
   }
 
   async function close() {
