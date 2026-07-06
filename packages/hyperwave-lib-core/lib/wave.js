@@ -17,16 +17,8 @@ const b4a = require('b4a')
 const fs = require('bare-fs')
 
 const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring')
-const {
-  pinTargets,
-  successors,
-  predecessor,
-  stabilizeStep,
-  findSuccessorStep,
-  closestPrecedingNode,
-  nodeIdOfHex,
-  RING
-} = require('./chord')
+const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord')
+const { createChordRouting } = require('./chord-routing')
 const { createFlood } = require('./flood')
 const {
   ZERO_HASH,
@@ -40,13 +32,10 @@ const {
   signGalleryKey,
   verifyGalleryKey,
   signWaveEnd,
-  verifyWaveEnd,
-  commitOf,
-  signCommit,
-  verifyCommit,
-  raffleDraw
+  verifyWaveEnd
 } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
+const { createRaffle } = require('./raffle')
 
 const MATCH = 'hyperwave:demo-match:v1'
 const HEARTBEAT_MS = 2000 // pointers-heartbeat cadence (liveness + Chord pointer exchange)
@@ -104,15 +93,6 @@ const SELF_ID_FIELD = {
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096
-// Distributed findSuccessor routing (§4.5): safety cap on lookup hops (O(log N)
-// expected), how long the origin waits for a reply, and how long a routing-discovered
-// successor stays a pin candidate.
-const LOOKUP_TTL = 24
-const LOOKUP_TIMEOUT_MS = 5000
-const ROUTED_TTL_MS = 30000
-// After my first connection, wait this long (for a few fingers to connect → better
-// routing start) then place myself in the ring via findSuccessor (Chord join, §4.5).
-const BOOTSTRAP_MS = 1500
 // How long the initiator waits for its kick-off burn to confirm + announce before aborting
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
@@ -126,14 +106,6 @@ const PAY_TIMEOUT_MS = 60000
 const ADMIT_TIMEOUT_MS = 25000
 const ADMIT_RETRY_MS = 3000
 const BURN_WAIT_MS = 10000
-// Raffle (ideas/raffle.md): after a wave ends the initiator waits an initial settle, then draws.
-// Because the initiator is a normal ring peer (no dedicated hub seed), distant selfie reveals can
-// take a few update cycles to replicate into its retained gallery — so before drawing it POLLS
-// (every RAFFLE_POLL_MS, up to RAFFLE_CONVERGE_MS) until every recorded commit has a matching
-// revealed secret, then draws. A committed peer that never selfied just won't produce a ticket.
-const RAFFLE_DELAY_MS = 3000
-const RAFFLE_POLL_MS = 1000
-const RAFFLE_CONVERGE_MS = 20000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -194,20 +166,10 @@ function createWave({
   let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
   let payReward = null // send TRX to an address — used only for the raffle prize (initiator)
-  const paidRaffles = new Set() // waves already drawn — draw exactly once
-  // (initiator only) waveId -> Map(peerId -> commit): raffle commits gathered from lobby gossip
-  // for a wave I started. I'm always in my own wave's lobby before anyone can join (I created
-  // it), so — unlike the old standalone seed — no pre-adoption buffering is needed.
-  const raffleCommits = new Map()
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
   const goneUntil = new Map() // id -> ts: suppress re-seeding a just-closed peer (churn)
-  const routed = new Map() // id -> expiry: successor found via distributed lookup (pin candidate)
-  const pendingLookups = new Map() // qid -> { resolve, timer }: findSuccessor lookups I originated
-  const lookupRoute = new Map() // qid -> upstream id: reverse path to return a lookup reply
-  let bootstrapTimer = null // one-shot join-time findSuccessor placement
-  let bootstrapDone = false
   const seen = new Set() // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set() // waves that finished — never re-adopt (prevents revival)
   const flood = createFlood({ cap: GOSSIP_SEEN_CAP }) // flood dedup for relayed control msgs
@@ -235,14 +197,39 @@ function createWave({
   let stagedSelfie = null // { image, caption } captured in the lobby, awaiting my hop
   let myReceipt = null // my hop's receipt once the token reaches me, awaiting the selfie
   let selfiePosted = false // guard: post my selfie exactly once per wave
-  // Raffle commit-reveal (ideas/raffle.md): as a participant I COMMIT to a hidden secret when I
-  // opt in (lobby), publish the commit in wave-join/announce, and REVEAL the secret in my selfie.
-  let myRaffleSecret = null // 32 random bytes (hex); revealed in my gallery entry
-  let myRaffleCommit = null // H(secret); published in the lobby, before anyone reveals
-  let myRaffleCommitSig = null // ring signature so only I can set my commit
   let admissionPromise = null // in-flight add-writer request (dedup concurrent callers)
   let myBurnProof = null // my signed fee-burn attestation — my gallery-admission ticket
   const admittedKeys = new Set() // (admitter) writer core keys I've already admitted this wave
+
+  // Per-wave sponsor raffle (raffle.js) — commit-reveal draw + payout, run by a wave's initiator.
+  // It owns its own state (my secret/commit, recorded commits); wave.js drives it via these calls.
+  // verifyBurnOnChain/payReward are read through accessors because setWallet reassigns them later.
+  const raffle = createRaffle({
+    keyPair: swarm.keyPair,
+    me,
+    raffleTrx,
+    galleries,
+    getWave: () => wave,
+    iInitiated: (id) => initiatedWaves.has(id),
+    getVerifyBurnOnChain: () => verifyBurnOnChain,
+    getPayReward: () => payReward,
+    onToken,
+    log
+  })
+
+  // Distributed findSuccessor routing (chord-routing.js) — the Chord control plane over the
+  // gossip mesh: join-time self-placement, periodic successor repair, and the find-succ RPC.
+  // `trySend`/`maintainNeighbours` are function declarations below (hoisted), safe to pass here.
+  const chord = createChordRouting({
+    me,
+    peers,
+    senders,
+    pinned,
+    ttlMs: TTL_MS,
+    trySend,
+    maintainNeighbours,
+    log
+  })
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
@@ -303,9 +290,13 @@ function createWave({
   // token-walk seats (`peers`) still come only from connections + gossip, so a stale
   // discovery we can't reach is pinned (dialed) but never shown as a seat.
   function maintainNeighbours() {
-    const now = Date.now()
-    for (const [id, exp] of routed) if (exp <= now) routed.delete(id) // drop stale routing hints
-    const cand = new Set([...discoveredIds(), ...senders.keys(), ...peers.keys(), ...routed.keys()])
+    // Candidates: DHT-discovered ∪ connected ∪ gossip-known ∪ routing-discovered (chord).
+    const cand = new Set([
+      ...discoveredIds(),
+      ...senders.keys(),
+      ...peers.keys(),
+      ...chord.pinCandidates()
+    ])
     cand.delete(me.id)
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS)
     for (const id of targets) {
@@ -369,8 +360,8 @@ function createWave({
       relayFlood(m, fromId)
     }
     if (m.kind === 'token') return processToken(m)
-    if (m.kind === 'find-succ') return handleFindSucc(m, fromId)
-    if (m.kind === 'find-succ-reply') return handleFindSuccReply(m)
+    if (m.kind === 'find-succ') return chord.handleFindSucc(m, fromId)
+    if (m.kind === 'find-succ-reply') return chord.handleFindSuccReply(m)
     if (m.kind === 'wave-pos') {
       // only animate the ball for the wave we're racing (angle derived locally)
       if (wave && wave.phase === 'racing' && m.waveId === wave.id) {
@@ -439,7 +430,7 @@ function createWave({
     if (m.kind === 'wave-join') {
       if (wave && m.waveId === wave.id && m.peerId) {
         wave.roster.add(m.peerId)
-        recordRaffleCommit(m.waveId, m.peerId, m.commit, m.commitSig)
+        raffle.recordCommit(m.waveId, m.peerId, m.commit, m.commitSig)
         onToken({ event: 'roster', waveId: wave.id, count: wave.roster.size })
       }
       return
@@ -552,110 +543,6 @@ function createWave({
     }
   }
 
-  // My current successor id (next reachable clockwise) + the finger/successor ids I know
-  // — the inputs to Chord's per-hop routing decision.
-  function mySuccessorId() {
-    const s = nextClockwise(me.angle, liveRing([...peers.values()], Date.now(), TTL_MS))
-    return s ? s.id : null
-  }
-  function myKnownIds() {
-    return [...new Set([...pinned, ...senders.keys()])]
-  }
-
-  // --- distributed findSuccessor (Chord routing, §4.5) -----------------------
-  // Locate the true successor of a keyspace position by routing the query through
-  // fingers, so it's correct even when no single peer knows the whole ring. The request
-  // hops along connected fingers (findSuccessorStep chooses the next); the reply retraces
-  // the same path back to the origin. Resolves to a peer id, or null on timeout/no peers.
-  function findSuccessorRemote(target) {
-    return new Promise((resolve) => {
-      const start = closestPrecedingNode(myKnownIds(), me.id, target) || mySuccessorId()
-      if (!start || !senders.has(start)) return resolve(null) // nobody to ask
-      const qid = b4a.toString(crypto.randomBytes(8), 'hex')
-      const timer = setTimeout(() => {
-        pendingLookups.delete(qid)
-        resolve(null)
-      }, LOOKUP_TIMEOUT_MS)
-      pendingLookups.set(qid, { resolve, timer })
-      if (!trySend(start, { kind: 'find-succ', qid, target: target.toString(), hops: 0 })) {
-        clearTimeout(timer)
-        pendingLookups.delete(qid)
-        resolve(null)
-      }
-    })
-  }
-
-  // A find-succ request reached me: answer if the target falls in (me, successor], else
-  // forward to my closest preceding finger, remembering the upstream for the reply.
-  function handleFindSucc(m, fromId) {
-    let target
-    try {
-      target = BigInt(m.target)
-    } catch {
-      return
-    }
-    const step = findSuccessorStep(me.id, mySuccessorId(), myKnownIds(), target)
-    if (step.done || (m.hops || 0) >= LOOKUP_TTL) {
-      trySend(fromId, {
-        kind: 'find-succ-reply',
-        qid: m.qid,
-        successor: step.done ? step.successor : mySuccessorId()
-      })
-      return
-    }
-    if (!senders.has(step.next)) {
-      trySend(fromId, { kind: 'find-succ-reply', qid: m.qid, successor: mySuccessorId() })
-      return
-    }
-    lookupRoute.set(m.qid, fromId)
-    setTimeout(() => lookupRoute.delete(m.qid), LOOKUP_TIMEOUT_MS)
-    trySend(step.next, { kind: 'find-succ', qid: m.qid, target: m.target, hops: (m.hops || 0) + 1 })
-  }
-
-  // A find-succ-reply reached me: resolve it if I'm the origin, else pass it back up the
-  // reverse path toward whoever asked me.
-  function handleFindSuccReply(m) {
-    const pend = pendingLookups.get(m.qid)
-    if (pend) {
-      clearTimeout(pend.timer)
-      pendingLookups.delete(m.qid)
-      pend.resolve(m.successor || null)
-      return
-    }
-    const up = lookupRoute.get(m.qid)
-    if (up) {
-      lookupRoute.delete(m.qid)
-      trySend(up, m)
-    }
-  }
-
-  // Chord repair: verify my successor via distributed routing and, if the lookup surfaces
-  // a truer successor my local view missed (a node between me and who I think is next),
-  // add it as a pin candidate so maintainNeighbours connects to it. Additive and safe: a
-  // no-op at small scale (local knowledge already resolves the lookup with no hops).
-  async function repairSuccessor() {
-    if (senders.size === 0) return
-    const succId = await findSuccessorRemote((nodeIdOfHex(me.id) + 1n) % RING)
-    if (succId && succId !== me.id && !senders.has(succId)) {
-      routed.set(succId, Date.now() + ROUTED_TTL_MS)
-      maintainNeighbours()
-    }
-  }
-
-  // Chord join (§4.5): once I have my first connection(s), place myself in the ring by
-  // asking an already-connected peer to route findSuccessor(me) — so a joiner finds its true successor via
-  // O(log N) routing even when its own DHT sample is incomplete, instead of waiting for
-  // the slow periodic repair. One-shot per connected session; re-armed if I go solo.
-  function scheduleBootstrap() {
-    if (bootstrapDone || bootstrapTimer) return
-    bootstrapTimer = setTimeout(() => {
-      bootstrapTimer = null
-      bootstrapDone = true
-      log('join: placing myself via findSuccessor')
-      repairSuccessor().catch(() => {})
-    }, BOOTSTRAP_MS)
-  }
-
   // Send only to our pinned ring neighbours (successor-list + predecessor + fingers).
   // Used for the slimmed membership gossip (the pointers heartbeat) — O(k + log N)
   // fanout instead of hitting every connection. wave-* fanout stays on broadcast() (the
@@ -751,7 +638,7 @@ function createWave({
   //      txHash + tip address, but NOT verified on-chain here.
   // We deliberately do *not* verify the burn on-chain at admission: that's O(N) REST calls
   // concentrated on the admitter and doesn't scale. Instead the burn is verified only when it
-  // pays off — at raffle payout (the winner walk, runRaffle) — and by tippers/auditors via the
+  // pays off — at raffle payout (the winner walk, raffle.js) — and by tippers/auditors via the
   // entry's `burnTx`. Spam is bounded locally: one entry per peer + a byte-size cap on the
   // image (gallery.js apply). So a fake-burn entry is cheap to make but wins nothing (excluded
   // at payout, worthless to tip) and is publicly detectable. Fully local + synchronous.
@@ -837,7 +724,7 @@ function createWave({
     // the append — dropping our own tip address / raffle reveal. (The staged image/receipt are
     // already captured as args.)
     const burnProof = myBurnProof
-    const raffleSecret = myRaffleSecret
+    const raffleSecret = raffle.currentReveal()
     if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
       onToken({ event: 'gallery-error', reason: 'not-admitted' })
       return
@@ -961,19 +848,6 @@ function createWave({
     })
   }
 
-  // My raffle commitment for the current wave (generated once): a hidden secret + its published
-  // commit H(secret) + a ring signature so only I can set it. Returns { commit, commitSig } to
-  // broadcast in the lobby (before anyone reveals); the secret is revealed later in my selfie.
-  function raffleOptIn() {
-    if (!wave) return null
-    if (!myRaffleSecret) {
-      myRaffleSecret = b4a.toString(crypto.randomBytes(32), 'hex')
-      myRaffleCommit = commitOf(myRaffleSecret)
-      myRaffleCommitSig = signCommit(swarm.keyPair, wave.id, me.id, myRaffleCommit)
-    }
-    return { commit: myRaffleCommit, commitSig: myRaffleCommitSig }
-  }
-
   // Opt in to the current lobby (renderer command / harness). Returns the joined waveId
   // (so the worker can charge the join fee on a real opt-in), or null if it was a no-op.
   function join() {
@@ -985,7 +859,7 @@ function createWave({
     }
     wave.joined = true
     wave.roster.add(me.id)
-    const rc = raffleOptIn() // commit to my raffle secret in the lobby (revealed in my selfie)
+    const rc = raffle.optIn() // commit to my raffle secret in the lobby (revealed in my selfie)
     floodGossip({
       kind: 'wave-join',
       waveId: wave.id,
@@ -1024,124 +898,11 @@ function createWave({
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
     if (stalled) onToken({ event: 'stalled', waveId, reason: 'no successor' })
     else onToken({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
-    // If I initiated this wave and fund a raffle, draw it after a short settle (so late selfie
-    // reveals land). Reads the gallery I retained + the commits I recorded by waveId, so goIdle
-    // clearing `wave` is fine. Payment happens only if a wallet is wired.
-    if (raffleTrx > 0 && initiatedWaves.has(waveId)) {
-      setTimeout(() => runRaffle(waveId).catch(() => {}), RAFFLE_DELAY_MS)
-    }
+    // If I initiated this wave and fund a raffle, the raffle draws it after a settle (no-op
+    // otherwise). It reads the gallery I retained + the commits it recorded, so goIdle clearing
+    // `wave` below is fine.
+    raffle.scheduleDraw(waveId)
     goIdle(stalled ? 'stalled' : 'ended')
-  }
-
-  // (Initiator only) Record a participant's raffle commitment, seen in lobby gossip (wave-join).
-  // Only for a wave I started (I'm its archivist/sponsor), only while it's in its lobby (before
-  // any reveal), only a validly-signed commit by that peer, first-write-wins. This is the
-  // pre-reveal binding: a peer commits before anyone reveals, so it can't steer the draw. I
-  // adopt my own wave before anyone can join it, so no pre-adoption buffering is needed.
-  function recordRaffleCommit(waveId, peerId, commit, commitSig) {
-    if (raffleTrx <= 0 || !commit || !peerId) return
-    if (!wave || wave.id !== waveId || wave.by !== me.id) return // only for a wave I initiated
-    if (wave.phase !== 'lobby') return // reveals happen in racing — too late for a new commit
-    if (!verifyCommit(waveId, peerId, commit, commitSig)) return
-    storeRaffleCommit(waveId, peerId, commit)
-  }
-
-  // Insert a verified commit into the draw set. First commit per peer wins (can't be changed).
-  function storeRaffleCommit(waveId, peerId, commit) {
-    let byPeer = raffleCommits.get(waveId)
-    if (!byPeer) raffleCommits.set(waveId, (byPeer = new Map()))
-    if (!byPeer.has(peerId)) byPeer.set(peerId, commit)
-  }
-
-  // (Initiator) Draw + pay the raffle for a wave I ran. Eligible tickets = gallery entries whose
-  // revealed `raffleSecret` matches the commit I recorded from lobby gossip. raffleDraw folds the
-  // reveals into a seed and a deterministic ranking; I then walk the ranking and pay the FIRST
-  // candidate whose burn verifies ON-CHAIN — because admission was optimistic (no burn check at
-  // write time), the burn is verified here, and only for the winner (+ any fake-burn entries
-  // ranked above it). So on-chain reads are O(1)-ish per wave, not O(participants). Fully
-  // auditable: anyone recomputes the seed + ranking from the reveals, and the walk (skip a
-  // candidate only if its burn is really invalid) is checkable on-chain.
-  async function runRaffle(waveId) {
-    if (paidRaffles.has(waveId)) return
-    paidRaffles.add(waveId)
-    const commits = raffleCommits.get(waveId) || new Map()
-    raffleCommits.delete(waveId)
-    const g = galleries.get(waveId)
-    if (!g) return
-    // Gather tickets = gallery entries whose revealed secret matches a commit I recorded. Poll
-    // until every recorded commit has a matching reveal (all committed participants have posted
-    // + replicated to me) or RAFFLE_CONVERGE_MS elapses — so a distant reveal that's slow to
-    // reach this (non-hub) initiator isn't silently dropped from the draw.
-    const ticketsFrom = (entries) => {
-      const t = []
-      for (const e of entries) {
-        const commit = commits.get(e.peerId)
-        if (!commit || !e.raffleSecret || commitOf(e.raffleSecret) !== commit) continue
-        t.push({
-          peerId: e.peerId,
-          secret: e.raffleSecret,
-          address: e.address || '',
-          burnTx: e.burnTx || ''
-        })
-      }
-      return t
-    }
-    let tickets = []
-    for (let waited = 0; ; waited += RAFFLE_POLL_MS) {
-      await g.update().catch(() => {})
-      tickets = ticketsFrom(await readGallery(g))
-      if (tickets.length >= commits.size || waited >= RAFFLE_CONVERGE_MS) break
-      await new Promise((r) => setTimeout(r, RAFFLE_POLL_MS))
-    }
-    const { seed, order } = raffleDraw(waveId, tickets)
-    onToken({
-      event: 'raffle-draw',
-      waveId,
-      tickets: tickets.length,
-      seed,
-      top: order[0] ? order[0].peerId : null
-    })
-    if (order.length === 0) return log('raffle: no eligible tickets for wave', shortId(waveId))
-    // Walk the ranking; the winner is the first candidate whose fee burn verifies on-chain.
-    // Skip myself: I'm the sponsor paying from my own wallet, so paying myself is a no-op — the
-    // prize goes to the next eligible participant instead (I'm still a fair ticket in the draw).
-    let winner = null
-    for (const cand of order) {
-      if (cand.peerId === me.id) continue
-      if (verifyBurnOnChain) {
-        const r = cand.burnTx
-          ? await verifyBurnOnChain(cand.burnTx, {
-              waveId,
-              from: cand.address,
-              minTrx: 1
-            }).catch(() => null)
-          : null
-        if (!r || !r.ok) {
-          log('raffle: skipping unverified burn', shortId(cand.peerId), r && r.reason)
-          continue // fake / unpaid / unconfirmed burn — not a valid winner
-        }
-      }
-      winner = cand
-      break
-    }
-    if (!winner) return log('raffle: no candidate with a verified burn for wave', shortId(waveId))
-    if (!payReward) return log('raffle: winner', shortId(winner.peerId), '(no wallet — not paid)')
-    if (!winner.address) return log('raffle: winner has no payout address', shortId(winner.peerId))
-    try {
-      const { hash } = await payReward(winner.address, raffleTrx)
-      log('raffle: paid', raffleTrx, 'TRX ->', shortId(winner.peerId), 'tx', hash)
-      onToken({
-        event: 'raffle-win',
-        waveId,
-        winner: winner.peerId,
-        address: winner.address,
-        amount: raffleTrx,
-        tickets: tickets.length,
-        hash
-      })
-    } catch (e) {
-      onToken({ event: 'raffle-error', waveId, error: e.message })
-    }
   }
 
   // Am I opted in to the current wave (a roster member who took a lobby selfie)?
@@ -1181,11 +942,9 @@ function createWave({
     admissionPromise = null
     myBurnProof = null
     admittedKeys.clear()
-    myRaffleSecret = null
-    myRaffleCommit = null
-    myRaffleCommitSig = null
-    // NB: raffleCommits is keyed per-wave and consumed by the *delayed* runRaffle after
-    // goIdle, so it is NOT cleared here — runRaffle deletes its own wave's entry when done.
+    raffle.reset() // clear my staged secret/commit for the next wave (see raffle.js)
+    // NB: the raffle's recorded commits are keyed per-wave and consumed by its *delayed* draw
+    // after goIdle, so they are NOT cleared here — the draw deletes its own wave's entry.
   }
 
   // Emit a holding event; canSelfie tells the renderer this peer is a participant (its
@@ -1380,10 +1139,10 @@ function createWave({
   // participant too, so it publishes its own raffle commit here (in the lobby).
   function doAnnounce(waveId, paidProof) {
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '')
-    const rc = raffleOptIn()
+    const rc = raffle.optIn()
     // I'm this wave's initiator, so I collect commits for its raffle — record my own now (I
     // won't receive my own announce back). Joiners' commits arrive via wave-join.
-    if (rc && raffleTrx > 0) storeRaffleCommit(waveId, me.id, rc.commit)
+    if (rc) raffle.recordOwn(waveId, rc.commit)
     floodGossip({
       kind: 'wave-announce',
       waveId,
@@ -1502,7 +1261,7 @@ function createWave({
 
     const send = (str) => message.send(str)
     senders.set(id, send)
-    scheduleBootstrap() // first connection -> place myself in the ring via findSuccessor
+    chord.scheduleBootstrap() // first connection -> place myself in the ring via findSuccessor
 
     // greet: my compact pointers (Phase 4 — no O(N) snapshot; carries liveness +
     // country too). The newcomer converges via DHT discovery (swarm.peers) +
@@ -1531,7 +1290,7 @@ function createWave({
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
       goneUntil.set(id, Date.now() + TTL_MS) // cooldown: don't re-pin/re-hint it yet
-      if (senders.size === 0) bootstrapDone = false // went solo -> re-bootstrap on reconnect
+      if (senders.size === 0) chord.markSolo() // went solo -> re-bootstrap on reconnect
       log('peer disconnected', shortId(id))
       // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
       // promotes the next successor-list entry and repairs fingers without waiting
@@ -1574,7 +1333,7 @@ function createWave({
   // Chord repair via distributed findSuccessor — correct a successor pointer my local
   // (possibly partial) view missed. Slow cadence; a no-op when local knowledge suffices.
   const tRepair = setInterval(() => {
-    repairSuccessor().catch(() => {})
+    chord.repairSuccessor().catch(() => {})
   }, RINGUPDATE_MS * 4)
 
   return {
@@ -1598,14 +1357,10 @@ function createWave({
     recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)
     // My raffle commitment for the current wave (generated once), so the worker can put it in
     // the burn memo → the commit is recorded on-chain (auditable), not just gossiped.
-    raffleCommit: () => {
-      const rc = raffleOptIn()
-      return rc ? rc.commit : ''
-    },
+    raffleCommit: raffle.raffleCommit,
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
-    findSuccessor: (target) =>
-      findSuccessorRemote(typeof target === 'bigint' ? target : nodeIdOfHex(target)),
+    findSuccessor: chord.findSuccessor,
     async close() {
       clearInterval(tHeartbeat)
       clearInterval(tRing)
@@ -1613,8 +1368,7 @@ function createWave({
       clearTimeout(lobbyTimer)
       clearTimeout(waveTimer)
       clearTimeout(healTimer)
-      clearTimeout(bootstrapTimer)
-      for (const { timer } of pendingLookups.values()) clearTimeout(timer)
+      chord.close()
       await swarm.destroy()
       for (const b of galleries.values()) await b.close().catch(() => {})
       await store.close()

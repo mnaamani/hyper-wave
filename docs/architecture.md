@@ -143,9 +143,11 @@ app/
     hyperwave.js     worker entry: bridges lib/wave.js + lib/pay.js to IPC; charges/verifies fees
     main.js          template OTA updater (unrelated)
     lib/
-      wave.js        orchestrator: transport + Chord pinning + lifecycle + gallery + healing
+      wave.js        orchestrator: transport + ring pinning + lifecycle + gallery + healing
       ring.js        pure ring geometry (angleOf, liveRing, nextClockwise, pickReachable)
       chord.js       pure Chord math (nodeId, successors, fingers, findSuccessorStep, stabilizeStep)
+      chord-routing.js  createChordRouting: distributed findSuccessor RPC + join placement + repair
+      raffle.js      createRaffle: per-wave commit-reveal draw + payout (run by the wave initiator)
       flood.js       pure gossip-flood dedup (firstSight) for relayed lifecycle messages
       token.js       pure token crypto (receipts, chain accumulator, burn + wave-end attestations)
       gallery.js     Autobase config + ordering (galleryConfig, buildGallery, readGallery)
