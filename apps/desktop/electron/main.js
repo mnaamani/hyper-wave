@@ -35,6 +35,12 @@ ipcMain.on('pkg', (evt) => {
   evt.returnValue = pkg
 })
 
+// Dev vs distributed build (false under `npm start`, true in a packaged app). The renderer uses
+// this to gate a dev-only debug handle; app.isPackaged lives in main, so expose it over the bridge.
+ipcMain.on('isPackaged', (evt) => {
+  evt.returnValue = app.isPackaged
+})
+
 function getAppPath() {
   if (!app.isPackaged) return null
   if (isLinux && process.env.APPIMAGE) return process.env.APPIMAGE

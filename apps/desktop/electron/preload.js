@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('bridge', {
   pkg() {
     return ipcRenderer.sendSync('pkg')
   },
+  // true in a packaged/distributed build, false under `npm start` (dev). Gates dev-only tooling.
+  isPackaged() {
+    return ipcRenderer.sendSync('isPackaged')
+  },
   applyUpdate: () => ipcRenderer.invoke('pear:applyUpdate'),
   appAfterUpdate: () => ipcRenderer.invoke('app:afterUpdate'),
   startWorker: (specifier) => ipcRenderer.invoke('pear:startWorker', specifier),
