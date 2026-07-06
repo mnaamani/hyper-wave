@@ -1,4 +1,16 @@
+# Dependencies + generated build artifacts (gitignore-style; a bare name matches at any depth,
+# and only full-line `#` comments are supported — no trailing comments).
 node_modules
-out
-bundles
 package-lock.json
+
+# Build output: electron-forge distributables (apps/desktop/out) + bare-pack worklet bundles.
+out/
+bundles/
+
+# Generated native mobile projects (apps/mobile/ios|android are gitignored + regenerated):
+# CocoaPods, Xcode/Gradle build dirs, Expo cache. Never hand-edited, so never format them.
+apps/mobile/ios
+apps/mobile/android
+Pods/
+.expo/
+.gradle/
