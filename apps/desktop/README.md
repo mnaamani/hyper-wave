@@ -7,6 +7,26 @@ Docs: [`../docs/`](../docs/) — `architecture.md`, `protocol.md` (on-wire spec,
 fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scaling, phases
 1–4 implemented). Demo walkthrough: [`../DEMO.md`](../DEMO.md).
 
+## Run
+
+```bash
+npm install    # postinstall normalizes dep engines ranges for Bare (scripts/fix-bare-engines.js)
+
+# Each instance needs its own --storage dir (own identity + Corestore + wallet).
+npm start -- --storage /tmp/hyperwave/one
+npm start -- --storage /tmp/hyperwave/two
+
+# validator/seed (archives galleries so they survive peers leaving — see ../DEMO.md)
+HYPERWAVE_ROLE=validator npm start -- --storage /tmp/hyperwave/validator
+```
+
+Wallets must be **funded** to pay fees (the Nile faucet gives 2000 TRX/day:
+https://nileex.io/join/getJoinPage — the wallet address is in the 💰 chip / worker log).
+Full demo script incl. funding and local-DHT setup: [`../DEMO.md`](../DEMO.md).
+
+> **Discovery latency:** cold discovery on a fresh public-DHT topic takes **~20–35s**. For
+> demos use the local DHT bootstrap (below) for instant same-machine discovery.
+
 ## Architecture (as wired today)
 
 - **`renderer/`** (Chromium, sandboxed) — UI only. Starts the worker via the preload
@@ -119,26 +139,6 @@ the ring on every screen**. **Kick off the wave** burns the fee, then announces.
 automatically at kickoff or on 📸). As the ball passes each participant, their staged selfie
 posts and features **in the centre of the ring**; a 💵 Tip button under the featured selfie
 sends real testnet TRX to its owner.
-
-## Run
-
-```bash
-npm install    # postinstall normalizes dep engines ranges for Bare (scripts/fix-bare-engines.js)
-
-# Each instance needs its own --storage dir (own identity + Corestore + wallet).
-npm start -- --storage /tmp/hyperwave/one
-npm start -- --storage /tmp/hyperwave/two
-
-# validator/seed (archives galleries so they survive peers leaving — see ../DEMO.md)
-HYPERWAVE_ROLE=validator npm start -- --storage /tmp/hyperwave/validator
-```
-
-Wallets must be **funded** to pay fees (the Nile faucet gives 2000 TRX/day:
-https://nileex.io/join/getJoinPage — the wallet address is in the 💰 chip / worker log).
-Full demo script incl. funding and local-DHT setup: [`../DEMO.md`](../DEMO.md).
-
-> **Discovery latency:** cold discovery on a fresh public-DHT topic takes **~20–35s**. For
-> demos use the local DHT bootstrap (below) for instant same-machine discovery.
 
 ## Tests (no GUI)
 
