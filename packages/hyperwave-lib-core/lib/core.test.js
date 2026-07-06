@@ -7,7 +7,7 @@ const test = require('brittle')
 const hyperwave = require('./core')
 
 // A fake engine that records the calls core makes on it, and hands core the option callbacks
-// so the test can fire engine events (onState/onToken/onGallery) itself.
+// so the test can fire engine events (onState/onEvent/onGallery) itself.
 function fakeWave() {
   const calls = []
   const w = {
@@ -46,11 +46,11 @@ test('core routes commands to the engine and forwards engine events to send', as
 
   // engine callbacks are wired through to send with the right envelope
   wave.opts.onState({ me: wave.me, peers: [] })
-  wave.opts.onToken({ event: 'started', waveId: 'wave-1' })
+  wave.opts.onEvent({ event: 'started', waveId: 'wave-1' })
   wave.opts.onGallery([{ caption: 'hi' }])
   t.ok(
     sent.find((m) => m.type === 'state') &&
-      sent.find((m) => m.type === 'token' && m.event === 'started') &&
+      sent.find((m) => m.type === 'event' && m.event === 'started') &&
       sent.find((m) => m.type === 'gallery' && m.items.length === 1),
     'state / token / gallery events forwarded with type envelopes'
   )

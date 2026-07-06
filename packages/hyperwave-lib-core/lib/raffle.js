@@ -32,10 +32,10 @@ const shortId = (hex) => (hex ? hex.slice(0, 8) : '?')
 //   iInitiated,           // (waveId) => did I initiate this wave?
 //   getVerifyBurnOnChain, // () => on-chain burn verifier (or null) — set later via setWallet
 //   getPayReward,         // () => TRX sender (or null) — set later via setWallet
-//   onToken, log
+//   onEvent, log
 // }
 function createRaffle(ctx) {
-  const { keyPair, me, raffleTrx, galleries, getWave, iInitiated, onToken, log } = ctx
+  const { keyPair, me, raffleTrx, galleries, getWave, iInitiated, onEvent, log } = ctx
   const raffleCommits = new Map() // (initiator) waveId -> Map(peerId -> commit), from lobby gossip
   const paidRaffles = new Set() // waves already drawn — draw exactly once
   let myRaffleSecret = null // 32 random bytes (hex); revealed in my gallery entry
@@ -135,7 +135,7 @@ function createRaffle(ctx) {
       await new Promise((r) => setTimeout(r, RAFFLE_POLL_MS))
     }
     const { seed, order } = raffleDraw(waveId, tickets)
-    onToken({
+    onEvent({
       event: 'raffle-draw',
       waveId,
       tickets: tickets.length,
@@ -171,7 +171,7 @@ function createRaffle(ctx) {
     try {
       const { hash } = await payReward(winner.address, raffleTrx)
       log('raffle: paid', raffleTrx, 'TRX ->', shortId(winner.peerId), 'tx', hash)
-      onToken({
+      onEvent({
         event: 'raffle-win',
         waveId,
         winner: winner.peerId,
@@ -181,7 +181,7 @@ function createRaffle(ctx) {
         hash
       })
     } catch (e) {
-      onToken({ event: 'raffle-error', waveId, error: e.message })
+      onEvent({ event: 'raffle-error', waveId, error: e.message })
     }
   }
 

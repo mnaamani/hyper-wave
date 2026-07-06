@@ -66,7 +66,7 @@ renderer  ──(commands)──▶  worker
 
 worker  ──(events)──▶  renderer
   { type: 'state',   me, peers[], successor }         // ring membership (every change)
-  { type: 'token',   event, ... }                     // lifecycle + race events (protocol.md)
+  { type: 'event',   event, ... }                     // lifecycle + race + raffle events (protocol.md)
   { type: 'gallery', items[] }                        // ordered selfies (every change)
   { type: 'wallet',  address, trx }                   // self-custodial wallet chip
   { type: 'burn-result' | 'tip-result', ... }         // fee/tip outcomes (toasts)
@@ -132,7 +132,7 @@ app/
     index.html
     app.js           orchestrator: wire ipc events → views
     lib/
-      ipc.js         worker channel: route state/token/gallery/wallet/tip/burn + command senders
+      ipc.js         worker channel: route state/event/gallery/wallet/tip/burn + command senders
       ring.js        all <canvas> drawing (ring, dots, flags, football, centre selfie)
       gallery.js     centre-selfie slideshow + collection progress + 💵 tip button
       lobby.js       lobby panel (countdown + join, gated on payment verification)

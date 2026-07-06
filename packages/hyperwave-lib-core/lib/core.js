@@ -29,7 +29,7 @@ function init({
     // initiator is its own gallery archivist + commit-recorder + raffle sponsor.
     raffleTrx: config.raffleTrx || 0,
     onState: (state) => send({ type: 'state', ...state }),
-    onToken: (event) => send({ type: 'token', ...event }),
+    onEvent: (event) => send({ type: 'event', ...event }),
     onGallery: (items) => send({ type: 'gallery', items }),
     log
   })

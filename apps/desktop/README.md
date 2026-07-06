@@ -104,21 +104,21 @@ isn't archived elsewhere (accepted simplification).
 { type: 'tip-result', hash?|error?, to, amount }
 
 // lifecycle events (idle -> pay -> lobby -> racing -> idle)
-{ type: 'token', event: 'paying', waveId }                   // initiator burning the kick-off fee
-{ type: 'token', event: 'wave-announce', waveId, by, mine, joined, count, lobbyMs, paid }
-{ type: 'token', event: 'wave-verified', waveId, mine? }     // kick-off burn proven -> join allowed
-{ type: 'token', event: 'wave-unpaid', waveId, reason }      // failed verification -> abandoned
-{ type: 'token', event: 'join-blocked', waveId, reason }     // tried to join before verification
-{ type: 'token', event: 'joined' | 'roster', waveId, count }
-{ type: 'token', event: 'wave-active', waveId, joined, count }
-{ type: 'token', event: 'wave-idle', waveId, reason }
-{ type: 'token', event: 'busy', waveId }
+{ type: 'event', event: 'paying', waveId }                   // initiator burning the kick-off fee
+{ type: 'event', event: 'wave-announce', waveId, by, mine, joined, count, lobbyMs, paid }
+{ type: 'event', event: 'wave-verified', waveId, mine? }     // kick-off burn proven -> join allowed
+{ type: 'event', event: 'wave-unpaid', waveId, reason }      // failed verification -> abandoned
+{ type: 'event', event: 'join-blocked', waveId, reason }     // tried to join before verification
+{ type: 'event', event: 'joined' | 'roster', waveId, count }
+{ type: 'event', event: 'wave-active', waveId, joined, count }
+{ type: 'event', event: 'wave-idle', waveId, reason }
+{ type: 'event', event: 'busy', waveId }
 
 // token race events
-{ type: 'token', event: 'started', waveId, by }
-{ type: 'token', event: 'holding', waveId, hopCount, holder, angle, canSelfie }
-{ type: 'token', event: 'position', waveId, hopCount, holder, angle }
-{ type: 'token', event: 'forwarded' | 'healed' | 'stalled' | 'completed', ... }
+{ type: 'event', event: 'started', waveId, by }
+{ type: 'event', event: 'holding', waveId, hopCount, holder, angle, canSelfie }
+{ type: 'event', event: 'position', waveId, hopCount, holder, angle }
+{ type: 'event', event: 'forwarded' | 'healed' | 'stalled' | 'completed', ... }
 
 // gallery (Autobase view) — on every change / replication
 { type: 'gallery', items: [ { waveId, peerId, hopCount, caption, image, address, ... } ] }

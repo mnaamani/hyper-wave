@@ -28,7 +28,7 @@ class Proc {
   constructor(name, args, env) {
     this.name = name
     this.out = ''
-    this.events = [] // parsed onToken events, in order
+    this.events = [] // parsed onEvent events, in order
     this._waiters = new Set() // { ready:()=>bool, value:()=>any, resolve, timer }
     // `detached` puts the child in its OWN process group. `bare` here is a Node wrapper that
     // spawns the native runtime as a child, so killing the wrapper PID alone would orphan the
@@ -94,7 +94,7 @@ class Proc {
     )
   }
 
-  // Resolve with the first onToken event named `name` (optionally matching `pred`).
+  // Resolve with the first onEvent event named `name` (optionally matching `pred`).
   waitForEvent(name, ms = 30000, pred = () => true) {
     const find = () => this.events.find((e) => e.event === name && pred(e))
     return this._wait(() => !!find(), find, ms, `event ${name}`)

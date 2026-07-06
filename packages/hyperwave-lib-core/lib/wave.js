@@ -125,7 +125,7 @@ function parseBootstrap(str) {
 function createWave({
   storageDir,
   onState,
-  onToken = () => {},
+  onEvent = () => {},
   onGallery = () => {},
   log = () => {},
   bootstrap = null,
@@ -213,7 +213,7 @@ function createWave({
     iInitiated: (id) => initiatedWaves.has(id),
     getVerifyBurnOnChain: () => verifyBurnOnChain,
     getPayReward: () => payReward,
-    onToken,
+    onEvent,
     log
   })
 
@@ -377,7 +377,7 @@ function createWave({
         ) {
           clearHeal()
         }
-        onToken({
+        onEvent({
           event: 'position',
           waveId: m.waveId,
           holder: m.holder,
@@ -408,7 +408,7 @@ function createWave({
           verifyKickoff(m.waveId, m.paid)
         }
         for (const id of m.roster || []) wave.roster.add(id)
-        onToken({ event: 'roster', waveId: wave.id, count: wave.roster.size })
+        onEvent({ event: 'roster', waveId: wave.id, count: wave.roster.size })
       }
       return
     }
@@ -431,7 +431,7 @@ function createWave({
       if (wave && m.waveId === wave.id && m.peerId) {
         wave.roster.add(m.peerId)
         raffle.recordCommit(m.waveId, m.peerId, m.commit, m.commitSig)
-        onToken({ event: 'roster', waveId: wave.id, count: wave.roster.size })
+        onEvent({ event: 'roster', waveId: wave.id, count: wave.roster.size })
       }
       return
     }
@@ -716,7 +716,7 @@ function createWave({
     image
   }) {
     if (!base) {
-      onToken({ event: 'gallery-error', reason: 'no-gallery-yet' })
+      onEvent({ event: 'gallery-error', reason: 'no-gallery-yet' })
       return
     }
     // Capture closure state NOW, before the admission await: in a fast (few-peer) wave the
@@ -726,7 +726,7 @@ function createWave({
     const burnProof = myBurnProof
     const raffleSecret = raffle.currentReveal()
     if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
-      onToken({ event: 'gallery-error', reason: 'not-admitted' })
+      onEvent({ event: 'gallery-error', reason: 'not-admitted' })
       return
     }
     await base.append({
@@ -836,7 +836,7 @@ function createWave({
     clearTimeout(lobbyTimer)
     lobbyTimer = setTimeout(() => goIdle('lobby-timeout'), lobbyMs + 10000)
     if (silent) return
-    onToken({
+    onEvent({
       event: 'wave-announce',
       waveId,
       by,
@@ -854,7 +854,7 @@ function createWave({
     if (!wave || wave.phase !== 'lobby' || wave.joined) return null
     // anti-spam: never join (and pay) a wave whose kick-off fee isn't proven paid
     if (wave.paid !== 'verified') {
-      onToken({ event: 'join-blocked', waveId: wave.id, reason: wave.paid })
+      onEvent({ event: 'join-blocked', waveId: wave.id, reason: wave.paid })
       return null
     }
     wave.joined = true
@@ -867,7 +867,7 @@ function createWave({
       commit: rc.commit,
       commitSig: rc.commitSig
     })
-    onToken({ event: 'joined', waveId: wave.id, count: wave.roster.size })
+    onEvent({ event: 'joined', waveId: wave.id, count: wave.roster.size })
     return wave.id
   }
 
@@ -879,7 +879,7 @@ function createWave({
     clearTimeout(lobbyTimer)
     clearTimeout(waveTimer)
     waveTimer = setTimeout(() => goIdle('timeout'), waveTimeoutMs)
-    onToken({ event: 'wave-active', waveId: wave.id, joined: wave.joined, count: wave.roster.size })
+    onEvent({ event: 'wave-active', waveId: wave.id, joined: wave.joined, count: wave.roster.size })
   }
 
   function goIdle(reason) {
@@ -890,14 +890,14 @@ function createWave({
     resetSelfie() // drop any staged selfie / receipt for the next wave
     seen.clear() // only needed within the active wave; bound its growth
     teardown()
-    onToken({ event: 'wave-idle', waveId, reason })
+    onEvent({ event: 'wave-idle', waveId, reason })
   }
 
   // Finish the current wave: emit the outcome to the UI and return to idle. Shared by
   // the originator (local completion), a dead-end stall, and receiving a `wave-end`.
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
-    if (stalled) onToken({ event: 'stalled', waveId, reason: 'no successor' })
-    else onToken({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
+    if (stalled) onEvent({ event: 'stalled', waveId, reason: 'no successor' })
+    else onEvent({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
     // If I initiated this wave and fund a raffle, the raffle draws it after a settle (no-op
     // otherwise). It reads the gallery I retained + the commits it recorded, so goIdle clearing
     // `wave` below is fine.
@@ -951,7 +951,7 @@ function createWave({
   // staged selfie will post now). Everyone else just relays the ball.
   function emitHolding(waveId, hopCount, receiptSig, chainHash, receiptTs) {
     recordMyReceipt(waveId, hopCount, receiptSig, chainHash, receiptTs)
-    onToken({
+    onEvent({
       event: 'holding',
       waveId,
       hopCount,
@@ -982,7 +982,7 @@ function createWave({
       // dead end (kicked off solo, or all successors gone) — end the wave now so every
       // peer returns to idle instead of waiting out the timeout
       clearHeal()
-      onToken({
+      onEvent({
         event: 'stalled',
         waveId: token.waveId,
         reason: skipped.size ? 'no-reachable-successor' : 'no successor'
@@ -1004,7 +1004,7 @@ function createWave({
       return
     }
     senders.get(succ.id)(JSON.stringify(token))
-    onToken({ event: 'forwarded', waveId: token.waveId, hopCount: token.hopCount, to: succ.id })
+    onEvent({ event: 'forwarded', waveId: token.waveId, hopCount: token.hopCount, to: succ.id })
 
     // heal: expect the peer I forwarded to (succ) to hold the ball soon; its wave-pos is the
     // ACK. Record succ.id so only *its* position clears the watch (see the wave-pos handler).
@@ -1014,7 +1014,7 @@ function createWave({
       healPending = null
       skipped.add(succ.id)
       log('healing: successor', shortId(succ.id), 'silent — skipping')
-      onToken({ event: 'healed', waveId: token.waveId, skipped: succ.id })
+      onEvent({ event: 'healed', waveId: token.waveId, skipped: succ.id })
       forwardToken(token, skipped)
     }, healTimeoutMs)
   }
@@ -1115,7 +1115,7 @@ function createWave({
   // lobby window the initiator finalizes the roster and the token starts racing.
   function startWave() {
     if (wave) {
-      onToken({ event: 'busy', waveId: wave.id })
+      onEvent({ event: 'busy', waveId: wave.id })
       return null
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
@@ -1127,7 +1127,7 @@ function createWave({
       log('wave', shortId(waveId), '— awaiting kick-off payment')
       clearTimeout(lobbyTimer)
       lobbyTimer = setTimeout(() => goIdle('unpaid'), PAY_TIMEOUT_MS)
-      onToken({ event: 'paying', waveId })
+      onEvent({ event: 'paying', waveId })
     } else {
       doAnnounce(waveId, null) // legacy/no-wallet path: announce immediately, unpaid
     }
@@ -1164,7 +1164,7 @@ function createWave({
     wave.kickoffProof = proof
     wave.paid = 'verified'
     doAnnounce(wave.id, proof)
-    onToken({ event: 'wave-verified', waveId: wave.id, mine: true })
+    onEvent({ event: 'wave-verified', waveId: wave.id, mine: true })
   }
 
   // A kick-off proof is structurally valid: signed (Ed25519) by the initiator over a
@@ -1192,10 +1192,10 @@ function createWave({
         if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return
         if (res && res.ok) {
           wave.paid = 'verified'
-          onToken({ event: 'wave-verified', waveId })
+          onEvent({ event: 'wave-verified', waveId })
         } else {
           wave.paid = 'rejected'
-          onToken({ event: 'wave-unpaid', waveId, reason: res && res.reason })
+          onEvent({ event: 'wave-unpaid', waveId, reason: res && res.reason })
           goIdle('unpaid-rejected')
         }
       })
@@ -1228,7 +1228,7 @@ function createWave({
       paid: wave.kickoffProof || undefined // so peers adopting via start can re-sync newcomers
     })
     beginRace()
-    onToken({ event: 'started', waveId, by: me.id })
+    onEvent({ event: 'started', waveId, by: me.id })
 
     // the originator is hop 0 — hold (post staged selfie if joined) and forward
     holdAndForward(stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey))

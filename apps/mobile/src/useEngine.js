@@ -44,7 +44,7 @@ export function useEngine(config = {}) {
           if (msg.me) setMe(msg.me)
           setPeers((msg.peers || []).length)
           break
-        case 'token':
+        case 'event':
           if (msg.event === 'started' || msg.event === 'announced') setPhase('active')
           else if (msg.event === 'completed' || msg.event === 'ended') setPhase('idle')
           break

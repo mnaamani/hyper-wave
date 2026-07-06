@@ -43,7 +43,7 @@ const wave = createWave({
       setTimeout(() => kickOff(), 500)
     }
   },
-  onToken: (e) => {
+  onEvent: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
     if (e.event === 'raffle-draw') {
       console.log(

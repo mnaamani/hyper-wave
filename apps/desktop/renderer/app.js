@@ -49,7 +49,6 @@ function renderIdle() {
 }
 
 ipc.on('state', (msg) => {
-  console.log('state', msg)
   if (!state.countrySent) {
     setState({ countrySent: true })
     hud.sendCountry() // worker is up - tell it the nation we support
@@ -79,7 +78,7 @@ ipc.on('burn-result', (msg) => {
   )
 })
 
-ipc.on('token', (e) => {
+ipc.on('event', (e) => {
   switch (e.event) {
     case 'wave-announce':
       setState({ waveActive: true, lobbyDeadline: performance.now() + (e.lobbyMs || 15000) })

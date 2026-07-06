@@ -1,5 +1,5 @@
 // Worker IPC: one channel to the hyperwave Bare worker. Decodes/routes incoming
-// messages by type (state / token / gallery) to registered listeners, and exposes
+// messages by type (state / event / gallery / …) to registered listeners, and exposes
 // typed command senders. The rest of the renderer talks to the worker only via this.
 const bridge = window.bridge
 const decoder = new TextDecoder('utf-8')
@@ -8,14 +8,7 @@ const HYPERWAVE = '/workers/hyperwave.js'
 bridge.startWorker(HYPERWAVE)
 
 // Handlers for worker message events
-const listenersByMessageType = {
-  state: [],
-  token: [],
-  gallery: [],
-  wallet: [],
-  'tip-result': [],
-  'burn-result': []
-}
+const listenersByMessageType = {}
 
 bridge.onWorkerIPC(HYPERWAVE, (data) => {
   let msg
@@ -31,17 +24,17 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
     }
   }
 })
-bridge.onWorkerStdout(HYPERWAVE, (d) => console.log('[hyperwave]', decoder.decode(d)))
-bridge.onWorkerStderr(HYPERWAVE, (d) => console.error('[hyperwave]', decoder.decode(d)))
+bridge.onWorkerStdout(HYPERWAVE, (data) => console.log('[hyperwave]', decoder.decode(data)))
+bridge.onWorkerStderr(HYPERWAVE, (data) => console.error('[hyperwave]', decoder.decode(data)))
 
 // Register message handler
 export function on(type, fn) {
-  if (!listenersByMessageType[type]) {
-    throw new Error(`Registering unknown message type ${type}`)
-  }
-  listenersByMessageType[type].push(fn)
+  const handlers = listenersByMessageType[type] || []
+  handlers.push(fn)
+  listenersByMessageType[type] = handlers
 }
 
+// Send command message to worker
 function send(type, extra = {}) {
   bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type, ...extra }))
 }
