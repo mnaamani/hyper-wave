@@ -17,13 +17,17 @@ const path = require('path')
 // Monorepo: npm hoists shared deps (WDK + its @noble transitive deps) to the ROOT node_modules,
 // but stragglers can land in a workspace's own node_modules on a version conflict. Scan the root
 // and each workspace so the GUI (pear-runtime) resolver never trips on an unpatched engines range.
+// Pass a directory argument to instead scan just <dir>/node_modules — used when packaging the
+// desktop app (electron-forge assembles a fresh, un-normalized node_modules in the bundle).
 const ROOT = path.join(__dirname, '..')
-const NODE_MODULES = path.join(ROOT, 'node_modules')
-const ROOTS = [
-  NODE_MODULES,
-  path.join(ROOT, 'apps', 'desktop', 'node_modules'),
-  path.join(ROOT, 'packages', 'hyperwave-lib-core', 'node_modules')
-]
+const target = process.argv[2]
+const ROOTS = target
+  ? [path.join(path.resolve(target), 'node_modules')]
+  : [
+      path.join(ROOT, 'node_modules'),
+      path.join(ROOT, 'apps', 'desktop', 'node_modules'),
+      path.join(ROOT, 'packages', 'hyperwave-lib-core', 'node_modules')
+    ]
 const SAFE = '>=0.0.0' // always satisfied — removes the (advisory) constraint, stays parseable
 
 // Use bare-semver ITSELF as the oracle: a range is a problem iff bare-semver can't parse it

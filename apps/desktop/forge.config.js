@@ -112,6 +112,26 @@ module.exports = {
   ],
 
   hooks: {
+    // The npm workspace hoists this app's runtime deps (pear-runtime, corestore, the Bare stack,
+    // hyperwave-lib-core) to the REPO ROOT node_modules, so the copied app ships with an empty
+    // node_modules and can't resolve them at runtime. Assemble a self-contained production install
+    // right in the packaged app, resolving the workspace dep from its real path, then normalize
+    // engines so pear-runtime's bare-semver doesn't choke on the freshly-installed tree.
+    packageAfterCopy: async (_forgeConfig, buildPath) => {
+      const cp = require('child_process')
+      const coreDir = path.resolve(__dirname, '..', '..', 'packages', 'hyperwave-lib-core')
+      const shim = path.resolve(__dirname, '..', '..', 'scripts', 'fix-bare-engines.js')
+      const pjPath = path.join(buildPath, 'package.json')
+      const pj = JSON.parse(fs.readFileSync(pjPath, 'utf8'))
+      pj.dependencies['hyperwave-lib-core'] = 'file:' + coreDir
+      delete pj.devDependencies
+      fs.writeFileSync(pjPath, JSON.stringify(pj, null, 2))
+      cp.execSync('npm install --omit=dev --install-links --no-audit --no-fund --no-package-lock', {
+        cwd: buildPath,
+        stdio: 'inherit'
+      })
+      cp.execSync(`node "${shim}" "${buildPath}"`, { stdio: 'inherit' })
+    },
     readPackageJson: async (forgeConfig, packageJson) => {
       if (process.env.UPGRADE_KEY) {
         packageJson.upgrade = process.env.UPGRADE_KEY
