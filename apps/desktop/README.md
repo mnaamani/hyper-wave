@@ -100,7 +100,7 @@ isn't archived elsewhere (accepted simplification).
 
 // wallet + money
 { type: 'wallet', address, trx }                          // self-custodial wallet (chip)
-{ type: 'burn-result', hash?|error?, amount, waveId, reason /* kickoff|join */ }
+{ type: 'burn-result', stage: 'confirming'|'burned'|'failed', hash?, error?, amount?, waveId?, reason /* kickoff|join */ }
 { type: 'tip-result', hash?|error?, to, amount }
 
 // lifecycle events (idle -> pay -> lobby -> racing -> idle)

@@ -68,13 +68,13 @@ ipc.on('wallet', (msg) => {
 })
 ipc.on('tip-result', (msg) => gallery.tipResult(msg))
 ipc.on('burn-result', (msg) => {
-  // participation fee (kick-off or join), burned to the black hole (skin in the game)
+  // participation fee (kick-off or join), burned to the black hole (skin in the game). `stage`
+  // keeps us from claiming "burned" before the tx is actually confirmed on-chain.
   const what = msg.reason === 'join' ? 'join' : 'kick-off'
-  hud.waveStatus(
-    msg.hash
-      ? `🔥 ${what} fee burned - ${msg.amount} TRX (tx ${msg.hash.slice(0, 8)}…)`
-      : `⚠️ ${what} fee burn failed: ${msg.error}`
-  )
+  const tx = msg.hash ? ` (tx ${msg.hash.slice(0, 8)}…)` : ''
+  if (msg.stage === 'confirming') hud.waveStatus(`⏳ confirming ${what} burn on-chain…${tx}`)
+  else if (msg.stage === 'failed') hud.waveStatus(`⚠️ ${what} fee burn failed: ${msg.error}`)
+  else hud.waveStatus(`🔥 ${what} fee burned - ${msg.amount} TRX${tx}`)
 })
 
 ipc.on('event', (e) => {

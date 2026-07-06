@@ -61,44 +61,65 @@ function init({
       })
   }
 
-  // Participation fee (fees.js) — burned to the black hole by both initiator (kick-off) and each
-  // joiner. `burn-result` -> UI toast.
-  async function burnFee(waveId, reason) {
-    const { hash, proof } = await payFee(wave, payments, waveId, reason)
-    send({ type: 'burn-result', hash, amount: FEE_TRX, waveId, reason })
-    return { hash, proof }
-  }
+  // Participation fee (fees.js), burned to the black hole. The `burn-result` message carries a
+  // `stage` so the UI never says "burned" prematurely:
+  //   confirming — tx broadcast, awaiting on-chain confirmation (kick-off only)
+  //   burned     — confirmed on-chain (kick-off) or broadcast (join, fire-and-forget)
+  //   failed     — couldn't burn / never confirmed
 
   // Kick-off: the wave is NOT announced until the initiator's burn is CONFIRMED on-chain, so
   // peers can verify it and won't join an unpaid (spam) wave.
   async function handleStartWave() {
+    // Fail fast: a wallet that can't cover the fee would broadcast a burn that never confirms —
+    // the wave would just stall until PAY_TIMEOUT. Refuse up front with a clear message. Only when
+    // we could actually read the balance; a failed read falls through and lets the burn try.
+    if (payments) {
+      const bal = await payments.balances().catch(() => null)
+      if (bal && bal.trx < FEE_TRX) {
+        send({
+          type: 'burn-result',
+          stage: 'failed',
+          reason: 'kickoff',
+          error: `wallet unfunded (${bal.trx} TRX) — fund it to kick off a wave`
+        })
+        return
+      }
+    }
     const waveId = wave.startWave()
     if (!waveId || !payments) return // busy / no wallet (unpaid path already announced)
     try {
-      const { hash, proof } = await burnFee(waveId, 'kickoff')
-      if (await confirmBurn(payments, waveId, hash)) wave.announcePaid(proof)
-      else {
+      const { hash, proof } = await payFee(wave, payments, waveId, 'kickoff')
+      send({ type: 'burn-result', stage: 'confirming', hash, waveId, reason: 'kickoff' })
+      if (await confirmBurn(payments, waveId, hash)) {
         send({
           type: 'burn-result',
-          error: 'kick-off burn not confirmed',
+          stage: 'burned',
+          hash,
+          amount: FEE_TRX,
           waveId,
           reason: 'kickoff'
         })
+        wave.announcePaid(proof)
+      } else {
+        const error = 'burn not confirmed on-chain'
+        send({ type: 'burn-result', stage: 'failed', error, waveId, reason: 'kickoff' })
       }
     } catch (e) {
-      send({ type: 'burn-result', error: e.message, waveId, reason: 'kickoff' })
+      send({ type: 'burn-result', stage: 'failed', error: e.message, waveId, reason: 'kickoff' })
     }
   }
 
-  // Join: wave.join() is gated on the kick-off being verified (returns null otherwise), so we
-  // only burn the join fee for a wave that's proven paid.
+  // Join: wave.join() is gated on the kick-off being verified (returns null otherwise), so we only
+  // burn the join fee for a wave that's proven paid. The join burn is fire-and-forget (no on-chain
+  // confirmation), so it's reported as burned on broadcast.
   async function handleJoin() {
     const waveId = wave.join()
     if (!waveId || !payments) return
     try {
-      await burnFee(waveId, 'join')
+      const { hash } = await payFee(wave, payments, waveId, 'join')
+      send({ type: 'burn-result', stage: 'burned', hash, amount: FEE_TRX, waveId, reason: 'join' })
     } catch (e) {
-      send({ type: 'burn-result', error: e.message, waveId, reason: 'join' })
+      send({ type: 'burn-result', stage: 'failed', error: e.message, waveId, reason: 'join' })
     }
   }
 

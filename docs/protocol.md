@@ -916,7 +916,8 @@ tip to a selfie owner's wallet).
 
 **Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`;
 `wallet {address, trx}` (self-custodial TRX wallet); `tip-result {hash?, error?}`;
-`burn-result {hash?, amount?, error?, waveId, reason}` (a **participation fee** — 1 TRX burned
+`burn-result {stage: 'confirming'|'burned'|'failed', hash?, amount?, error?, waveId?, reason}`
+(a **participation fee** — 1 TRX burned
 to Tron's black hole address `T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb`, i.e. the all-zero EVM
 address: unspendable by anyone, so the fee proves skin in the game without enriching any
 party. `reason: 'kickoff'` for the initiator on `start-wave`, `'join'` for each opt-in on
