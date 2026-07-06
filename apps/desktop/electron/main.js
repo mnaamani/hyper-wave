@@ -10,7 +10,7 @@ const pkg = require('../package.json')
 const { name, productName, version, upgrade } = pkg
 
 const protocol = name
-const mainWorkerSpecifier = '/workers/main.js'
+const updaterWorkerSpecifier = '/workers/updater.js'
 
 const workers = new Map()
 
@@ -141,7 +141,7 @@ async function createWindow() {
 }
 
 ipcMain.handle('pear:applyUpdate', () => {
-  const pipe = getWorker(mainWorkerSpecifier)
+  const pipe = getWorker(updaterWorkerSpecifier)
 
   return new Promise((resolve, reject) => {
     function onData(data) {

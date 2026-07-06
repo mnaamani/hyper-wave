@@ -9,7 +9,7 @@ const { createWave, parseBootstrap } = require('./wave')
 const { createPayments } = require('./pay')
 const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees')
 
-function createCore({
+function init({
   storageDir,
   config = {},
   send,
@@ -130,4 +130,4 @@ function createCore({
   return { wave, onMessage, close }
 }
 
-module.exports = { createCore }
+module.exports = { init }

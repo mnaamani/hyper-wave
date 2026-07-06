@@ -9,7 +9,7 @@
 const os = require('bare-os')
 const path = require('bare-path')
 const FramedStream = require('framed-stream')
-const { createCore } = require('../lib/core')
+const hyperwave = require('../lib/core')
 
 // On mobile the process cwd is the (read-only) app bundle, so a relative storageDir like
 // 'hyperwave' resolves somewhere bare-fs can't write — Corestore then fails with "Corestore is
@@ -22,6 +22,7 @@ function resolveStorage(dir) {
 }
 
 const pipe = new FramedStream(BareKit.IPC) // bare-kit's worklet-side IPC (cf. Bare.IPC on desktop)
+// Sends a message Worker -> Host (React Native app)
 const send = (msg) => pipe.write(JSON.stringify(msg))
 
 // Resilience: a mobile app must not die on a stray async rejection deep in the engine. Bare
@@ -44,7 +45,7 @@ pipe.on('data', (data) => {
   }
   // First message from the RN host is the init: storageDir + config (matchId, role, seed, …).
   if (msg.type === 'init' && !core) {
-    core = createCore({
+    core = hyperwave.init({
       storageDir: resolveStorage(msg.storageDir),
       config: msg.config || {},
       send

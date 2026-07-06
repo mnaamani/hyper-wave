@@ -62,7 +62,7 @@ fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scalin
     admitter verifies it on-chain before admitting, so every gallery entry is backed by a burn.
   - **Gallery tipping** — 💵 tip a selfie 1 TRX straight to its owner's wallet. The only way
     to actually make money — and always to a peer who paid in.
-- **`workers/main.js`** — the template's OTA updater worker, left intact.
+- **`workers/updater.js`** — the template's OTA updater worker, left intact.
 
 **Roles:** a normal instance is a `peer`. Launch with `HYPERWAVE_ROLE=validator` to run a
 **validator/seed**: it retains every gallery (store not wiped) so galleries survive peers

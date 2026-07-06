@@ -9,7 +9,7 @@ only the host (this Expo app) and the UI differ.
 
 ```
 Expo RN app (this package)                 Bare worklet (hyperwave-lib-core)
-  App.js  ── useEngine() ──► FramedStream ⇄ IPC ⇄ FramedStream ──► worklet/app.js ──► createCore
+  App.js  ── useEngine() ──► FramedStream ⇄ IPC ⇄ FramedStream ──► worklet/app.js ──► init
   (React UI)                 (JSON messages)                        (wave + gallery + wallet)
 ```
 

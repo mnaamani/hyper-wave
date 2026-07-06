@@ -161,7 +161,7 @@ ipc.on('token', (e) => {
 // OTA updater worker (kept from the template)
 const bridge = window.bridge
 const decoder = new TextDecoder('utf-8')
-bridge.startWorker('/workers/main.js')
-bridge.onWorkerIPC('/workers/main.js', (d) => {
+bridge.startWorker('/workers/updater.js')
+bridge.onWorkerIPC('/workers/updater.js', (d) => {
   if (decoder.decode(d) === 'updating') hud.status('updating…')
 })

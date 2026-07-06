@@ -26,7 +26,7 @@ flowchart TB
       W["workers/hyperwave.js → lib/wave.js + lib/pay.js<br/>discovery · Chord pinning · gossip · token race ·<br/>lifecycle · Autobase gallery · healing ·<br/>WDK wallet · fee burns · tips"]
     end
     subgraph Updater["Bare worker (OTA, template)"]
-      U["workers/main.js<br/>pear-runtime auto-update"]
+      U["workers/updater.js<br/>pear-runtime auto-update"]
     end
   end
 
@@ -47,7 +47,7 @@ sandboxed renderer and the worker.
 | **Main** (`electron/main.js`)                | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers. Essentially unmodified template + one permission line.                                      |
 | **Renderer** (`renderer/`)                   | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                         |
 | **Worker** (`workers/hyperwave.js` + `lib/`) | **Bare**            | CJS           | All protocol/state: Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing — plus the WDK wallet (fee burns, tips). WDK is ESM-only, so `pay.js` bridges via dynamic `import()`. |
-| **Updater** (`workers/main.js`)              | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                       |
+| **Updater** (`workers/updater.js`)           | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                       |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
 

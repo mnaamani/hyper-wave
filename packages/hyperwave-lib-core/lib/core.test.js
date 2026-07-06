@@ -4,7 +4,7 @@
 // is exactly what the extraction bought: core is testable without a host. Runs under Bare:
 //   bare workers/lib/core.test.js   (or `npm test`)
 const test = require('brittle')
-const { createCore } = require('./core')
+const hyperwave = require('./core')
 
 // A fake engine that records the calls core makes on it, and hands core the option callbacks
 // so the test can fire engine events (onState/onToken/onGallery) itself.
@@ -30,7 +30,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0)) // let the async wallet
 test('core routes commands to the engine and forwards engine events to send', async (t) => {
   const sent = []
   const wave = fakeWave()
-  const core = createCore({
+  const core = hyperwave.init({
     storageDir: '/tmp/e',
     config: { role: 'peer', matchId: 'm', bootstrap: '' },
     send: (m) => sent.push(m),
@@ -93,7 +93,7 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
     send: async (to, amount) => (tipped.push([to, amount]), { hash: 'f'.repeat(64) }),
     dispose: () => {}
   }
-  const core = createCore({
+  const core = hyperwave.init({
     storageDir: '/tmp/e',
     config: {},
     send: (m) => sent.push(m),
