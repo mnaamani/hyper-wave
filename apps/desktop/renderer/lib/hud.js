@@ -4,6 +4,7 @@ import { COUNTRIES, flagOf } from './countries.js'
 import { startWave, setCountry, appVersion } from './ipc.js'
 
 const statusEl = document.getElementById('status')
+const waveEl = document.getElementById('wave-status')
 const startBtn = document.getElementById('start')
 const walletEl = document.getElementById('wallet')
 
@@ -17,8 +18,15 @@ export function wallet({ address, trx }) {
 }
 
 // --- status + start button --------------------------------------------------
+// The persistent status line (idle chrome: peer count).
 export function status(text) {
   statusEl.innerText = text
+}
+// The live wave narration, on its own line (paying / lobby / racing / result). Pass '' to clear
+// it (the element collapses via #wave-status:empty). Kept separate from status() so the two never
+// fight over one line — status() shows peer count even while a wave narrates here.
+export function wave(text) {
+  waveEl.innerText = text || ''
 }
 export function showStart(show) {
   startBtn.style.display = show ? '' : 'none'

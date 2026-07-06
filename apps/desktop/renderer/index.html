@@ -105,6 +105,16 @@
         opacity: 0.85;
         min-height: 20px;
       }
+      /* live wave narration — its own line, more prominent than the status line; hidden when idle */
+      #wave-status {
+        font-size: 15px;
+        font-weight: 600;
+        min-height: 20px;
+        margin-top: 2px;
+      }
+      #wave-status:empty {
+        display: none;
+      }
       #me {
         font-size: 12px;
         opacity: 0.6;
@@ -345,6 +355,7 @@
       <span id="v">v</span>
     </header>
     <div id="status">connecting…</div>
+    <div id="wave-status"></div>
     <div id="me"></div>
     <div id="wallet" title="Your self-custodial TRX wallet (Tron testnet)"></div>
     <div class="field">

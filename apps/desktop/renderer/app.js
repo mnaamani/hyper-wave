@@ -13,15 +13,14 @@ ring.start()
 // The orchestrator's UI state - a single source of truth. Mutate only via setState() so updates
 // are explicit and in one place; the views below are still driven imperatively off the ipc events.
 const state = {
-  waveActive: false, // a wave is forming/racing → hide the idle chrome
   countrySent: false, // one-shot: pushed our saved team to the worker once it came up
-  peers: 0, // number of live peers in the ring (drives the idle status line)
+  peers: 0, // number of live peers in the ring (drives the status line)
   lobbyDeadline: 0 // ~when the lobby closes (kickoff), for the capture countdown
 }
 const setState = (patch) => Object.assign(state, patch)
 
 // Dev-only console handle (`hw` = HyperWave): reach the orchestrator state + view modules from the
-// DevTools console, e.g. `hw.state`, `hw.gallery.count()`, `hw.hud.status('test')`. ES modules
+// DevTools console, e.g. `hw.state`, `hw.gallery.count()`, `hw.hud.wave('test')`. ES modules
 // don't expose their bindings globally, so nothing is reachable unless we put it here — which is
 // exactly why we DON'T in a packaged build (keeps a shipped app's global scope clean). `npm start`
 // is unpackaged, so the handle is present in dev only.
@@ -35,10 +34,10 @@ function beginCapture() {
   proof.open(Math.max(0, state.lobbyDeadline - performance.now()))
 }
 
-// The idle chrome (status line + docked kick-off button), derived from state. A no-op while a
-// wave is active - call it wherever an input changes (peer count, gallery size, wave end).
-function renderIdle() {
-  if (state.waveActive) return
+// Update the HUD's persistent chrome from state: the status line (peer count) + the docked
+// kick-off button. The live wave narration is a separate element (hud.wave / #wave-status), so
+// this runs freely — even mid-wave — without clobbering it; the status line just shows peer count.
+function updateHud() {
   hud.status(
     state.peers === 0
       ? 'in the ring - waiting for peers...'
@@ -55,12 +54,12 @@ ipc.on('state', (msg) => {
   }
   ring.setState(msg)
   setState({ peers: msg.peers.length })
-  renderIdle()
+  updateHud()
 })
 
 ipc.on('gallery', (msg) => {
   gallery.handle(msg.items)
-  renderIdle() // dock the kick-off button below a non-empty gallery (when idle)
+  updateHud() // dock the kick-off button below a non-empty gallery (when idle)
 })
 
 ipc.on('wallet', (msg) => {
@@ -71,7 +70,7 @@ ipc.on('tip-result', (msg) => gallery.tipResult(msg))
 ipc.on('burn-result', (msg) => {
   // participation fee (kick-off or join), burned to the black hole (skin in the game)
   const what = msg.reason === 'join' ? 'join' : 'kick-off'
-  hud.status(
+  hud.wave(
     msg.hash
       ? `🔥 ${what} fee burned - ${msg.amount} TRX (tx ${msg.hash.slice(0, 8)}…)`
       : `⚠️ ${what} fee burn failed: ${msg.error}`
@@ -81,14 +80,15 @@ ipc.on('burn-result', (msg) => {
 ipc.on('event', (e) => {
   switch (e.event) {
     case 'wave-announce':
-      setState({ waveActive: true, lobbyDeadline: performance.now() + (e.lobbyMs || 15000) })
+      setState({ lobbyDeadline: performance.now() + (e.lobbyMs || 15000) })
       hud.showStart(false)
+      hud.wave('') // clear the previous wave's narration; this wave's fills in below
       gallery.hideProgress()
       if (e.mine) {
         // initiator: capture once the wave is live (immediately if already paid, else
         // wait for wave-verified after the kick-off burn confirms)
         if (e.paid === 'verified') beginCapture()
-        else hud.status('🔥 paying the kick-off fee…')
+        else hud.wave('🔥 paying the kick-off fee…')
       } else {
         // joiner: show the join panel; the join button stays disabled until the wave's
         // kick-off payment is verified (anti-spam - never pay into an unpaid wave)
@@ -97,7 +97,7 @@ ipc.on('event', (e) => {
       }
       break
     case 'paying':
-      hud.status('🔥 paying the kick-off fee…')
+      hud.wave('🔥 paying the kick-off fee…')
       break
     case 'wave-verified':
       if (e.mine) {
@@ -108,11 +108,11 @@ ipc.on('event', (e) => {
       } // safe to join - kick-off is proven paid
       break
     case 'wave-unpaid':
-      hud.status('⚠️ ignored an unpaid wave')
+      hud.wave('⚠️ ignored an unpaid wave')
       lobby.close()
       break
     case 'join-blocked':
-      hud.status('⏳ verifying the wave’s kick-off payment…')
+      hud.wave('⏳ verifying the wave’s kick-off payment…')
       break
     case 'joined':
       beginCapture() // opted in - swap the join panel for the camera
@@ -121,31 +121,32 @@ ipc.on('event', (e) => {
       lobby.update(e.count)
       break
     case 'wave-active':
-      setState({ waveActive: true })
       hud.showStart(false)
       gallery.setExpected(e.count || 1)
       gallery.setActive(true)
       lobby.close()
       proof.captureAndStage() // snap + stage the lobby selfie, then free the centre
-      hud.status(e.joined ? '📸 captured - here comes the wave!' : '👀 spectating this wave')
+      hud.wave(e.joined ? '📸 captured - here comes the wave!' : '👀 spectating this wave')
       break
     case 'wave-idle':
-      setState({ waveActive: false })
       hud.showStart(true)
       gallery.setActive(false)
       lobby.close()
       proof.close()
-      renderIdle() // status line + dock button, now that we're idle again
+      // refresh the status line + dock button now the wave is over. We deliberately DON'T clear
+      // the wave-status here — it keeps the last result (completed / raffle winner) on screen
+      // until the next wave's wave-announce clears it.
+      updateHud()
       break
     case 'busy':
-      hud.status('⏳ a wave is already forming - wait for it to finish')
+      hud.wave('⏳ a wave is already forming - wait for it to finish')
       break
     case 'started':
-      hud.status('⚽ the wave is off!')
+      hud.wave('⚽ the wave is off!')
       break
     case 'holding':
       // the ball reached me - my staged selfie posts now (worker-side); just animate
-      hud.status(
+      hud.wave(
         e.canSelfie
           ? `📸 your selfie joins the wave! - hop ${e.hopCount ?? ''}`
           : `wave passing you - hop ${e.hopCount ?? ''}`
@@ -153,25 +154,25 @@ ipc.on('event', (e) => {
       ring.setBall(e.angle)
       break
     case 'position':
-      hud.status(`wave rolling - hop ${e.hopCount ?? ''}`)
+      hud.wave(`wave rolling - hop ${e.hopCount ?? ''}`)
       ring.setBall(e.angle)
       break
     case 'completed':
-      hud.status(`✅ wave completed - ${e.hops} hops, chain ${e.chainHash.slice(0, 8)}…`)
+      hud.wave(`✅ wave completed - ${e.hops} hops, chain ${e.chainHash.slice(0, 8)}…`)
       ring.setBall(e.angle)
       break
     case 'healed':
-      hud.status('🩹 routing around a dropped peer…')
+      hud.wave('🩹 routing around a dropped peer…')
       break
     case 'gallery-error':
-      hud.status(`⚠️ couldn't post your selfie (${e.reason})`)
+      hud.wave(`⚠️ couldn't post your selfie (${e.reason})`)
       break
     case 'stalled':
-      hud.status(`⚠️ wave stalled (${e.reason})`)
+      hud.wave(`⚠️ wave stalled (${e.reason})`)
       break
     case 'raffle-win':
       // the wave's initiator drew a winner among the gallery participants (commit-reveal draw)
-      hud.status(
+      hud.wave(
         `🎉 raffle winner: ${e.winner.slice(0, 8)}… - ${e.amount} TRX (of ${e.tickets} tickets, tx ${e.hash.slice(0, 8)}…)`
       )
       break
