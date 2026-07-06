@@ -72,7 +72,8 @@ headroom without BigInt-heavy math getting silly; revisit if collisions matter a
 - Seed the peer set from **`swarm.peers`** (PeerInfo public keys on the topic) and refresh
   on `swarm.on('update')` — DHT discovery gives ring members before/without gossip.
 - Liveness + country ride the **`pointers` heartbeat** to neighbours (no separate presence
-  message). Drop the O(N) full `peers` snapshot (§4.6).
+  message). Drop the O(N) full `peers` snapshot (§4.6). (There is no `role` field — every peer
+  is equal; see §4.7.)
 
 ### 4.3 Pointers & connections (the core change)
 
@@ -124,7 +125,7 @@ Two changes, both implemented:
 
 - **Slim the membership plane.** Replace the O(N) `peers` snapshot with **pointer exchange**
   (successor-list + predecessor), O(k + log N), sent only to neighbours; `pointers` doubles
-  as the liveness heartbeat (country + role ride it — no separate presence message).
+  as the liveness heartbeat (country rides it — no separate presence message).
   Membership is DHT-discovered but **liveness-gated** — `swarm.peers` drives
   _who we dial_ (pinning), while a ring **seat** requires a real connection or direct gossip,
   so a stale announce can't become a ghost seat.
@@ -140,7 +141,7 @@ Two changes, both implemented:
 **`wave-sync` on connect** stays essential as the catch-up path for a peer that joins after a
 flood has already passed.
 
-### 4.7 Gallery replication over a partial mesh — **reach verified; persistence open**
+### 4.7 Gallery replication over a partial mesh — **reach verified; persistence held by the initiator**
 
 `Corestore.replicate(conn)` runs on every connection, and the gallery Autobase is opened by
 essentially every peer that sees the wave (`openGallery` fires on `wave-start`, inside
@@ -154,15 +155,16 @@ through B**, and A receives C's selfie through B. So Hypercore/Corestore does fo
 gallery along connected (ring/finger) paths when intermediates keep it open — no full mesh
 required.
 
-**Persistence — addressed by a seed role.** A regular peer keeps only the current wave's
-gallery open and wipes its store per run, so galleries would vanish as peers leave. A
-**validator/seed** (`role: 'validator'`, `createWave`) instead keeps its store _and_ retains
-**every** gallery it opens (`galleries` map — never closed, updated each tick), so it can keep
-serving them after participants disconnect. It advertises `role` in its `pointers` heartbeat; peers pin any
-seed (`seedPeers`) so it's a **well-connected** replication hub. A seed never selfies or starts
-waves — it relays like any peer and archives. Verified in `gallery.replication.test.js`: a
-latecomer connected _only_ to the seed gets the full gallery after the originator has left.
-(Convergence _lag_ at large depth remains unmeasured.)
+**Persistence — held by the wave's initiator.** There are **no peer roles** (no validator/seed
+archivist hub). Every peer is equal and wipes its store per run, so a gallery only survives as
+long as a peer keeps it open. The one per-wave asymmetry belongs to the **initiator** of a
+wave: the peer that kicks it off keeps _that_ wave's gallery open and retains it (archivist for
+its own wave only), so it can keep serving that gallery to latecomers after other participants
+disconnect. Verified in `gallery.replication.test.js`: a latecomer connected _only_ to the
+initiator gets the full gallery after other participants have left. **Accepted simplification:**
+if the initiator goes offline its wave's gallery isn't archived anywhere else (no dedicated hub
+pins/retains it), and nothing persists across runs. (Convergence _lag_ at large depth remains
+unmeasured.)
 
 ## 5. Migration behind the seam
 
@@ -231,11 +233,11 @@ construction). `wave.js` is untouched.
   reach** without the transport. Asserts full reach in the connected component, exactly-once
   dedup, sends ≤ 2·|E|, and diameter-ish rounds (e.g. N=200 partial mesh → all 200 in ~6
   rounds; a disconnected component is correctly _not_ reached).
-- **Line-topology gallery replication + seed persistence** (`gallery.replication.test.js`):
+- **Line-topology gallery replication + initiator persistence** (`gallery.replication.test.js`):
   real Corestores/Autobases with no swarm. (1) A↔B, B↔C (no A↔C) — the gallery replicates
-  _transitively_ (C converges to A's writes through B). (2) originator→seed, originator leaves,
-  a latecomer connected _only_ to the seed still gets the full gallery. The §4.7 reach +
-  persistence tests.
+  _transitively_ (C converges to A's writes through B). (2) the wave initiator retains its own
+  gallery, other participants leave, a latecomer connected _only_ to the initiator still gets
+  the full gallery. The §4.7 reach + persistence tests.
 - **Local DHT integration** (`bootstrap.js`): N processes; assert the ring converges (every
   peer's successor is correct), a token completes a full lap visiting all seats, and the
   gallery replicates across the partial mesh.
@@ -259,11 +261,11 @@ things that decide whether this actually works at scale — in priority order:
    ≈ hours at N=10k, so there is currently _no_ working large-N wave. The deterministic
    angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely
    global wave; its kickoff already has a delivery mechanism (the §4.6 flood).
-3. ~~**Gallery persistence via a seed (§4.7).**~~ **Done** — transitive reach _and_ persistence
-   are covered: a **validator/seed** role (`role: 'validator'`) retains every gallery and is
-   pinned by peers as a well-connected hub, so galleries survive participants leaving
-   (`gallery.replication.test.js`). Remaining: the payment/proof-validation layer that attaches
-   to this same seed instance (WDK — out of scope here), and convergence-lag measurement.
+3. ~~**Gallery persistence (§4.7).**~~ **Done (bounded)** — transitive reach _and_ per-wave
+   persistence are covered: with **no peer roles**, the wave's **initiator** retains its own
+   wave's gallery, so it survives other participants leaving (`gallery.replication.test.js`).
+   Accepted simplification: no dedicated archivist hub, so a gallery is lost if its initiator
+   goes offline and nothing persists across runs. Remaining: convergence-lag measurement.
 
 Secondary / masked-for-now:
 

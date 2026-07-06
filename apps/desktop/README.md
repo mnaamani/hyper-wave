@@ -13,11 +13,10 @@ fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scalin
 npm install    # postinstall normalizes dep engines ranges for Bare (scripts/fix-bare-engines.js)
 
 # Each instance needs its own --storage dir (own identity + Corestore + wallet).
+# Every peer is equal — no roles. The peer that kicks off a wave keeps that wave's
+# gallery open (archivist for its own wave only). See ../DEMO.md.
 npm start -- --storage /tmp/hyperwave/one
 npm start -- --storage /tmp/hyperwave/two
-
-# validator/seed (archives galleries so they survive peers leaving — see ../DEMO.md)
-HYPERWAVE_ROLE=validator npm start -- --storage /tmp/hyperwave/validator
 ```
 
 Wallets must be **funded** to pay fees (the Nile faucet gives 2000 TRX/day:
@@ -84,11 +83,14 @@ Full demo script incl. funding and local-DHT setup: [`../DEMO.md`](../DEMO.md).
     to actually make money — and always to a peer who paid in.
 - **`workers/updater.js`** — the template's OTA updater worker, left intact.
 
-**Roles:** a normal instance is a `peer`. Launch with `HYPERWAVE_ROLE=validator` to run a
-**validator/seed**: it retains every gallery (store not wiped) so galleries survive peers
-leaving, and is pinned by everyone as a well-connected replication hub. It relays the ball
-but never kicks off, joins, or selfies. (With sponsor rewards removed its job is purely
-archival; the `validator` name is kept for the role flag.)
+**No roles — every peer is equal.** There is no validator/seed/sponsor role (no `role` option,
+no `HYPERWAVE_ROLE`). The only asymmetry is **per-wave and belongs to the peer that kicks it
+off**: that **initiator** keeps _its_ wave's gallery open and retains it (archivist for its own
+wave only) so latecomers can still fetch it, collects that wave's raffle commits, and — if it
+funds a raffle (`HYPERWAVE_RAFFLE_TRX`) — draws and pays the prize from its own wallet after the
+wave (it's skipped in the winner walk, so it never pays itself). Every instance wipes its store
+on startup, so galleries are ephemeral per run; if the initiator goes offline its wave's gallery
+isn't archived elsewhere (accepted simplification).
 
 ### Worker → renderer messages
 
@@ -159,13 +161,14 @@ bare workers/lib/flood.test.js               # gossip-flood reach over synthetic
 bare workers/lib/wave.token.test.js          # receipts, accumulator, burn + wave-end attestations
 bare workers/lib/wave.gallery.test.js        # buildGallery ordering/dedup (+ tip address)
 bare workers/lib/wave.autobase.test.js       # real Autobase apply/view + receipt write-gate
-bare workers/lib/gallery.replication.test.js # transitive replication + seed persistence (line topology)
+bare workers/lib/gallery.replication.test.js # transitive replication + initiator persistence (line topology)
 bare workers/lib/pay.test.js                 # wallet derivation/persistence (offline)
 ```
 
-End-to-end (one wave per process — the real worker topology). `AUTOJOIN` opts in,
-`AUTOSELFIE` stages a fake selfie, `WALLET=1` brings up the wallet (fee burns need funded
-wallets), `HYPERWAVE_ROLE=validator` makes a seed:
+End-to-end (one wave per process — the real worker topology; every peer is equal, no roles).
+`AUTOJOIN` opts in, `AUTOSELFIE` stages a fake selfie, `WALLET=1` brings up the wallet (fee
+burns need funded wallets); `START=N` makes a peer the **initiator** (kicks off once it sees N
+others), and `HYPERWAVE_RAFFLE_TRX` on that same initiator funds a raffle it draws and pays:
 
 ```bash
 export HYPERWAVE_MATCH="test-$(date +%s)" HYPERWAVE_LOBBY_MS=4000
@@ -198,8 +201,9 @@ HYPERWAVE_BOOTSTRAP=127.0.0.1:<port> bare workers/lib/wave.run.js A /tmp/hw/a
   (`hyperwave:demo-match:v1`) is fixed, so public-DHT instances collide across machines —
   isolate with `HYPERWAVE_MATCH`/the `matchId` option, or use the local bootstrap.
 - **Per-wave galleries:** each wave's gallery is a separate Autobase namespaced by its
-  random `waveId`. A peer's `storageDir/hyperwave` store is wiped on startup (ephemeral
-  per-run); a **validator** keeps its store and retains every gallery, so galleries
-  survive peers leaving.
+  random `waveId`. Every peer's `storageDir/hyperwave` store is wiped on startup (ephemeral
+  per-run — no roles, no cross-run archival). The peer that **initiates** a wave keeps that
+  wave's gallery open and retains it, so latecomers can still fetch it while the initiator is
+  online; there is no dedicated hub that archives every gallery.
 - **Wallet seed** persists at `<storage>/wallet.seed` (outside the wiped store) — fund an
   instance once and it stays funded across restarts.

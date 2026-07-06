@@ -44,7 +44,7 @@ pipe.on('data', (data) => {
   } catch {
     return
   }
-  // First message from the RN host should be the init: storageDir + config (matchId, role, seed, ...)
+  // First message from the RN host should be the init: storageDir + config (matchId, seed, ...)
   if (msg.type === 'init' && !core) {
     core = hyperwave.init({
       storageDir: resolveStorage(msg.storageDir),

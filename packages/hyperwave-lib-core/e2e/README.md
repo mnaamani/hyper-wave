@@ -4,16 +4,22 @@ Black-box tests that run the **real app**: they spawn a local DHT bootstrap and 
 `bare workers/lib/wave.run.js` peer processes, drive a full wave, and assert on the outcome.
 Complements the pure-logic unit suite (`app/*.test.js`, run by `npm test` under Bare).
 
+**No roles — N equal peers.** There is no dedicated seed/validator process. The peers are
+identical; `p1` is the wave **initiator** (kicks off once it sees the other N-1 peers via
+`START=N-1`) and, as the initiator, retains its own wave's gallery and — when a raffle is
+funded (`HYPERWAVE_RAFFLE_TRX` is passed only to p1) — draws and pays the prize from its own
+wallet.
+
 The harness runs under **Node** (for ergonomic process orchestration) and uses **brittle**
 (the same TAP framework as the unit tests) for assertions. The peers under test are Bare — the
 same binary the app ships.
 
 ## Two tiers
 
-| Suite                     | What it exercises                                                                                                                                       | Deps                                                  | When                    |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------- |
-| **`wave.local.e2e.js`**   | discovery, ring/token race across N hops, gossip flooding, gallery replication + seed archival, self-healing under churn, commit-reveal raffle **draw** | none — local DHT, **no wallets / no on-chain**        | every push (CI)         |
-| **`wave.onchain.e2e.js`** | paid-wave gate, real fee burns, on-chain kick-off verification, optimistic admission, raffle **payout** (on-chain winner check + real TRX transfer)     | funded testnet wallets (secrets), Nile RPC, costs TRX | manual / nightly, gated |
+| Suite                     | What it exercises                                                                                                                                             | Deps                                                  | When                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------- |
+| **`wave.local.e2e.js`**   | discovery, ring/token race across N hops, gossip flooding, gallery replication + initiator retention, self-healing under churn, commit-reveal raffle **draw** | none — local DHT, **no wallets / no on-chain**        | every push (CI)         |
+| **`wave.onchain.e2e.js`** | paid-wave gate, real fee burns, on-chain kick-off verification, optimistic admission, raffle **payout** (on-chain winner check + real TRX transfer)           | funded testnet wallets (secrets), Nile RPC, costs TRX | manual / nightly, gated |
 
 The local suite is deterministic and secret-free, so it guards every change in CI
 (`.github/workflows/ci.yml`). The on-chain suite is a real external-testnet integration test —
@@ -27,11 +33,10 @@ cd app
 npm run test:e2e:local               # 8 peers (default)
 E2E_PEERS=4 npm run test:e2e:local   # fewer peers (faster / constrained box)
 
-# on-chain tier — needs three funded Nile mnemonics; skips itself if unset:
+# on-chain tier — needs two funded Nile mnemonics; skips itself if unset:
 E2E_ONCHAIN=1 \
-  HYPERWAVE_E2E_SEED_SPONSOR="word word …" \  # seed/sponsor, pays the prize (well-funded)
-  HYPERWAVE_E2E_SEED_1="word word …" \        # initiator P1 (kick-off burn)
-  HYPERWAVE_E2E_SEED_2="word word …" \        # joiner P2 (join burn)
+  HYPERWAVE_E2E_SEED_1="word word …" \  # initiator P1 (kick-off burn + pays the raffle prize; well-funded)
+  HYPERWAVE_E2E_SEED_2="word word …" \  # joiner P2 (join burn; wins the prize)
   npm run test:e2e:onchain
 ```
 

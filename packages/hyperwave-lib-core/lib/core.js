@@ -24,8 +24,10 @@ function init({
     bootstrap: config.bootstrap ? parseBootstrap(config.bootstrap) : undefined,
     matchId: config.matchId,
     lobbyMs: config.lobbyMs,
-    role: config.role || 'peer', // 'validator'/'seed' runs this instance as a gallery archivist
-    raffleTrx: config.raffleTrx || 0, // seed-only prize
+    // Raffle prize (TRX): if > 0, for waves THIS peer initiates it draws a winner among the
+    // gallery participants and pays them from its own wallet. 0 = off. No roles — the wave's
+    // initiator is its own gallery archivist + commit-recorder + raffle sponsor.
+    raffleTrx: config.raffleTrx || 0,
     onState: (state) => send({ type: 'state', ...state }),
     onToken: (event) => send({ type: 'token', ...event }),
     onGallery: (items) => send({ type: 'gallery', items }),
@@ -71,7 +73,7 @@ function init({
   // peers can verify it and won't join an unpaid (spam) wave.
   async function handleStartWave() {
     const waveId = wave.startWave()
-    if (!waveId || !payments) return // busy / seed / no wallet (unpaid path already announced)
+    if (!waveId || !payments) return // busy / no wallet (unpaid path already announced)
     try {
       const { hash, proof } = await burnFee(waveId, 'kickoff')
       if (await confirmBurn(payments, waveId, hash)) wave.announcePaid(proof)

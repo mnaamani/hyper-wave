@@ -36,7 +36,8 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] Distributed `findSuccessor` routing (`find-succ` RPC) — correct under partial
       membership knowledge (64-node sim ≤5 hops); join-time placement + periodic repair
 - [x] Gallery over a partial mesh: transitive replication proven (line topology, no swarm);
-      **validator/seed role** retains every gallery + is pinned as a hub (persistence)
+      the wave **initiator** retains its own wave's gallery (per-wave persistence — no peer
+      roles, no dedicated archivist hub)
 
 ### Payment layer (WDK, Tron Nile testnet, native TRX) — burned fees + tips, no rewards
 
@@ -62,16 +63,24 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       log with unbounded self-signed entries (was display-only dedup before)
 - [x] **Sponsor rewards removed** (simplification): dropped the interlocked payout, the
       `wave-proof` receipt collection, the golden-rule chain-walk (`longestValidChain` /
-      `payableFromChain`), and the gallery `burn-proof` op. The validator role is now purely
-      a gallery archivist. Kills the sybil-payout risk class outright (nothing to steal).
-- [x] **Sponsor-funded raffle** (positive incentive re-added, off by default; `raffleTrx` /
-      `HYPERWAVE_RAFFLE_TRX` on a seed) — `runRaffle` draws ONE winner among gallery
+      `payableFromChain`), and the gallery `burn-proof` op. Kills the sybil-payout risk class
+      outright (nothing to steal).
+- [x] **Peer roles removed** (simplification): no more `validator`/`seed`/`sponsor` role, no
+      `role` option, no `HYPERWAVE_ROLE`, no `role` in the `pointers` heartbeat, no
+      seed-pinning. Every peer is equal. The only asymmetry is **per-wave and belongs to the
+      initiator**: it retains its own wave's gallery (archivist for that wave only), collects
+      its raffle commits, and — if it funds a raffle — draws + pays the prize from its own
+      wallet (skipping itself in the winner walk). Accepted: a gallery is lost if its initiator
+      goes offline; nothing persists across runs.
+- [x] **Initiator-funded raffle** (positive incentive re-added, off by default; `raffleTrx` /
+      `HYPERWAVE_RAFFLE_TRX` on the initiator) — `runRaffle` draws ONE winner among gallery
       participants via internal **commit-reveal** (no external beacon: commit rides
-      `wave-join`/`wave-announce` in the lobby, reveal rides the selfie, seed folds secrets into
-      a deterministic auditable draw) and pays the burn-verified address. Verified live on Nile.
-      See `ideas/raffle.md` + `docs/protocol.md` §12. **MVP: sponsor = admitter = seed** (one
-      trusted role) — production must separate the admitter from the prize-holder; testnet-only
-      (a paid game of chance is legally a lottery).
+      `wave-join`/`wave-announce` in the lobby, reveal rides the selfie, the initiator folds
+      secrets into a deterministic auditable draw) and pays the burn-verified address from its
+      own wallet (it's skipped in the winner walk — never pays itself). Verified live on Nile.
+      See `ideas/raffle.md` + `docs/protocol.md` §12. **MVP: initiator = admitter = prize-holder**
+      — production must separate the admitter from the prize-holder; testnet-only (a paid game of
+      chance is legally a lottery).
 - [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
       semver can't parse (`scripts/fix-bare-engines.js`)
 - [x] **End-to-end integration tests** (`app/e2e/`): a Node+brittle harness spawns a local DHT + N real `wave.run.js` peers and drives full waves, asserting on the protocol's structured
@@ -121,9 +130,9 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       (N reads of 1 immutable tx). Not a concentration bottleneck (distributed, 1 read/joiner)
       and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
       the anti-_wave_-spam gate; making it optimistic would re-open free wave-spam).
-- [ ] Raffle production hardening (`ideas/raffle.md`): **separate the admitter (independent
-      wave originator) from the prize-holder** so the sponsor can't censor the entry set;
-      escrow/contract custody instead of the trusted sponsor wallet; a VDF (Verifiable Delay
+- [ ] Raffle production hardening (`ideas/raffle.md`): **separate the admitter from the
+      prize-holder** so the initiator (currently admitter + prize-holder in one) can't censor
+      the entry set; escrow/contract custody instead of the trusted initiator wallet; a VDF (Verifiable Delay
       Function) or threshold scheme to remove the last-revealer abort; legal review (a paid game
       of chance is a lottery). Also: k-winners/tiered prizes (`raffleDraw` returns the full
       ranking, so the top-k of the winner walk are the winners).
@@ -139,7 +148,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       Keep the ring-key attestation chain-agnostic; make the verifier pluggable per chain.
 - [ ] **Bloom filter to minimize selfie re-use.** A peer can re-post the same image across
       waves (or lift someone else's). Maintain a space-efficient bloom filter of seen
-      selfie-image hashes (per-seed across waves, and/or gossiped) and reject a `wave-selfie`
+      selfie-image hashes (per-peer, and/or gossiped) and reject a `wave-selfie`
       whose image hash is probably-already-seen — cheap "have I seen this image?" at scale
       without storing every hash. False positives (rare) just ask the peer to re-shoot; no false
       negatives. Complements the per-entry byte cap + one-per-peer dedup (bounds _content_ reuse,
@@ -152,13 +161,14 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 - [ ] Clean seam switch: forward via `successor-list[0]` instead of full-ring
       `nextClockwise` (works today via pin coupling; unverified at partial-neighbourhood scale)
 - [ ] `add-writer` admission across a partial mesh (currently one-hop; fine while the
-      originator/validator is well-connected)
+      wave initiator is well-connected)
 - [ ] Measure gallery replication lag at depth
 
 ### Demo polish / wow factor
 
 - [ ] World map with flags lighting up as selfies arrive (final-idea wow factor)
-- [ ] "Past waves" browser (validator retains galleries; peers could browse them)
+- [ ] "Past waves" browser (would need galleries to persist across runs — currently a wave
+      initiator only retains its own wave's gallery in-run)
 - [ ] Tipping UX polish (a "you were tipped" toast for the recipient)
 
 ### Housekeeping

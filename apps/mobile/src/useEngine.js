@@ -64,7 +64,7 @@ export function useEngine(config = {}) {
       }
     })
 
-    // one-time init: storageDir + config (matchId, role, bootstrap, seed)
+    // one-time init: storageDir + config (matchId, bootstrap, seed)
     pipe.write(JSON.stringify({ type: 'init', storageDir: STORAGE_DIR, config }))
 
     // Cooperate with the OS lifecycle: react-native-bare-kit's Worklet.update() takes an RN

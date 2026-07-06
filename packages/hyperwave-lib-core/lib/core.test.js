@@ -32,7 +32,7 @@ test('core routes commands to the engine and forwards engine events to send', as
   const wave = fakeWave()
   const core = hyperwave.init({
     storageDir: '/tmp/e',
-    config: { role: 'peer', matchId: 'm', bootstrap: '' },
+    config: { matchId: 'm', bootstrap: '' },
     send: (m) => sent.push(m),
     log: () => {},
     deps: {

@@ -100,17 +100,26 @@ so there's no duplicated protocol logic across the seam.
 > phases 1–4 + distributed `findSuccessor` routing + gossip flooding), with the Chord math
 > pure in `workers/lib/chord.js`.
 
-## Roles
+## No roles — every peer is equal
 
-Every instance runs the same code; `role` (env `HYPERWAVE_ROLE`) selects behaviour:
+There are no peer roles: every instance runs the same code and behaves identically. There is
+no `role` option, no `HYPERWAVE_ROLE` env var, no `role` field in gossip, and no "well-known
+seed" that others pin. Every peer participates fully (pays fees, joins waves, selfies, relays)
+and every peer's `storageDir/hyperwave` store is **wiped on startup**, so galleries are
+ephemeral per run — keyed by the random `waveId`, nothing persists across runs.
 
-- **`peer`** (default) — participates fully: pays fees, joins waves, selfies, relays.
-  Ephemeral storage (galleries wiped per run).
-- **`validator`** (a.k.a. seed) — the gallery **archivist**: retains every gallery (store
-  persists) and is pinned by all peers as a well-connected replication hub, so galleries
-  survive after participants disconnect. It relays the ball but never kicks off, joins, or
-  selfies. It is a first-class swarm peer — not a server. (The name `validator` is retained
-  for the `HYPERWAVE_ROLE` flag; with sponsor rewards removed its job is purely archival.)
+The only asymmetry is **per-wave and belongs to that wave's initiator** (the peer that kicked
+it off):
+
+- It **keeps its own wave's gallery Autobase open and retains it** for the life of the
+  process, so the gallery survives for latecomers and replication — but it is the archivist
+  for _its own_ wave only. If the initiator goes offline, its wave's gallery is not archived
+  by anyone else; this is the accepted simplification of dropping the old standalone seed.
+- It **collects the raffle commits** for that wave (from lobby `wave-join` gossip; it records
+  its own commit locally when it announces).
+- If it funds a raffle (`raffleTrx > 0`, env `HYPERWAVE_RAFFLE_TRX`), it **draws the winner
+  and pays the prize from its own wallet** after the wave — never paying itself (if it ranks
+  first it is skipped in favour of the next eligible participant). See [`protocol.md`](./protocol.md) §12.
 
 ## Module map
 
@@ -142,7 +151,7 @@ app/
       gallery.js     Autobase config + ordering (galleryConfig, buildGallery, readGallery)
       fees.js        shared fee flow (burn memo, payFee, confirmBurn, wireWallet)
       pay.js         WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx
-      wave.run.js    headless harness (one wave per process; WALLET=1, HYPERWAVE_ROLE=validator)
+      wave.run.js    headless harness (one wave per process; WALLET=1, HYPERWAVE_RAFFLE_TRX for a funded raffle)
       bootstrap.js   local DHT for fast same-machine testing
       *.test.js      brittle test suites
   scripts/

@@ -21,7 +21,7 @@ const MATCH = 'hyperwave-mobile-demo'
 export default function App() {
   // wallet on — testing WDK under the worklet (the chip populates on success; a failure
   // surfaces as a ⚠ wallet toast). Flip to wallet:false to run the engine wallet-less.
-  const engine = useEngine({ matchId: MATCH, role: 'peer' })
+  const engine = useEngine({ matchId: MATCH })
   const { me, peers, phase, gallery, wallet, toast } = engine
   const [joined, setJoined] = useState(false)
 

@@ -22,20 +22,20 @@ const bootstrap = parseBootstrap(env.HYPERWAVE_BOOTSTRAP)
 
 let started = false
 let payments = null // set by the WALLET=1 block below (if enabled)
-const role = env.HYPERWAVE_ROLE || 'peer' // 'validator'/'seed' -> passive gallery seed
 const wave = createWave({
   storageDir,
-  role,
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
+  // HYPERWAVE_RAFFLE_TRX>0 -> when THIS instance initiates a wave (START), it sponsors a raffle
+  // for it (draws + pays a winner from its own wallet). No roles; the initiator archives + draws.
   raffleTrx: env.HYPERWAVE_RAFFLE_TRX ? Number(env.HYPERWAVE_RAFFLE_TRX) : 0,
   onState: (s) => {
     console.log(
       `[${name}] peers=${s.peers.length} me=${s.me.id.slice(0, 8)}@${s.me.angle.toFixed(1)} ` +
         `succ=${s.successor ? s.successor.id.slice(0, 8) + '@' + s.successor.angle.toFixed(1) : 'none'}`
     )
-    if (role === 'peer' && env.START && !started && s.peers.length >= Number(env.START)) {
+    if (env.START && !started && s.peers.length >= Number(env.START)) {
       // With WALLET=1, wait for the wallet before kicking off — else startWave runs with the
       // paid-gate still off and announces an UNPAID wave (races wallet init vs discovery).
       if (env.WALLET && !payments) return
@@ -57,7 +57,6 @@ const wave = createWave({
           `${e.amount} TRX -> ${e.address.slice(0, 6)} tx=${e.hash}`
       )
     }
-    if (role !== 'peer') return // a validator/seed doesn't join or selfie
     // AUTOJOIN: try on announce (no-wallet path: already 'verified') and on wave-verified
     // (wallet path: after the kick-off burn confirms). join() dedupes + gates on paid.
     if (env.AUTOJOIN && !e.mine && (e.event === 'wave-announce' || e.event === 'wave-verified')) {

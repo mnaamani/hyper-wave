@@ -22,7 +22,7 @@ const BARE = process.env.BARE_BIN || 'bare' // same runtime `npm test` uses
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// One launched process (a peer, a seed, or the bootstrap). Buffers stdout and exposes
+// One launched process (a peer or the bootstrap). Buffers stdout and exposes
 // promise-based waiters over its lines and parsed `TOKEN {json}` events.
 class Proc {
   constructor(name, args, env) {
@@ -150,10 +150,10 @@ class Cluster {
     return this
   }
 
-  // Launch a peer (or seed) with its own storage dir. `env` overrides (ROLE, START, AUTOJOIN,
-  // AUTOSELFIE, WALLET, HYPERWAVE_RAFFLE_TRX, …). `seed` (a BIP39 mnemonic) is written to the
-  // storage dir's `wallet.seed` so the wallet is a specific FUNDED one (for the on-chain tier);
-  // omit it for the local no-wallet tier. Returns the Proc.
+  // Launch a peer with its own storage dir. `env` overrides (START, AUTOJOIN, AUTOSELFIE,
+  // WALLET, HYPERWAVE_RAFFLE_TRX, …). `seed` (a BIP39 mnemonic) is written to the storage dir's
+  // `wallet.seed` so the wallet is a specific FUNDED one (for the on-chain tier); omit it for
+  // the local no-wallet tier. Returns the Proc.
   launch(name, env = {}, seed = null) {
     const dir = path.join(this.root, name)
     fs.mkdirSync(dir, { recursive: true })

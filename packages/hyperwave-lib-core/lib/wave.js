@@ -104,9 +104,6 @@ const SELF_ID_FIELD = {
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096
-// Cap on buffered pre-adoption raffle commits (across un-adopted waveIds). Cleared wholesale
-// when exceeded — a bound against a seed being flooded with commits for waves it never joins.
-const PENDING_COMMIT_CAP = 1024
 // Distributed findSuccessor routing (§4.5): safety cap on lookup hops (O(log N)
 // expected), how long the origin waits for a reply, and how long a routing-discovered
 // successor stays a pin candidate.
@@ -129,9 +126,14 @@ const PAY_TIMEOUT_MS = 60000
 const ADMIT_TIMEOUT_MS = 25000
 const ADMIT_RETRY_MS = 3000
 const BURN_WAIT_MS = 10000
-// Raffle (ideas/raffle.md): settle delay after a wave ends before the seed draws, so late
-// selfie reveals have replicated into its gallery first.
-const RAFFLE_DELAY_MS = 5000
+// Raffle (ideas/raffle.md): after a wave ends the initiator waits an initial settle, then draws.
+// Because the initiator is a normal ring peer (no dedicated hub seed), distant selfie reveals can
+// take a few update cycles to replicate into its retained gallery — so before drawing it POLLS
+// (every RAFFLE_POLL_MS, up to RAFFLE_CONVERGE_MS) until every recorded commit has a matching
+// revealed secret, then draws. A committed peer that never selfied just won't produce a ticket.
+const RAFFLE_DELAY_MS = 3000
+const RAFFLE_POLL_MS = 1000
+const RAFFLE_CONVERGE_MS = 20000
 
 function shortId(hex) {
   return hex.slice(0, 8)
@@ -160,32 +162,27 @@ function createWave({
   waveTimeoutMs = WAVE_TIMEOUT_MS,
   healTimeoutMs = HEAL_TIMEOUT_MS,
   lobbyMs = LOBBY_MS,
-  role = 'peer', // 'peer' | 'validator' (a.k.a. seed): keeps galleries alive after peers leave
   // Anti-spam: when enabled, a wave is only announced once its initiator has PROVEN the
   // kick-off fee burn, and peers refuse to join a wave whose kick-off isn't verified
   // on-chain. `verifyBurnTx(txHash, {waveId, from, minTrx}) -> {ok}` is the on-chain check
   // (provided by the payment layer once the wallet is up; off by default so no-wallet
   // headless/tests behave as before — waves announce immediately, unpaid).
   verifyBurnTx = null,
-  // Sponsor-funded raffle (ideas/raffle.md): if > 0 and this instance is a seed/sponsor, after
-  // each wave it draws one winner among the gallery participants (commit-reveal) and pays them
-  // `raffleTrx` from its own wallet. 0 = off. The seed here is BOTH sponsor and entry-recorder;
-  // production should separate those powers (see the doc).
+  // Raffle prize (ideas/raffle.md): if > 0, then for a wave THIS peer initiates it draws one
+  // winner among the gallery participants (commit-reveal) after the wave and pays `raffleTrx`
+  // from its own wallet. 0 = off. There are no roles: the wave's initiator is its gallery
+  // archivist, commit-recorder, and (if funded) raffle sponsor — all for its own wave only.
   raffleTrx = 0
 }) {
-  // A validator/seed is a first-class swarm peer whose job is to make the gallery survive:
-  // it opens every wave's gallery and RETAINS it (never closes, store not wiped), so it can
-  // keep serving it once participants disconnect. Regular peers are ephemeral per-run.
-  const isSeed = role === 'validator' || role === 'seed'
-  // Prune old galleries (peers only): the store is per-run (galleries keyed by random
-  // waveId, nothing persists across runs), so wipe it on startup to reclaim disk. A seed
-  // instead keeps its store so it archives galleries across runs.
+  // No roles — every peer is equal. The one asymmetry is per-wave: the peer that INITIATES a
+  // wave keeps that wave's gallery open (so it survives for latecomers/replication) and runs
+  // its raffle; everyone else treats galleries as ephemeral and closes them when moving on.
+  // The store is per-run (galleries are keyed by the random waveId, so nothing persists
+  // meaningfully across runs); wipe it on startup to reclaim disk.
   const storePath = storageDir + '/hyperwave'
-  if (!isSeed) {
-    try {
-      fs.rmSync(storePath, { recursive: true, force: true })
-    } catch {}
-  }
+  try {
+    fs.rmSync(storePath, { recursive: true, force: true })
+  } catch {}
   const store = new Corestore(storePath)
   // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
@@ -196,12 +193,12 @@ function createWave({
   let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
-  let payReward = null // (sponsor/seed) send TRX to an address — used only for the raffle prize
-  const paidRaffles = new Set() // (seed) waves already drawn — draw exactly once
-  const raffleCommits = new Map() // (seed) waveId -> Map(peerId -> commit), from lobby gossip
-  // (seed) waveId -> Map(peerId -> commit): valid commits that flooded in BEFORE I adopted the
-  // wave (gossip isn't ordered), held until enterLobby flushes them into raffleCommits.
-  const pendingCommits = new Map()
+  let payReward = null // send TRX to an address — used only for the raffle prize (initiator)
+  const paidRaffles = new Set() // waves already drawn — draw exactly once
+  // (initiator only) waveId -> Map(peerId -> commit): raffle commits gathered from lobby gossip
+  // for a wave I started. I'm always in my own wave's lobby before anyone can join (I created
+  // it), so — unlike the old standalone seed — no pre-adoption buffering is needed.
+  const raffleCommits = new Map()
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -218,8 +215,8 @@ function createWave({
   let base = null // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
   let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
-  const galleries = new Map() // waveId -> base: a seed retains every gallery it opens
-  const seedPeers = new Set() // ids advertising role=validator/seed — pin them (well-connected seed)
+  const galleries = new Map() // waveId -> base (I retain the galleries for waves I initiated)
+  const initiatedWaves = new Set() // waveIds I started — I keep their galleries + run their raffle
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
   // concurrent starts resolve deterministically (lower waveId wins). During the
@@ -311,7 +308,6 @@ function createWave({
     const cand = new Set([...discoveredIds(), ...senders.keys(), ...peers.keys(), ...routed.keys()])
     cand.delete(me.id)
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS)
-    for (const s of seedPeers) if (s !== me.id) targets.add(s) // always connect to seeds
     for (const id of targets) {
       if (pinned.has(id)) continue
       pinned.add(id)
@@ -347,15 +343,14 @@ function createWave({
   // successor-list + predecessor — O(k + log N), not O(N). Recipients learn the local
   // ring structure around us (transitive discovery, bounded) and run one stabilize
   // step. Primary membership still comes from DHT discovery (`swarm.peers`).
-  // Doubles as the liveness heartbeat (it refreshes lastSeen and carries country +
-  // role), so there is no separate `presence` message.
+  // Doubles as the liveness heartbeat (it refreshes lastSeen and carries country),
+  // so there is no separate `presence` message.
   function myPointers() {
     const ids = liveRing([...peers.values()], Date.now(), TTL_MS).map((p) => p.id)
     return {
       kind: 'pointers',
       id: me.id,
       country: me.country,
-      role,
       succ: successors(ids, me.id, K_SUCCESSORS),
       pred: predecessor(ids, me.id)
     }
@@ -436,7 +431,9 @@ function createWave({
         wave.kickoffProof = m.paid
         verifyKickoff(m.waveId, m.paid)
       }
-      recordRaffleCommit(m.waveId, m.by, m.commit, m.commitSig) // the initiator is a participant too
+      // NB: no commit recorded here — whoever receives an announce is never its initiator (I
+      // don't receive my own flood), and only the initiator collects. The initiator records its
+      // own commit locally in doAnnounce; joiners' commits arrive via wave-join below.
       return
     }
     if (m.kind === 'wave-join') {
@@ -490,12 +487,6 @@ function createWave({
     // third peer's advert can't resurrect a ghost seat.
     const now = Date.now()
     upsert(m.id, now, m.country)
-    // note validators/seeds so we deliberately connect to them (a well-connected seed
-    // is always reachable for gallery replication, §4.7).
-    if ((m.role === 'validator' || m.role === 'seed') && !seedPeers.has(m.id)) {
-      seedPeers.add(m.id)
-      maintainNeighbours()
-    }
     const learned = now - Math.floor(TTL_MS / 2)
     for (const id of [...(m.succ || []), m.pred]) {
       if (id && !(goneUntil.get(id) > now)) upsert(id, learned)
@@ -652,7 +643,7 @@ function createWave({
   }
 
   // Chord join (§4.5): once I have my first connection(s), place myself in the ring by
-  // asking a seed to route findSuccessor(me) — so a joiner finds its true successor via
+  // asking an already-connected peer to route findSuccessor(me) — so a joiner finds its true successor via
   // O(log N) routing even when its own DHT sample is incomplete, instead of waiting for
   // the slow periodic repair. One-shot per connected session; re-armed if I go solo.
   function scheduleBootstrap() {
@@ -691,15 +682,15 @@ function createWave({
     if (currentWaveId === waveId && base) return base
     const kept = galleries.get(waveId)
     if (kept) {
-      // seed already holds this gallery — make it the current one, don't reopen
+      // I already hold this gallery (a wave I initiated) — make it current, don't reopen
       base = kept
       currentWaveId = waveId
       autobaseKey = b4a.toString(kept.key, 'hex')
       return base
     }
-    // A seed keeps old galleries open (so it can keep serving them after peers leave); a
-    // regular peer closes the previous wave's gallery when it moves on.
-    if (base && !isSeed) {
+    // Close the previous wave's gallery when moving on — UNLESS I initiated it, in which case
+    // I keep it open to archive it (so it survives for latecomers) and run its raffle.
+    if (base && !initiatedWaves.has(currentWaveId)) {
       base.close().catch(() => {})
       if (currentWaveId) galleries.delete(currentWaveId)
     }
@@ -722,7 +713,7 @@ function createWave({
         shortId(key),
         'writable',
         b.writable,
-        isSeed ? '(seed)' : ''
+        initiatedWaves.has(waveId) ? '(mine)' : ''
       )
       if (base === b) emitGallery()
     })
@@ -953,15 +944,6 @@ function createWave({
       keySig: null // originator's signature over (waveId, galleryKey); set when we learn the key
     }
     if (mine) wave.roster.add(me.id)
-    // Flush any raffle commits that flooded in before I adopted this wave (recordRaffleCommit
-    // buffers them because gossip isn't ordered). Do it now that `wave` is in the lobby phase.
-    const buffered = pendingCommits.get(waveId)
-    if (buffered) {
-      pendingCommits.delete(waveId)
-      if (isSeed && raffleTrx > 0) {
-        for (const [pid, c] of buffered) storeRaffleCommit(waveId, pid, c)
-      }
-    }
     lobbyEndsAt = Date.now() + dur
     // fallback: if the race never starts (initiator vanished), drop back to idle
     clearTimeout(lobbyTimer)
@@ -1042,34 +1024,25 @@ function createWave({
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
     if (stalled) onToken({ event: 'stalled', waveId, reason: 'no successor' })
     else onToken({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
-    // Sponsor/seed: after a short settle (so late selfie reveals land), draw the raffle. Reads
-    // the retained gallery + recorded commits by waveId, so goIdle clearing `wave` is fine.
-    // The draw runs whenever raffle is enabled; payment happens only if a wallet is wired.
-    if (isSeed && raffleTrx > 0) {
+    // If I initiated this wave and fund a raffle, draw it after a short settle (so late selfie
+    // reveals land). Reads the gallery I retained + the commits I recorded by waveId, so goIdle
+    // clearing `wave` is fine. Payment happens only if a wallet is wired.
+    if (raffleTrx > 0 && initiatedWaves.has(waveId)) {
       setTimeout(() => runRaffle(waveId).catch(() => {}), RAFFLE_DELAY_MS)
     }
     goIdle(stalled ? 'stalled' : 'ended')
   }
 
-  // (Seed) Record a participant's raffle commitment, seen in lobby gossip (wave-announce /
-  // wave-join). Only while the wave is in its lobby (before any reveal), only a
-  // validly-signed commit by that peer, first-write-wins. This is the pre-reveal binding: a
-  // peer commits before anyone reveals, so it can't choose a secret to steer the draw.
+  // (Initiator only) Record a participant's raffle commitment, seen in lobby gossip (wave-join).
+  // Only for a wave I started (I'm its archivist/sponsor), only while it's in its lobby (before
+  // any reveal), only a validly-signed commit by that peer, first-write-wins. This is the
+  // pre-reveal binding: a peer commits before anyone reveals, so it can't steer the draw. I
+  // adopt my own wave before anyone can join it, so no pre-adoption buffering is needed.
   function recordRaffleCommit(waveId, peerId, commit, commitSig) {
-    if (!isSeed || raffleTrx <= 0 || !commit || !peerId) return
-    if (endedWaves.has(waveId)) return // wave already over — too late to enter the draw
-    if (!verifyCommit(waveId, peerId, commit, commitSig)) return
-    // wave-join/announce commit gossip floods independently of the announce that makes me adopt
-    // the wave, so a valid commit can reach me before I'm in this wave's lobby. Buffer it (flushed
-    // by enterLobby) — otherwise that participant is silently dropped from the draw (see e2e).
-    if (!wave || wave.id !== waveId) {
-      if (pendingCommits.size > PENDING_COMMIT_CAP) pendingCommits.clear()
-      let buf = pendingCommits.get(waveId)
-      if (!buf) pendingCommits.set(waveId, (buf = new Map()))
-      if (!buf.has(peerId)) buf.set(peerId, commit)
-      return
-    }
+    if (raffleTrx <= 0 || !commit || !peerId) return
+    if (!wave || wave.id !== waveId || wave.by !== me.id) return // only for a wave I initiated
     if (wave.phase !== 'lobby') return // reveals happen in racing — too late for a new commit
+    if (!verifyCommit(waveId, peerId, commit, commitSig)) return
     storeRaffleCommit(waveId, peerId, commit)
   }
 
@@ -1080,14 +1053,14 @@ function createWave({
     if (!byPeer.has(peerId)) byPeer.set(peerId, commit)
   }
 
-  // (Seed/sponsor) Draw + pay the raffle for a finished wave. Eligible tickets = gallery entries
-  // whose revealed `raffleSecret` matches the commit that peer cached from lobby gossip.
-  // raffleDraw folds the reveals into a seed and a deterministic ranking; the seed then walks
-  // the ranking and pays the FIRST candidate whose burn verifies ON-CHAIN — because admission
-  // was optimistic (no burn check at write time), the burn is verified here, and only for the
-  // winner (+ any fake-burn entries ranked above it). So on-chain reads are O(1)-ish per wave,
-  // not O(participants). Fully auditable: anyone recomputes the seed + ranking from the reveals,
-  // and the walk (skip a candidate only if its burn is really invalid) is checkable on-chain.
+  // (Initiator) Draw + pay the raffle for a wave I ran. Eligible tickets = gallery entries whose
+  // revealed `raffleSecret` matches the commit I recorded from lobby gossip. raffleDraw folds the
+  // reveals into a seed and a deterministic ranking; I then walk the ranking and pay the FIRST
+  // candidate whose burn verifies ON-CHAIN — because admission was optimistic (no burn check at
+  // write time), the burn is verified here, and only for the winner (+ any fake-burn entries
+  // ranked above it). So on-chain reads are O(1)-ish per wave, not O(participants). Fully
+  // auditable: anyone recomputes the seed + ranking from the reveals, and the walk (skip a
+  // candidate only if its burn is really invalid) is checkable on-chain.
   async function runRaffle(waveId) {
     if (paidRaffles.has(waveId)) return
     paidRaffles.add(waveId)
@@ -1095,18 +1068,30 @@ function createWave({
     raffleCommits.delete(waveId)
     const g = galleries.get(waveId)
     if (!g) return
-    await g.update().catch(() => {})
-    const entries = await readGallery(g)
-    const tickets = []
-    for (const e of entries) {
-      const commit = commits.get(e.peerId)
-      if (!commit || !e.raffleSecret || commitOf(e.raffleSecret) !== commit) continue
-      tickets.push({
-        peerId: e.peerId,
-        secret: e.raffleSecret,
-        address: e.address || '',
-        burnTx: e.burnTx || ''
-      })
+    // Gather tickets = gallery entries whose revealed secret matches a commit I recorded. Poll
+    // until every recorded commit has a matching reveal (all committed participants have posted
+    // + replicated to me) or RAFFLE_CONVERGE_MS elapses — so a distant reveal that's slow to
+    // reach this (non-hub) initiator isn't silently dropped from the draw.
+    const ticketsFrom = (entries) => {
+      const t = []
+      for (const e of entries) {
+        const commit = commits.get(e.peerId)
+        if (!commit || !e.raffleSecret || commitOf(e.raffleSecret) !== commit) continue
+        t.push({
+          peerId: e.peerId,
+          secret: e.raffleSecret,
+          address: e.address || '',
+          burnTx: e.burnTx || ''
+        })
+      }
+      return t
+    }
+    let tickets = []
+    for (let waited = 0; ; waited += RAFFLE_POLL_MS) {
+      await g.update().catch(() => {})
+      tickets = ticketsFrom(await readGallery(g))
+      if (tickets.length >= commits.size || waited >= RAFFLE_CONVERGE_MS) break
+      await new Promise((r) => setTimeout(r, RAFFLE_POLL_MS))
     }
     const { seed, order } = raffleDraw(waveId, tickets)
     onToken({
@@ -1118,8 +1103,11 @@ function createWave({
     })
     if (order.length === 0) return log('raffle: no eligible tickets for wave', shortId(waveId))
     // Walk the ranking; the winner is the first candidate whose fee burn verifies on-chain.
+    // Skip myself: I'm the sponsor paying from my own wallet, so paying myself is a no-op — the
+    // prize goes to the next eligible participant instead (I'm still a fair ticket in the draw).
     let winner = null
     for (const cand of order) {
+      if (cand.peerId === me.id) continue
       if (verifyBurnOnChain) {
         const r = cand.burnTx
           ? await verifyBurnOnChain(cand.burnTx, {
@@ -1139,7 +1127,6 @@ function createWave({
     if (!winner) return log('raffle: no candidate with a verified burn for wave', shortId(waveId))
     if (!payReward) return log('raffle: winner', shortId(winner.peerId), '(no wallet — not paid)')
     if (!winner.address) return log('raffle: winner has no payout address', shortId(winner.peerId))
-    if (winner.peerId === me.id) return // sponsor never wins its own draw (it doesn't selfie)
     try {
       const { hash } = await payReward(winner.address, raffleTrx)
       log('raffle: paid', raffleTrx, 'TRX ->', shortId(winner.peerId), 'tx', hash)
@@ -1368,12 +1355,12 @@ function createWave({
   // Announce a new wave and open the lobby (any peer can start when idle). After the
   // lobby window the initiator finalizes the roster and the token starts racing.
   function startWave() {
-    if (isSeed) return null // a seed archives galleries; it doesn't run waves
     if (wave) {
       onToken({ event: 'busy', waveId: wave.id })
       return null
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
+    initiatedWaves.add(waveId) // I own this wave: I keep its gallery + run its raffle
     enterLobby(waveId, me.id, true) // initiator auto-joins (marks its own lobby)
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the kick-off fee and
@@ -1394,6 +1381,9 @@ function createWave({
   function doAnnounce(waveId, paidProof) {
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '')
     const rc = raffleOptIn()
+    // I'm this wave's initiator, so I collect commits for its raffle — record my own now (I
+    // won't receive my own announce back). Joiners' commits arrive via wave-join.
+    if (rc && raffleTrx > 0) storeRaffleCommit(waveId, me.id, rc.commit)
     floodGossip({
       kind: 'wave-announce',
       waveId,
@@ -1515,7 +1505,7 @@ function createWave({
     scheduleBootstrap() // first connection -> place myself in the ring via findSuccessor
 
     // greet: my compact pointers (Phase 4 — no O(N) snapshot; carries liveness +
-    // country + role too). The newcomer converges via DHT discovery (swarm.peers) +
+    // country too). The newcomer converges via DHT discovery (swarm.peers) +
     // pointer exchange; at small N the mesh also upserts every peer directly on connect.
     send(JSON.stringify(myPointers()))
     // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
@@ -1540,7 +1530,6 @@ function createWave({
     conn.on('close', () => {
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
-      seedPeers.delete(id) // re-learned from its pointers heartbeat if it comes back
       goneUntil.set(id, Date.now() + TTL_MS) // cooldown: don't re-pin/re-hint it yet
       if (senders.size === 0) bootstrapDone = false // went solo -> re-bootstrap on reconnect
       log('peer disconnected', shortId(id))
@@ -1576,17 +1565,11 @@ function createWave({
     // re-pin ring edges from current discovery even if no 'update' fired
     maintainNeighbours()
     emit() // also re-evaluate TTL pruning
-    // pull replicated gallery writes. A seed updates ALL retained galleries so each keeps
-    // syncing (and stays a live source for latecomers); a peer just its current one.
-    if (isSeed) {
-      for (const b of galleries.values()) b.update().catch(() => {})
-      if (base) emitGallery()
-    } else if (base) {
-      base
-        .update()
-        .then(emitGallery)
-        .catch(() => {})
-    }
+    // Pull replicated gallery writes for every gallery I hold. For most peers that's just the
+    // current wave's; for a peer that initiated waves it also includes the galleries it retains
+    // (so each keeps syncing and stays a live source for latecomers).
+    for (const b of galleries.values()) b.update().catch(() => {})
+    if (base) emitGallery()
   }, RINGUPDATE_MS)
   // Chord repair via distributed findSuccessor — correct a successor pointer my local
   // (possibly partial) view missed. Slow cadence; a no-op when local knowledge suffices.
@@ -1596,14 +1579,13 @@ function createWave({
 
   return {
     me,
-    role,
     startWave,
     join,
     setCountry,
     stageSelfie,
     // Wire the payment layer once the wallet is up: my address (for gallery tips /
     // attestations), the on-chain burn verifier (enables the paid-wave anti-spam gate), and —
-    // for a sponsor/seed running a raffle — the reward sender (pays the prize).
+    // when I run a raffle for a wave I initiated — the reward sender (pays the prize).
     setWallet: (address, verifier, rewarder) => {
       walletAddress = address || null
       if (verifier) {
