@@ -10,6 +10,7 @@ const pkg = require('../package.json')
 const { name, productName, version, upgrade } = pkg
 
 const protocol = name
+// Should match value of 'UPDATER' in /renderer/updater.js
 const updaterWorkerSpecifier = '/workers/updater.js'
 
 const workers = new Map()

@@ -7,7 +7,8 @@ const HYPERWAVE = '/workers/hyperwave.js'
 
 bridge.startWorker(HYPERWAVE)
 
-const listeners = {
+// Handlers for worker message events
+const listenersByMessageType = {
   state: [],
   token: [],
   gallery: [],
@@ -23,17 +24,25 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
   } catch {
     return
   }
-  const hs = listeners[msg.type]
-  if (hs) for (const h of hs) h(msg)
+  const listeners = listenersByMessageType[msg.type]
+  if (listeners) {
+    for (const fn of listeners) {
+      fn(msg)
+    }
+  }
 })
 bridge.onWorkerStdout(HYPERWAVE, (d) => console.log('[hyperwave]', decoder.decode(d)))
 bridge.onWorkerStderr(HYPERWAVE, (d) => console.error('[hyperwave]', decoder.decode(d)))
 
+// Register message handler
 export function on(type, fn) {
-  ;(listeners[type] || (listeners[type] = [])).push(fn)
+  if (!listenersByMessageType[type]) {
+    throw new Error(`Registering unknown message type ${type}`)
+  }
+  listenersByMessageType[type].push(fn)
 }
 
-function send(type, extra) {
+function send(type, extra = {}) {
   bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type, ...extra }))
 }
 
