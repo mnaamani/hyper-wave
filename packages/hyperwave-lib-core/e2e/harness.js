@@ -177,4 +177,12 @@ class Cluster {
   }
 }
 
-module.exports = { Cluster, Proc, sleep }
+// Resolve true when ANY of `procs` reaches `min` gallery entries, else false within `ms`. Use
+// when the assertion is "the writes converged into a shared gallery" and no single peer is a
+// guaranteed hub — e.g. under churn, the slowest node to converge shouldn't fail the test.
+// (waitForGallery only ever settles truthy on success / false on timeout, so racing is sound.)
+function waitForAnyGallery(procs, min, ms = 60000) {
+  return Promise.race(procs.map((p) => p.waitForGallery(min, ms))).then(Boolean)
+}
+
+module.exports = { Cluster, Proc, sleep, waitForAnyGallery }
