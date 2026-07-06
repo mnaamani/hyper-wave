@@ -88,5 +88,7 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
   path (`react-native.config.js`) — wire the equivalent addon step for `npm run android`.
 - **Discovery** — no local DHT on device; you're on the public DHT (~20–35s cold). Pin a
   validator via `config.bootstrap` / a well-known key to speed the demo.
-- **Background lifecycle** — iOS/Android suspend sockets in the background; fine for a
-  foreground "watch the wave" experience, needs thought for background.
+- **Background lifecycle** — `useEngine` wires RN `AppState` → `Worklet.update(state)`, so the
+  Bare runtime suspends/resumes with the app (per react-native-bare-kit's design). Sockets still
+  suspend in the background; fine for a foreground "watch the wave" experience, and a wave in
+  progress would need a background mode / push to keep the connection alive across a backgrounding.

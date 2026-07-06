@@ -4,6 +4,7 @@
 // engine state + actions to React. The engine itself (wave race, gallery, WDK wallet) runs
 // unchanged inside the worklet — this file never touches Hyperswarm/Autobase/WDK directly.
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { AppState } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
 import FramedStream from 'framed-stream'
 import b4a from 'b4a'
@@ -66,7 +67,21 @@ export function useEngine(config = {}) {
     // one-time init: storageDir + config (matchId, role, bootstrap, seed)
     pipe.write(JSON.stringify({ type: 'init', storageDir: STORAGE_DIR, config }))
 
+    // Cooperate with the OS lifecycle: react-native-bare-kit's Worklet.update() takes an RN
+    // AppStateStatus and suspends/resumes the Bare runtime accordingly, so we don't burn battery
+    // (or get killed ungracefully) running the swarm full-tilt in the background. (Sockets still
+    // suspend in the background — fine for a foreground "watch the wave" app.)
+    worklet.update(AppState.currentState)
+    const appSub = AppState.addEventListener('change', (state) => {
+      try {
+        worklet.update(state)
+      } catch {}
+    })
+
     return () => {
+      try {
+        appSub.remove()
+      } catch {}
       try {
         pipe.end()
       } catch {}

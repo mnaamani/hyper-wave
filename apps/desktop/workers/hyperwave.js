@@ -18,7 +18,8 @@ const core = createCore({
     matchId: env.HYPERWAVE_MATCH || undefined, // isolate the ring
     lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
     role: env.HYPERWAVE_ROLE || 'peer', // 'validator'/'seed' = gallery archivist
-    raffleTrx: env.HYPERWAVE_RAFFLE_TRX ? Number(env.HYPERWAVE_RAFFLE_TRX) : 0 // seed-only prize
+    raffleTrx: env.HYPERWAVE_RAFFLE_TRX ? Number(env.HYPERWAVE_RAFFLE_TRX) : 0, // seed-only prize
+    wallet: env.HYPERWAVE_WALLET === 'false' ? false : undefined // HYPERWAVE_WALLET=false -> no-wallet (receipt-only) wave
   },
   send
 })
