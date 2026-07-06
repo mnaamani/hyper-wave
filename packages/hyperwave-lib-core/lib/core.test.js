@@ -73,9 +73,13 @@ test('core routes commands to the engine and forwards engine events to send', as
     sent.find((m) => m.type === 'tip-result' && m.error === 'wallet not ready'),
     'tip with no wallet returns an error result'
   )
+  t.ok(
+    sent.find((m) => m.type === 'wallet' && m.error),
+    'a wallet init failure surfaces a { wallet, error } message (no balance)'
+  )
   t.absent(
-    sent.find((m) => m.type === 'wallet'),
-    'no wallet message when the wallet failed to init'
+    sent.find((m) => m.type === 'wallet' && m.address),
+    'no wallet balance message when the wallet failed to init'
   )
 })
 

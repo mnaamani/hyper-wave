@@ -51,7 +51,8 @@ export function useEngine(config = {}) {
           setGallery(msg.items || [])
           break
         case 'wallet':
-          setWallet({ address: msg.address, trx: msg.trx })
+          if (msg.error) setToast(`⚠ wallet: ${msg.error}`)
+          else setWallet({ address: msg.address, trx: msg.trx })
           break
         case 'burn-result':
         case 'tip-result':

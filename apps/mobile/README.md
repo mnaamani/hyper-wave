@@ -35,6 +35,10 @@ What works:
   … — 41 xcframeworks — so the worklet's `dlopen` succeeds and the P2P stack runs.
 - The Expo app builds (87 CocoaPods incl. `react-native-bare-kit`), installs, and launches; the
   RN UI drives the engine over the IPC protocol; identity + ring angle render on device.
+- **The WDK wallet runs in the worklet** — dynamic ESM import + Tron key derivation + an HTTP
+  balance query to `nile.trongrid.io` all work; the 💰 chip populates (`0 TRX · T9zq6b…` on a
+  fresh wallet). So the full money layer (burns/tips/raffle) is available on mobile, same as
+  desktop.
 
 Two mobile-specific fixes were needed and are in place: the worklet resolves the storage dir
 under a **writable** path (a relative `storageDir` isn't writable on mobile → Corestore closed →
@@ -74,12 +78,12 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
   plain status + gallery list.
 - **Camera capture** — wire `expo-camera` to take the lobby selfie → JPEG data URL →
   `engine.stageSelfie(...)` (the worklet already handles the rest, incl. the gallery blob).
-- **Wallet in the worklet** — the wave engine runs **wallet-less** for now (`wallet: false` in
-  `App.js`), so no burns/paid-gate/tips on mobile yet. Confirm WDK inits under the worklet (the
-  💰 chip should populate), flip `wallet` back on, then inject the seed from `expo-secure-store`
-  via the init `config.seed` (the core already accepts it, `lib/pay.js`) instead of a
-  `wallet.seed` file. This also keeps the mobile in the same (no-wallet) mode as the demo desktop
-  peer, so the paid-gate doesn't block a mixed-mode wave.
+- **Wallet persistence + funding** — WDK works in the worklet (wallet is **on**), but the seed
+  currently persists in the tmp dir (wiped per run → fresh unfunded wallet each launch). Inject
+  the seed from `expo-secure-store` via the init `config.seed` (the core already accepts it,
+  `lib/pay.js`) for a stable, secure wallet, then faucet-fund it to exercise burns/tips/raffle.
+  Note: a wallet-enabled phone runs **paid** waves (enforces the burn gate), so a cross-peer demo
+  needs the other peers funded too — or set `wallet: false` in `App.js` for a no-wallet demo.
 - **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake
   path (`react-native.config.js`) — wire the equivalent addon step for `npm run android`.
 - **Discovery** — no local DHT on device; you're on the public DHT (~20–35s cold). Pin a

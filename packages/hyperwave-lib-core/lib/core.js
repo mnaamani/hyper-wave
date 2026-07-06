@@ -53,7 +53,10 @@ function createCore({
         await push()
         tBalance = setInterval(push, 15000)
       })
-      .catch((e) => log('[wallet] init failed:', e.message))
+      .catch((e) => {
+        log('[wallet] init failed:', e.message)
+        send({ type: 'wallet', error: e.message }) // surface to the host (mobile has no console)
+      })
   }
 
   // Participation fee (fees.js) — burned to the black hole by both initiator (kick-off) and each
