@@ -5,28 +5,34 @@ import { startWave, setCountry, appVersion } from './ipc.js'
 
 const statusEl = document.getElementById('status')
 const waveEl = document.getElementById('wave-status')
+const updaterEl = document.getElementById('updater')
 const startBtn = document.getElementById('start')
 const walletEl = document.getElementById('wallet')
 
 document.getElementById('v').innerText = 'v' + appVersion()
 
 // --- wallet chip (self-custodial TRX wallet) -------------------------------
-export function wallet({ address, trx }) {
+export function walletStatus({ address, trx }) {
   if (!address) return
   const short = address.slice(0, 6) + '…' + address.slice(-4)
   walletEl.innerText = `💰 ${trx.toFixed(2)} TRX · ${short}` + (trx === 0 ? ' · ⚠ unfunded' : '')
 }
 
-// --- status + start button --------------------------------------------------
-// The persistent status line (idle chrome: peer count).
-export function status(text) {
+// --- status lines + start button --------------------------------------------
+// The persistent network status line (peer count).
+export function networkStatus(text) {
   statusEl.innerText = text
 }
-// The live wave narration, on its own line (paying / lobby / racing / result). Pass '' to clear
-// it (the element collapses via #wave-status:empty). Kept separate from status() so the two never
-// fight over one line — status() shows peer count even while a wave narrates here.
-export function wave(text) {
+// The live wave narration, on its own line (paying / lobby / racing / result). Pass '' to clear it
+// (the element collapses via #wave-status:empty). Kept separate from networkStatus() so the two
+// never fight over one line — networkStatus() shows peer count even while a wave narrates here.
+export function waveStatus(text) {
   waveEl.innerText = text || ''
+}
+// OTA update notice (its own line), set by updater.js when the app is updating. Separate again so
+// it never collides with the network status line.
+export function updatingStatus(text) {
+  updaterEl.innerText = text || ''
 }
 export function showStart(show) {
   startBtn.style.display = show ? '' : 'none'

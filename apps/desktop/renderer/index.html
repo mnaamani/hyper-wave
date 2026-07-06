@@ -115,6 +115,15 @@
       #wave-status:empty {
         display: none;
       }
+      /* OTA update notice (from updater.js) — amber, own line, hidden unless updating */
+      #updater {
+        font-size: 12px;
+        color: #ffd479;
+        min-height: 14px;
+      }
+      #updater:empty {
+        display: none;
+      }
       #me {
         font-size: 12px;
         opacity: 0.6;
@@ -354,6 +363,7 @@
       <h1>🌊 HyperWave</h1>
       <span id="v">v</span>
     </header>
+    <div id="updater"></div>
     <div id="status">connecting…</div>
     <div id="wave-status"></div>
     <div id="me"></div>

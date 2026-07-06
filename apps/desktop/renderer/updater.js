@@ -7,5 +7,5 @@ const decoder = new TextDecoder('utf-8')
 const UPDATER = '/workers/updater.js'
 bridge.startWorker(UPDATER)
 bridge.onWorkerIPC(UPDATER, (data) => {
-  if (decoder.decode(data) === 'updating') hud.status('updating...')
+  if (decoder.decode(data) === 'updating') hud.updatingStatus('updating...')
 })
