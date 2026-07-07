@@ -68,11 +68,15 @@ function getWorker(specifier) {
   if (workers.has(specifier)) return workers.get(specifier)
   const appPath = getAppPath()
   let dir = null
+  let dirSource = null
   if (pearStore) {
-    console.log('pear store: ' + pearStore)
     dir = pearStore
+    dirSource = '--storage flag'
   } else if (appPath === null) {
+    // Dev (`npm start`, unpackaged): getAppPath() is null, so storage is the OS temp dir — NOT
+    // ~/Library/Application Support. That branch is packaged-app only.
     dir = path.join(os.tmpdir(), 'pear', appName)
+    dirSource = 'default (dev: os.tmpdir)'
   } else {
     const isSnap = !!process.env.SNAP_USER_COMMON
     const linuxConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config')
@@ -83,7 +87,12 @@ function getWorker(specifier) {
           ? path.join(process.env.SNAP_USER_COMMON, appName)
           : path.join(linuxConfigHome, appName)
         : path.join(os.homedir(), 'AppData', 'Roaming', appName)
+    dirSource = 'default (packaged)'
   }
+
+  // Resolve to absolute (a relative --storage arg resolves against cwd, same as the worker's
+  // bare-fs/Corestore downstream) so the log shows the true on-disk location.
+  console.log(`[main] storage dir: ${path.resolve(dir)}  (${dirSource})`)
 
   const extension = isLinux ? '.AppImage' : isMac ? '.app' : '.msix'
 

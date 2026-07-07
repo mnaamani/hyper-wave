@@ -7,6 +7,7 @@
 //   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted when the ball arrives, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 const env = require('bare-env')
+const path = require('bare-path')
 const { createWave, parseBootstrap } = require('./wave.js')
 const { nodeIdOfHex, RING } = require('./chord.js')
 const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees.js')
@@ -17,6 +18,11 @@ if (!storageDir) {
   console.error('usage: bare wave.run.js <name> <storageDir>')
   Bare.exit(1)
 }
+// Echo the resolved storage dir (and thus where wallet.seed lives) — a mis-quoted or relative
+// path on the command line silently lands in the wrong dir, so make the ABSOLUTE one (resolved
+// against cwd, same as bare-fs/Corestore downstream) visible at startup.
+const absStorageDir = path.resolve(storageDir)
+console.log(`[${name}] storage dir: ${absStorageDir}`)
 
 const bootstrap = parseBootstrap(env.HYPERWAVE_BOOTSTRAP)
 
@@ -132,7 +138,7 @@ if (env.WALLET) {
       payments = pay
       wireWallet(wave, pay) // paid-wave gate (on-chain burn verifier)
       const b = await pay.balances()
-      console.log(`[${name}] WALLET ${b.address} trx=${b.trx}`)
+      console.log(`[${name}] WALLET ${b.address} trx=${b.trx} storage=${absStorageDir}`)
       if (env.WALLET_SEND) {
         const [to, amt] = env.WALLET_SEND.split(':')
         const r = await pay.send(to, Number(amt))

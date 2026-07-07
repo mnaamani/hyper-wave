@@ -5,6 +5,7 @@
 // no Bare.argv / bare-env / IPC transport in here, so the same core boots under Electron-spawned
 // Bare and a react-native-bare-kit worklet unchanged. `deps` lets tests inject fake factories
 // (so core is unit-testable without a real swarm or a wallet). Unit-tested in core.test.js.
+const path = require('bare-path')
 const { createWave, parseBootstrap } = require('./wave')
 const { createPayments } = require('./pay')
 const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees')
@@ -18,6 +19,13 @@ function init({
 }) {
   const makeWave = deps.createWave || createWave
   const makePayments = deps.createPayments || createPayments
+
+  // Log the resolved storage dir up front — every host routes through here, so this is the one
+  // line that always tells you which dir this engine (and its wallet.seed) is really using. A
+  // relative arg is resolved against cwd (the same way bare-fs/Corestore resolve it downstream),
+  // so the log shows the true absolute on-disk location, not the ambiguous relative string.
+  const absStorageDir = path.resolve(storageDir)
+  log('storage dir:', absStorageDir)
 
   const wave = makeWave({
     storageDir,
@@ -48,6 +56,8 @@ function init({
       .then(async (pay) => {
         payments = pay
         wireWallet(wave, pay)
+        // Echo the wallet next to its storage dir so "which dir → which wallet" is unambiguous.
+        log('wallet', pay.address, 'in storage dir:', absStorageDir)
         pushBalance = async () =>
           send({
             type: 'wallet',

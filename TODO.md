@@ -136,6 +136,13 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       Function) or threshold scheme to remove the last-revealer abort; legal review (a paid game
       of chance is a lottery). Also: k-winners/tiered prizes (`raffleDraw` returns the full
       ranking, so the top-k of the winner walk are the winners).
+- [ ] **Harden `pay.send` to report failed transactions** (`pay.js`). The returned `hash` is the
+      txID computed client-side from the signed bytes (`sha256(raw_data)`), so `send` resolves
+      `{ hash }` even when the broadcast is rejected or the tx later fails on-chain — e.g. sending
+      from an **unfunded** wallet (`WALLET_SEND` via `wave.run.js`) prints `WALLET SENT ... hash=`
+      with no error. Check the broadcast result (`res.result`/`code`/`message`) and/or confirm via
+      `getTransaction`/`getTransactionInfo` (as `verifyBurnTx` already does) and throw/return a
+      failure so the `fund` flow surfaces insufficient-balance instead of a misleading success.
 
 ### Future features / ideas
 
