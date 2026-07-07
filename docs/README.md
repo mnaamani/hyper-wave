@@ -23,6 +23,10 @@
 - [research.md](./research.md) — the papers, protocols, and projects HyperWave draws on
   (Chord, epidemic gossip, Kademlia, the Holepunch stack, WDK, proof-of-burn,
   commit-reveal randomness, …) and what each contributed.
+- [future-work.md](./future-work.md) — what else the substrate is good for: the general
+  properties of the wave-over-Chord-over-Hyperswarm stack, candidate applications with
+  real value (paid-postage messaging, rendezvous KV, auditable rotation/draw primitives,
+  presence, pub/sub), and an honest read of the prior attempts' graveyard.
 
 Project overview, quickstart, and the local demo walkthrough: [`../README.md`](../README.md).
 Desktop app shell: [`../apps/desktop/README.md`](../apps/desktop/README.md). Mobile host:
