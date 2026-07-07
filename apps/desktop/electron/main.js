@@ -26,7 +26,13 @@ const cmd = command(
 
 cmd.parse(app.isPackaged ? process.argv.slice(1) : process.argv.slice(2))
 
+// Resolve a relative --storage to absolute: app.setPath requires it, and the worker's
+// bare-fs/Corestore would otherwise resolve it against a different cwd. Resolve against the
+// directory the user ran the command from — npm switches cwd to the workspace (apps/desktop)
+// when `npm start` delegates, but preserves the original in INIT_CWD.
 const pearStore = cmd.flags.storage
+  ? path.resolve(process.env.INIT_CWD || process.cwd(), cmd.flags.storage)
+  : cmd.flags.storage
 const updates = cmd.flags.updates
 
 if (pearStore) app.setPath('userData', pearStore)
