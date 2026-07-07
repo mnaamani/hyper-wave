@@ -1,6 +1,6 @@
 # HyperWave — task list
 
-Refinement backlog, roughly prioritized. Design context in `ideas/final-idea.md`;
+Refinement backlog, roughly prioritized. Design context in `docs/final-idea.md`;
 docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEMO.md`.
 
 ## Done
@@ -78,7 +78,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       `wave-join`/`wave-announce` in the lobby, reveal rides the selfie, the initiator folds
       secrets into a deterministic auditable draw) and pays the burn-verified address from its
       own wallet (it's skipped in the winner walk — never pays itself). Verified live on Nile.
-      See `ideas/raffle.md` + `docs/protocol.md` §12. **MVP: initiator = admitter = prize-holder**
+      See `docs/raffle.md` + `docs/protocol.md` §12. **MVP: initiator = admitter = prize-holder**
       — production must separate the admitter from the prize-holder; testnet-only (a paid game of
       chance is legally a lottery).
 - [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
@@ -130,7 +130,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       (N reads of 1 immutable tx). Not a concentration bottleneck (distributed, 1 read/joiner)
       and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
       the anti-_wave_-spam gate; making it optimistic would re-open free wave-spam).
-- [ ] Raffle production hardening (`ideas/raffle.md`): **separate the admitter from the
+- [ ] Raffle production hardening (`docs/raffle.md`): **separate the admitter from the
       prize-holder** so the initiator (currently admitter + prize-holder in one) can't censor
       the entry set; escrow/contract custody instead of the trusted initiator wallet; a VDF (Verifiable Delay
       Function) or threshold scheme to remove the last-revealer abort; legal review (a paid game

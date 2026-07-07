@@ -14,6 +14,13 @@
   successor-list/predecessor/fingers, stabilize + churn, slim gossip) plus control-plane
   flooding and distributed `findSuccessor` routing; §8 tracks what remains (notably the
   deterministic-sweep decision for propagation at extreme N).
+- [final-idea.md](./final-idea.md) — **the authoritative design doc** (read first). The
+  original HyperWave vision + the settled refinements; §11 is the desktop-Electron MVP
+  decision. Note: it still describes the original interlocked-reward model, superseded by the
+  fees+tips money model (see the current-state summary in `CLAUDE.md`).
+- [raffle.md](./raffle.md) — the per-wave initiator-funded raffle: internal commit-reveal
+  fairness, the draw + on-chain-verified payout, and the production hardening still open
+  (separate admitter from prize-holder; VDF/threshold against last-revealer abort).
 
-App-level run/test instructions: [`../app/README.md`](../app/README.md).
+App-level run/test instructions: [`../apps/desktop/README.md`](../apps/desktop/README.md).
 Local demo walkthrough: [`../DEMO.md`](../DEMO.md).

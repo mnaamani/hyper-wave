@@ -140,7 +140,7 @@ function createWave({
   // (provided by the payment layer once the wallet is up; off by default so no-wallet
   // headless/tests behave as before — waves announce immediately, unpaid).
   verifyBurnTx = null,
-  // Raffle prize (ideas/raffle.md): if > 0, then for a wave THIS peer initiates it draws one
+  // Raffle prize (docs/raffle.md): if > 0, then for a wave THIS peer initiates it draws one
   // winner among the gallery participants (commit-reveal) after the wave and pays `raffleTrx`
   // from its own wallet. 0 = off. There are no roles: the wave's initiator is its gallery
   // archivist, commit-recorder, and (if funded) raffle sponsor — all for its own wave only.
@@ -746,7 +746,7 @@ function createWave({
       // It's verified then dropped from the stored entry (kept lean); `tronAddress === address`.
       burn: burnProof || undefined,
       // raffle REVEAL: my secret, whose H(secret) I committed to in the lobby. The seed folds
-      // every revealed secret into the draw seed (ideas/raffle.md); I couldn't have chosen it
+      // every revealed secret into the draw seed (docs/raffle.md); I couldn't have chosen it
       // to steer the outcome because I committed before anyone revealed.
       raffleSecret: raffleSecret || undefined,
       timestamp: Date.now()

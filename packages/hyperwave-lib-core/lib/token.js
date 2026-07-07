@@ -1,5 +1,5 @@
 // Pure token crypto for the wave race. Ed25519 receipts + a constant-size blake2b
-// chain accumulator (final-idea.md §1.1 — NOT a growing hops[] array). No state,
+// chain accumulator (docs/final-idea.md §1.1 — NOT a growing hops[] array). No state,
 // no I/O — unit-tested in wave.token.test.js.
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
@@ -142,7 +142,7 @@ function verifyWaveEnd(originatorHex, waveId, hops, chainHash, sigHex) {
   }
 }
 
-// --- raffle: commit-reveal + the draw (ideas/raffle.md) --------------------
+// --- raffle: commit-reveal + the draw (docs/raffle.md) --------------------
 // A sponsor-funded raffle picks one winner among the wave's (burn-gated) gallery entries.
 // Fairness = commit-reveal, using the wave's two phases: each participant COMMITS to a hidden
 // secret during the lobby (before anyone reveals), then REVEALS it in its gallery selfie. The

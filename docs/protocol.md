@@ -857,7 +857,7 @@ Off by default. When the wave's **initiator** has a funded wallet and a prize bu
 from its own wallet — a positive incentive to participate, on top of burned fees + tips. There
 is no dedicated sponsor/seed role: the initiator of each wave sponsors that wave's raffle.
 Fairness is **commit-reveal**, using the wave's two phases and **no external randomness
-beacon** (design + trade-offs: `ideas/raffle.md`).
+beacon** (design + trade-offs: `docs/raffle.md`).
 
 1. **Commit (lobby).** Each participant generates a 32-byte `secret` and publishes
    `commit = BLAKE2b(secret)` in the lobby **two ways**: (a) as a ring-signed `commit`/`commitSig`
@@ -892,7 +892,7 @@ reveals (no eligible tickets → no winner, a no-op). Because each peer commits 
 others, it can't choose a secret to steer the draw; the residual is a **last-revealer abort**:
 withholding your reveal removes you and shifts the seed — a _bounded, binary_ re-roll at the
 cost of your own ticket, **not** the ability to aim (nor to cancel the draw). Removing even
-this needs a **VDF (Verifiable Delay Function)** or a threshold scheme (`ideas/raffle.md`).
+this needs a **VDF (Verifiable Delay Function)** or a threshold scheme (`docs/raffle.md`).
 
 > **Trust caveat (MVP): initiator = admitter = prize-holder.** For simplicity the wave's
 > initiator both funds the prize and draws it. With commits on-chain the **draw math is publicly

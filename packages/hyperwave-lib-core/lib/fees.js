@@ -12,7 +12,7 @@ const CONFIRM_INTERVAL_MS = 2500
 
 // The memo that provably ties a burn to its wave + payer (protocol.md §9.2), and — when the
 // raffle is on — the payer's raffle **commit**, so the commitment is recorded ON-CHAIN
-// (timestamped, immutable, auditable) rather than only in the seed's memory (ideas/raffle.md).
+// (timestamped, immutable, auditable) rather than only in the seed's memory (docs/raffle.md).
 function burnMemo(waveId, peerId, commit) {
   return commit ? `hyperwave:${waveId}:${peerId}:${commit}` : `hyperwave:${waveId}:${peerId}`
 }

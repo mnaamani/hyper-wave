@@ -4,7 +4,6 @@ out/
 bundles/
 
 # local-only design/notes + spikes
-ideas/
 spike/
 DEMO.md
 VULN.md
