@@ -23,6 +23,10 @@
 - [research.md](./research.md) — the papers, protocols, and projects HyperWave draws on
   (Chord, epidemic gossip, Kademlia, the Holepunch stack, WDK, proof-of-burn,
   commit-reveal randomness, …) and what each contributed.
+- [hyperwave-whitepaper.pdf](./hyperwave-whitepaper.pdf) — a two-page, scientific-style
+  summary of the protocol (ring, token race + receipt accumulator, gallery, burn/tip/raffle
+  economics, scaling + adversarial notes). Source: `whitepaper.html`, rendered via headless
+  Chromium (`--headless --print-to-pdf`).
 - [future-work.md](./future-work.md) — what else the substrate is good for: the general
   properties of the wave-over-Chord-over-Hyperswarm stack, candidate applications with
   real value (paid-postage messaging, rendezvous KV, auditable rotation/draw primitives,

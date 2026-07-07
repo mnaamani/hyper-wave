@@ -1,0 +1,578 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>HyperWave: A Peer-to-Peer Stadium Wave with Burned-Fee Economics</title>
+    <style>
+      @page {
+        size: letter;
+        margin: 16mm 14mm 16mm 14mm;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 8.5pt;
+        line-height: 1.24;
+        color: #111;
+      }
+      .titleblock {
+        text-align: center;
+        margin-bottom: 8pt;
+      }
+      h1 {
+        font-size: 15pt;
+        margin-bottom: 4pt;
+        font-weight: bold;
+      }
+      .authors {
+        font-size: 9pt;
+        margin-bottom: 2pt;
+      }
+      .affil {
+        font-size: 8pt;
+        font-style: italic;
+        color: #333;
+      }
+      .cols {
+        column-count: 2;
+        column-gap: 6mm;
+      }
+      h2 {
+        font-size: 9.6pt;
+        margin: 6pt 0 2.5pt 0;
+      }
+      h3 {
+        font-size: 8.8pt;
+        margin: 4pt 0 1.5pt 0;
+        font-style: italic;
+      }
+      p {
+        text-align: justify;
+        margin-bottom: 2.5pt;
+        hyphens: auto;
+      }
+      .abstract {
+        margin-bottom: 3pt;
+      }
+      .abstract b {
+        font-variant: small-caps;
+      }
+      code {
+        font-family: 'Courier New', monospace;
+        font-size: 7.9pt;
+      }
+      figure {
+        margin: 4pt 0 5pt 0;
+        break-inside: avoid;
+        text-align: center;
+      }
+      figcaption {
+        font-size: 7.6pt;
+        color: #222;
+        margin-top: 1.5pt;
+        text-align: center;
+      }
+      ul {
+        margin: 1pt 0 3pt 11pt;
+      }
+      li {
+        text-align: justify;
+        margin-bottom: 1pt;
+      }
+      .refs {
+        font-size: 7.2pt;
+      }
+      .refs li {
+        margin-bottom: 0.5pt;
+        text-align: left;
+      }
+      .refs ol {
+        margin-left: 11pt;
+      }
+      svg {
+        display: block;
+        margin: 0 auto;
+      }
+      .eq {
+        text-align: center;
+        font-size: 8.2pt;
+        margin: 2.5pt 0;
+        font-family: 'Courier New', monospace;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 7.6pt;
+        margin: 3pt 0 4pt 0;
+        break-inside: avoid;
+      }
+      th,
+      td {
+        border-top: 0.5pt solid #999;
+        border-bottom: 0.5pt solid #999;
+        padding: 1.5pt 3pt;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        font-variant: small-caps;
+        border-bottom: 0.8pt solid #333;
+      }
+      .tcap {
+        font-size: 7.6pt;
+        text-align: center;
+        margin-bottom: 1.5pt;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="titleblock">
+      <h1>HyperWave: A Peer-to-Peer Stadium Wave<br />with Burned-Fee Economics</h1>
+      <div class="affil">Tether Developers Cup 2026 &nbsp;·&nbsp; github: mnaamani/hyper-wave</div>
+    </div>
+
+    <div class="cols">
+      <p class="abstract">
+        <b>Abstract.</b> HyperWave recreates the stadium "Mexican wave" as a serverless,
+        permissionless protocol. Peers derive a fixed seat on a logical ring from their public key,
+        a signed token races seat-to-seat leaving a constant-size cryptographic trace, and each
+        participant's selfie converges into a replicated, multi-writer gallery. Real (testnet) value
+        flows through the game with no beneficiary or operator: participation fees are provably
+        <i>burned</i> on-chain (anti-spam), viewers tip selfies wallet-to-wallet, and an optional
+        raffle pays a winner selected by an auditable commit&#8211;reveal draw. The system runs on
+        the Holepunch stack (Hyperswarm, Autobase) with a Chord overlay for scale, and Tether's WDK
+        for self-custodial payments. Every peer runs identical code; there are no roles.
+      </p>
+
+      <h2>1&nbsp;&nbsp;Introduction</h2>
+      <p>
+        A stadium wave is a self-organising relay: thousands of people produce a global pattern from
+        one local rule — <i>react to your neighbour, then pass it on</i>. HyperWave moves this
+        phenomenon onto the open Internet. The design goals are (i) <b>no servers</b> — discovery,
+        state, and money are all peer-to-peer; (ii) <b>no trust</b> — every claim a peer makes is
+        signed and cheaply verifiable; (iii) <b>no free spam</b> — starting or joining a wave costs
+        a small, provable, beneficiary-less fee; and (iv) <b>equality</b> — every peer runs the same
+        code, with no privileged validator or seed node.
+      </p>
+
+      <h2>2&nbsp;&nbsp;The ring: identity is the seat</h2>
+      <p>
+        Each peer holds an Ed25519 keypair. Its ring position (angle) is derived from the top bytes
+        of the public key, so a seat can be neither chosen nor forged, and grinding keys buys
+        nothing but a different random seat. Peers on the same <i>match topic</i> discover each
+        other via Hyperswarm's DHT and communicate over Noise-encrypted streams. A peer's
+        <b>successor</b> is the next live peer clockwise; liveness rides a small heartbeat that also
+        carries Chord pointers (&sect;6).
+      </p>
+
+      <figure>
+        <svg width="215" height="128" viewBox="0 0 230 138">
+          <circle
+            cx="115"
+            cy="69"
+            r="52"
+            fill="none"
+            stroke="#999"
+            stroke-width="1"
+            stroke-dasharray="3,3"
+          />
+          <!-- peers -->
+          <g font-family="Georgia" font-size="9">
+            <circle cx="167" cy="69" r="6" fill="#2a7" />
+            <circle cx="141" cy="24" r="6" fill="#2a7" />
+            <circle cx="89" cy="24" r="6" fill="#e6b422" />
+            <circle cx="63" cy="69" r="6" fill="#2a7" />
+            <circle cx="89" cy="114" r="6" fill="#ccc" stroke="#999" />
+            <circle cx="141" cy="114" r="6" fill="#2a7" />
+            <text x="178" y="73">A</text>
+            <text x="147" y="18">B</text>
+            <text x="78" y="18">C (you)</text>
+            <text x="42" y="73">D</text>
+            <text x="72" y="126">E ✕</text>
+            <text x="147" y="126">F</text>
+          </g>
+          <!-- token arrows clockwise: C->B->A->F then heal past dead E -> D -->
+          <defs>
+            <marker id="arr" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 z" fill="#c33" />
+            </marker>
+          </defs>
+          <path
+            d="M 97,21 A 52,52 0 0 1 133,21"
+            fill="none"
+            stroke="#c33"
+            stroke-width="1.6"
+            marker-end="url(#arr)"
+          />
+          <path
+            d="M 146,32 A 52,52 0 0 1 162,58"
+            fill="none"
+            stroke="#c33"
+            stroke-width="1.6"
+            marker-end="url(#arr)"
+          />
+          <path
+            d="M 162,80 A 52,52 0 0 1 146,106"
+            fill="none"
+            stroke="#c33"
+            stroke-width="1.6"
+            marker-end="url(#arr)"
+          />
+          <path
+            d="M 133,118 A 52,52 0 0 1 68,80"
+            fill="none"
+            stroke="#c33"
+            stroke-width="1.6"
+            stroke-dasharray="4,2"
+            marker-end="url(#arr)"
+          />
+          <text x="60" y="112" font-family="Georgia" font-size="8" fill="#c33">
+            heal: skip dead E
+          </text>
+          <text x="103" y="73" font-family="Georgia" font-size="8" fill="#555">⚽ token</text>
+        </svg>
+        <figcaption>
+          <b>Fig. 1.</b> Seats derived from keys; the token visits successors clockwise and heals
+          around a dead peer (E).
+        </figcaption>
+      </figure>
+
+      <h2>3&nbsp;&nbsp;The wave</h2>
+      <p>
+        A wave has a lifecycle of <i>idle &rarr; lobby &rarr; racing &rarr; idle</i>, one wave at a
+        time. Any peer may kick off: it pays the fee (&sect;5), then floods a signed announcement
+        opening a short <b>lobby</b> in which peers opt in (paying their own fee) and stage a webcam
+        selfie — captured <i>before</i> the race, so the token never waits for a human. The
+        initiator then starts the race.
+      </p>
+      <p>
+        The <b>token</b> hops from each holder to its successor. Every holder signs a
+        <i>receipt</i> over <code>(waveId, hop, chain, t)</code> and folds it into a rolling
+        accumulator carried by the token:
+      </p>
+      <p class="eq">chain&prime; = BLAKE2b(chain &Vert; sig<sub>hop</sub>)</p>
+      <p>
+        The token therefore stays a few hundred bytes at any crowd size, yet commits to the full
+        ordered history of who carried the wave (Fig.&nbsp;2). Anyone holding the receipts can
+        replay the fold and verify the lap. If a successor fails to acknowledge within a timeout,
+        the holder skips to the next live seat; when the token returns to the initiator, a signed
+        <i>wave-end</i> is flooded and all peers finish together.
+      </p>
+
+      <figure>
+        <svg width="228" height="52" viewBox="0 0 246 56">
+          <defs>
+            <marker id="arr2" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 z" fill="#333" />
+            </marker>
+          </defs>
+          <g font-family="Courier New" font-size="8">
+            <rect x="4" y="16" width="40" height="20" fill="#eee" stroke="#333" />
+            <text x="12" y="29">0000</text>
+            <rect x="78" y="16" width="40" height="20" fill="#eee" stroke="#333" />
+            <text x="84" y="29">chain₁</text>
+            <rect x="152" y="16" width="40" height="20" fill="#eee" stroke="#333" />
+            <text x="158" y="29">chain₂</text>
+            <text x="206" y="29" font-size="10">…</text>
+            <line
+              x1="44"
+              y1="26"
+              x2="76"
+              y2="26"
+              stroke="#333"
+              stroke-width="1.2"
+              marker-end="url(#arr2)"
+            />
+            <line
+              x1="118"
+              y1="26"
+              x2="150"
+              y2="26"
+              stroke="#333"
+              stroke-width="1.2"
+              marker-end="url(#arr2)"
+            />
+            <text x="46" y="12" font-size="7">⊕ sig₀</text>
+            <text x="120" y="12" font-size="7">⊕ sig₁</text>
+            <text x="46" y="50" font-size="7" font-family="Georgia">BLAKE2b(prev ‖ sig)</text>
+          </g>
+        </svg>
+        <figcaption>
+          <b>Fig. 2.</b> The constant-size receipt-chain accumulator: each hop's signature is folded
+          into a rolling hash.
+        </figcaption>
+      </figure>
+
+      <h2>4&nbsp;&nbsp;The gallery</h2>
+      <p>
+        Each wave mints a fresh multi-writer log (an Autobase keyed by the random wave id; its key
+        is signed by the initiator so relays cannot substitute a rogue log). As the token reaches a
+        participant, their staged selfie is appended, and the gallery fills in seat order on every
+        screen. Writes are gated twice: admission requires a valid hop receipt plus a signed fee
+        attestation, and a deterministic apply rule — identical on every peer — verifies each
+        entry's signature, enforces <i>one entry per peer</i> and byte caps, and keeps a tip address
+        only if the signed fee names that wallet. Galleries are ephemeral by design; the wave's
+        initiator retains its own wave's gallery for latecomers while it remains online.
+      </p>
+
+      <h2>5&nbsp;&nbsp;Economics: burn, tip, raffle</h2>
+      <p>
+        Every peer embeds a self-custodial wallet (WDK; Tron Nile testnet, native TRX). Three rules
+        define the entire economy:
+      </p>
+      <ul>
+        <li>
+          <b>Fees are burned.</b> Starting or joining costs 1 TRX sent to Tron's unspendable
+          black-hole address, memo-tagged <code>hyperwave:&lt;wave&gt;:&lt;peer&gt;</code>. Nobody
+          profits; spam costs real money. Peers verify the initiator's burn on-chain before joining
+          — an unpaid wave is ignored by all.
+        </li>
+        <li>
+          <b>Tips are the only earnings.</b> A viewer tips a selfie 1 TRX directly to its owner's
+          wallet; the apply rule guarantees a tip can only reach a wallet that paid in.
+        </li>
+        <li>
+          <b>An optional raffle.</b> The initiator may fund a prize. Each participant commits
+          <code>H(secret)</code> before the race — in gossip <i>and</i> in its burn memo (on-chain,
+          timestamped) — and reveals the secret with its selfie. The seed is the hash of all
+          reveals; a deterministic ranking picks the winner, and the initiator pays the first
+          candidate whose burn verifies on-chain, never itself. Since commits and reveals are
+          public, anyone can recompute the draw and audit the payout.
+        </li>
+      </ul>
+
+      <figure>
+        <svg width="226" height="66" viewBox="0 0 244 70">
+          <defs>
+            <marker id="arr3" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 z" fill="#333" />
+            </marker>
+          </defs>
+          <g font-family="Georgia" font-size="8.5">
+            <rect x="4" y="24" width="52" height="20" rx="3" fill="#eef4ff" stroke="#336" />
+            <text x="14" y="37">player</text>
+            <rect x="100" y="4" width="60" height="20" rx="3" fill="#fff0f0" stroke="#933" />
+            <text x="105" y="17">🔥 black hole</text>
+            <rect x="100" y="44" width="60" height="20" rx="3" fill="#eefaee" stroke="#363" />
+            <text x="107" y="57">other player</text>
+            <rect x="188" y="24" width="52" height="20" rx="3" fill="#fffbe6" stroke="#963" />
+            <text x="194" y="37">initiator</text>
+            <line
+              x1="56"
+              y1="30"
+              x2="98"
+              y2="16"
+              stroke="#933"
+              stroke-width="1.2"
+              marker-end="url(#arr3)"
+            />
+            <line
+              x1="56"
+              y1="40"
+              x2="98"
+              y2="52"
+              stroke="#363"
+              stroke-width="1.2"
+              marker-end="url(#arr3)"
+            />
+            <line
+              x1="188"
+              y1="34"
+              x2="162"
+              y2="52"
+              stroke="#963"
+              stroke-width="1.2"
+              marker-end="url(#arr3)"
+            />
+            <text x="52" y="14" font-size="7" fill="#933">fee (burned)</text>
+            <text x="62" y="55" font-size="7" fill="#363">tip</text>
+            <text x="166" y="40" font-size="7" fill="#963">prize</text>
+          </g>
+        </svg>
+        <figcaption>
+          <b>Fig. 3.</b> Money flows: fees are destroyed, tips go peer-to-peer, the optional prize
+          is paid by the wave's initiator.
+        </figcaption>
+      </figure>
+
+      <h2>6&nbsp;&nbsp;Scaling and security</h2>
+      <p>
+        <b>Topology.</b> Small swarms full-mesh, but the design does not depend on it: the ring
+        <i>drives</i> connections. Each peer pins its successor list (k=3), predecessor, and
+        O(log&nbsp;N) Chord fingers, and a distributed <code>findSuccessor</code> RPC resolves
+        lookups correctly under partial membership knowledge. Lifecycle messages are flooded
+        epidemically (relay on first sight of a message id), blanketing a partial mesh in a few
+        rounds. A serial lap is O(N) in wall clock; a deterministic timed sweep — each seat
+        self-triggering from a flooded start time — is the designed path to arbitrarily-large
+        instant waves.
+      </p>
+      <p>
+        <b>Adversarial notes.</b> Self-describing sender fields must match the authenticated
+        connection identity; flooded messages are instead authenticated by the signatures they
+        carry. Wave termination is signed by the originator. Gallery admission is <i>optimistic</i>:
+        the fee attestation's signature is checked locally, and the on-chain read is deferred to
+        where it has value — raffle payout and tip time — bounding a fake burn's payoff at zero
+        while keeping the write path free of chain I/O. The residual raffle bias is a bounded
+        last-revealer abort (a costly re-roll, not aim); removing it needs a VDF or threshold
+        scheme. The raffle is testnet-only.
+      </p>
+      <p>
+        <b>Wire surface.</b> The protocol is deliberately small: one encoding (signed JSON over a
+        single multiplexed channel) and ten message kinds, each assigned the cheapest propagation
+        class that meets its need (Table&nbsp;1).
+      </p>
+
+      <div class="tcap"><b>Table 1.</b> Message kinds and how each propagates.</div>
+      <table>
+        <tr>
+          <th>Message</th>
+          <th>Propagation &amp; role</th>
+        </tr>
+        <tr>
+          <td><code>pointers</code></td>
+          <td>neighbour-scoped heartbeat: liveness, country, Chord successor/predecessor</td>
+        </tr>
+        <tr>
+          <td><code>wave-announce / join / start / end</code></td>
+          <td>epidemic flood (dedup by message id): the wave lifecycle, paid-gate attested</td>
+        </tr>
+        <tr>
+          <td><code>token</code></td>
+          <td>unicast to the successor: the racing ball + receipt accumulator</td>
+        </tr>
+        <tr>
+          <td><code>wave-pos</code></td>
+          <td>one-hop broadcast: ball position for the visual roll; doubles as the heal ACK</td>
+        </tr>
+        <tr>
+          <td><code>wave-sync</code></td>
+          <td>unicast on connect: catch-up state for late joiners</td>
+        </tr>
+        <tr>
+          <td><code>add-writer</code></td>
+          <td>flood: gallery admission request, authenticated by its carried receipt</td>
+        </tr>
+        <tr>
+          <td><code>find-succ / -reply</code></td>
+          <td>routed via fingers: distributed successor lookup (Chord)</td>
+        </tr>
+      </table>
+
+      <h2>7&nbsp;&nbsp;Gossip vs. replicated logs</h2>
+      <p>
+        HyperWave keeps two kinds of shared state and moves each with a different tool. The
+        <b>control plane</b> — lifecycle, ball positions, admission requests — is ephemeral: it must
+        reach everyone quickly, needs no history, and any peer may originate it. It travels as
+        flooded gossip: unordered, deduplicated by message id, discarded once processed, with
+        authenticity carried per-message by the signatures inside. The <b>data plane</b> — the
+        gallery — is durable and ordered: it must converge to the same view everywhere and remain
+        fetchable by latecomers. It lives in Autobase, Holepunch's multi-writer abstraction: each
+        writer appends to its own signed Hypercore, and a deterministic <i>apply</i> function merges
+        the inputs into one linearised view (the same family as Hyperbee, the append-only B-tree
+        index over a single-writer Hypercore).
+      </p>
+      <p>
+        The planes could be collapsed — every gossip message an Autobase op — but that would buy
+        ordering, causality, and persistence for messages that need none of it, at the cost of
+        writer admission for every participant, per-wave log growth, and log-replication latency on
+        the token's hot path. Conversely, running the gallery over bare gossip would forfeit
+        convergence and late-join fetch. The split — transient flooding for <i>signals</i>,
+        replicated logs for <i>artifacts</i> — is the design's central economy, and the admission
+        handshake (a flooded, receipt-authenticated request that results in an Autobase writer
+        grant) is the bridge between the two.
+      </p>
+
+      <h2>8&nbsp;&nbsp;Potential applications</h2>
+      <p>
+        The substrate generalises beyond the game. The receipted token walk is a distributed
+        round-robin with an audit trail — applicable to fair rotation and duty assignment among
+        mutually distrusting parties, token-based mutual exclusion across trust boundaries, and
+        roll-call liveness ceremonies (a completed lap proves N specific identities were live in a
+        window). The ring gives every key a <i>place</i>, suggesting a rendezvous/metadata key-value
+        service with per-record payment (the niche BitTorrent's Mainline DHT proved viable), and
+        store-and-forward messaging with paid postage and paid mailboxes at
+        <code>successor(recipient)</code> — the burn pattern directly answers the spam and
+        carrier-incentive gaps that sank earlier peer-to-peer messengers. The commit&#8211;reveal
+        machinery generalises to any small-stakes public draw or allocation where participants do
+        not trust the operator.
+      </p>
+
+      <h2>9&nbsp;&nbsp;Related work</h2>
+      <p>
+        Chord [1] supplied the ring and routing but its storage applications never left the testbed;
+        the only DHT with mass deployment, BitTorrent's Mainline, succeeded with tiny, ephemeral,
+        self-certifying values — conditions HyperWave's per-wave state deliberately shares. Gossip
+        messengers (Scuttlebutt [8], Ethereum's Whisper [9]) repeatedly foundered on the same two
+        gaps — no spam cost and no incentive to carry others' data — that Whisper's own successor
+        (Waku [10]) later addressed with rate-limiting proofs and payments. HyperWave differs in
+        making the economics native from the start: a wallet in every peer, verifiable burns as the
+        admission ticket, and direct transfers as the reward path — while Hyperswarm supplies the
+        NAT traversal whose absence sank much of the earlier P2P generation.
+      </p>
+
+      <h2>10&nbsp;&nbsp;Limitations and future work</h2>
+      <p>
+        The serial lap is O(N) in wall clock — a spectacle for rooms and stadiums, not planets; the
+        deterministic sweep (§6) is the designed successor for large N and drops only the
+        hop-interlocked receipt chain, which no payment depends on. Galleries are ephemeral and a
+        wave's gallery survives only while its initiator stays online; durable archival is a policy
+        choice deliberately left out. The swarm identity is currently regenerated per run (the
+        wallet persists; the seat does not) — persisting the keypair is queued work. Finally, the
+        raffle concentrates two powers in the initiator (admitting entries and holding the prize); a
+        production version must separate them.
+      </p>
+
+      <h2>11&nbsp;&nbsp;Status</h2>
+      <p>
+        Implemented and verified live on Nile: the ring, token race with healing, per-wave
+        galleries, burned fees with on-chain verification, tipping, and the audited raffle (commit
+        in the burn memo; winner's burn verified before payout), running under a desktop Electron
+        host. Correctness is covered by unit suites (ring/token/gallery/Chord/flood/pay), an 8-peer
+        end-to-end harness on a local DHT including mid-race peer kills, and an on-chain end-to-end
+        tier that drives a full paid wave with real burns and a raffle payout. Neither the protocol
+        nor the implementation has undergone an independent security audit; the adversarial analysis
+        in §6 is the authors' own. Code and the full protocol specification are in the repository.
+      </p>
+
+      <h2>References</h2>
+      <div class="refs">
+        <ol>
+          <li>
+            I.&nbsp;Stoica et&nbsp;al. Chord: A scalable peer-to-peer lookup service.
+            <i>SIGCOMM</i>, 2001. pdos.csail.mit.edu/papers/chord:sigcomm01/chord_sigcomm.pdf
+          </li>
+          <li>
+            A.&nbsp;Demers et&nbsp;al. Epidemic algorithms for replicated database maintenance.
+            <i>PODC</i>, 1987. courses.cs.washington.edu/courses/cse552/07sp/papers/epidemic.pdf
+          </li>
+          <li>Holepunch. Hyperswarm, Hypercore, Autobase. github.com/holepunchto</li>
+          <li>Tether. Wallet Development Kit (WDK). docs.wdk.tether.io</li>
+          <li>
+            K.&nbsp;Karantias, A.&nbsp;Kiayias, D.&nbsp;Zindros. Proof-of-burn.
+            <i>Financial Cryptography</i>, 2020. eprint.iacr.org/2019/1096
+          </li>
+          <li>
+            D.&nbsp;Boneh et&nbsp;al. Verifiable delay functions. <i>CRYPTO</i>, 2018.
+            eprint.iacr.org/2018/601
+          </li>
+          <li>
+            I.&nbsp;Farkas, D.&nbsp;Helbing, T.&nbsp;Vicsek. Mexican waves in an excitable medium.
+            <i>Nature</i> 419, 2002. nature.com/articles/419131a
+          </li>
+          <li>
+            D.&nbsp;Tarr et&nbsp;al. Secure Scuttlebutt: An identity-centric protocol for subjective
+            and decentralized applications. <i>ACM ICN</i>, 2019.
+            conferences.sigcomm.org/acm-icn/2019/proceedings/icn19-19.pdf
+          </li>
+          <li>Ethereum. Whisper specification. EIP-627, 2017. eips.ethereum.org/EIPS/eip-627</li>
+          <li>Vac / Status. Waku: peer-to-peer messaging protocols. waku.org</li>
+        </ol>
+      </div>
+    </div>
+  </body>
+</html>
