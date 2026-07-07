@@ -146,6 +146,14 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Future features / ideas
 
+- [ ] **Persist the peer identity (swarm keypair) across runs.** `wave.js` constructs
+      `new Hyperswarm({...})` with no `keyPair`, so every run generates a fresh Noise
+      keypair — the peer id, and therefore the **ring seat**, changes on every restart
+      (only `wallet.seed` persists today). Fix: persist a DHT keypair seed alongside the
+      wallet (e.g. `<storage>/swarm.seed` → `hyperdht.keyPair(seed)` passed as the
+      Hyperswarm `keyPair` option), giving a stable seat + stable identity for burns/
+      receipts across restarts. Consider the privacy trade-off of deriving it from the
+      wallet seed (would publicly link wallet ↔ swarm identity — keep the seeds separate).
 - [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
       `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
       commit `hyperwave:<waveId>:<peerId>[:<commit>]` in an **`OP_RETURN`** output (≤ 80 bytes —
