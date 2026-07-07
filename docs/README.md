@@ -1,8 +1,12 @@
 # HyperWave docs
 
-- [architecture.md](./architecture.md) — process/layer structure (Electron main ·
-  renderer · Bare workers · IPC), why there are no peer roles (every peer is equal; the
-  only asymmetry is the per-wave initiator), the module map, and where logic lives.
+- [idea.md](./idea.md) — **the idea, in plain language** (read first). What HyperWave is,
+  how a wave works, the money model (burned fees + tips + optional raffle), why P2P, and
+  the honest limitations — non-technical, describes the system as built.
+- [hyperwave-whitepaper.pdf](./hyperwave-whitepaper.pdf) — a two-page, scientific-style
+  summary of the protocol (ring, token race + receipt accumulator, gallery, burn/tip/raffle
+  economics, scaling + adversarial notes). Source: `whitepaper.html`, rendered via headless
+  Chromium (`--headless --print-to-pdf`).
 - [protocol.md](./protocol.md) — the on-wire protocol & per-peer state machine: identity/
   ring geometry, transport, crypto (receipts + chain accumulator), message propagation
   (flooding / pointer gossip), every message type, the token race, the paid lobby/racing
@@ -14,19 +18,15 @@
   successor-list/predecessor/fingers, stabilize + churn, slim gossip) plus control-plane
   flooding and distributed `findSuccessor` routing; §8 tracks what remains (notably the
   deterministic-sweep decision for propagation at extreme N).
-- [idea.md](./idea.md) — **the idea, in plain language** (read first). What HyperWave is,
-  how a wave works, the money model (burned fees + tips + optional raffle), why P2P, and
-  the honest limitations — non-technical, describes the system as built.
 - [raffle.md](./raffle.md) — the per-wave initiator-funded raffle: internal commit-reveal
   fairness, the draw + on-chain-verified payout, and the production hardening still open
   (separate admitter from prize-holder; VDF/threshold against last-revealer abort).
+- [architecture.md](./architecture.md) — process/layer structure (Electron main ·
+  renderer · Bare workers · IPC), why there are no peer roles (every peer is equal; the
+  only asymmetry is the per-wave initiator), the module map, and where logic lives.
 - [research.md](./research.md) — the papers, protocols, and projects HyperWave draws on
   (Chord, epidemic gossip, Kademlia, the Holepunch stack, WDK, proof-of-burn,
   commit-reveal randomness, …) and what each contributed.
-- [hyperwave-whitepaper.pdf](./hyperwave-whitepaper.pdf) — a two-page, scientific-style
-  summary of the protocol (ring, token race + receipt accumulator, gallery, burn/tip/raffle
-  economics, scaling + adversarial notes). Source: `whitepaper.html`, rendered via headless
-  Chromium (`--headless --print-to-pdf`).
 - [future-work.md](./future-work.md) — what else the substrate is good for: the general
   properties of the wave-over-Chord-over-Hyperswarm stack, candidate applications with
   real value (paid-postage messaging, rendezvous KV, auditable rotation/draw primitives,
