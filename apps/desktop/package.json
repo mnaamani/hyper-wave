@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "upgrade": "pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y",
   "description": "HyperWave desktop (Electron shell) — Tether Developers Cup. Hosts the shared engine (hyperwave-lib-core) in a Bare worker.",
-  "license": "",
+  "license": "Apache-2.0",
   "author": "",
   "type": "commonjs",
   "main": "electron/main.js",

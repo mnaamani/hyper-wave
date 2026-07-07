@@ -27,5 +27,6 @@
   },
   "devDependencies": {
     "bare-pack": "^1.4.1"
-  }
+  },
+  "license": "Apache-2.0"
 }

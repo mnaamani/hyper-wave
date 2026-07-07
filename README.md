@@ -216,3 +216,12 @@ npm run test:e2e:local    # 8-peer end-to-end wave on a local DHT (no wallet, de
 npm run test:e2e:onchain  # enforced wave on Nile with real burns (needs funded-wallet secrets)
 npm run lint              # prettier + lunte
 ```
+
+## Research & inspiration
+
+The papers and projects behind the design (Chord, epidemic gossip, the Holepunch stack,
+WDK, proof-of-burn, commit-reveal randomness, …): [`docs/research.md`](docs/research.md).
+
+## License
+
+[Apache 2.0](LICENSE).

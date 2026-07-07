@@ -20,6 +20,9 @@
 - [raffle.md](./raffle.md) — the per-wave initiator-funded raffle: internal commit-reveal
   fairness, the draw + on-chain-verified payout, and the production hardening still open
   (separate admitter from prize-holder; VDF/threshold against last-revealer abort).
+- [research.md](./research.md) — the papers, protocols, and projects HyperWave draws on
+  (Chord, epidemic gossip, Kademlia, the Holepunch stack, WDK, proof-of-burn,
+  commit-reveal randomness, …) and what each contributed.
 
 Project overview, quickstart, and the local demo walkthrough: [`../README.md`](../README.md).
 Desktop app shell: [`../apps/desktop/README.md`](../apps/desktop/README.md). Mobile host:
