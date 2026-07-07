@@ -99,10 +99,10 @@ const GOSSIP_SEEN_CAP = 4096
 const PAY_TIMEOUT_MS = 60000
 // Gallery-writer admission (§8.2). The requester re-broadcasts its add-writer every
 // ADMIT_RETRY_MS (a single one-hop broadcast can race connection setup) until admitted or
-// ADMIT_TIMEOUT_MS — generous because the admitter verifies the burn ON-CHAIN (~seconds on
-// Nile), and because in a fast few-peer wave the race finishes first; the gallery persists
-// after the wave, so a late admission still lands. BURN_WAIT_MS: how long to wait for my own
-// join burn to be recorded before requesting admission.
+// ADMIT_TIMEOUT_MS — generous because in a fast few-peer wave the race finishes first (the
+// admitter's check itself is a cheap local signature check — burnAuthorizes, no on-chain
+// call); the gallery persists after the wave, so a late admission still lands. BURN_WAIT_MS:
+// how long to wait for my own join burn to be recorded before requesting admission.
 const ADMIT_TIMEOUT_MS = 25000
 const ADMIT_RETRY_MS = 3000
 const BURN_WAIT_MS = 10000
@@ -655,9 +655,10 @@ function createWave({
   }
 
   // Become an admitted gallery writer: broadcast an add-writer request presenting (a) my hop
-  // receipt for this wave and (b) my fee-burn attestation — the admitter verifies the burn
-  // ON-CHAIN before granting write access, so a gallery seat requires a real burn. Then wait
-  // until writable. `admissionPromise` dedups concurrent callers into one in-flight request.
+  // receipt for this wave and (b) my fee-burn attestation — admission is OPTIMISTIC: the
+  // admitter checks only the attestation signature (burnAuthorizes), no on-chain call; the
+  // burn is verified later where it pays off (raffle winner walk, tippers via burnTx). Then
+  // wait until writable. `admissionPromise` dedups concurrent callers into one in-flight request.
   // (The originator is already a writer and never comes here — it paid its kick-off burn.)
   function ensureWriter(receipt) {
     if (!base) return Promise.resolve(false)

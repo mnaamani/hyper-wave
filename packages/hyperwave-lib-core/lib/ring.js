@@ -1,5 +1,5 @@
 // Pure ring geometry. The DHT keyspace is the stadium; a peer's key is its seat
-// (docs/final-idea.md §2.1). No state, no I/O — unit-tested in wave.logic.test.js.
+// (docs/protocol.md §2.1). No state, no I/O — unit-tested in wave.logic.test.js.
 const b4a = require('b4a')
 
 // Ring position: top 6 bytes of the key mapped onto [0, 360).

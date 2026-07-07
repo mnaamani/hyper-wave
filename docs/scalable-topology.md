@@ -90,8 +90,11 @@ Stop depending on Hyperswarm's incidental meshing for the ring.
 
 - **stabilize** (periodic): ask successor for its predecessor `x`; if `x` is between me and
   my successor, adopt `x` as successor; then notify the successor of me.
-- **fixFingers** (periodic): refresh one finger per tick via `findSuccessor`.
-- **checkPredecessor**: drop a dead predecessor.
+- **fixFingers**: as built, the whole finger set is recomputed locally from known ids on
+  each topology refresh (pure `fingers(ids, myId)` inside `maintainNeighbours`) — that
+  recompute _is_ fixFingers; there is no per-tick single-finger `findSuccessor` lookup.
+- **checkPredecessor**: as built, covered by the connection-`close` path only — there is no
+  periodic predecessor probe (see §8).
 - **churn:** on a connection close, promote the next successor-list entry and re-stabilize.
 
 ### 4.5 Routing / lookup — **implemented**
@@ -104,17 +107,20 @@ whole ring** (the partial-knowledge case that a purely local computation gets wr
   decision — answer if `target ∈ (me, successor]`, else forward to `closestPrecedingNode`
   (the finger closest below the target). With a full finger table it converges in O(log N);
   with only a successor pointer it degrades to a _correct_ linear walk. Brittle-tested,
-  including a simulation over 64-node partial-knowledge networks (correct in ≤ 5 hops).
-- **Transport** (`wave.js`): `find-succ` / `find-succ-reply` messages. `findSuccessorRemote`
-  sends the query to the closest preceding _connected_ finger; each hop forwards along
-  connected fingers and the reply **retraces the same path** back to the origin (no ad-hoc
-  connections), with a hop cap + timeout. Exposed as `wave.findSuccessor(target)`.
+  including a simulation over 64-node partial-knowledge networks (correct within the
+  2·log₂N ≤ 12-hop test bound).
+- **Transport** (`chord-routing.js`, `createChordRouting`): `find-succ` / `find-succ-reply`
+  messages. `findSuccessor` sends the query to the closest preceding _connected_ finger;
+  each hop forwards along connected fingers and the reply **retraces the same path** back to
+  the origin (no ad-hoc connections), with a hop cap + timeout. Wired by `wave.js` and
+  exposed as `wave.findSuccessor(target)`.
 - **Consumers:** at **join time**, once a peer gets its first connection it places itself in
-  the ring by routing `findSuccessor(me)` through a seed (Chord `n.join`) — so a joiner finds
-  its true successor even when its own DHT sample is incomplete, rather than waiting for the
-  slow path. Thereafter a periodic `repairSuccessor` corrects any successor a partial local
-  view missed. Both feed the result into pin candidates (additive; a no-op at small scale
-  where local knowledge already resolves the lookup with zero hops).
+  the ring by routing `findSuccessor(me + 1)` — the successor of its own position — through
+  a seed (Chord `n.join`; the same `repairSuccessor` call used periodically) — so a joiner
+  finds its true successor even when its own DHT sample is incomplete, rather than waiting
+  for the slow path. Thereafter the periodic `repairSuccessor` corrects any successor a
+  partial local view missed. Both feed the result into pin candidates (additive; a no-op at
+  small scale where local knowledge already resolves the lookup with zero hops).
 
 Uses: placing where a token starts / where a joining node inserts / routing a control message
 to a specific seat. The token still walks successor→successor for the _visual_ wave (axis B).
@@ -135,8 +141,11 @@ Two changes, both implemented:
   each carries a unique `mid`, and a peer relays it to its other neighbours **on first sight**,
   dropping repeats (pure `flood.js`, verified for reach over synthetic partial meshes in
   `flood.test.js`). On the random mesh (diameter ≈ log N / log degree) this blankets every
-  seat in ~2–3 relay rounds. `wave-pos` stays one-hop (chatty; its heal-ACK only needs the
-  predecessor); `add-writer` stays one-hop (tied to gallery replication, §4.7).
+  seat in a few relay rounds. `wave-pos` stays one-hop (chatty; its heal-ACK only needs the
+  predecessor). `add-writer` is **also flooded** (in `RELAYED_KINDS`, re-flooded on each
+  admission retry) — a one-hop broadcast silently failed to reach a current writer across a
+  sparse/churned mesh; it's authenticated by its carried receipt signature, so relaying is
+  sound.
 
 **`wave-sync` on connect** stays essential as the catch-up path for a peer that joins after a
 flood has already passed.
@@ -188,13 +197,14 @@ construction). `wave.js` is untouched.
 ## 6. Phases (each shippable + testable)
 
 1. **Discover via `swarm.peers`** — seed the peer map from DHT discovery (additive, low
-   risk; ring converges faster, less gossip). **✅ Done:** `wave.js` `seedFromSwarm()` walks
-   `swarm.peers` (PeerInfo keyed by hex key) into the ring, fired on `swarm.on('update')`,
+   risk; ring converges faster, less gossip). **✅ Done:** `wave.js` `discoveredIds()` walks
+   `swarm.peers` (PeerInfo keyed by hex key) into the ring (consumed by
+   `maintainNeighbours()`), fired on `swarm.on('update')`,
    after `discovery.flushed()`, and each `RINGUPDATE_MS` tick; peers are refreshed while
    discoverable and TTL-pruned once Hyperswarm GCs them. Forwarding still targets only
    _connected_ peers (`pickReachable ∩ senders`), so it's purely additive.
 2. **`joinPeer` successor + predecessor (+ successor-list)** — make ring edges physical;
-   keep full-ring gossip as a fallback initially. **✅ Done:** pure `workers/lib/chord.js`
+   keep full-ring gossip as a fallback initially. **✅ Done:** pure `lib/chord.js`
    (`nodeId`/`successors`/`predecessor`/`connectionTargets`, brittle-tested in
    `chord.test.js`) computes the target neighbour set; `wave.js` `maintainNeighbours()`
    diffs it against a `pinned` set and `swarm.joinPeer`/`leavePeer`s the delta on every
@@ -226,13 +236,13 @@ construction). `wave.js` is untouched.
 
 - **Pure unit tests (brittle):** `nodeId` from key; finger targets; `findSuccessor` over a
   synthetic node set; one `stabilize` step; successor-list failover. Put Chord math in a
-  pure module (`workers/lib/chord.js`) so it's unit-testable without a swarm.
+  pure module (`packages/hyperwave-lib-core/lib/chord.js`) so it's unit-testable without a swarm.
 - **Partial-topology flood harness** (`flood.test.js`): drives the real per-node flood
   decision (`flood.js`) over synthetic graphs (line, ring, star, random partial mesh,
   disconnected) — Hyperswarm full-meshes small swarms, so this is how we prove **relay
   reach** without the transport. Asserts full reach in the connected component, exactly-once
-  dedup, sends ≤ 2·|E|, and diameter-ish rounds (e.g. N=200 partial mesh → all 200 in ~6
-  rounds; a disconnected component is correctly _not_ reached).
+  dedup, sends ≤ 2·|E|, and diameter-ish rounds (the N=200 partial mesh asserts full reach
+  within a ≤ 20-round bound; a disconnected component is correctly _not_ reached).
 - **Line-topology gallery replication + initiator persistence** (`gallery.replication.test.js`):
   real Corestores/Autobases with no swarm. (1) A↔B, B↔C (no A↔C) — the gallery replicates
   _transitively_ (C converges to A's writes through B). (2) the wave initiator retains its own
@@ -250,12 +260,13 @@ Phases 1–4 + the control-plane flood are built and unit/partial-mesh tested. T
 things that decide whether this actually works at scale — in priority order:
 
 1. ~~**Ring correctness under partial membership knowledge (§4.3–4.5).**~~ **Done** — the
-   **distributed `findSuccessor` routing** is built (pure `findSuccessorStep` + `find-succ`
-   transport RPC, §4.5), so a lookup resolves to the correct successor even when the DHT only
-   samples membership. Wired at **join time** (a peer routes `findSuccessor(me)` on its first
-   connection to place itself, Chord `n.join`) and as a periodic `repairSuccessor`; both feed
+   **distributed `findSuccessor` routing** is built (pure `findSuccessorStep` + the
+   `find-succ` transport RPC in `chord-routing.js`, §4.5), so a lookup resolves to the correct
+   successor even when the DHT only samples membership. Wired at **join time** (a peer routes
+   `findSuccessor(me + 1)` on its first connection to place itself — the same `repairSuccessor`
+   used periodically, Chord `n.join`); both feed
    routed results back into pinning. Verified over simulated 64-node partial-knowledge networks
-   (≤ 5 hops) and end-to-end on the local DHT incl. a late joiner. _Still to harden:_ validate
+   (within the 2·log₂N ≤ 12-hop test bound) and end-to-end on the local DHT incl. a late joiner. _Still to harden:_ validate
    convergence under real large-N churn (can't force a partial mesh locally).
 2. **Propagation at scale — build the sweep (§3B / Phase 5).** The serial token is O(N·dwell)
    ≈ hours at N=10k, so there is currently _no_ working large-N wave. The deterministic

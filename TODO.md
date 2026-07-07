@@ -1,6 +1,6 @@
 # HyperWave — task list
 
-Refinement backlog, roughly prioritized. Design context in `docs/final-idea.md`;
+Refinement backlog, roughly prioritized. Design context in `docs/idea.md`;
 docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEMO.md`.
 
 ## Done
@@ -173,7 +173,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Demo polish / wow factor
 
-- [ ] World map with flags lighting up as selfies arrive (final-idea wow factor)
+- [ ] World map with flags lighting up as selfies arrive (the original design's wow factor)
 - [ ] "Past waves" browser (would need galleries to persist across runs — currently a wave
       initiator only retains its own wave's gallery in-run)
 - [ ] Tipping UX polish (a "you were tipped" toast for the recipient)

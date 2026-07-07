@@ -1,5 +1,5 @@
 // Pure token crypto for the wave race. Ed25519 receipts + a constant-size blake2b
-// chain accumulator (docs/final-idea.md §1.1 — NOT a growing hops[] array). No state,
+// chain accumulator (docs/protocol.md §2.3 — NOT a growing hops[] array). No state,
 // no I/O — unit-tested in wave.token.test.js.
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')

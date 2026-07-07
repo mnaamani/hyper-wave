@@ -1,140 +1,61 @@
-# HyperWave (desktop MVP)
+# HyperWave (desktop app)
 
-Electron + Pear desktop app for the HyperWave P2P stadium wave. Forked from
+Electron + Pear desktop host for the HyperWave P2P stadium wave. Forked from
 [`holepunchto/hello-pear-electron`](https://github.com/holepunchto/hello-pear-electron).
-Design: `../../docs/final-idea.md` (§11 = this desktop MVP).
-Docs: [`../docs/`](../docs/) — `architecture.md`, `protocol.md` (on-wire spec, incl. the
-fee-burning mechanism), and `scalable-topology.md` (Chord-over-Hyperswarm scaling, phases
-1–4 implemented). Demo walkthrough: [`../DEMO.md`](../DEMO.md).
+
+This package is only the **shell**: window, renderer UI, and a thin Bare worker that boots
+the shared engine (`hyperwave-lib-core`). Everything general lives in the docs:
+
+- Project overview + quickstart: [`../../README.md`](../../README.md)
+- Architecture (processes, IPC surface, module map): [`../../docs/architecture.md`](../../docs/architecture.md)
+- On-wire protocol & state machine: [`../../docs/protocol.md`](../../docs/protocol.md)
+- The idea, in plain language: [`../../docs/idea.md`](../../docs/idea.md)
 
 ## Run
 
 ```bash
-npm install    # postinstall normalizes dep engines ranges for Bare (scripts/fix-bare-engines.js)
+npm install    # once, at the repo ROOT (workspace; postinstall fixes dep engines for Bare)
 
-# Each instance needs its own --storage dir (own identity + Corestore + wallet).
-# Every peer is equal — no roles. The peer that kicks off a wave keeps that wave's
-# gallery open (archivist for its own wave only). See ../DEMO.md.
+# From the repo root. Each instance needs its own --storage dir (own identity,
+# Corestore, wallet). Open several for a local multi-peer demo.
 npm start -- --storage /tmp/hyperwave/one
 npm start -- --storage /tmp/hyperwave/two
 ```
 
-Wallets must be **funded** to pay fees (the Nile faucet gives 2000 TRX/day:
-https://nileex.io/join/getJoinPage — the wallet address is in the 💰 chip / worker log).
-Full demo script incl. funding and local-DHT setup: [`../DEMO.md`](../DEMO.md).
+Without `--storage`, a dev run (`npm start`) stores under `os.tmpdir()/pear/HyperWave` —
+the resolved dir is logged at startup (`[main] storage dir: ...`). Wallets must be
+**funded** to pay fees (Nile faucet: https://nileex.io/join/getJoinPage — the address is in
+the 💰 chip / worker log). Full walkthrough incl. funding and local-DHT setup: the root
+README.
 
-> **Discovery latency:** cold discovery on a fresh public-DHT topic takes **~20–35s**. For
-> demos use the local DHT bootstrap (below) for instant same-machine discovery.
+> **Discovery latency:** cold discovery on a fresh public-DHT topic takes ~20–35s. For
+> demos use a local DHT bootstrap (`bare packages/hyperwave-lib-core/lib/bootstrap.js` +
+> `HYPERWAVE_BOOTSTRAP=127.0.0.1:<port>`) for instant same-machine discovery.
 
-## Architecture (as wired today)
+## What's in this package
 
-- **`renderer/`** (Chromium, sandboxed) — UI only. Starts the worker via the preload
-  `bridge`, receives events, draws the ring. Never touches the swarm or keys.
-- **`electron/main.js`** — the template plus a `media` permission line (webcam). Spawns Bare
-  workers with `PearRuntime.run(specifier, [dir, ...])`; `--storage <dir>` becomes the
-  worker's `Bare.argv[2]`, giving each instance its own identity, Corestore and wallet.
-- **`workers/hyperwave.js`** (Bare) — bridges `lib/wave.js` + `lib/pay.js` to Electron IPC:
-  starts the engine, brings up the WDK wallet, charges/verifies the participation fees, and
-  relays commands/events.
-- **`workers/lib/wave.js`** — runtime-agnostic P2P engine (Bare or Node harness):
-  - **Discovery + topology (Chord over Hyperswarm):** Hyperswarm join (configurable
-    `matchId`). Ring membership requires real liveness (a connection or gossip); DHT
-    discovery (`swarm.peers`) drives which peers we deliberately connect to. Each peer
-    **pins** (`swarm.joinPeer`) its Chord pointer set — successor-list (k=3), predecessor,
-    and O(log N) finger table (`lib/chord.js`, pure + unit-tested) — so ring edges are
-    physical without a full mesh. Includes distributed `findSuccessor` routing
-    (`find-succ` RPC, correct under partial membership knowledge), join-time placement, a
-    periodic stabilize/repair, and churn handling.
-  - **Gossip:** slim pointer-exchange (a single `pointers` heartbeat to pinned neighbours only) for
-    membership; wave lifecycle messages (`wave-announce/join/start/end`) are **flooded**
-    (relay + dedup by `mid`, `lib/flood.js`) so they reach every peer on a partial mesh.
-  - **Token race:** the initiator mints a wave-token; each holder verifies the sender's
-    Ed25519 receipt, advances a **constant-size blake2b chain accumulator** (never a growing
-    hops[]), signs its own receipt, and forwards to its successor; the lap completes back at
-    the originator, which floods a **signed** `wave-end`. A small per-hop dwell (`hopDelayMs`,
-    default 250ms) is purely the visible roll pace — selfies are captured in the lobby, so
-    the token never waits on a human.
-  - **Lifecycle:** idle → (pay) → lobby → racing → idle, one wave at a time, lower-`waveId`
-    tie-break, `wave-end` broadcast, timeout fallbacks, `wave-sync` for late joiners, and
-    healing (skip a dead successor when its `wave-pos` ACK doesn't arrive).
-  - **Gallery (Autobase):** per-wave Autobase created by the originator. The gallery **key is
-    signed** by the originator (rides `wave-start`/token/`wave-sync`) so a relay can't swap it
-    to a rogue base. Writer admission (`add-writer`) is **burn-gated** — the admitter verifies
-    the requester's join burn on-chain before granting write access, so a gallery seat (and thus
-    a tippable selfie) requires a real fee burn. `apply()` runs deterministically on all peers:
-    verifies every `wave-selfie` signature, admits **one entry per peer**, and keeps the tip
-    `address` only if the entry's burn names that wallet (so tips always reach a payer). Selfies
-    are captured during the **lobby** and posted when the token reaches that peer (ring order).
-- **`workers/lib/pay.js`** + **`lib/fees.js`** — the WDK payment layer (Tron **Nile
-  testnet**, native TRX). Self-custodial wallet per instance (seed at `<storage>/wallet.seed`),
-  `send()` transfers, `burn(amount, memo)` to Tron's black-hole address with an on-chain memo,
-  and `verifyBurnTx()` for the paid-wave gate; `fees.js` is the fee flow shared by both engine
-  hosts. WDK is ESM-only; `pay.js` bridges via dynamic `import()`. The money model is simple —
-  **burned fees + tips, no sponsor rewards** (all real on-chain):
-  - **Participation fees are burned** — the initiator (kick-off) and every joiner pay 1 TRX
-    to the unspendable black hole; the burn tx carries `hyperwave:<waveId>:<peerId>` as an
-    on-chain memo (see `../docs/protocol.md` §9). Nobody profits — the fee is pure skin in
-    the game / anti-spam.
-  - **Paid-wave anti-spam gate** — a wave isn't announced until its kick-off burn exists
-    on-chain; peers ignore unproven announces and verify the burn before joining.
-  - **Burn-gated gallery admission** — the join burn is the ticket to write a selfie: the
-    admitter verifies it on-chain before admitting, so every gallery entry is backed by a burn.
-  - **Gallery tipping** — 💵 tip a selfie 1 TRX straight to its owner's wallet. The only way
-    to actually make money — and always to a peer who paid in.
+- **`renderer/`** (Chromium, sandboxed, ESM) — UI only. Starts the worker via the preload
+  `bridge`, receives engine events, draws the ring. Never touches the swarm or keys.
+  - `app.js` orchestrates; `lib/` holds `ipc.js` (worker channel), `ring.js` (canvas),
+    `gallery.js` (centre-selfie slideshow + 💵 tip), `lobby.js` (countdown + join),
+    `proof.js` (lobby webcam capture), `hud.js` (status, Kick-off, 💰 chip, country picker),
+    `countries.js`.
+- **`electron/main.js`** — the template plus: a `media` permission line (webcam),
+  storage-dir resolution/logging, and small helper IPC (`copy-text`, `open-external`,
+  `isPackaged`). Spawns Bare workers with `PearRuntime.run(specifier, [dir, ...])`;
+  `--storage <dir>` becomes the worker's `Bare.argv[2]`.
+- **`workers/hyperwave.js`** (Bare, CJS) — a ~40-line host: wraps `Bare.IPC` in a
+  `FramedStream` and calls `hyperwave-lib-core`'s `init()`. All P2P/protocol/wallet logic
+  lives in the engine package.
 - **`workers/updater.js`** — the template's OTA updater worker, left intact.
 
-**No roles — every peer is equal.** There is no validator/seed/sponsor role (no `role` option,
-no `HYPERWAVE_ROLE`). The only asymmetry is **per-wave and belongs to the peer that kicks it
-off**: that **initiator** keeps _its_ wave's gallery open and retains it (archivist for its own
-wave only) so latecomers can still fetch it, collects that wave's raffle commits, and — if it
-funds a raffle (`HYPERWAVE_RAFFLE_TRX`) — draws and pays the prize from its own wallet after the
-wave (it's skipped in the winner walk, so it never pays itself). Every instance wipes its store
-on startup, so galleries are ephemeral per run; if the initiator goes offline its wave's gallery
-isn't archived elsewhere (accepted simplification).
+The IPC message surface (commands/events between renderer and engine) is documented in
+[`../../docs/architecture.md`](../../docs/architecture.md) — it's shared with the mobile
+host, not desktop-specific.
 
-### Worker → renderer messages
+## The UI
 
-```js
-// ring state (on every change)
-{ type: 'state', me: { id, angle }, peers: [...], successor: { id, angle } | null }
-
-// wallet + money
-{ type: 'wallet', address, trx }                          // self-custodial wallet (chip)
-{ type: 'burn-result', stage: 'confirming'|'burned'|'failed', hash?, error?, amount?, waveId?, reason /* kickoff|join */ }
-{ type: 'tip-result', hash?|error?, to, amount }
-
-// lifecycle events (idle -> pay -> lobby -> racing -> idle)
-{ type: 'event', event: 'paying', waveId }                   // initiator burning the kick-off fee
-{ type: 'event', event: 'wave-announce', waveId, by, mine, joined, count, lobbyMs, paid }
-{ type: 'event', event: 'wave-verified', waveId, mine? }     // kick-off burn proven -> join allowed
-{ type: 'event', event: 'wave-unpaid', waveId, reason }      // failed verification -> abandoned
-{ type: 'event', event: 'join-blocked', waveId, reason }     // tried to join before verification
-{ type: 'event', event: 'joined' | 'roster', waveId, count }
-{ type: 'event', event: 'wave-active', waveId, joined, count }
-{ type: 'event', event: 'wave-idle', waveId, reason }
-{ type: 'event', event: 'busy', waveId }
-
-// token race events
-{ type: 'event', event: 'started', waveId, by }
-{ type: 'event', event: 'holding', waveId, hopCount, holder, angle, canSelfie }
-{ type: 'event', event: 'position', waveId, hopCount, holder, angle }
-{ type: 'event', event: 'forwarded' | 'healed' | 'stalled' | 'completed', ... }
-
-// gallery (Autobase view) — on every change / replication
-{ type: 'gallery', items: [ { waveId, peerId, hopCount, caption, image, address, ... } ] }
-```
-
-### Renderer → worker commands
-
-```js
-{ type: 'start-wave' }                        // burn kick-off fee -> announce + lobby
-{ type: 'join-wave' }                         // verify wave paid -> opt in + burn join fee
-{ type: 'set-country', country }
-{ type: 'stage-selfie', selfie: { image, caption } }  // lobby-captured; posts when the ball arrives
-{ type: 'tip', to, amount, peerId }           // real TRX to a selfie owner
-```
-
-The ring UI draws a yellow "you" dot, green peer dots, the **successor** in orange with a
+The ring draws a yellow "you" dot, green peer dots, the **successor** in orange with a
 baton line, and a 💰 wallet chip. The token is a **⚽ football that rolls clockwise around
 the ring on every screen**. **Kick off the wave** burns the fee, then announces. During the
 **lobby**, opted-in peers frame their selfie on camera (countdown to kickoff; captured
@@ -142,68 +63,25 @@ automatically at kickoff or on 📸). As the ball passes each participant, their
 posts and features **in the centre of the ring**; a 💵 Tip button under the featured selfie
 sends real testnet TRX to its owner.
 
-## Tests (no GUI)
-
-Everything runs under **Bare** — the worker's real runtime (`bare`, not `node`). Tests use
-[**brittle**](https://github.com/holepunchto/brittle). From `app/`:
-
-```bash
-npm test          # bare test.js — all suites, TAP output, non-zero on failure
-```
-
-`test.js` requires each suite; add new `workers/lib/*.test.js` there. Run one directly with
-`bare workers/lib/<name>.test.js`:
-
-```bash
-bare workers/lib/wave.logic.test.js          # ring: successor, liveness, pickReachable
-bare workers/lib/chord.test.js               # Chord math + distributed findSuccessor routing sim
-bare workers/lib/flood.test.js               # gossip-flood reach over synthetic partial meshes
-bare workers/lib/wave.token.test.js          # receipts, accumulator, burn + wave-end attestations
-bare workers/lib/wave.gallery.test.js        # buildGallery ordering/dedup (+ tip address)
-bare workers/lib/wave.autobase.test.js       # real Autobase apply/view + receipt write-gate
-bare workers/lib/gallery.replication.test.js # transitive replication + initiator persistence (line topology)
-bare workers/lib/pay.test.js                 # wallet derivation/persistence (offline)
-```
-
-End-to-end (one wave per process — the real worker topology; every peer is equal, no roles).
-`AUTOJOIN` opts in, `AUTOSELFIE` stages a fake selfie, `WALLET=1` brings up the wallet (fee
-burns need funded wallets); `START=N` makes a peer the **initiator** (kicks off once it sees N
-others), and `HYPERWAVE_RAFFLE_TRX` on that same initiator funds a raffle it draws and pays:
-
-```bash
-export HYPERWAVE_MATCH="test-$(date +%s)" HYPERWAVE_LOBBY_MS=4000
-START=1 AUTOJOIN=1 AUTOSELFIE=1 bare workers/lib/wave.run.js A /tmp/hw/a
-AUTOJOIN=1 AUTOSELFIE=1 bare workers/lib/wave.run.js B /tmp/hw/b
-# both converge on GALLERY size=2
-```
-
-### Fast local discovery (recommended for demos)
-
-`createWave` accepts a `bootstrap` option (and `wave.run.js`/the app read
-`HYPERWAVE_BOOTSTRAP=host:port`) to use a **local DHT** instead of the public one:
-
-```bash
-bare workers/lib/bootstrap.js          # prints "BOOTSTRAP 127.0.0.1:<port>", stays up
-HYPERWAVE_BOOTSTRAP=127.0.0.1:<port> bare workers/lib/wave.run.js A /tmp/hw/a
-```
-
-## Notes
+## Notes (app-shell specifics)
 
 - `package.json#upgrade` must be a valid `pear://` link or `electron-forge start` refuses
   to boot (mint via `pear touch`).
 - **Bare + npm deps:** some packages declare `engines.node` ranges Bare's semver can't
-  parse (`^`, `||`, `>= 16`), which crashes module resolution under pear-runtime. The
-  `postinstall` (`scripts/fix-bare-engines.js`) normalizes every such value using
-  bare-semver itself as the oracle; re-run it manually if you ever patch `node_modules`.
-- Two Hyperswarm instances in the **same** process don't reliably discover each other —
-  one instance per process (which is how the app works anyway).
-- **Shared topic:** all instances on the same `matchId` join one ring. The app default
-  (`hyperwave:demo-match:v1`) is fixed, so public-DHT instances collide across machines —
-  isolate with `HYPERWAVE_MATCH`/the `matchId` option, or use the local bootstrap.
-- **Per-wave galleries:** each wave's gallery is a separate Autobase namespaced by its
-  random `waveId`. Every peer's `storageDir/hyperwave` store is wiped on startup (ephemeral
-  per-run — no roles, no cross-run archival). The peer that **initiates** a wave keeps that
-  wave's gallery open and retains it, so latecomers can still fetch it while the initiator is
-  online; there is no dedicated hub that archives every gallery.
-- **Wallet seed** persists at `<storage>/wallet.seed` (outside the wiped store) — fund an
-  instance once and it stays funded across restarts.
+  parse, which crashes module resolution under pear-runtime. The root `postinstall`
+  (`scripts/fix-bare-engines.js`) normalizes them; re-run it manually if you ever patch
+  `node_modules`.
+- Engine behavior (per-wave galleries, storage wipe on startup, wallet seed persistence,
+  match topics, no peer roles) is engine-level, not desktop-specific — see
+  [`../../docs/architecture.md`](../../docs/architecture.md) and
+  [`../../docs/protocol.md`](../../docs/protocol.md).
+
+## Tests
+
+There are no desktop-specific tests; the engine's unit + e2e suites live in
+`packages/hyperwave-lib-core` and run from the repo root:
+
+```bash
+npm test                  # engine unit suites (brittle, under Bare)
+npm run test:e2e:local    # 8-peer end-to-end on a local DHT
+```

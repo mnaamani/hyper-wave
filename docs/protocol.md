@@ -6,7 +6,7 @@ what peers exchange over the network; the Electron/renderer split (see
 [`architecture.md`](./architecture.md)) is one implementation and is **not** part of the
 protocol.
 
-Reference implementation: `app/workers/lib/{wave,ring,token,gallery}.js`.
+Reference implementation: `packages/hyperwave-lib-core/lib/{wave,ring,token,gallery}.js`.
 
 ---
 
@@ -748,9 +748,11 @@ gallery admitter can gate write access).
   `join()` is refused until this passes, so no peer ever pays into a wave the initiator
   hasn't paid for. The initiator, symmetrically, does not announce until its own burn is
   readable on-chain.
-- **Before admitting a gallery writer (the admitter):** the same `verifyBurnTx` check is run
-  on the requester's **join** burn before granting write access (§8.2), so a gallery seat —
-  and therefore a tippable selfie — requires a real, on-chain-verified burn.
+- **Before admitting a gallery writer (the admitter):** only the burn attestation's
+  **signature** is checked locally (`burnAuthorizes`, bound to peerId + wave) — admission is
+  **optimistic**, with deliberately **no on-chain call on the write path** (§8.2). The burn
+  is verified on-chain where it has value: at raffle payout (the winner walk, §12) and by
+  tippers/auditors via the entry's `burnTx`.
 - **Anyone, later:** because every fee's memo is on-chain, a third party can audit the fees
   of any wave with nothing but a Tron node — no trust in anyone's bookkeeping required.
 
@@ -759,21 +761,21 @@ the gate (waves announce immediately, unpaid).
 
 ## 10. Constants (reference build)
 
-| Constant            | Value  | Meaning                                                                 |
-| ------------------- | ------ | ----------------------------------------------------------------------- |
-| `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                              |
-| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                               |
-| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                   |
-| `HOP_DELAY_MS`      | 250    | per-hop dwell (visible roll pace; selfie is decoupled, §6)              |
-| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                   |
-| `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                     |
-| `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                                 |
-| `MAX_HOPS`          | 5000   | runaway-token safety cap                                                |
-| `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2)   |
-| `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                  |
-| `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)           |
-| `RAFFLE_DELAY_MS`   | 5000   | settle delay after wave-end before the initiator draws the raffle (§12) |
-| `raffleTrx`         | 0      | raffle prize per wave (initiator's budget; 0 = raffle off)              |
+| Constant            | Value  | Meaning                                                                                                                                 |
+| ------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                                                                                              |
+| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                                                                                               |
+| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                                                                                   |
+| `HOP_DELAY_MS`      | 250    | per-hop dwell (visible roll pace; selfie is decoupled, §6)                                                                              |
+| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                                                                                   |
+| `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                                                                                     |
+| `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                                                                                                 |
+| `MAX_HOPS`          | 5000   | runaway-token safety cap                                                                                                                |
+| `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2)                                                                   |
+| `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                                                                                  |
+| `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)                                                                           |
+| `RAFFLE_DELAY_MS`   | 3000   | settle delay after wave-end before the raffle draw (§12); the draw then polls up to 20s (`RAFFLE_CONVERGE_MS`) for reveals to replicate |
+| `raffleTrx`         | 0      | raffle prize per wave (initiator's budget; 0 = raffle off)                                                                              |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.
@@ -800,11 +802,13 @@ application logic must actually **use** that rather than trust self-reported fie
 following guards keep a hostile peer running a modified app from disrupting honest peers:
 
 - **Identity binding.** For a message that describes its own sender — `pointers.id`,
-  `wave-pos.holder`, `token.senderPeerId`, `add-writer.peerId` — the claimed id must equal the
+  `wave-pos.holder`, `token.senderPeerId` — the claimed id must equal the
   authenticated connection id it arrived on, else it's dropped (before any signature work).
-  This blocks peer-map/ring pollution under spoofed ids and stops a peer from requesting
-  gallery admission under a key it doesn't hold. Flooded `wave-*` fields (`by`, roster ids)
-  are third-party at relay hops and are instead authenticated by the signatures they carry
+  This blocks peer-map/ring pollution under spoofed ids. `add-writer` is deliberately **not**
+  connection-bound: it is flooded (relayed), so binding it to the connection would make every
+  relay drop it — it is instead authenticated by its carried receipt signature
+  (`verifyReceipt` binds it to `peerId`, §5). Flooded `wave-*` fields (`by`, roster ids)
+  are likewise third-party at relay hops and are authenticated by the signatures they carry
   (kick-off attestation, receipts).
 - **Authenticated lifecycle termination.** `wave-end` is flooded (forgeable by any relay), so
   it is honoured only with proof: a **completion** carries the originator's Ed25519 signature
@@ -870,8 +874,8 @@ beacon** (design + trade-offs: `docs/raffle.md`).
    also carries the burn's `burnTx` so anyone can locate the on-chain commit.
 3. **Draw + winner walk (initiator, after wave-end + `RAFFLE_DELAY_MS`).** Eligible tickets =
    entries whose `BLAKE2b(raffleSecret) ==` the commit the initiator **cached from lobby gossip**
-   (in memory — no per-participant REST fetch at draw time). `seed = BLAKE2b("raffle|" ‖ waveId
-‖ sorted secrets)`, then a deterministic **ranking**: each ticket keyed by
+   (in memory — no per-participant REST fetch at draw time). `seed = BLAKE2b("raffle|" ‖ waveId ‖
+the secrets concatenated in ascending-peerId order, "|"-separated)`, then a deterministic **ranking**: each ticket keyed by
    `BLAKE2b(seed ‖ peerId)`, sorted ascending. The initiator walks the ranking and pays the **first
    candidate whose fee burn verifies ON-CHAIN** (`verifyBurnTx` on the entry's `burnTx`) — this
    is where admission's deferred burn check happens, and it costs **one on-chain read for the
@@ -911,8 +915,8 @@ only §3–§8 are the interop surface.
 
 **Renderer → worker (commands):** `start-wave`, `join-wave`, `set-country {country}`,
 `stage-selfie {selfie:{image,caption}}` (the lobby-captured selfie; the worker attaches the
-receipt and posts it when the token arrives), `tip {to, amount, peerId}` (send a real TRX
-tip to a selfie owner's wallet).
+receipt and posts it when the token arrives), `tip {to, amount}` (send a real TRX
+tip to a selfie owner's wallet), `refresh-wallet` (manual balance re-check after funding).
 
 **Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`;
 `wallet {address, trx}` (self-custodial TRX wallet); `tip-result {hash?, error?}`;
@@ -928,4 +932,5 @@ announcing), `wave-verified` (kick-off burn proven — join is now allowed), `wa
 before the kick-off is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
 `position`, `forwarded`, `completed`, `healed`, `stalled`, `gallery-error`; and (the wave's
-initiator, when the raffle is on) `raffle-draw {tickets,seed,winner}` + `raffle-win {winner,address,amount,hash}`.
+initiator, when the raffle is on) `raffle-draw {tickets,seed,top}` (`top` = the pre-walk
+top-ranked candidate) + `raffle-win {winner,address,amount,hash}`.

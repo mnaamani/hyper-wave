@@ -14,13 +14,13 @@
   successor-list/predecessor/fingers, stabilize + churn, slim gossip) plus control-plane
   flooding and distributed `findSuccessor` routing; §8 tracks what remains (notably the
   deterministic-sweep decision for propagation at extreme N).
-- [final-idea.md](./final-idea.md) — **the authoritative design doc** (read first). The
-  original HyperWave vision + the settled refinements; §11 is the desktop-Electron MVP
-  decision. Note: it still describes the original interlocked-reward model, superseded by the
-  fees+tips money model (see the current-state summary in `CLAUDE.md`).
+- [idea.md](./idea.md) — **the idea, in plain language** (read first). What HyperWave is,
+  how a wave works, the money model (burned fees + tips + optional raffle), why P2P, and
+  the honest limitations — non-technical, describes the system as built.
 - [raffle.md](./raffle.md) — the per-wave initiator-funded raffle: internal commit-reveal
   fairness, the draw + on-chain-verified payout, and the production hardening still open
   (separate admitter from prize-holder; VDF/threshold against last-revealer abort).
 
-App-level run/test instructions: [`../apps/desktop/README.md`](../apps/desktop/README.md).
-Local demo walkthrough: [`../DEMO.md`](../DEMO.md).
+Project overview, quickstart, and the local demo walkthrough: [`../README.md`](../README.md).
+Desktop app shell: [`../apps/desktop/README.md`](../apps/desktop/README.md). Mobile host:
+[`../apps/mobile/README.md`](../apps/mobile/README.md).
