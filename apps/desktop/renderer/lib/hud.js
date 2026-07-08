@@ -80,8 +80,14 @@ const introEl = document.getElementById('intro')
 const introCountryEl = document.getElementById('intro-country')
 const enterBtn = document.getElementById('enter')
 const globeBtn = document.getElementById('globe')
+const myFlagEl = document.getElementById('myflag')
 
 let country = localStorage.getItem('hyperwave-country') || ''
+
+// Show the user's team flag next to the globe (hidden until a team is picked).
+function renderMyFlag() {
+  myFlagEl.innerText = country ? flagOf(country) : ''
+}
 
 const placeholder = document.createElement('option')
 placeholder.value = ''
@@ -94,6 +100,7 @@ for (const [code, name] of COUNTRIES) {
   introCountryEl.appendChild(o)
 }
 introCountryEl.value = country
+renderMyFlag()
 
 if (!country) introEl.classList.add('show') // first time only
 
@@ -101,12 +108,14 @@ function applyCountry(code) {
   country = code
   localStorage.setItem('hyperwave-country', country)
   introCountryEl.value = country
+  renderMyFlag()
   setCountry(country)
 }
 
 introCountryEl.onchange = () => applyCountry(introCountryEl.value)
 enterBtn.onclick = () => introEl.classList.remove('show')
 globeBtn.onclick = () => introEl.classList.add('show')
+myFlagEl.onclick = () => introEl.classList.add('show') // click your flag to change team too
 
 // push our stored country to the worker (called once it's up)
 export function sendCountry() {

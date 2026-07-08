@@ -47,6 +47,29 @@
       #globe:hover {
         background: rgba(0, 0, 0, 0.6);
       }
+      /* the user's team flag, sitting just left of the globe */
+      #myflag {
+        position: fixed;
+        top: 12px;
+        right: 58px;
+        z-index: 15;
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(0, 0, 0, 0.35);
+        font-size: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      #myflag:empty {
+        display: none;
+      }
+      #myflag:hover {
+        background: rgba(0, 0, 0, 0.6);
+      }
       /* intro / onboarding: pick your team before entering the ring */
       #intro {
         display: none;
@@ -369,6 +392,16 @@
       #countdown:empty {
         display: none;
       }
+      /* prominent countdown to auto-capture (the big lobby countdown is gone once you're in) */
+      #proof-hint {
+        font-size: 14px;
+        font-weight: 700;
+        color: #ffd166;
+        min-height: 18px;
+      }
+      #proof-hint:empty {
+        display: none;
+      }
       #caption {
         width: 220px;
         box-sizing: border-box;
@@ -414,6 +447,7 @@
       </div>
     </div>
 
+    <span id="myflag" title="Your team — click to change"></span>
     <button id="globe" title="Change your team">🌐</button>
 
     <header>
@@ -449,6 +483,7 @@
             <video id="preview" autoplay muted playsinline></video>
             <div id="countdown"></div>
           </div>
+          <div id="proof-hint"></div>
           <input id="caption" placeholder="Say something… 🇧🇷" maxlength="60" />
           <div id="proof-btns">
             <button id="capture">📸 Capture</button>

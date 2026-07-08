@@ -8,6 +8,7 @@ import { stageSelfie } from './ipc.js'
 const proofEl = document.getElementById('proof')
 const preview = document.getElementById('preview')
 const countdownEl = document.getElementById('countdown')
+const hintEl = document.getElementById('proof-hint')
 const captionEl = document.getElementById('caption')
 const snap = document.getElementById('snap')
 const captureBtn = document.getElementById('capture')
@@ -49,6 +50,9 @@ function paint() {
   if (!isOpen || captured) return
   const secs = Math.max(0, Math.ceil((deadline - performance.now()) / 1000))
   countdownEl.innerText = secs > 0 ? `📸 ${secs}` : '📸'
+  // keep a clear countdown to auto-capture visible (the big lobby countdown is gone once you're in)
+  hintEl.innerText =
+    secs > 0 ? `📸 auto-capturing in ${secs}s — or press Capture now` : '📸 capturing…'
 }
 
 // Grab the current frame + caption and hand it to the worker. Stays open (showing a
@@ -69,6 +73,7 @@ function capture() {
   }
   stageSelfie({ image, caption: captionEl.value })
   countdownEl.innerText = '✅'
+  hintEl.innerText = '✅ captured — you’re in the wave!'
   captureBtn.style.display = 'none'
   captionEl.disabled = true
 }
@@ -90,6 +95,7 @@ export function close() {
   }
   preview.style.display = ''
   countdownEl.innerText = ''
+  hintEl.innerText = ''
   captionEl.disabled = false
   proofEl.classList.remove('show')
   isOpen = false
