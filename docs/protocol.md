@@ -48,11 +48,15 @@ n     = K[0]*256^5 + K[1]*256^4 + K[2]*256^3 + K[3]*256^2 + K[4]*256 + K[5]   //
 angle = (n / 2^48) * 360      // degrees in [0, 360)
 ```
 
-Angle is **always derived locally** from a peer's id; it is never trusted from the wire.
-
 **Successor** = the next live peer clockwise: among live peers sorted by ascending angle,
 the first with `angle > myAngle`, wrapping to the smallest if none is greater. (A peer's
 own angle is not in the set.)
+
+Angle is **always derived locally** from a peer's id; it is never trusted from the wire.
+
+> Why is the angle derived this way? It's a deterministic, uniform hash-to-circle: take enough high-order key bits to make collisions negligible, but few enough (48) to stay within JavaScripts's exact-integer range (53 bits), normalize to [0,1), scale to degrees. Uniform placement, no coordination, no trust, and cheap pure-integer math.
+
+> One nuance worth noting: it uses only the top 6 of 32 bytes for the angle, but identity/ordering still uses the full key elsewhere — so the truncation is purely about the visual/ring geometry, not about security.
 
 ### 2.2 Receipt
 
@@ -128,11 +132,11 @@ propagated differently to match what each needs:
 **Flood (epidemic broadcast).** The wave _lifecycle_ messages must reach every seat, so they
 are relayed hop-to-hop:
 
-- The originator stamps the message with a unique `mid` (random id) and broadcasts it to all
+- The originator stamps the message with a unique `mid` (random message id) and broadcasts it to all
   direct connections.
 - On **first** receipt of a given `mid`, a peer records it, **re-broadcasts** to its other
   neighbours (everyone except the sender), and then processes it locally. On any **repeat**
-  `mid` it does nothing (drops the duplicate) — this dedup is what stops loops and bounds the
+  `mid` it does nothing (drops the duplicate) — this dedup (de-duplication) is what stops loops and bounds the
   flood.
 - On the partial random mesh (average degree ≈ connection limit, diameter ≈ log N / log
   degree ≈ a few hops) this blankets the whole swarm in ~2–3 relay rounds — hundreds of ms,
@@ -141,15 +145,10 @@ are relayed hop-to-hop:
   lifecycle messages. Seen-`mid`s are capped (`GOSSIP_SEEN_CAP`) so the dedup set can't grow
   unbounded over a long session.
 
-**One-hop broadcast (no relay).** `wave-pos` is emitted every hop (~`HOP_DELAY_MS`); flooding
-it would be a storm, and it doesn't need to reach everyone — its role as the heal-ACK only
-needs to reach the **predecessor** (a pinned neighbour), and distant ball-animation is a
-nice-to-have. `add-writer` **is now flooded** (each `ADMIT_RETRY_MS` retry re-stamps a fresh
-`mid` so it re-blankets the mesh): a gallery seat is granted only by a current writer, so on a
-sparse mesh — especially after peers die and churn connections mid-wave — a requester may not
-be directly connected to any writer, and a one-hop request would silently fail to admit. It's
-authenticated by its **carried receipt signature** (`admitWriter` → `verifyReceipt`), not the
-connection, so relaying stays sound (see §11.2).
+**One-hop broadcast (no relay).** Sent to direct neighbours only and never re-broadcast. Used
+for high-frequency or purely-local signals that don't need to reach the whole swarm — flooding
+them would be wasteful and their value is confined to nearby seats. `wave-pos` is the one such
+message (per-message rationale in §5).
 
 **Unicast.** The **token** is sent only to the current successor and deliberately relayed
 **hop by hop** as the wave mechanic — each holder _re-stamps_ it with a fresh receipt before
@@ -230,11 +229,61 @@ a `wave-sync` (§7.4), so the newcomer's map _and_ wave state converge immediate
 
 All are JSON objects on the `hyperwave/gossip` channel. Unknown `kind`s are ignored.
 
+### 5.0 Uniform message envelope (planned)
+
+> **Status: planned, not yet implemented.** The per-message schemas below document the wire
+> format **as built**, which is inconsistent: the author field is variously `id` (`pointers`),
+> `by` (`wave-start`/`wave-end`), `peerId` (`wave-join`/`add-writer`), `holder` (`wave-pos`), or
+> `originator`/`senderPeerId` (`token`); only some messages carry a signature; and there is no
+> uniform per-message timestamp. The target is a single envelope shared by **every** gossip
+> message. Tracked in `TODO.md` (Adversarial hardening).
+
+Every message will carry these three envelope fields in addition to its `kind` and payload:
+
+```jsonc
+{
+  "kind": "<message-kind>",
+  "origin": "<peerId>", // one convention everywhere for who authored the message
+  // (replaces id / by / peerId / holder)
+  "ts": 1719705612080, // origin timestamp (ms) — when the author created the message
+  "sig": "<hex64>" // Ed25519 signature by origin's ring key over the canonical
+  // serialization of the whole message minus `sig`
+  // …kind-specific payload fields…
+}
+```
+
+- **`origin`** — the single authorship field on every message. `angle` is still derived from it
+  locally (§2.1), never trusted from the wire; the identity binding of §11.2 (self-describing id
+  must match the Noise connection id, where the message came direct) becomes **one shared check**
+  instead of a per-kind one.
+- **`sig`** — an Ed25519 signature by `origin`'s ring key covering **all** fields (canonical
+  serialization of the message with `sig` removed). Any relay or recipient can verify authenticity
+  before acting or re-flooding, so authenticity no longer depends on the connection a flooded
+  message arrived over. This **generalizes** today's ad-hoc signatures (the originator's `wave-end`
+  `sig`, the gallery-key `keySig`, per-hop `receiptSig`) rather than replacing their _semantics_:
+  those domain signatures still bind their specific tuples (gallery key, receipt chain), but the
+  envelope `sig` additionally authenticates the message as a whole.
+- **`ts`** — the origin timestamp, enabling **age-based relay decisions**: a peer refuses to
+  accept or re-flood any message older than a max-lifetime bound (`GOSSIP_MAX_AGE_MS`, TBD). This
+  is a **hard cap on how long any flooded message can circulate** — independent of `mid` dedup — so
+  a routing loop or a dedup-set bug cannot amplify into unbounded flooding; a message simply dies
+  once it is too old. Requires generous clock-skew tolerance (peers are not time-synchronized).
+
+Cost note: verifying `sig` on **every** message adds work on the hot path (`wave-pos` is emitted
+each hop); this pairs with the compact wire-encoding item (raw-byte `sig`/ids) and per-connection
+rate limiting (both in `TODO.md`). Until implemented, treat the individual schemas below as
+authoritative.
+
 ### pointers — to pinned neighbours, every `HEARTBEAT_MS`
 
 ```json
-{ "kind": "pointers", "id": "<peerId>", "country": "BR" | null,
-  "succ": ["<peerId>", ...], "pred": "<peerId>" | null }
+{
+  "kind": "pointers",
+  "id": "<peerId>",
+  "country": "BR" | null,
+  "succ": ["<peerId>", ...],
+  "pred": "<peerId>" | null
+}
 ```
 
 The heartbeat **and** the Chord pointer exchange in one message, sent only to pinned ring
@@ -299,9 +348,16 @@ joiner's raffle commitment; the wave's initiator records it during the lobby (§
 ### wave-start — flooded (originator, when the lobby closes)
 
 ```json
-{ "kind": "wave-start", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
-  "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>", "keySig": "<hex64>",
-  "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ } }
+{
+  "kind": "wave-start",
+  "mid": "<hex8>",
+  "waveId": "<hex16>",
+  "by": "<peerId>",
+  "roster": ["<peerId>", ...],
+  "key": "<autobaseKeyHex>",
+  "keySig": "<hex64>",
+  "paid": { /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */ }
+}
 ```
 
 Finalizes the roster and begins the race. `key` is the wave's gallery Autobase bootstrap key
@@ -311,6 +367,8 @@ it against the wave's originator before opening the gallery, so a relay can't sw
 `lobby → racing`. When the paid-wave gate is enforced, `wave-start` also carries the kick-off
 `paid` proof and is gated on it (§11); carrying it also lets a peer that adopted via
 `wave-start` re-authenticate a later `wave-sync` to a newcomer.
+
+The `roster` is the initiator-finalized answer to "who is actually in this wave?" — broadcast so (a) everyone agrees on membership despite the lobby's flooded, partial-mesh joins, and (b) each peer knows whether it should selfie (roster member) or merely relay the ball (spectator).
 
 ### token — DIRECT to the successor (the ⚽)
 
@@ -338,25 +396,52 @@ sender's receipt over `(waveId, hopCount, prevChainHash, timestamp)`. Processing
 ### wave-pos — one-hop broadcast (a peer when it becomes the holder)
 
 ```json
-{ "kind": "wave-pos", "waveId": "<hex16>", "holder": "<peerId>", "hopCount": 3 }
+{
+  "kind": "wave-pos",
+  "waveId": "<hex16>",
+  "holder": "<peerId>",
+  "hopCount": 3
+}
 ```
 
 Tells direct neighbours the ball is now at `holder` (so they can animate it). Also serves as
 the **ACK** that healing (§7.3) waits for — the predecessor is a pinned neighbour, so it's
-received without needing a flood. Deliberately **not** relayed (emitted every hop). `holder`
+received without needing a flood. Deliberately **not** relayed: it's emitted every hop
+(~`HOP_DELAY_MS`), so flooding it would be a storm, and it doesn't need to reach everyone — the
+heal-ACK only needs to reach the predecessor, and distant ball-animation is a nice-to-have. `holder`
 is connection-bound (§11), and healing only accepts the ACK when `holder` is the **specific
 successor** it forwarded to, so a bogus `wave-pos` can't suppress healing of a dead successor.
+
+Regarding distant ball-animation, everyone that is not a neighbout animates approximately: interpolate
+clockwise toward the last-heard holder, gain fidelity as the ball enters your neighbourhood, and fade it
+when updates stop. This best-effort approximation reads as smooth even though most peers never learn most hops.
 
 ### wave-end — flooded (originator on completion, or a participant on a dead-end stall)
 
 ```json
 // completion (by the originator):
-{ "kind": "wave-end", "mid": "<hex8>", "waveId": "<hex16>", "by": "<peerId>",
-  "hops": 7, "chainHash": "<hex32>", "sig": "<hex64>" }
+{
+  "kind": "wave-end",
+  "mid": "<hex8>",
+  "waveId": "<hex16>",
+  "by": "<peerId>",
+  "hops": 7,
+  "chainHash": "<hex32>",
+  "sig": "<hex64>"
+}
 // stall (by the participant that dead-ended):
-{ "kind": "wave-end", "mid": "<hex8>", "waveId": "<hex16>", "by": "<originatorId>",
-  "stalled": true, "staller": "<peerId>", "hopCount": 5, "chainHash": "<hex32>",
-  "receiptTs": 1719705612080, "receiptSig": "<hex64>" }
+{
+  "kind": "wave-end",
+  "mid": "<hex8>",
+  "waveId": "<hex16>",
+  "by": "<originatorId>",
+  "stalled": true,
+  "staller": "<peerId>",
+  "hopCount": 5,
+  "chainHash": "<hex32>",
+  "receiptTs": 1719705612080,
+  "receiptSig": "<hex64>"
+}
 ```
 
 Ends the wave for everyone. Because it is flooded (forgeable by any relay), it is honoured
@@ -391,9 +476,16 @@ an `add-writer` op.
 ### wave-sync — DIRECT to a newly-connected peer (join-time state)
 
 ```json
-{ "kind": "wave-sync", "waveId": "<hex16>", "phase": "lobby" | "racing",
-  "by": "<peerId>", "roster": ["<peerId>", ...], "key": "<autobaseKeyHex>|null",
-  "keySig": "<hex64>", "lobbyMsLeft": 8000 }
+{
+  "kind": "wave-sync",
+  "waveId": "<hex16>",
+  "phase": "lobby" | "racing",
+  "by": "<peerId>",
+  "roster": ["<peerId>", ...],
+  "key": "<autobaseKeyHex>|null",
+  "keySig": "<hex64>",
+  "lobbyMsLeft": 8000
+}
 ```
 
 Lets a peer joining mid-wave sync (§7.4). `keySig` carries the originator's gallery-key
@@ -450,6 +542,17 @@ selfies still land in the gallery in **ring order**, as the ball passes each par
 
 The originator starts the chain at hop 0: `prevChainHash = ZERO_HASH`, its own receipt,
 then hold & forward as above.
+
+> **Loop guard (planned, not yet implemented).** Termination currently depends on the originator
+> being alive to recognize its returning token (step 4) plus `hopCount > MAX_HOPS` as the only
+> hard backstop; the `seen` dedup is keyed by `waveId|hopCount`, so it stops a re-received _exact
+> hop_ but not a token that keeps advancing `hopCount` past a dead/misbehaving originator. The
+> planned stricter guard: a peer **forwards a token for a given `waveId` at most once**,
+> independent of `hopCount` (a per-wave `forwardedWave` set, cleared per wave). This makes a wave
+> deterministically die after one lap without relying on `MAX_HOPS`. **It must exempt the
+> completion path** — the originator legitimately touches its own token twice (hop 0 kickoff +
+> the returning completion), so the guard applies only to the non-originator forward path, else
+> it would suppress the `wave-end` that ends the wave. Tracked in `TODO.md`.
 
 ```mermaid
 flowchart TD

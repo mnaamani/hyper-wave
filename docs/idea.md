@@ -78,7 +78,7 @@ funded one. Anyone can start the next wave.
 
 ## What it looks like
 
-A desktop app (and a working mobile version running the very same engine):
+A desktop app (mobile version running the very same engine still under development):
 
 - A ring of dots — one per person online, each with their chosen country flag.
 - A **Kick off the wave** button. Pressing it pays the fee, then opens a short lobby

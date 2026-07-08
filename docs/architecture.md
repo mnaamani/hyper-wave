@@ -119,11 +119,10 @@ so there's no duplicated protocol logic across the seam.
 
 ## No roles — every peer is equal
 
-There are no peer roles: every instance runs the same code and behaves identically. There is
-no `role` option, no `HYPERWAVE_ROLE` env var, no `role` field in gossip, and no "well-known
-seed" that others pin. Every peer participates fully (pays fees, joins waves, selfies, relays)
-and every peer's `storageDir/hyperwave` store is **wiped on startup**, so galleries are
-ephemeral per run — keyed by the random `waveId`, nothing persists across runs.
+There are no peer roles: every instance runs the same code and behaves identically. Every peer
+participates fully (pays fees, joins waves, selfies, relays), and every peer's
+`storageDir/hyperwave` store is **wiped on startup**, so galleries are ephemeral per run —
+keyed by the random `waveId`, nothing persists across runs.
 
 The only asymmetry is **per-wave and belongs to that wave's initiator** (the peer that kicked
 it off):
@@ -131,7 +130,7 @@ it off):
 - It **keeps its own wave's gallery Autobase open and retains it** for the life of the
   process, so the gallery survives for latecomers and replication — but it is the archivist
   for _its own_ wave only. If the initiator goes offline, its wave's gallery is not archived
-  by anyone else; this is the accepted simplification of dropping the old standalone seed.
+  by anyone else.
 - It **collects the raffle commits** for that wave (from lobby `wave-join` gossip; it records
   its own commit locally when it announces).
 - If it funds a raffle (`raffleTrx > 0`, env `HYPERWAVE_RAFFLE_TRX`), it **draws the winner
