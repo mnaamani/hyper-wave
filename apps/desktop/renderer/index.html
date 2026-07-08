@@ -209,6 +209,12 @@
       }
       #ring {
         display: block;
+        transition: opacity 0.4s ease;
+      }
+      /* while a new wave's lobby is up, fade the ring + gallery so the countdown reads clearly
+         (the lobby countdown is an HTML overlay above the canvas, so it stays crisp) */
+      .field.dim #ring {
+        opacity: 0.18;
       }
       #center {
         position: absolute;
@@ -292,8 +298,12 @@
         font-size: 15px;
         font-weight: 600;
       }
-      #join {
+      #lobby-btns {
+        display: flex;
+        gap: 8px;
         margin-top: 6px;
+      }
+      #join {
         padding: 9px 22px;
         font-size: 15px;
         border: none;
@@ -302,6 +312,18 @@
         color: #06210d;
         font-weight: 600;
         cursor: pointer;
+      }
+      #cancel {
+        padding: 9px 18px;
+        font-size: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 20px;
+        background: rgba(0, 0, 0, 0.4);
+        color: #eafff0;
+        cursor: pointer;
+      }
+      #cancel:hover {
+        background: rgba(0, 0, 0, 0.6);
       }
       /* proof window: circular selfie capture in the centre of the ring */
       #proof {
@@ -384,7 +406,7 @@
   <body>
     <div id="intro">
       <div class="intro-card">
-        <h1>🌊 HyperWave</h1>
+        <h1>HyperWave</h1>
         <p>The global stadium wave. Who do you support?</p>
         <select id="intro-country"></select>
         <br />
@@ -395,7 +417,7 @@
     <button id="globe" title="Change your team">🌐</button>
 
     <header>
-      <h1>🌊 HyperWave</h1>
+      <h1>HyperWave</h1>
       <span id="v">v</span>
     </header>
     <div id="updater"></div>
@@ -416,8 +438,11 @@
         <button id="start">⚽ Kick off the wave</button>
         <div id="lobby">
           <div id="lobby-count"></div>
-          <div id="lobby-msg">🌊 a wave is forming</div>
-          <button id="join">✋ Count me in</button>
+          <div id="lobby-msg">a wave is forming</div>
+          <div id="lobby-btns">
+            <button id="join">✋ Count me in</button>
+            <button id="cancel">Not now</button>
+          </div>
         </div>
         <div id="proof">
           <div id="proof-wrap">

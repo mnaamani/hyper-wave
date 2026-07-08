@@ -49,44 +49,105 @@ function drawFlagAt(angleDeg, r, size, flag) {
   ctx.textBaseline = 'alphabetic'
 }
 
-// --- the football: rolls clockwise from holder to holder --------------------
-let ball = null // { from, to, startedAt }
-let ballSeenAt = 0
-const TRAVEL_MS = 220 // ~= the per-hop dwell (HOP_DELAY_MS), so the fast roll keeps up
-const BALL_FADE_MS = 4000 // hide the ball this long after the last position update
-
-function ballAngle() {
-  if (!ball) return null
-  const p = Math.min(1, (performance.now() - ball.startedAt) / TRAVEL_MS)
-  let d = (ball.to - ball.from) % 360
-  if (d < 0) d += 360 // always roll clockwise (increasing angle)
-  return (ball.from + d * p) % 360
+// Ring angle (seat) derived from a hex peer id — mirrors ring.js `angleOf` in the engine
+// (top 6 bytes, big-endian, mapped onto [0, 360)). Used to place a gallery entry on the ring.
+export function angleOfId(hex) {
+  let n = 0
+  for (let i = 0; i < 6; i++) n = n * 256 + parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  return (n / 2 ** 48) * 360
 }
 
-export function setBall(toAngle) {
-  if (toAngle === null || toAngle === undefined) return
-  const from = ball ? ballAngle() : toAngle // continue from where it is, or drop in
-  ball = { from, to: toAngle, startedAt: performance.now() }
-  ballSeenAt = performance.now()
+// --- the football: a local REPLAY sweep, decoupled from the (near-instant) race ---
+// The protocol races at network speed (HOP_DELAY_MS = 0); visual pacing lives here. On
+// completion the host starts a fixed-duration sweep: the ⚽ rolls clockwise once around the
+// ring over SWEEP_MS regardless of N, and each frame we report progress so the gallery can
+// feature the selfie the ball is passing. When the sweep reaches the end it FREEZES (the ball
+// parks and stays); the user can then drag it (see scrubber.js → scrubTo) to browse. `origin`
+// is the originator's seat angle (hop 0) — frac 0 sits there, frac 1 completes the lap.
+export const SWEEP_MS = 8000
+
+let origin = null // null = no active replay (ball hidden); else the sweep's start angle
+let sweepMs = SWEEP_MS
+let playStart = 0 // performance.now() while auto-playing; 0 when frozen/scrubbing
+let frac = 0 // authoritative progress [0,1] when not auto-playing
+const frameListeners = [] // fn(frac, origin) called each render frame while a replay is live
+
+// Register a per-frame progress listener (gallery featuring, scrubber handle).
+export function onSweepFrame(fn) {
+  frameListeners.push(fn)
 }
 
-function drawBall() {
-  if (!ball) return
-  if (performance.now() - ballSeenAt >= BALL_FADE_MS) {
-    ball = null
-    return
+// Begin the replay sweep from `originAngle` (hop 0's seat). Auto-plays over `ms`.
+export function startSweep(originAngle, ms = SWEEP_MS) {
+  origin = originAngle ?? 0
+  sweepMs = ms
+  playStart = performance.now()
+  frac = 0
+}
+
+// Manual scrub (from the scrubber): pause auto-play and park the ball at `f` ∈ [0,1].
+export function scrubTo(f) {
+  if (origin === null) return
+  playStart = 0 // freeze auto-advance; the user is driving now
+  frac = Math.max(0, Math.min(1, f))
+}
+
+// The sweep's start angle (hop 0), or null if no replay is active. Used by the scrubber to
+// map a pointer angle to a progress fraction.
+export function sweepOrigin() {
+  return origin
+}
+
+// End the replay entirely (hide the ball) — on wave-idle.
+export function stopSweep() {
+  origin = null
+  playStart = 0
+  frac = 0
+}
+
+function currentFrac() {
+  if (origin === null) return 0
+  if (playStart) {
+    frac = Math.min(1, (performance.now() - playStart) / sweepMs)
+    if (frac >= 1) playStart = 0 // reached the end → freeze in place (manual scrub only)
   }
-  const a = ballAngle()
-  const [bx, by] = pointOn(a, R)
+  return frac
+}
+
+function drawBall(angle, handle) {
+  if (angle === null) return
+  const [bx, by] = pointOn(angle, R)
+  // when the replay has frozen, the ⚽ is the scrubber handle — draw a grab halo so it reads
+  // as draggable (paired with the cursor:grab from scrubber.js and the dashed track below)
+  if (handle) {
+    ctx.beginPath()
+    ctx.arc(bx, by, 20, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(255,209,102,0.9)'
+    ctx.lineWidth = 2
+    ctx.stroke()
+  }
   ctx.save()
   ctx.translate(bx, by)
-  ctx.rotate((a * Math.PI) / 180) // spin as it rolls around the ring
+  ctx.rotate((angle * Math.PI) / 180) // spin as it rolls around the ring
   ctx.font = '26px sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText('⚽', 0, 0)
   ctx.restore()
   ctx.textBaseline = 'alphabetic'
+}
+
+// A dashed track around the ring while the replay is frozen — signals the ring is now an
+// interactive circular scrubber (drag the ⚽ around it to browse the gallery).
+function drawScrubTrack(cx, cy) {
+  ctx.save()
+  ctx.setLineDash([4, 7])
+  ctx.beginPath()
+  ctx.arc(cx, cy, R, 0, Math.PI * 2)
+  ctx.strokeStyle = 'rgba(255,209,102,0.4)'
+  ctx.lineWidth = 2
+  ctx.stroke()
+  ctx.restore()
 }
 
 // --- the centre selfie ------------------------------------------------------
@@ -130,7 +191,7 @@ function drawCenterSelfie(cx, cy) {
     ctx.font = '40px sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText('🌊', cx, cy)
+    ctx.fillText('📷', cx, cy)
     ctx.textBaseline = 'alphabetic'
   }
   ctx.restore()
@@ -206,7 +267,15 @@ function render() {
     drawFlagAt(state.me.angle, R + 22, 26, flagOf(state.me.country))
   }
 
-  drawBall()
+  // replay sweep: drive the ball + notify listeners (gallery featuring, scrubber handle)
+  if (origin !== null) {
+    const f = currentFrac()
+    const frozen = playStart === 0 // sweep finished (or user is scrubbing) → interactive
+    const ballAngle = (origin + f * 360) % 360
+    if (frozen) drawScrubTrack(cx, cy)
+    drawBall(ballAngle, frozen)
+    for (const fn of frameListeners) fn(f, origin)
+  }
   drawCenterSelfie(cx, cy)
 
   if (state.me) {
