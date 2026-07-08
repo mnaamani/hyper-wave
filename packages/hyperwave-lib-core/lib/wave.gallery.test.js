@@ -37,6 +37,25 @@ test('ties on hop broken by timestamp', (t) => {
   )
 })
 
+// Regression guard for the zero-dwell race (HOP_DELAY_MS = 0): the token races at network
+// speed, so selfies can be appended in a burst whose arrival order — and here whose timestamps
+// too — is the reverse of ring/hop order. Gallery order must still be strictly by hopCount, so
+// the renderer replay features participants in ring order regardless of how they arrived.
+test('hop order wins even when insertion and timestamp order are both inverted', (t) => {
+  // fed last-hop-first, and later hops carry LARGER timestamps (arrived sooner in the burst)
+  const g = buildGallery([
+    e('w', 'd', 3, 400),
+    e('w', 'c', 2, 300),
+    e('w', 'b', 1, 200),
+    e('w', 'a', 0, 100)
+  ])
+  t.alike(
+    g.map((x) => x.peerId),
+    ['a', 'b', 'c', 'd'],
+    'ordered by hopCount, not by arrival/timestamp'
+  )
+})
+
 test('empty input -> empty gallery', (t) => {
   t.alike(buildGallery([]), [])
 })

@@ -136,6 +136,22 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Adversarial hardening still open (`docs/protocol.md` §11.3)
 
+- [ ] **Automated coverage for the paid gate + late gallery admission (currently a test gap).**
+      The whole burn/attestation/admission path — `enforcePaid`, `recordBurn`, `ensureWriter` →
+      `requestAdmission`, `admitWriter` (`burnAuthorizes`) — has **no automated test**: the unit
+      suites don't wire a wallet and the `e2e/` harness runs wallet-less (`enforcePaid` off,
+      receipt-only admission), so this path is exercised only by manual two-peer runs. That's how
+      the zero-dwell regression slipped in: with `HOP_DELAY_MS = 0` a wave ends before a joiner's
+      fee burn confirms, and two bugs dropped the admission ticket — `recordBurn` refused once
+      `wave` was null, and `resetSelfie` nulled `myBurnProof` on `goIdle` (fixed by threading
+      `waveId` into `recordBurn` so a late burn still records into the persisted gallery, and by
+      keeping the waveId-bound proof alive across `goIdle`, clearing it only in `enterLobby`).
+      Add a **wallet-mocked engine test** (stub `payments` with a controllable `burn`/`verifyBurnTx`
+      whose confirmation can be delayed past wave completion) asserting: (a) a joiner whose burn
+      confirms AFTER the wave ends still gets admitted and its selfie lands (late admission); (b) an
+      unpaid/unconfirmed joiner is refused with `gallery-error` reason `fee-unpaid`; (c) a stale
+      burn for a superseded wave is dropped (the `recordBurn` guard). Optionally extend `e2e/` with
+      a mock-payments mode so the paid gate gets end-to-end coverage too.
 - [ ] Per-connection rate limiting (token buckets per message kind) + bounds on auxiliary maps
       (`seen`/`endedWaves`/`routed`/`lookupRoute`/`goneUntil`). More important now that
       admission is optimistic (gallery seats are cheap) — the token bucket caps how many

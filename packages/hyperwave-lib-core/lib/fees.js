@@ -23,7 +23,9 @@ function burnMemo(waveId, peerId, commit) {
 async function payFee(wave, payments, waveId, reason) {
   const commit = wave.raffleCommit ? wave.raffleCommit() : '' // in-memo raffle commitment
   const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id, commit))
-  const proof = wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash })
+  // pass waveId so the attestation records even if the (instant) wave already ended — it's the
+  // ticket for a late gallery admission into the persisted gallery (wave.js recordBurn).
+  const proof = wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash, waveId })
   return { hash, proof }
 }
 

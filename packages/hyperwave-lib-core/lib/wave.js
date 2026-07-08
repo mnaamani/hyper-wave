@@ -42,10 +42,13 @@ const HEARTBEAT_MS = 2000 // pointers-heartbeat cadence (liveness + Chord pointe
 const RINGUPDATE_MS = 4000 // re-pin + gallery-pull maintenance cadence
 const TTL_MS = 12000 // drop peers not refreshed within this window
 const MAX_HOPS = 5000 // safety cap against runaway tokens
-// Dwell per hop — kept minimal so the ⚽ races around the ring quickly. The selfie is
-// captured up-front in the lobby (not during the race), so the dwell never has to cover
-// a human; it's purely the visible roll pace. Configurable per wave.
-const HOP_DELAY_MS = 250
+// Dwell per hop. Defaults to 0: the token races at network speed and visual pacing is a
+// pure renderer concern (the host replays the completed, hopCount-ordered gallery as a
+// fixed-duration sweep — see docs/protocol.md §6). The selfie is captured up-front in the
+// lobby (not during the race), so the dwell never has to cover a human, and it is not a
+// security/correctness mechanism. Kept as a configurable option (set > 0 to demo a slow,
+// live per-hop roll).
+const HOP_DELAY_MS = 0
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
 // (get ready / choose to selfie) before the token starts racing.
 const LOBBY_MS = 15000
@@ -727,7 +730,11 @@ function createWave({
     const burnProof = myBurnProof
     const raffleSecret = raffle.currentReveal()
     if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
-      onEvent({ event: 'gallery-error', reason: 'not-admitted' })
+      // distinguish the two failure modes so the UI can tell the user what actually went wrong:
+      // no burn ticket at all (fee never paid/confirmed) vs. a valid ticket that timed out being
+      // admitted (network/mesh). enforcePaid off (headless) → always the timeout case.
+      const reason = enforcePaid && !myBurnProof ? 'fee-unpaid' : 'admit-timeout'
+      onEvent({ event: 'gallery-error', reason })
       return
     }
     await base.append({
@@ -761,10 +768,16 @@ function createWave({
   // Two consumers: the initiator attaches its KICK-OFF proof to the wave-announce (the
   // paid-wave gate, announcePaid); and any participant presents its proof (kick-off OR join)
   // when it requests to write a selfie — so a gallery seat requires a real burn (ensureWriter).
-  function recordBurn({ reason, amount, txHash }) {
-    if (!wave) return null
+  function recordBurn({ reason, amount, txHash, waveId }) {
+    // The burn is for `waveId` (threaded from payFee). Record it even if the wave has already
+    // ended — at HOP_DELAY_MS = 0 the race completes before a fee burn confirms, and the burn is
+    // the ticket for a LATE gallery admission into the (still-open) originator gallery. Only drop
+    // it if we've moved past that wave entirely (its gallery is no longer current) — never let a
+    // stale burn overwrite the current wave's ticket.
+    const wid = waveId || wave?.id
+    if (!wid || (wid !== wave?.id && wid !== currentWaveId)) return null
     const fields = {
-      waveId: wave.id,
+      waveId: wid,
       peerId: me.id,
       reason,
       amount,
@@ -819,6 +832,7 @@ function createWave({
       teardown()
     }
     resetSelfie() // fresh wave — clear any staged selfie/receipt from a prior one
+    myBurnProof = null // a genuinely new wave (guarded above): drop the previous wave's burn ticket
     // paid: 'verified' when the kick-off burn is confirmed (or enforcement is off);
     // 'pending' while a peer verifies it on-chain; 'rejected' if it isn't a real burn.
     wave = {
@@ -941,7 +955,12 @@ function createWave({
     myReceipt = null
     selfiePosted = false
     admissionPromise = null
-    myBurnProof = null
+    // NB: myBurnProof is NOT cleared here. The wave ends the instant the token completes
+    // (HOP_DELAY_MS = 0), but a joiner's fee burn can confirm slightly later; the gallery
+    // persists (the originator keeps it open) precisely so a late admission still lands, and
+    // the burn attestation is that admission ticket. It's bound to its waveId (burnAuthorizes
+    // checks burn.waveId), so keeping it is safe — it can only ever admit its own wave. It's
+    // cleared instead when a genuinely new wave's lobby begins (enterLobby).
     admittedKeys.clear()
     raffle.reset() // clear my staged secret/commit for the next wave (see raffle.js)
     // NB: the raffle's recorded commits are keyed per-wave and consumed by its *delayed* draw

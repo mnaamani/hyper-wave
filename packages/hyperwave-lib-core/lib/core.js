@@ -124,6 +124,21 @@ function init({
   // burn the join fee for a wave that's proven paid. The join burn is fire-and-forget (no on-chain
   // confirmation), so it's reported as burned on broadcast.
   async function handleJoin() {
+    // Fail fast, like kick-off: an unfunded joiner would broadcast a burn that never confirms and
+    // then be refused gallery admission ("fee-unpaid") — confusing. Refuse the join up front with
+    // a clear message instead. Only when we could actually read the balance.
+    if (payments) {
+      const bal = await payments.balances().catch(() => null)
+      if (bal && bal.trx < FEE_TRX) {
+        send({
+          type: 'burn-result',
+          stage: 'failed',
+          reason: 'join',
+          error: `wallet unfunded (${bal.trx} TRX) — fund it to join the wave`
+        })
+        return
+      }
+    }
     const waveId = wave.join()
     if (!waveId || !payments) return
     try {

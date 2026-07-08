@@ -404,17 +404,18 @@ sender's receipt over `(waveId, hopCount, prevChainHash, timestamp)`. Processing
 }
 ```
 
-Tells direct neighbours the ball is now at `holder` (so they can animate it). Also serves as
-the **ACK** that healing (§7.3) waits for — the predecessor is a pinned neighbour, so it's
-received without needing a flood. Deliberately **not** relayed: it's emitted every hop
-(~`HOP_DELAY_MS`), so flooding it would be a storm, and it doesn't need to reach everyone — the
-heal-ACK only needs to reach the predecessor, and distant ball-animation is a nice-to-have. `holder`
-is connection-bound (§11), and healing only accepts the ACK when `holder` is the **specific
-successor** it forwarded to, so a bogus `wave-pos` can't suppress healing of a dead successor.
+Primarily the **ACK** that healing (§7.3) waits for — the predecessor is a pinned neighbour, so
+it's received without needing a flood. Deliberately **not** relayed: it's emitted once per hop
+and the token now races at network speed (`HOP_DELAY_MS = 0`), so flooding it would be a burst
+storm, and it doesn't need to reach everyone. `holder` is connection-bound (§11), and healing
+only accepts the ACK when `holder` is the **specific successor** it forwarded to, so a bogus
+`wave-pos` can't suppress healing of a dead successor.
 
-Regarding distant ball-animation, everyone that is not a neighbout animates approximately: interpolate
-clockwise toward the last-heard holder, gain fidelity as the ball enters your neighbourhood, and fade it
-when updates stop. This best-effort approximation reads as smooth even though most peers never learn most hops.
+Note `wave-pos` is **not** how peers animate the ball: the live race is too fast to watch and a
+distant peer only hears the hops of its own neighbours. Ball animation is a **renderer replay**
+of the completed, `hopCount`-ordered gallery (§6) — a fixed-duration sweep every peer runs
+locally over its own replicated copy — so `wave-pos` is now essentially just the heal-ACK (a
+nearby holder's update can still drive an optional live indicator, but it is not required).
 
 ### wave-end — flooded (originator on completion, or a participant on a dead-end stall)
 
@@ -521,7 +522,7 @@ hopCount', newChainHash, now)`. This is _my_ hop.
    - Broadcast `wave-pos { holder: me, hopCount' }`.
    - If I'm in the roster, **post my staged selfie now** (see below): I have my receipt for
      this hop, and my image was captured back in the lobby.
-   - After `HOP_DELAY_MS` (a **minimal** dwell — just the visible roll pace), forward the
+   - After `HOP_DELAY_MS` (**default 0** — the token races at network speed), forward the
      new token to my **successor** (§7.3 handles a dead successor).
 
 **The selfie is captured up-front, in the lobby.** The token must never wait on a human, so
@@ -537,8 +538,15 @@ capture and posting are split:
   receipt are present, so it's robust to either arriving first (e.g. the originator, which
   stages and holds at hop 0 almost simultaneously). Posted exactly once per wave.
 
-So `HOP_DELAY_MS` can be small (250ms) — it never has to cover a human taking a selfie — and
-selfies still land in the gallery in **ring order**, as the ball passes each participant.
+**`HOP_DELAY_MS` defaults to 0** — it never has to cover a human taking a selfie, and it is
+not a security/correctness mechanism, so the token races at network speed and a wave completes
+quickly regardless of ring size. **Visual pacing is a pure renderer concern**, decoupled from
+the protocol: each peer replicates the whole gallery, and the host replays the completed,
+`hopCount`-ordered gallery (see below) as a fixed-duration **sweep** — the ⚽ rolls around the
+ring over a constant wall-clock time independent of N, featuring each selfie as it passes. So
+selfies always present in **ring order** whatever the arrival timing, because ordering comes
+from the entry's `hopCount` (§8.3 / `buildGallery`), not from the dwell. (Set `HOP_DELAY_MS > 0`
+to demo a slow, live per-hop roll instead of the replay.)
 
 The originator starts the chain at hop 0: `prevChainHash = ZERO_HASH`, its own receipt,
 then hold & forward as above.
@@ -864,21 +872,21 @@ the gate (waves announce immediately, unpaid).
 
 ## 10. Constants (reference build)
 
-| Constant            | Value  | Meaning                                                                                                                                 |
-| ------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                                                                                              |
-| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                                                                                               |
-| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                                                                                   |
-| `HOP_DELAY_MS`      | 250    | per-hop dwell (visible roll pace; selfie is decoupled, §6)                                                                              |
-| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                                                                                   |
-| `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                                                                                     |
-| `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                                                                                                 |
-| `MAX_HOPS`          | 5000   | runaway-token safety cap                                                                                                                |
-| `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2)                                                                   |
-| `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                                                                                  |
-| `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)                                                                           |
-| `RAFFLE_DELAY_MS`   | 3000   | settle delay after wave-end before the raffle draw (§12); the draw then polls up to 20s (`RAFFLE_CONVERGE_MS`) for reveals to replicate |
-| `raffleTrx`         | 0      | raffle prize per wave (initiator's budget; 0 = raffle off)                                                                              |
+| Constant            | Value  | Meaning                                                                                                                                           |
+| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                                                                                                        |
+| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                                                                                                         |
+| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                                                                                             |
+| `HOP_DELAY_MS`      | 0      | per-hop dwell; default 0 (token races at network speed). Visual pacing is a renderer replay, not the protocol (§6). Set > 0 for a slow live roll. |
+| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                                                                                             |
+| `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                                                                                               |
+| `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                                                                                                           |
+| `MAX_HOPS`          | 5000   | runaway-token safety cap                                                                                                                          |
+| `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2)                                                                             |
+| `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                                                                                            |
+| `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)                                                                                     |
+| `RAFFLE_DELAY_MS`   | 3000   | settle delay after wave-end before the raffle draw (§12); the draw then polls up to 20s (`RAFFLE_CONVERGE_MS`) for reveals to replicate           |
+| `raffleTrx`         | 0      | raffle prize per wave (initiator's budget; 0 = raffle off)                                                                                        |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.
