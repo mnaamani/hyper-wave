@@ -192,6 +192,7 @@ ipc.on('event', (e) => {
       hud.waveStatus(
         `✅ wave completed - ${e.hops} hops · 🔎 drag the ⚽ around the ring to browse`
       )
+      ring.startFlourish() // golden ring pulse + confetti — the wave made it all the way around
       gallery.startReplay() // roll the ⚽ once around the ring, featuring selfies in hop order
       break
     case 'healed':

@@ -137,6 +137,69 @@ function drawBall(angle, handle) {
   ctx.textBaseline = 'alphabetic'
 }
 
+// --- completion flourish: a golden ring pulse + light confetti when the wave makes it home ---
+let flourish = null // { startedAt } | null
+let confetti = [] // particles for the current flourish (browser rAF, so Math.random is fine here)
+const FLOURISH_MS = 1500
+
+export function startFlourish() {
+  const N = 26
+  const cx = canvas.width / 2
+  const cy = canvas.height / 2
+  confetti = []
+  for (let i = 0; i < N; i++) {
+    const [sx, sy] = pointOn((i / N) * 360 + Math.random() * 8, R) // start on the ring edge
+    const dx = sx - cx
+    const dy = sy - cy
+    const len = Math.hypot(dx, dy) || 1
+    const speed = 70 + Math.random() * 90
+    confetti.push({
+      x: sx,
+      y: sy,
+      vx: (dx / len) * speed, // radiate outward from the ring (keeps clear of the centre selfie)
+      vy: (dy / len) * speed - 30,
+      color: ['#ffd166', '#39d98a', '#eafff0', '#ff8c42'][i % 4],
+      rot: Math.random() * Math.PI,
+      spin: (Math.random() - 0.5) * 12,
+      size: 4 + Math.random() * 4
+    })
+  }
+  flourish = { startedAt: performance.now() }
+}
+
+function drawFlourish(cx, cy) {
+  if (!flourish) return
+  const t = (performance.now() - flourish.startedAt) / FLOURISH_MS
+  if (t >= 1) {
+    flourish = null
+    confetti = []
+    return
+  }
+  // two staggered golden ring pulses expanding outward from the ring
+  for (let k = 0; k < 2; k++) {
+    const pt = t - k * 0.18
+    if (pt < 0 || pt > 1) continue
+    ctx.beginPath()
+    ctx.arc(cx, cy, R + pt * 70, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(255,209,102,${(1 - pt) * 0.55})`
+    ctx.lineWidth = 3
+    ctx.stroke()
+  }
+  // light confetti with gravity, fading out over the flourish
+  const tt = (t * FLOURISH_MS) / 1000 // seconds
+  const g = 240
+  for (const p of confetti) {
+    ctx.save()
+    ctx.globalAlpha = 1 - t
+    ctx.translate(p.x + p.vx * tt, p.y + p.vy * tt + 0.5 * g * tt * tt)
+    ctx.rotate(p.rot + p.spin * tt)
+    ctx.fillStyle = p.color
+    ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6)
+    ctx.restore()
+  }
+  ctx.globalAlpha = 1
+}
+
 // A dashed track around the ring while the replay is frozen — signals the ring is now an
 // interactive circular scrubber (drag the ⚽ around it to browse the gallery).
 function drawScrubTrack(cx, cy) {
@@ -277,6 +340,7 @@ function render() {
     for (const fn of frameListeners) fn(f, origin)
   }
   drawCenterSelfie(cx, cy)
+  drawFlourish(cx, cy) // celebratory pulse + confetti overlay when a wave just completed
 
   if (state.me) {
     meEl.innerText = `you: ${state.me.id.slice(0, 12)}…  @ ${state.me.angle.toFixed(1)}°  ·  ${state.peers.length} peer${state.peers.length === 1 ? '' : 's'}`
