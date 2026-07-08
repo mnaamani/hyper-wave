@@ -152,6 +152,20 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       unpaid/unconfirmed joiner is refused with `gallery-error` reason `fee-unpaid`; (c) a stale
       burn for a superseded wave is dropped (the `recordBurn` guard). Optionally extend `e2e/` with
       a mock-payments mode so the paid gate gets end-to-end coverage too.
+- [ ] **Reject a wave whose kick-off burn is stale (replay-attack prevention).** `shouldAdopt()`
+      only refuses a `waveId` already in `endedWaves`, and `validKickoff()` checks the burn
+      attestation's `reason`/`waveId`/`peerId`/signature but **not its age**. So an attacker can
+      **replay a captured, still-validly-signed `wave-announce`** later: a peer that never saw the
+      original end (a freshly joined or **restarted** peer has an empty `endedWaves`) will adopt the
+      stale wave, since the signed kick-off proof still verifies. Fix: enforce a **freshness
+      window** on adoption. The burn attestation already carries a **signed `burnTs`** (part of
+      `burnHash`, so it can't be back-dated without the initiator's key) — reject a kick-off whose
+      `burnTs` is older than a bound (`MAX_KICKOFF_AGE_MS`, e.g. a few minutes) in `validKickoff`
+      /`shouldAdopt`. For a stronger, unforgeable anchor, gate on the **on-chain tx timestamp**
+      via `verifyBurnTx` (already fetched at the paid-gate verify step) rather than the
+      self-reported `burnTs`. Allow generous clock-skew (peers aren't synchronized). Ties into the
+      envelope `ts` item (§5.0) — a per-message timestamp would let the same freshness check apply
+      to every flooded message, not just the kick-off.
 - [ ] Per-connection rate limiting (token buckets per message kind) + bounds on auxiliary maps
       (`seen`/`endedWaves`/`routed`/`lookupRoute`/`goneUntil`). More important now that
       admission is optimistic (gallery seats are cheap) — the token bucket caps how many
@@ -276,6 +290,19 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       without storing every hash. False positives (rare) just ask the peer to re-shoot; no false
       negatives. Complements the per-entry byte cap + one-per-peer dedup (bounds _content_ reuse,
       not just count). Pairs well with a lightweight perceptual hash to catch near-duplicates.
+- [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) selfies.** A `wave-selfie` is
+      an inline image any admitted participant can post, so a peer could post something NSFW or
+      abusive. Add a **report/downvote** signal that propagates so each peer can **choose not to
+      display** a flagged entry (client-side moderation, not censorship — the entry stays in the
+      log; hiding it is a local decision). Design: a signed `downvote` op appended to the same
+      per-wave gallery Autobase, referencing the target entry (`waveId` + `peerId`, or its image
+      hash), **receipt-gated + one-per-reporter** exactly like a selfie (so `apply()` tallies at
+      most one downvote per reporter — a sybil can't brigade, and the whole tally is deterministic + replicated so every peer converges on the same counts). The renderer hides an entry whose
+      downvote count crosses a threshold (with a per-user "show anyway" toggle, and a default that
+      errs toward hiding). Prefer an Autobase op over gossip so counts persist with the gallery and
+      converge; keep the report bytes tiny (no image). Pairs with the perceptual-hash / bloom
+      item (auto-detection) — this is the human-report half. Note the moderation is inherently
+      subjective + decentralized: it's advisory per-peer, not a global takedown.
 
 ### Remaining hardening (scalable-topology §8)
 
