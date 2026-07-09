@@ -33,9 +33,6 @@ const wave = createWave({
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
-  // HYPERWAVE_RAFFLE_TRX>0 -> when THIS instance initiates a wave (START), it sponsors a raffle
-  // for it (draws + pays a winner from its own wallet). No roles; the initiator archives + draws.
-  raffleTrx: env.HYPERWAVE_RAFFLE_TRX ? Number(env.HYPERWAVE_RAFFLE_TRX) : 0,
   onState: (s) => {
     console.log(
       `[${name}] peers=${s.peers.length} me=${s.me.id.slice(0, 8)}@${s.me.angle.toFixed(1)} ` +
@@ -51,18 +48,6 @@ const wave = createWave({
   },
   onEvent: (e) => {
     console.log(`[${name}] TOKEN`, JSON.stringify(e))
-    if (e.event === 'raffle-draw') {
-      console.log(
-        `[${name}] RAFFLE-DRAW wave=${e.waveId.slice(0, 8)} tickets=${e.tickets} ` +
-          `seed=${e.seed.slice(0, 8)} top=${e.top ? e.top.slice(0, 8) : 'none'}`
-      )
-    }
-    if (e.event === 'raffle-win') {
-      console.log(
-        `[${name}] RAFFLE-WIN wave=${e.waveId.slice(0, 8)} winner=${e.winner.slice(0, 8)} ` +
-          `${e.amount} TRX -> ${e.address.slice(0, 6)} tx=${e.hash}`
-      )
-    }
     // AUTOJOIN: try on announce (no-wallet path: already 'verified') and on wave-verified
     // (wallet path: after the kick-off burn confirms). join() dedupes + gates on paid.
     if (env.AUTOJOIN && !e.mine && (e.event === 'wave-announce' || e.event === 'wave-verified')) {

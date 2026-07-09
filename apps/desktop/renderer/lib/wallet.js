@@ -1,6 +1,6 @@
 // Wallet view: the self-custodial TRX wallet modal, opened from the top-right 💰. Shows the
 // balance + address (with refresh / copy / faucet / send) and a transaction history that merges
-// two sources by tx hash: the app's own events (burns / tips / sends / raffle payouts — instant,
+// two sources by tx hash: the app's own events (burns / tips / sends — instant,
 // optimistic) and the wallet's on-chain history fetched from the worker (which also surfaces
 // funds/tips RECEIVED — things the app never sees as events). Each row links to Tronscan; a
 // "full history" link deep-links to the address page. Extracted from hud.js.
@@ -40,12 +40,11 @@ export function walletStatus({ address, trx }) {
 const SENT_META = {
   burn: { icon: '🔥', label: 'Burned participation fee' },
   tip: { icon: '💵', label: 'Tipped a selfie' },
-  raffle: { icon: '🎁', label: 'Paid raffle prize' },
   send: { icon: '📤', label: 'Sent TRX' }
 }
 
-// Record an outgoing tx the app just made (burn / tip / send / raffle payout), from a worker
-// event — instant, with a specific label. Wins over the generic on-chain view for the same hash.
+// Record an outgoing tx the app just made (burn / tip / send), from a worker event — instant,
+// with a specific label. Wins over the generic on-chain view for the same hash.
 export function record({ kind, hash, amount }) {
   if (!hash) return
   const meta = SENT_META[kind] || { icon: '•', label: kind }

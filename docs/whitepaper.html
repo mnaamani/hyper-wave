@@ -143,10 +143,9 @@
         a signed token races seat-to-seat leaving a constant-size cryptographic trace, and each
         participant's selfie converges into a replicated, multi-writer gallery. Real (testnet) value
         flows through the game with no beneficiary or operator: participation fees are provably
-        <i>burned</i> on-chain (anti-spam), viewers tip selfies wallet-to-wallet, and an optional
-        raffle pays a winner selected by an auditable commit&#8211;reveal draw. The system runs on
-        the Holepunch stack (Hyperswarm, Autobase) with a Chord overlay for scale, and Tether's WDK
-        for self-custodial payments. Every peer runs identical code; there are no roles.
+        <i>burned</i> on-chain (anti-spam) and viewers tip selfies wallet-to-wallet. The system runs
+        on the Holepunch stack (Hyperswarm, Autobase) with a Chord overlay for scale, and Tether's
+        WDK for self-custodial payments. Every peer runs identical code; there are no roles.
       </p>
 
       <h2>1&nbsp;&nbsp;Introduction</h2>
@@ -320,9 +319,9 @@
         initiator retains its own wave's gallery for latecomers while it remains online.
       </p>
 
-      <h2>5&nbsp;&nbsp;Economics: burn, tip, raffle</h2>
+      <h2>5&nbsp;&nbsp;Economics: burn, tip</h2>
       <p>
-        Every peer embeds a self-custodial wallet (WDK; Tron Nile testnet, native TRX). Three rules
+        Every peer embeds a self-custodial wallet (WDK; Tron Nile testnet, native TRX). Two rules
         define the entire economy:
       </p>
       <ul>
@@ -335,14 +334,6 @@
         <li>
           <b>Tips are the only earnings.</b> A viewer tips a selfie 1 TRX directly to its owner's
           wallet; the apply rule guarantees a tip can only reach a wallet that paid in.
-        </li>
-        <li>
-          <b>An optional raffle.</b> The initiator may fund a prize. Each participant commits
-          <code>H(secret)</code> before the race — in gossip <i>and</i> in its burn memo (on-chain,
-          timestamped) — and reveals the secret with its selfie. The seed is the hash of all
-          reveals; a deterministic ranking picks the winner, and the initiator pays the first
-          candidate whose burn verifies on-chain, never itself. Since commits and reveals are
-          public, anyone can recompute the draw and audit the payout.
         </li>
       </ul>
 
@@ -360,8 +351,6 @@
             <text x="105" y="17">🔥 black hole</text>
             <rect x="100" y="44" width="60" height="20" rx="3" fill="#eefaee" stroke="#363" />
             <text x="107" y="57">other player</text>
-            <rect x="188" y="24" width="52" height="20" rx="3" fill="#fffbe6" stroke="#963" />
-            <text x="194" y="37">initiator</text>
             <line
               x1="56"
               y1="30"
@@ -380,23 +369,12 @@
               stroke-width="1.2"
               marker-end="url(#arr3)"
             />
-            <line
-              x1="188"
-              y1="34"
-              x2="162"
-              y2="52"
-              stroke="#963"
-              stroke-width="1.2"
-              marker-end="url(#arr3)"
-            />
             <text x="52" y="14" font-size="7" fill="#933">fee (burned)</text>
             <text x="62" y="55" font-size="7" fill="#363">tip</text>
-            <text x="166" y="40" font-size="7" fill="#963">prize</text>
           </g>
         </svg>
         <figcaption>
-          <b>Fig. 3.</b> Money flows: fees are destroyed, tips go peer-to-peer, the optional prize
-          is paid by the wave's initiator.
+          <b>Fig. 3.</b> Money flows: fees are destroyed, tips go peer-to-peer.
         </figcaption>
       </figure>
 
@@ -416,10 +394,8 @@
         connection identity; flooded messages are instead authenticated by the signatures they
         carry. Wave termination is signed by the originator. Gallery admission is <i>optimistic</i>:
         the fee attestation's signature is checked locally, and the on-chain read is deferred to
-        where it has value — raffle payout and tip time — bounding a fake burn's payoff at zero
-        while keeping the write path free of chain I/O. The residual raffle bias is a bounded
-        last-revealer abort (a costly re-roll, not aim); removing it needs a VDF or threshold
-        scheme. The raffle is testnet-only.
+        where it has value — tip time — bounding a fake burn's payoff at zero while keeping the
+        write path free of chain I/O.
       </p>
       <p>
         <b>Wire surface.</b> The protocol is deliberately small: one encoding (signed JSON over a
@@ -497,9 +473,7 @@
         service with per-record payment (the niche BitTorrent's Mainline DHT proved viable), and
         store-and-forward messaging with paid postage and paid mailboxes at
         <code>successor(recipient)</code> — the burn pattern directly answers the spam and
-        carrier-incentive gaps that sank earlier peer-to-peer messengers. The commit&#8211;reveal
-        machinery generalises to any small-stakes public draw or allocation where participants do
-        not trust the operator.
+        carrier-incentive gaps that sank earlier peer-to-peer messengers.
       </p>
 
       <h2>9&nbsp;&nbsp;Related work</h2>
@@ -522,21 +496,18 @@
         hop-interlocked receipt chain, which no payment depends on. Galleries are ephemeral and a
         wave's gallery survives only while its initiator stays online; durable archival is a policy
         choice deliberately left out. The swarm identity is currently regenerated per run (the
-        wallet persists; the seat does not) — persisting the keypair is queued work. Finally, the
-        raffle concentrates two powers in the initiator (admitting entries and holding the prize); a
-        production version must separate them.
+        wallet persists; the seat does not) — persisting the keypair is queued work.
       </p>
 
       <h2>11&nbsp;&nbsp;Status</h2>
       <p>
         Implemented and verified live on Nile: the ring, token race with healing, per-wave
-        galleries, burned fees with on-chain verification, tipping, and the audited raffle (commit
-        in the burn memo; winner's burn verified before payout), running under a desktop Electron
-        host. Correctness is covered by unit suites (ring/token/gallery/Chord/flood/pay), an 8-peer
-        end-to-end harness on a local DHT including mid-race peer kills, and an on-chain end-to-end
-        tier that drives a full paid wave with real burns and a raffle payout. Neither the protocol
-        nor the implementation has undergone an independent security audit; the adversarial analysis
-        in §6 is the authors' own. Code and the full protocol specification are in the repository.
+        galleries, burned fees with on-chain verification, and tipping, running under a desktop
+        Electron host. Correctness is covered by unit suites (ring/token/gallery/Chord/flood/pay),
+        an 8-peer end-to-end harness on a local DHT including mid-race peer kills, and an on-chain
+        end-to-end tier that drives a full paid wave with real burns. Neither the protocol nor the
+        implementation has undergone an independent security audit; the adversarial analysis in §6
+        is the authors' own. Code and the full protocol specification are in the repository.
       </p>
 
       <h2>References</h2>

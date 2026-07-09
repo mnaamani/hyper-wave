@@ -25,22 +25,19 @@ With a built-in self-custodial wallet via
   beneficiary: it's the anti-spam gate (peers verify the kick-off burn on-chain before
   joining).
 - **Gallery tips** — Tip a selfie 1 TRX straight to its owner's wallet.
-- **Optional raffle** — a wave's initiator can fund a prize; after the wave it draws one
-  winner among gallery participants via an auditable **commit-reveal** draw (commits ride
-  the burn memos on-chain) and pays from its own wallet, never itself.
 
-Every peer runs the same code; the only asymmetry is per-wave (the initiator archives its own wave's gallery and runs its raffle). Waves self-heal around dead peers.
+Every peer runs the same code; the only asymmetry is per-wave (the initiator archives its own wave's gallery). Waves self-heal around dead peers.
 
 Built for the [Tether Developers Cup](https://dorahacks.io/hackathon/tether-developers-cup) (theme: football / global tournament moment).
 
 ## Repo layout
 
-| Path                                                           | What                                                                                                                                                                                                                                                              |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`packages/hyperwave-lib-core/`](packages/hyperwave-lib-core/) | The reusable Bare engine: ring, token race, gossip/Chord topology, Autobase gallery, WDK wallet, fees, raffle. Unit + e2e tests.                                                                                                                                  |
-| [`apps/desktop/`](apps/desktop/)                               | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                                                                                                                                    |
-| [`apps/mobile/`](apps/mobile/)                                 | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                                                           |
-| [`docs/`](docs/)                                               | [`architecture.md`](docs/architecture.md) · [`protocol.md`](docs/protocol.md) (on-wire spec) · [`scalable-topology.md`](docs/scalable-topology.md) (Chord over Hyperswarm) · [`idea.md`](docs/idea.md) (the idea, plain language) · [`raffle.md`](docs/raffle.md) |
+| Path                                                           | What                                                                                                                                                                                                                              |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`packages/hyperwave-lib-core/`](packages/hyperwave-lib-core/) | The reusable Bare engine: ring, token race, gossip/Chord topology, Autobase gallery, WDK wallet, fees. Unit + e2e tests.                                                                                                          |
+| [`apps/desktop/`](apps/desktop/)                               | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                                                                                                    |
+| [`apps/mobile/`](apps/mobile/)                                 | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                           |
+| [`docs/`](docs/)                                               | [`architecture.md`](docs/architecture.md) · [`protocol.md`](docs/protocol.md) (on-wire spec) · [`scalable-topology.md`](docs/scalable-topology.md) (Chord over Hyperswarm) · [`idea.md`](docs/idea.md) (the idea, plain language) |
 
 ## Quickstart
 

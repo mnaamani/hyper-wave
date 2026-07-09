@@ -37,7 +37,7 @@ What works:
   RN UI drives the engine over the IPC protocol; identity + ring angle render on device.
 - **The WDK wallet runs in the worklet** — dynamic ESM import + Tron key derivation + an HTTP
   balance query to `nile.trongrid.io` all work; the 💰 chip populates (`0 TRX · T9zq6b…` on a
-  fresh wallet). So the full money layer (burns/tips/raffle) is available on mobile, same as
+  fresh wallet). So the full money layer (burns/tips) is available on mobile, same as
   desktop.
 
 Two mobile-specific fixes were needed and are in place: the worklet resolves the storage dir
@@ -81,7 +81,7 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 - **Wallet persistence + funding** — WDK works in the worklet (wallet is **on**), but the seed
   currently persists in the tmp dir (wiped per run → fresh unfunded wallet each launch). Inject
   the seed from `expo-secure-store` via the init `config.seed` (the core already accepts it,
-  `lib/pay.js`) for a stable, secure wallet, then faucet-fund it to exercise burns/tips/raffle.
+  `lib/pay.js`) for a stable, secure wallet, then faucet-fund it to exercise burns/tips.
   Note: a wallet-enabled phone runs **paid** waves (enforces the burn gate), so a cross-peer demo
   needs the other peers funded too — or set `wallet: false` in `App.js` for a no-wallet demo.
 - **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake

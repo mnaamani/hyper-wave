@@ -309,14 +309,11 @@ The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries
   "waveId": "<hex16>",
   "by": "<peerId>",
   "lobbyMs": 15000,
-  "paid": {/* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */},
-  "commit": "<hex32>",
-  "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */
+  "paid": {/* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */}
 }
 ```
 
-Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`. `commit`
-is the initiator's raffle commitment (it's a participant too); see §12.
+Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`.
 
 **Paid-wave gate (anti-spam).** When enforced (every instance has a wallet), the initiator
 **does not announce until it has burned the kick-off fee and confirmed it on-chain** — the
@@ -335,15 +332,12 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
   "kind": "wave-join",
   "mid": "<hex8>",
   "waveId": "<hex16>",
-  "peerId": "<peerId>",
-  "commit": "<hex32>",
-  "commitSig": "<hex64>" /* raffle commit, §12 — present when raffle is on */
+  "peerId": "<peerId>"
 }
 ```
 
 Receiver adds `peerId` to the wave's roster (if it's the current wave). Flooded so it reaches
-the initiator (which assembles the roster) even across a partial mesh. `commit` is the
-joiner's raffle commitment; the wave's initiator records it during the lobby (§12).
+the initiator (which assembles the roster) even across a partial mesh.
 
 ### wave-start — flooded (originator, when the lobby closes)
 
@@ -712,13 +706,12 @@ doesn't scale:
   connection-bound, §11) and the burn attestation is **signed** by that `peerId` for this wave
   (`burnAuthorizes`) — a cheap local check. It does **not** verify the burn on-chain here. It
   then appends the `add-writer` op.
-- **The burn is verified only where it matters:** at **raffle payout** (the wave's initiator
-  verifies the _winner's_ burn on-chain — the winner walk, §12), and by **tippers/auditors** at their own
-  pace via the entry's `burnTx`. So on-chain reads are O(1)-ish per wave, not O(N).
+- **The burn is verified only where it matters:** by **tippers/auditors** at their own pace via
+  the entry's `burnTx`. So on-chain reads are off the write path entirely.
 - **Spam is bounded locally** so optimistic admission can't be abused: **one entry per peer**
   (dedup in `apply()`) **+ a byte-size cap** on the entry (image ≤ `MAX_IMAGE_BYTES`, caption ≤
-  `MAX_CAPTION_BYTES`; oversized entries dropped). A fake-burn entry is cheap to make but wins
-  nothing (excluded at payout, worthless to tip) and is publicly detectable.
+  `MAX_CAPTION_BYTES`; oversized entries dropped). A fake-burn entry is cheap to make but is
+  worthless to tip and is publicly detectable.
 - **`apply()` (runs deterministically on every peer):**
   - `{ type: 'add-writer', key }` → `addWriter(key)`.
   - `{ type: 'wave-selfie', ... }` → append to the view **only if** its `receiptSig` verifies
@@ -726,7 +719,7 @@ doesn't scale:
     size caps. Plus: **one entry per peer** (first valid write wins); and the tip **`address`
     survives only if a signed burn backs it** (`burnAuthorizes` + `tronAddress === address`,
     else blanked). The bulky burn is verified-for-address then dropped; the burn `txHash` is
-    kept as `burnTx` so the on-chain burn (and raffle commit) stays locatable.
+    kept as `burnTx` so the on-chain burn stays locatable.
 
 ```mermaid
 sequenceDiagram
@@ -741,16 +734,16 @@ sequenceDiagram
   Note over AB: apply on every peer, addWriter key
   Note right of P: now writable
   P->>AB: append wave-selfie (size-capped, one per peer)
-  Note over AB: apply verifies receiptSig, append or drop.  Burn verified LATER (raffle/tips)
+  Note over AB: apply verifies receiptSig, append or drop.  Burn verified LATER (tips/audit)
   AB-->>P: view updates, replicates to all
 ```
 
 > **What each layer guarantees.** `apply()`'s checks are **deterministic** (no network I/O),
 > so every peer independently drops unsigned/impersonated/oversized/duplicate entries — that's
 > what bounds the gallery under optimistic admission. The **on-chain burn** is proof-of-payment
-> but it's checked **lazily, off the hot path** (winner at payout; anyone via `burnTx`), so a
-> gallery seat is cheap to take but its _value_ (winning the raffle, being worth a tip) still
-> requires a real burn. This trades the old hard "no unpaid write, ever" gate for a **soft,
+> but it's checked **lazily, off the hot path** (anyone via `burnTx`), so a gallery seat is
+> cheap to take but its _value_ (being worth a tip) still requires a real burn. This trades the
+> old hard "no unpaid write, ever" gate for a **soft,
 > publicly-detectable** one — a deliberate scale trade-off. When enforcement is off (no wallet
 > / tests) admission is receipt-only.
 
@@ -770,8 +763,7 @@ sequenceDiagram
   "image": "data:image/jpeg;base64,...",
   "address": "T…",
   "burn": {/* the poster's §9.0 attestation — verified then dropped */},
-  "raffleSecret": "<hex32>" /* raffle REVEAL, §12 — present when raffle is on */,
-  "burnTx": "<tron-tx-hash>" /* kept from the burn so the on-chain raffle commit is locatable */,
+  "burnTx": "<tron-tx-hash>" /* kept from the burn so the on-chain burn is locatable */,
   "timestamp": 1719705650000
 }
 ```
@@ -781,7 +773,7 @@ Hyperblobs is the scaling path. `address` is the poster's Tron (TRX) wallet, car
 viewer can **tip** this selfie with a real testnet transfer (renderer `tip` → worker
 `pay.send(address, amount)`; §WDK) — but only if `apply()` finds it backed by the `burn`
 (§8.2), so a tip always reaches the wallet that paid in. Stored form: one entry per
-`(waveId, peerId)`, the bulky `burn` stripped (its `txHash` kept as `burnTx` for raffle audit),
+`(waveId, peerId)`, the bulky `burn` stripped (its `txHash` kept as `burnTx` for audit),
 sorted by `hopCount` then `timestamp`.
 
 ## 9. Participation fees — burning & verification
@@ -843,8 +835,7 @@ costs real, irrecoverable value.
 
 A raw burn tx only proves "someone sent TRX to the black hole." The **on-chain memo** makes
 it _"peer P burned specifically for wave W"_: every fee burn carries
-`data = "hyperwave:<waveId>:<peerId>[:<raffleCommit>]"`, readable via `gettransactionbyid`
-(the `raffleCommit` segment is present only when the raffle is on — §12). Replay across waves
+`data = "hyperwave:<waveId>:<peerId>"`, readable via `gettransactionbyid`. Replay across waves
 is impossible — each `waveId` is 16 random bytes, unguessable before the wave exists, and the
 memo is part of the signed tx.
 
@@ -867,8 +858,7 @@ gallery admitter can gate write access).
 - **Before admitting a gallery writer (the admitter):** only the burn attestation's
   **signature** is checked locally (`burnAuthorizes`, bound to peerId + wave) — admission is
   **optimistic**, with deliberately **no on-chain call on the write path** (§8.2). The burn
-  is verified on-chain where it has value: at raffle payout (the winner walk, §12) and by
-  tippers/auditors via the entry's `burnTx`.
+  is verified on-chain where it has value: by tippers/auditors via the entry's `burnTx`.
 - **Anyone, later:** because every fee's memo is on-chain, a third party can audit the fees
   of any wave with nothing but a Tron node — no trust in anyone's bookkeeping required.
 
@@ -890,8 +880,6 @@ the gate (waves announce immediately, unpaid).
 | `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2)                                                                             |
 | `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                                                                                            |
 | `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)                                                                                     |
-| `RAFFLE_DELAY_MS`   | 3000   | settle delay after wave-end before the raffle draw (§12); the draw then polls up to 20s (`RAFFLE_CONVERGE_MS`) for reveals to replicate           |
-| `raffleTrx`         | 0      | raffle prize per wave (initiator's budget; 0 = raffle off)                                                                                        |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.
@@ -938,7 +926,7 @@ following guards keep a hostile peer running a modified app from disrupting hone
 - **Optimistic gallery admission, bounded locally.** Admission requires a _signed_ burn
   attestation but **no on-chain check on the write path** (that's O(N) reads on the admitter,
   §8.2). Spam is bounded deterministically instead — **one entry per peer + a byte-size cap** —
-  and the burn is verified where it has value: at raffle payout (the winner) and by tippers.
+  and the burn is verified where it has value: by tippers/auditors via `burnTx`.
   Trade-off: the hard "no unpaid write" gate becomes a **soft, publicly-detectable** one.
 - **Signed gallery key.** The gallery Autobase key is opened only after verifying the
   originator's signature over `(waveId, key)` (§8.1), so a relay can't swap the (unsigned,
@@ -962,66 +950,13 @@ following guards keep a hostile peer running a modified app from disrupting hone
   cheap now — only signature + one-per-peer + byte cap), so a per-connection token bucket is the
   natural cap on _how many_ add-writer/selfie a single peer can push.
 - **Optimistic admission is a soft gate.** Since the burn isn't checked on the write path
-  (§8.2), the gallery can hold unpaid entries until they're caught (raffle payout / a tipper /
-  an auditor via `burnTx`). They win nothing and are detectable, but they _do_ consume
-  (bounded) storage. Acceptable for the MVP scale; pair with the rate limit above at scale.
+  (§8.2), the gallery can hold unpaid entries until they're caught (a tipper / an auditor via
+  `burnTx`). They are detectable, but they _do_ consume (bounded) storage. Acceptable for the
+  MVP scale; pair with the rate limit above at scale.
 - **Wallet-less mode is unauthenticated by design.** All paid-gate guarantees hold only when a
   wallet is present (`enforcePaid`); an unfunded demo/test run accepts unpaid waves and
   receipt-only gallery admission so the lifecycle can be exercised without on-chain calls.
   Don't mistake that mode for the security model.
-
-## 12. Raffle — optional per-wave incentive (commit-reveal)
-
-Off by default. When the wave's **initiator** has a funded wallet and a prize budget
-(`raffleTrx > 0`), it draws one winner among its wave's gallery participants and pays the prize
-from its own wallet — a positive incentive to participate, on top of burned fees + tips. There
-is no dedicated sponsor/seed role: the initiator of each wave sponsors that wave's raffle.
-Fairness is **commit-reveal**, using the wave's two phases and **no external randomness
-beacon** (design + trade-offs: `docs/raffle.md`).
-
-1. **Commit (lobby).** Each participant generates a 32-byte `secret` and publishes
-   `commit = BLAKE2b(secret)` in the lobby **two ways**: (a) as a ring-signed `commit`/`commitSig`
-   on its `wave-join` / `wave-announce` gossip — which the initiator caches **in memory** while
-   its wave is in the lobby (the phase gate is the reveal deadline; the initiator records its own
-   commit locally when it announces); and (b) **on-chain**, in its fee-burn **memo**
-   (`hyperwave:<waveId>:<peerId>:<commit>`, §9.2), timestamped in the lobby and immutable. Both
-   hold the same value.
-2. **Reveal (gallery).** Each participant reveals `secret` in its `wave-selfie` entry, which
-   also carries the burn's `burnTx` so anyone can locate the on-chain commit.
-3. **Draw + winner walk (initiator, after wave-end + `RAFFLE_DELAY_MS`).** Eligible tickets =
-   entries whose `BLAKE2b(raffleSecret) ==` the commit the initiator **cached from lobby gossip**
-   (in memory — no per-participant REST fetch at draw time). `seed = BLAKE2b("raffle|" ‖ waveId ‖
-the secrets concatenated in ascending-peerId order, "|"-separated)`, then a deterministic **ranking**: each ticket keyed by
-   `BLAKE2b(seed ‖ peerId)`, sorted ascending. The initiator walks the ranking and pays the **first
-   candidate whose fee burn verifies ON-CHAIN** (`verifyBurnTx` on the entry's `burnTx`) — this
-   is where admission's deferred burn check happens, and it costs **one on-chain read for the
-   winner** (plus one per fake-burn entry ranked above it, if any). Usually it's `order[0]`. The
-   **initiator never pays itself:** it holds a fair ticket in the draw, but if it ranks first it
-   is skipped and the prize goes to the next eligible participant.
-
-**Accountability.** The initiator draws from its fast in-memory cache; the _authoritative_
-commits are the on-chain memos and the burns are on-chain too. So **anyone can later recompute**
-the seed + ranking (from the public reveals) and re-verify the walk on-chain, and **catch an
-initiator that dropped a validly-committed participant, skipped a candidate whose burn was
-actually valid, or paid the wrong winner**. Fast in-memory draw, kept honest by an on-chain
-audit trail (a deterrent), not by trusting the initiator.
-
-A missing/mismatched reveal (a peer that committed but didn't reveal by the draw) **does not
-abort the raffle** — that peer is simply excluded and the draw runs over the remaining valid
-reveals (no eligible tickets → no winner, a no-op). Because each peer commits before seeing
-others, it can't choose a secret to steer the draw; the residual is a **last-revealer abort**:
-withholding your reveal removes you and shifts the seed — a _bounded, binary_ re-roll at the
-cost of your own ticket, **not** the ability to aim (nor to cancel the draw). Removing even
-this needs a **VDF (Verifiable Delay Function)** or a threshold scheme (`docs/raffle.md`).
-
-> **Trust caveat (MVP): initiator = admitter = prize-holder.** For simplicity the wave's
-> initiator both funds the prize and draws it. With commits on-chain the **draw math is publicly
-> auditable** (nobody has to trust the initiator's RNG), but the initiator _could_ still
-> **censor the entry set** — it gates who's admitted to the gallery, so it could keep honest
-> peers out. This is acceptable only under the trusted-initiator + testnet assumption.
-> **Production must separate the admitter (an independent wave originator) from the prize-holder**
-> so the funder can't shape _who's in_ the draw. Also: a paid-entry game of chance is legally a
-> **lottery** in most jurisdictions — keep it testnet, or get legal review.
 
 ## Appendix A — app-internal IPC (informative, not on-wire)
 
@@ -1047,6 +982,4 @@ announcing), `wave-verified` (kick-off burn proven — join is now allowed), `wa
 (kick-off failed verification — wave abandoned), `join-blocked {reason}` (tried to join
 before the kick-off is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {canSelfie,angle,...}` (ball reached me — my staged selfie posts now),
-`position`, `forwarded`, `completed`, `healed`, `stalled`, `gallery-error`; and (the wave's
-initiator, when the raffle is on) `raffle-draw {tickets,seed,top}` (`top` = the pre-walk
-top-ranked candidate) + `raffle-win {winner,address,amount,hash}`.
+`position`, `forwarded`, `completed`, `healed`, `stalled`, `gallery-error`.

@@ -80,8 +80,7 @@ contributed to the design. Deeper context for the choices documented in
   (via `hypercore-crypto` / libsodium).
 - **BLAKE2: simpler, smaller, fast as MD5** — Aumasson, Neves, Wilcox-O'Hearn, Winnerlein
   (2013). <https://www.blake2.net/blake2.pdf>
-  Our hash everywhere: ring topics, receipt hashes, the chain accumulator, raffle
-  commits and the draw seed.
+  Our hash everywhere: ring topics, receipt hashes, and the chain accumulator.
 - **The Noise Protocol Framework** — Perrin. <https://noiseprotocol.org/noise.html>
   The handshake/encryption under every Hyperswarm connection; also what gives us an
   authenticated remote identity per connection (the basis of our identity-binding checks).
@@ -90,19 +89,6 @@ contributed to the design. Deeper context for the choices documented in
   The ancestor of our constant-size **chain accumulator**: folding each hop's signature
   into a rolling hash so the token stays tiny while still committing to the full hop
   history.
-
-## Randomness & the raffle
-
-- **RANDAO** — <https://github.com/randao/randao> — commit-reveal randomness among
-  mutually distrusting participants (as later used in Ethereum's beacon chain). Our
-  raffle draw is the same shape: commit `H(secret)` before the race (in gossip **and** in
-  the on-chain burn memo), reveal with the selfie, fold the reveals into the seed. Same
-  known residual, too: the last revealer can abort (re-roll) but cannot aim.
-- **Verifiable Delay Functions** — Boneh, Bonneau, Bünz, Fisch (CRYPTO 2018).
-  <https://eprint.iacr.org/2018/601>
-  The documented future fix for the last-revealer abort ([`raffle.md`](./raffle.md)
-  §3.4): make the seed's finalization deliberately too slow to compute-then-decide inside
-  the reveal window.
 
 ## The game itself
 

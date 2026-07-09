@@ -173,7 +173,7 @@ ipc.on('event', (e) => {
       lobby.close()
       proof.close()
       // refresh the status line + dock button now the wave is over. We deliberately DON'T clear
-      // the wave-status here — it keeps the last result (completed / raffle winner) on screen
+      // the wave-status here — it keeps the last result (completed) on screen
       // until the next wave's wave-announce clears it.
       updateHud()
       break
@@ -223,16 +223,6 @@ ipc.on('event', (e) => {
     case 'stalled':
       hud.waveStatus(`⚠️ wave stalled (${e.reason})`)
       gallery.startReplay() // still replay whatever selfies were collected before the stall
-      break
-    case 'raffle-win':
-      // the wave's initiator drew a winner among the gallery participants (commit-reveal draw).
-      // This only fires on the initiator, which actually paid the prize — so record it.
-      hud.waveStatusNodes(
-        `🎉 raffle winner: ${e.winner.slice(0, 8)}… - ${e.amount} TRX (of ${e.tickets} tickets, `,
-        txLink(e.hash, `tx ${e.hash.slice(0, 8)}…`),
-        ')'
-      )
-      wallet.record({ kind: 'raffle', hash: e.hash, amount: e.amount })
       break
   }
 })

@@ -68,7 +68,7 @@ class Proc {
   // `t.ok(await …)`, so a falsy result fails just that assertion, whereas a rejection becomes
   // an unhandled promise rejection that crashes the process and aborts the rest of the suite —
   // catastrophic for one flaky timeout. `false` (not `null`) is the safe sentinel: property
-  // access on it (`draw.tickets` for the `const x = await waitForEvent()` callers) yields
+  // access on it (`evt.hops` for the `const x = await waitForEvent()` callers) yields
   // `undefined` rather than throwing. The tail is logged as a TAP diagnostic so a timeout is
   // still diagnosable.
   _wait(ready, value, ms, what) {
@@ -151,7 +151,7 @@ class Cluster {
   }
 
   // Launch a peer with its own storage dir. `env` overrides (START, AUTOJOIN, AUTOSELFIE,
-  // WALLET, HYPERWAVE_RAFFLE_TRX, …). `seed` (a BIP39 mnemonic) is written to the storage dir's
+  // WALLET, …). `seed` (a BIP39 mnemonic) is written to the storage dir's
   // `wallet.seed` so the wallet is a specific FUNDED one (for the on-chain tier); omit it for
   // the local no-wallet tier. Returns the Proc.
   launch(name, env = {}, seed = null) {

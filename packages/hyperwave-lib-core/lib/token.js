@@ -142,61 +142,6 @@ function verifyWaveEnd(originatorHex, waveId, hops, chainHash, sigHex) {
   }
 }
 
-// --- raffle: commit-reveal + the draw (docs/raffle.md) --------------------
-// A sponsor-funded raffle picks one winner among the wave's (burn-gated) gallery entries.
-// Fairness = commit-reveal, using the wave's two phases: each participant COMMITS to a hidden
-// secret during the lobby (before anyone reveals), then REVEALS it in its gallery selfie. The
-// draw seed folds every revealed secret, so no participant — having committed before seeing
-// others — can steer the outcome (the residual is a last-revealer *abort*, bounded by a reveal
-// deadline; see the doc). Pure + deterministic here so anyone can recompute and audit the draw.
-
-// The public commitment to a hidden 32-byte secret.
-function commitOf(secretHex) {
-  return b4a.toString(crypto.hash(b4a.from(secretHex, 'hex')), 'hex')
-}
-
-// A participant signs its commitment with its ring key so only it can set its own commit
-// (the commit rides flooded gossip where peerId isn't connection-bound).
-function commitSigHash(waveId, peerId, commit) {
-  return crypto.hash(b4a.from(`raffle-commit|${waveId}|${peerId}|${commit}`))
-}
-function signCommit(keyPair, waveId, peerId, commit) {
-  return b4a.toString(crypto.sign(commitSigHash(waveId, peerId, commit), keyPair.secretKey), 'hex')
-}
-function verifyCommit(waveId, peerId, commit, sigHex) {
-  try {
-    return crypto.verify(
-      commitSigHash(waveId, peerId, commit),
-      b4a.from(sigHex, 'hex'),
-      b4a.from(peerId, 'hex')
-    )
-  } catch {
-    return false
-  }
-}
-
-// The draw. `tickets` = eligible entries [{ peerId, secret, ... }] whose reveal matched their
-// commit. Deterministic: fold the secrets (in peerId order) into a `seed`, then produce a
-// deterministic RANKING of the tickets — each keyed by H(seed|peerId), sorted ascending. The
-// winner is `order[0]`; a payer that must skip an ineligible winner (e.g. its burn doesn't
-// verify — admission is optimistic) walks down `order`, and that walk is itself auditable
-// (skipping a valid earlier candidate is detectable). Anyone with the same tickets recomputes
-// the same seed + order. Returns { seed, order, winner: order[0] | null }.
-function raffleDraw(waveId, tickets) {
-  const sorted = [...tickets].sort((a, b) =>
-    a.peerId < b.peerId ? -1 : a.peerId > b.peerId ? 1 : 0
-  )
-  const seed = b4a.toString(
-    crypto.hash(b4a.from(`raffle|${waveId}|` + sorted.map((t) => t.secret).join('|'))),
-    'hex'
-  )
-  const order = tickets
-    .map((t) => ({ t, k: b4a.toString(crypto.hash(b4a.from(`${seed}|${t.peerId}`)), 'hex') }))
-    .sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0))
-    .map((x) => x.t)
-  return { seed, order, winner: order[0] || null }
-}
-
 module.exports = {
   ZERO_HASH,
   receiptHash,
@@ -211,9 +156,5 @@ module.exports = {
   signGalleryKey,
   verifyGalleryKey,
   signWaveEnd,
-  verifyWaveEnd,
-  commitOf,
-  signCommit,
-  verifyCommit,
-  raffleDraw
+  verifyWaveEnd
 }

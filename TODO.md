@@ -52,8 +52,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] **Optimistic gallery admission** (scales without a Tron node/indexer): `add-writer`
       carries the join burn attestation; the admitter checks only the _signature_
       (`burnAuthorizes`) — **no on-chain call on the write path** (that was O(N) reads on the
-      admitter). The burn is verified where it pays off: at raffle payout (winner walk) + by
-      tippers via `burnTx`. Spam bounded by one-entry-per-peer + a byte-size cap
+      admitter). The burn is verified where it pays off: by tippers via `burnTx`. Spam bounded by one-entry-per-peer + a byte-size cap
       (`MAX_IMAGE_BYTES`/`MAX_CAPTION_BYTES`). Soft, publicly-detectable gate; verified live.
 - [x] **Signed gallery key**: originator signs `(waveId, autobaseKey)` (`signGalleryKey`);
       peers verify before opening — a relay can't swap the unsigned key to a rogue Autobase
@@ -68,29 +67,17 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] **Peer roles removed** (simplification): no more `validator`/`seed`/`sponsor` role, no
       `role` option, no `HYPERWAVE_ROLE`, no `role` in the `pointers` heartbeat, no
       seed-pinning. Every peer is equal. The only asymmetry is **per-wave and belongs to the
-      initiator**: it retains its own wave's gallery (archivist for that wave only), collects
-      its raffle commits, and — if it funds a raffle — draws + pays the prize from its own
-      wallet (skipping itself in the winner walk). Accepted: a gallery is lost if its initiator
-      goes offline; nothing persists across runs.
-- [x] **Initiator-funded raffle** (positive incentive re-added, off by default; `raffleTrx` /
-      `HYPERWAVE_RAFFLE_TRX` on the initiator) — `runRaffle` draws ONE winner among gallery
-      participants via internal **commit-reveal** (no external beacon: commit rides
-      `wave-join`/`wave-announce` in the lobby, reveal rides the selfie, the initiator folds
-      secrets into a deterministic auditable draw) and pays the burn-verified address from its
-      own wallet (it's skipped in the winner walk — never pays itself). Verified live on Nile.
-      See `docs/raffle.md` + `docs/protocol.md` §12. **MVP: initiator = admitter = prize-holder**
-      — production must separate the admitter from the prize-holder; testnet-only (a paid game of
-      chance is legally a lottery).
+      initiator**: it retains its own wave's gallery (archivist for that wave only). Accepted:
+      a gallery is lost if its initiator goes offline; nothing persists across runs.
 - [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
       semver can't parse (`scripts/fix-bare-engines.js`)
 - [x] **End-to-end integration tests** (`app/e2e/`): a Node+brittle harness spawns a local DHT + N real `wave.run.js` peers and drives full waves, asserting on the protocol's structured
       event stream (poll-until-event, no sleeps; process-group teardown). Local suite (no wallet
       / no on-chain, deterministic): 8-peer gallery convergence, self-healing under 2 mid-race
-      kills, raffle draw over all N. `npm run test:e2e:local`; runs in GitHub Actions
+      kills. `npm run test:e2e:local`; runs in GitHub Actions
       (`.github/workflows/ci.yml`) alongside unit tests. **On-chain tier** (`wave.onchain.e2e.js`,
       `npm run test:e2e:onchain`): enforced wave on Nile — paid gate → real kick-off/join burns →
-      on-chain kick-off verification → optimistic admission → raffle payout (on-chain winner
-      check + real TRX transfer). Gated on funded-wallet secrets, runs manual/nightly
+      on-chain kick-off verification → optimistic admission. Gated on funded-wallet secrets, runs manual/nightly
       (`.github/workflows/e2e-onchain.yml`). Verified live (8/8 asserts, ~38s).
 
 ### Adversarial hardening (against a modified client) — `docs/protocol.md` §11.2
@@ -180,12 +167,6 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       (N reads of 1 immutable tx). Not a concentration bottleneck (distributed, 1 read/joiner)
       and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
       the anti-_wave_-spam gate; making it optimistic would re-open free wave-spam).
-- [ ] Raffle production hardening (`docs/raffle.md`): **separate the admitter from the
-      prize-holder** so the initiator (currently admitter + prize-holder in one) can't censor
-      the entry set; escrow/contract custody instead of the trusted initiator wallet; a VDF (Verifiable Delay
-      Function) or threshold scheme to remove the last-revealer abort; legal review (a paid game
-      of chance is a lottery). Also: k-winners/tiered prizes (`raffleDraw` returns the full
-      ranking, so the top-k of the winner walk are the winners).
 - [ ] **Loop guard: a peer must never forward a token for the same `waveId` twice (wave can't
       circle past the originator).** Today the safety against a runaway loop is (a) the originator's
       completion check in `processToken` (`token.originator === me.id && hopCount > 0` → `wave-end`,
@@ -264,8 +245,8 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       wallet seed (would publicly link wallet ↔ swarm identity — keep the seeds separate).
 - [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
       `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
-      commit `hyperwave:<waveId>:<peerId>[:<commit>]` in an **`OP_RETURN`** output (≤ 80 bytes —
-      the raffle commit is 32B, fits with the ids trimmed/hashed). "Burn" = an output to a
+      commit `hyperwave:<waveId>:<peerId>` in an **`OP_RETURN`** output (≤ 80 bytes, with the
+      ids trimmed/hashed as needed). "Burn" = an output to a
       provably-unspendable script (`OP_RETURN` itself is unspendable, or a known burn address);
       `verifyBurnTx` becomes a chain-specific check of the tx's outputs + `OP_RETURN` data.
       Keep the ring-key attestation chain-agnostic; make the verifier pluggable per chain.

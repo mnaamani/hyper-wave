@@ -3,8 +3,8 @@
 // N equal peers, drives a full wave, and asserts on the outcome via the harness's
 // poll-until-event helpers (no sleeps). Run: `npm run test:e2e:local` (or set E2E_PEERS=N).
 //
-// A companion on-chain suite (funded wallets + Nile) covers the paid-wave gate, burns, raffle
-// payout, and tips — that one needs secrets + costs testnet TRX, so it runs gated/nightly.
+// A companion on-chain suite (funded wallets + Nile) covers the paid-wave gate, burns, and
+// tips — that one needs secrets + costs testnet TRX, so it runs gated/nightly.
 const test = require('brittle')
 const { Cluster, sleep, waitForAnyGallery } = require('./harness')
 
@@ -14,9 +14,9 @@ const N = Number(process.env.E2E_PEERS || 8)
 
 // Launch N equal peers, all auto-joining and auto-selfie-ing (no roles). p1 initiates: it kicks
 // off once it sees everyone (the N-1 other peers), and — as the initiator — it archives its
-// wave's gallery + runs its raffle. `initEnv` passes extra env only to p1 (e.g. the raffle
-// prize). Launches are staggered — the other half of reliable DHT discovery (see harness.start's
-// warm-up). Returns { peers } (peers[0] is the initiator p1).
+// wave's gallery. `initEnv` passes extra env only to p1. Launches are staggered — the other half
+// of reliable DHT discovery (see harness.start's warm-up). Returns { peers } (peers[0] is the
+// initiator p1).
 async function launchWave(c, initEnv = {}) {
   const peers = []
   for (let i = 1; i <= N; i++) {
@@ -78,23 +78,5 @@ test(
       await waitForAnyGallery(survivors, N - 3, 90000),
       `the healed wave still populated the gallery (≥ ${N - 3} survivor selfies converged)`
     )
-  }
-)
-
-test(
-  `the raffle draws over all ${N} participants (commit-reveal, no wallet)`,
-  { timeout: 150000 },
-  async (t) => {
-    const c = await new Cluster({ lobbyMs: 8000 }).start()
-    t.teardown(() => c.destroy())
-
-    // the initiator (p1) sponsors the raffle for its own wave
-    const { peers } = await launchWave(c, { HYPERWAVE_RAFFLE_TRX: '3' })
-
-    // after the wave the initiator folds every reveal into a deterministic draw over all N tickets
-    const draw = await peers[0].waitForEvent('raffle-draw', 90000)
-    t.is(draw.tickets, N, `all ${N} participants are eligible (commit ⟷ reveal matched)`)
-    t.ok(draw.top, 'the draw names a top candidate (deterministic ranking)')
-    t.is((draw.seed || '').length, 64, 'the draw seed is published for public recompute/audit')
   }
 )

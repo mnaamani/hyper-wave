@@ -10,19 +10,16 @@ const FEE_TRX = 1 // kick-off/join fee, burned to the black hole (pay.BURN_ADDRE
 const CONFIRM_ATTEMPTS = 12
 const CONFIRM_INTERVAL_MS = 2500
 
-// The memo that provably ties a burn to its wave + payer (protocol.md §9.2), and — when the
-// raffle is on — the payer's raffle **commit**, so the commitment is recorded ON-CHAIN
-// (timestamped, immutable, auditable) rather than only in the seed's memory (docs/raffle.md).
-function burnMemo(waveId, peerId, commit) {
-  return commit ? `hyperwave:${waveId}:${peerId}:${commit}` : `hyperwave:${waveId}:${peerId}`
+// The memo that provably ties a burn to its wave + payer (protocol.md §9.2).
+function burnMemo(waveId, peerId) {
+  return `hyperwave:${waveId}:${peerId}`
 }
 
 // Burn the participation fee for `waveId` and sign the ring attestation. Returns
 // { hash, proof }; throws if the burn fails. `proof` is the kick-off gate credential for the
 // initiator (announcePaid); a joiner's burn is its own anti-spam cost and ignores `proof`.
 async function payFee(wave, payments, waveId, reason) {
-  const commit = wave.raffleCommit ? wave.raffleCommit() : '' // in-memo raffle commitment
-  const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id, commit))
+  const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id))
   // pass waveId so the attestation records even if the (instant) wave already ended — it's the
   // ticket for a late gallery admission into the persisted gallery (wave.js recordBurn).
   const proof = wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash, waveId })
@@ -44,15 +41,10 @@ async function confirmBurn(payments, waveId, hash) {
   return false
 }
 
-// Wire a ready wallet into the engine: my address (gallery tips / attestations), the on-chain
-// burn verifier (enables the paid-wave anti-spam gate), and the reward sender (used by a
-// sponsor/seed to pay the raffle prize).
+// Wire a ready wallet into the engine: my address (gallery tips / attestations) and the on-chain
+// burn verifier (enables the paid-wave anti-spam gate).
 function wireWallet(wave, payments) {
-  wave.setWallet(
-    payments.address,
-    (txHash, expect) => payments.verifyBurnTx(txHash, expect),
-    (addr, amt) => payments.send(addr, amt)
-  )
+  wave.setWallet(payments.address, (txHash, expect) => payments.verifyBurnTx(txHash, expect))
 }
 
 module.exports = { FEE_TRX, burnMemo, payFee, confirmBurn, wireWallet }

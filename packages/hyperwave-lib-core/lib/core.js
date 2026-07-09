@@ -32,10 +32,6 @@ function init({
     bootstrap: config.bootstrap ? parseBootstrap(config.bootstrap) : undefined,
     matchId: config.matchId,
     lobbyMs: config.lobbyMs,
-    // Raffle prize (TRX): if > 0, for waves THIS peer initiates it draws a winner among the
-    // gallery participants and pays them from its own wallet. 0 = off. No roles — the wave's
-    // initiator is its own gallery archivist + commit-recorder + raffle sponsor.
-    raffleTrx: config.raffleTrx || 0,
     onState: (state) => send({ type: 'state', ...state }),
     onEvent: (event) => send({ type: 'event', ...event }),
     onGallery: (items) => send({ type: 'gallery', items }),

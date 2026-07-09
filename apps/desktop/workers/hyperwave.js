@@ -19,9 +19,6 @@ const core = hyperwave.init({
     bootstrap: env.HYPERWAVE_BOOTSTRAP, // optional host:port -> local DHT (instant same-machine discovery)
     matchId: env.HYPERWAVE_MATCH || undefined, // isolate the ring
     lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
-    // HYPERWAVE_RAFFLE_TRX>0 -> sponsor a raffle for waves this peer initiates (no roles; the
-    // initiator archives its wave's gallery + draws + pays the prize from its own wallet)
-    raffleTrx: env.HYPERWAVE_RAFFLE_TRX ? Number(env.HYPERWAVE_RAFFLE_TRX) : 0,
     wallet: env.HYPERWAVE_WALLET === 'false' ? false : undefined // HYPERWAVE_WALLET=false -> no-wallet (receipt-only) wave
   },
   send

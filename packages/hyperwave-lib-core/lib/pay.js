@@ -112,13 +112,12 @@ async function createPayments({
         if (expect.minTrx !== undefined && BigInt(v.amount || 0) < toSun(expect.minTrx)) {
           return { ok: false, reason: 'amount-too-low' }
         }
-        // Memo is `hyperwave:<waveId>:<peerId>:<commit?>` — check it commits the waveId, and
-        // return the (optional) raffle `commit` so the seed can read the ON-CHAIN commitment.
+        // Memo is `hyperwave:<waveId>:<peerId>` — check it commits the waveId.
         const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : ''
         if (expect.waveId && !memo.includes(expect.waveId)) {
           return { ok: false, reason: 'memo-mismatch' }
         }
-        return { ok: true, commit: memo.split(':')[3] || '' }
+        return { ok: true }
       } catch (e) {
         return { ok: false, reason: e.message }
       }

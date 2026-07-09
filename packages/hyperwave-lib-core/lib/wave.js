@@ -35,7 +35,6 @@ const {
   verifyWaveEnd
 } = require('./token')
 const { galleryConfig, readGallery } = require('./gallery')
-const { createRaffle } = require('./raffle')
 
 const MATCH = 'hyperwave:demo-match:v1'
 const HEARTBEAT_MS = 2000 // pointers-heartbeat cadence (liveness + Chord pointer exchange)
@@ -142,16 +141,11 @@ function createWave({
   // on-chain. `verifyBurnTx(txHash, {waveId, from, minTrx}) -> {ok}` is the on-chain check
   // (provided by the payment layer once the wallet is up; off by default so no-wallet
   // headless/tests behave as before — waves announce immediately, unpaid).
-  verifyBurnTx = null,
-  // Raffle prize (docs/raffle.md): if > 0, then for a wave THIS peer initiates it draws one
-  // winner among the gallery participants (commit-reveal) after the wave and pays `raffleTrx`
-  // from its own wallet. 0 = off. There are no roles: the wave's initiator is its gallery
-  // archivist, commit-recorder, and (if funded) raffle sponsor — all for its own wave only.
-  raffleTrx = 0
+  verifyBurnTx = null
 }) {
   // No roles — every peer is equal. The one asymmetry is per-wave: the peer that INITIATES a
-  // wave keeps that wave's gallery open (so it survives for latecomers/replication) and runs
-  // its raffle; everyone else treats galleries as ephemeral and closes them when moving on.
+  // wave keeps that wave's gallery open (so it survives for latecomers/replication);
+  // everyone else treats galleries as ephemeral and closes them when moving on.
   // The store is per-run (galleries are keyed by the random waveId, so nothing persists
   // meaningfully across runs); wipe it on startup to reclaim disk.
   const storePath = storageDir + '/hyperwave'
@@ -168,7 +162,6 @@ function createWave({
   let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
-  let payReward = null // send TRX to an address — used only for the raffle prize (initiator)
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -181,7 +174,7 @@ function createWave({
   let autobaseKey = null // hex bootstrap key of `base`, shared via gossip + token
   let currentWaveId = null // which wave `base` belongs to (galleries are per-wave)
   const galleries = new Map() // waveId -> base (I retain the galleries for waves I initiated)
-  const initiatedWaves = new Set() // waveIds I started — I keep their galleries + run their raffle
+  const initiatedWaves = new Set() // waveIds I started — I keep their galleries open (archivist)
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
   // concurrent starts resolve deterministically (lower waveId wins). During the
@@ -203,22 +196,6 @@ function createWave({
   let admissionPromise = null // in-flight add-writer request (dedup concurrent callers)
   let myBurnProof = null // my signed fee-burn attestation — my gallery-admission ticket
   const admittedKeys = new Set() // (admitter) writer core keys I've already admitted this wave
-
-  // Per-wave sponsor raffle (raffle.js) — commit-reveal draw + payout, run by a wave's initiator.
-  // It owns its own state (my secret/commit, recorded commits); wave.js drives it via these calls.
-  // verifyBurnOnChain/payReward are read through accessors because setWallet reassigns them later.
-  const raffle = createRaffle({
-    keyPair: swarm.keyPair,
-    me,
-    raffleTrx,
-    galleries,
-    getWave: () => wave,
-    iInitiated: (id) => initiatedWaves.has(id),
-    getVerifyBurnOnChain: () => verifyBurnOnChain,
-    getPayReward: () => payReward,
-    onEvent,
-    log
-  })
 
   // Distributed findSuccessor routing (chord-routing.js) — the Chord control plane over the
   // gossip mesh: join-time self-placement, periodic successor repair, and the find-succ RPC.
@@ -425,15 +402,11 @@ function createWave({
         wave.kickoffProof = m.paid
         verifyKickoff(m.waveId, m.paid)
       }
-      // NB: no commit recorded here — whoever receives an announce is never its initiator (I
-      // don't receive my own flood), and only the initiator collects. The initiator records its
-      // own commit locally in doAnnounce; joiners' commits arrive via wave-join below.
       return
     }
     if (m.kind === 'wave-join') {
       if (wave && m.waveId === wave.id && m.peerId) {
         wave.roster.add(m.peerId)
-        raffle.recordCommit(m.waveId, m.peerId, m.commit, m.commitSig)
         onEvent({ event: 'roster', waveId: wave.id, count: wave.roster.size })
       }
       return
@@ -579,7 +552,7 @@ function createWave({
       return base
     }
     // Close the previous wave's gallery when moving on — UNLESS I initiated it, in which case
-    // I keep it open to archive it (so it survives for latecomers) and run its raffle.
+    // I keep it open to archive it (so it survives for latecomers).
     if (base && !initiatedWaves.has(currentWaveId)) {
       base.close().catch(() => {})
       if (currentWaveId) galleries.delete(currentWaveId)
@@ -641,10 +614,9 @@ function createWave({
   //      txHash + tip address, but NOT verified on-chain here.
   // We deliberately do *not* verify the burn on-chain at admission: that's O(N) REST calls
   // concentrated on the admitter and doesn't scale. Instead the burn is verified only when it
-  // pays off — at raffle payout (the winner walk, raffle.js) — and by tippers/auditors via the
-  // entry's `burnTx`. Spam is bounded locally: one entry per peer + a byte-size cap on the
-  // image (gallery.js apply). So a fake-burn entry is cheap to make but wins nothing (excluded
-  // at payout, worthless to tip) and is publicly detectable. Fully local + synchronous.
+  // pays off — by tippers/auditors via the entry's `burnTx`. Spam is bounded locally: one entry
+  // per peer + a byte-size cap on the image (gallery.js apply). So a fake-burn entry is cheap to
+  // make but is worthless to tip and is publicly detectable. Fully local + synchronous.
   function admitWriter(m) {
     if (!base || !base.writable || !m.key || m.waveId !== currentWaveId) return
     if (admittedKeys.has(m.key)) return
@@ -660,7 +632,7 @@ function createWave({
   // Become an admitted gallery writer: broadcast an add-writer request presenting (a) my hop
   // receipt for this wave and (b) my fee-burn attestation — admission is OPTIMISTIC: the
   // admitter checks only the attestation signature (burnAuthorizes), no on-chain call; the
-  // burn is verified later where it pays off (raffle winner walk, tippers via burnTx). Then
+  // burn is verified later where it pays off (tippers/auditors via burnTx). Then
   // wait until writable. `admissionPromise` dedups concurrent callers into one in-flight request.
   // (The originator is already a writer and never comes here — it paid its kick-off burn.)
   function ensureWriter(receipt) {
@@ -724,11 +696,10 @@ function createWave({
       return
     }
     // Capture closure state NOW, before the admission await: in a fast (few-peer) wave the
-    // race can complete during ensureWriter, and goIdle→resetSelfie would clear these before
-    // the append — dropping our own tip address / raffle reveal. (The staged image/receipt are
-    // already captured as args.)
+    // race can complete during ensureWriter, and goIdle→resetSelfie would clear this before
+    // the append — dropping our own tip address. (The staged image/receipt are already captured
+    // as args.)
     const burnProof = myBurnProof
-    const raffleSecret = raffle.currentReveal()
     if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
       // distinguish the two failure modes so the UI can tell the user what actually went wrong:
       // no burn ticket at all (fee never paid/confirmed) vs. a valid ticket that timed out being
@@ -753,10 +724,6 @@ function createWave({
       // burn came from, so a tip always reaches the wallet that paid in (§ tip-address gate).
       // It's verified then dropped from the stored entry (kept lean); `tronAddress === address`.
       burn: burnProof || undefined,
-      // raffle REVEAL: my secret, whose H(secret) I committed to in the lobby. The seed folds
-      // every revealed secret into the draw seed (docs/raffle.md); I couldn't have chosen it
-      // to steer the outcome because I committed before anyone revealed.
-      raffleSecret: raffleSecret || undefined,
       timestamp: Date.now()
     })
     log('posted selfie hop', hopCount)
@@ -874,13 +841,10 @@ function createWave({
     }
     wave.joined = true
     wave.roster.add(me.id)
-    const rc = raffle.optIn() // commit to my raffle secret in the lobby (revealed in my selfie)
     floodGossip({
       kind: 'wave-join',
       waveId: wave.id,
-      peerId: me.id,
-      commit: rc.commit,
-      commitSig: rc.commitSig
+      peerId: me.id
     })
     onEvent({ event: 'joined', waveId: wave.id, count: wave.roster.size })
     return wave.id
@@ -913,10 +877,6 @@ function createWave({
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
     if (stalled) onEvent({ event: 'stalled', waveId, reason: 'no successor' })
     else onEvent({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) })
-    // If I initiated this wave and fund a raffle, the raffle draws it after a settle (no-op
-    // otherwise). It reads the gallery I retained + the commits it recorded, so goIdle clearing
-    // `wave` below is fine.
-    raffle.scheduleDraw(waveId)
     goIdle(stalled ? 'stalled' : 'ended')
   }
 
@@ -962,9 +922,6 @@ function createWave({
     // checks burn.waveId), so keeping it is safe — it can only ever admit its own wave. It's
     // cleared instead when a genuinely new wave's lobby begins (enterLobby).
     admittedKeys.clear()
-    raffle.reset() // clear my staged secret/commit for the next wave (see raffle.js)
-    // NB: the raffle's recorded commits are keyed per-wave and consumed by its *delayed* draw
-    // after goIdle, so they are NOT cleared here — the draw deletes its own wave's entry.
   }
 
   // Emit a holding event; canSelfie tells the renderer this peer is a participant (its
@@ -1139,7 +1096,7 @@ function createWave({
       return null
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex')
-    initiatedWaves.add(waveId) // I own this wave: I keep its gallery + run its raffle
+    initiatedWaves.add(waveId) // I own this wave: I keep its gallery open (archivist)
     enterLobby(waveId, me.id, true) // initiator auto-joins (marks its own lobby)
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the kick-off fee and
@@ -1155,22 +1112,15 @@ function createWave({
   }
 
   // Flood the wave-announce (carrying the kick-off `paid` proof when present) and start the
-  // lobby→race timer. Shared by the paid and unpaid initiator paths. The initiator is a
-  // participant too, so it publishes its own raffle commit here (in the lobby).
+  // lobby→race timer. Shared by the paid and unpaid initiator paths.
   function doAnnounce(waveId, paidProof) {
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '')
-    const rc = raffle.optIn()
-    // I'm this wave's initiator, so I collect commits for its raffle — record my own now (I
-    // won't receive my own announce back). Joiners' commits arrive via wave-join.
-    if (rc) raffle.recordOwn(waveId, rc.commit)
     floodGossip({
       kind: 'wave-announce',
       waveId,
       by: me.id,
       lobbyMs,
-      paid: paidProof || undefined,
-      commit: rc ? rc.commit : undefined,
-      commitSig: rc ? rc.commitSig : undefined
+      paid: paidProof || undefined
     })
     clearTimeout(lobbyTimer)
     lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs)
@@ -1363,21 +1313,16 @@ function createWave({
     setCountry,
     stageSelfie,
     // Wire the payment layer once the wallet is up: my address (for gallery tips /
-    // attestations), the on-chain burn verifier (enables the paid-wave anti-spam gate), and —
-    // when I run a raffle for a wave I initiated — the reward sender (pays the prize).
-    setWallet: (address, verifier, rewarder) => {
+    // attestations) and the on-chain burn verifier (enables the paid-wave anti-spam gate).
+    setWallet: (address, verifier) => {
       walletAddress = address || null
       if (verifier) {
         verifyBurnOnChain = verifier
         enforcePaid = true
       }
-      if (rewarder) payReward = rewarder
     },
     announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
     recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)
-    // My raffle commitment for the current wave (generated once), so the worker can put it in
-    // the burn memo → the commit is recorded on-chain (auditable), not just gossiped.
-    raffleCommit: raffle.raffleCommit,
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
     findSuccessor: chord.findSuccessor,

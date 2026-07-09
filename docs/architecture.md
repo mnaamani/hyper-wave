@@ -78,7 +78,7 @@ renderer  ──(commands)──▶  worker
 
 worker  ──(events)──▶  renderer
   { type: 'state',   me, peers[], successor }         // ring membership (every change)
-  { type: 'event',   event, ... }                     // lifecycle + race + raffle events (protocol.md)
+  { type: 'event',   event, ... }                     // lifecycle + race events (protocol.md)
   { type: 'gallery', items[] }                        // ordered selfies (every change)
   { type: 'wallet',  address, trx }                   // wallet chip (on ready + every 15s; { error } on init failure)
   { type: 'burn-result' | 'tip-result', ... }         // fee/tip outcomes (toasts)
@@ -131,11 +131,6 @@ it off):
   process, so the gallery survives for latecomers and replication — but it is the archivist
   for _its own_ wave only. If the initiator goes offline, its wave's gallery is not archived
   by anyone else.
-- It **collects the raffle commits** for that wave (from lobby `wave-join` gossip; it records
-  its own commit locally when it announces).
-- If it funds a raffle (`raffleTrx > 0`, env `HYPERWAVE_RAFFLE_TRX`), it **draws the winner
-  and pays the prize from its own wallet** after the wave — never paying itself (if it ranks
-  first it is skipped in favour of the next eligible participant). See [`protocol.md`](./protocol.md) §12.
 
 ## Module map
 
@@ -150,13 +145,12 @@ packages/hyperwave-lib-core/   the reusable Bare engine (npm workspace)
     ring.js          pure ring geometry (angleOf, liveRing, nextClockwise, pickReachable)
     chord.js         pure Chord math (nodeId, successors, fingers, findSuccessorStep, stabilizeStep)
     chord-routing.js createChordRouting: distributed findSuccessor RPC + join placement + repair
-    raffle.js        createRaffle: per-wave commit-reveal draw + payout (run by the wave initiator)
     flood.js         pure gossip-flood dedup (firstSight) for relayed lifecycle messages
     token.js         pure token crypto (receipts, chain accumulator, burn + wave-end attestations)
     gallery.js       Autobase config + ordering (galleryConfig, buildGallery, readGallery)
     fees.js          shared fee flow (burn memo, payFee, confirmBurn, wireWallet)
     pay.js           WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx
-    wave.run.js      headless harness (one wave per process; WALLET=1, HYPERWAVE_RAFFLE_TRX for a funded raffle)
+    wave.run.js      headless harness (one wave per process; WALLET=1)
     bootstrap.js     local DHT for fast same-machine testing
     *.test.js        brittle unit-test suites (aggregated by test.js)
   worklet/

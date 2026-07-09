@@ -55,26 +55,17 @@ money rules:
    The app makes sure a tip can only go to the wallet that actually paid that player's
    entry fee, so tips always land with a real participant.
 
-3. **An optional raffle sweetens the pot.** Whoever starts a wave can attach a prize.
-   After the wave, one participant is drawn at random and paid the prize — so joining
-   costs 1 TRX but might win you several back. The draw is designed so nobody (including
-   the person running it) can steer the result: every player locks in a secret number
-   before the race and reveals it with their selfie, and the winner falls out of mixing
-   all the revealed secrets together. The locked-in commitments are stamped into the
-   fee-burn notes on the blockchain, so anyone can check the draw afterwards. The
-   starter's own ticket can never win its own prize.
-
-That's the whole economy: **pay to play (burned), tip to reward, raffle for luck.** There
-are deliberately no "sponsor rewards" for participating — earlier versions of the design
-had them, and they turned out to be an open invitation to farm fake participants. Burning
-the fee removes anything to steal.
+That's the whole economy: **pay to play (burned), tip to reward.** There are deliberately
+no "sponsor rewards" for participating — earlier versions of the design had them, and they
+turned out to be an open invitation to farm fake participants. Burning the fee removes
+anything to steal.
 
 ## Nobody is special
 
 Every peer runs exactly the same app. There's no server, no operator, no admin, no
 special "validator". The only asymmetry is temporary and earned: the person who starts a
-wave looks after _that wave's_ gallery while they're online, and runs its raffle if they
-funded one. Anyone can start the next wave.
+wave looks after _that wave's_ gallery while they're online. Anyone can start the next
+wave.
 
 ## What it looks like
 
@@ -104,22 +95,17 @@ very large rings.
 
 ## Honest limitations
 
-- **Testnet only.** The money is real in mechanism but test-value by design. A
-  paid-entry prize draw is legally a lottery in most places, so the raffle must stay on
-  testnet without proper legal work.
+- **Testnet only.** The money is real in mechanism but test-value by design — no legal or
+  regulatory work has been done to handle real funds.
 - **The wave is as fast as its slowest hop.** A ball that visits every seat in turn takes
   time proportional to the crowd; a truly instant "whole planet at once" wave would use a
   timed sweep instead of a relayed ball. That's a designed-for future step, not built.
 - **Galleries are ephemeral.** Each run starts fresh; a wave's gallery lives as long as
   its starter stays online. A "past waves" archive is a possible future feature.
-- **The raffle trusts its starter a little.** The draw math is publicly checkable, but
-  the person funding the prize also controls who got into the gallery, so in a real-money
-  version those two powers must be separated.
 
 ## Where to go deeper
 
 - How it's put together: [`architecture.md`](./architecture.md)
 - The exact wire protocol and crypto: [`protocol.md`](./protocol.md)
 - Scaling the ring to large crowds: [`scalable-topology.md`](./scalable-topology.md)
-- The raffle's fairness design: [`raffle.md`](./raffle.md)
 - Run it yourself: the [repo README](../README.md)

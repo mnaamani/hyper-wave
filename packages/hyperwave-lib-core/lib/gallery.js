@@ -76,8 +76,8 @@ function galleryConfig() {
         seen.add(op.peerId)
         const { burn, ...entry } = op
         if (!tipAddressIsBackedByBurn(op)) entry.address = '' // unverified address → not tippable
-        // Keep the burn txHash (the rest of the bulky attestation is dropped): it lets the seed
-        // and any auditor fetch the tx and read the on-chain raffle commit (docs/raffle.md).
+        // Keep the burn txHash (the rest of the bulky attestation is dropped): it lets tippers
+        // and any auditor fetch the tx and verify the fee burn on-chain.
         if (burn && burn.txHash) entry.burnTx = burn.txHash
         await view.append(entry)
       }

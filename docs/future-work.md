@@ -141,11 +141,6 @@ primitive, and it has serious (if unglamorous) uses:
   were live and responsive within a window — a decentralised roll-call (uptime
   attestation for service networks, proof-of-liveness for validator sets, dead-man
   switches across independent parties).
-- **Auditable raffles/draws as a service:** the commit-reveal + on-chain-memo machinery
-  already built generalises to any small-stakes public draw where participants don't
-  trust the operator (prize wheels, allocation lotteries, work assignment). Past
-  attempts (RANDAO-style schemes) live on-chain and pay gas for every step; here only
-  the commitments touch the chain.
 
 Prior work treated ring/token algorithms as _intra-datacenter_ tools and dropped them
 for quorum protocols (Paxos/Raft) once machines were cheap. The open-network,
@@ -198,8 +193,8 @@ about which ones this substrate actually addresses:
    only proven-successful open-DHT niche (Mainline's) and adds the missing
    incentive/anti-abuse layer. Modest, achievable, broadly useful as infrastructure for
    everything else.
-3. **Auditable rotation / liveness / draw primitives as a library** (§2.3) — cheap to
-   extract from what's already built (the token walk, receipts, commit-reveal), novel
+3. **Auditable rotation / liveness primitives as a library** (§2.3) — cheap to
+   extract from what's already built (the token walk, receipts), novel
    territory, and monetisable B2B (audit trails for multi-party processes).
 4. **Presence/map experiences** (§2.4) — closest to the existing product, best
    demo-to-value ratio, but entertainment-shaped revenue.
