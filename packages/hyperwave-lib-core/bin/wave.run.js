@@ -1,5 +1,7 @@
+#!/usr/bin/env bare
 // One wave instance per process (the real topology: each worker is its own process).
-// Runs under Bare:  bare workers/lib/wave.run.js <name> <storageDir>
+// Runs under Bare:  bare bin/wave.run.js <name> <storageDir>  (or, if installed: hyperwave-wave)
+// Needs `bare` on PATH — it's a separate runtime, not an npm dependency.
 //   env HYPERWAVE_BOOTSTRAP=host:port  -> local DHT (fast same-machine discovery)
 //   env HYPERWAVE_MATCH=<id>           -> isolated match topic
 //   env START=<n>                      -> announce a wave once >= n peers are present
@@ -8,14 +10,14 @@
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 const env = require('bare-env');
 const path = require('bare-path');
-const { createWave, parseBootstrap } = require('./wave.js');
-const { nodeIdOfHex, RING } = require('./chord.js');
-const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees.js');
+const { createWave, parseBootstrap } = require('../lib/wave.js');
+const { nodeIdOfHex, RING } = require('../lib/chord.js');
+const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('../lib/fees.js');
 
 const name = Bare.argv[2] || 'peer';
 const storageDir = Bare.argv[3];
 if (!storageDir) {
-  console.error('usage: bare wave.run.js <name> <storageDir>');
+  console.error('usage: bare bin/wave.run.js <name> <storageDir>');
   Bare.exit(1);
 }
 // Echo the resolved storage dir (and thus where wallet.seed lives) — a mis-quoted or relative
@@ -134,7 +136,7 @@ if (env.PROBE) {
 // env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
 // WALLET_SEND=<addr>:<amt> -> also do a one-off TRX transfer (funded wallets only).
 if (env.WALLET) {
-  const { createPayments } = require('./pay.js');
+  const { createPayments } = require('../lib/pay.js');
   createPayments({ storageDir, log: (...args) => console.log(`[] wallet`, ...args) })
     .then(async (pay) => {
       payments = pay;

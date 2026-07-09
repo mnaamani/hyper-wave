@@ -1,7 +1,7 @@
 # End-to-end tests
 
 Black-box tests that run the **real app**: they spawn a local DHT bootstrap and N actual
-`bare workers/lib/wave.run.js` peer processes, drive a full wave, and assert on the outcome.
+`bare bin/wave.run.js` peer processes, drive a full wave, and assert on the outcome.
 Complements the pure-logic unit suite (`app/*.test.js`, run by `npm test` under Bare).
 
 **No roles — N equal peers.** There is no dedicated seed/validator process. The peers are

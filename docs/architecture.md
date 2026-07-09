@@ -155,9 +155,10 @@ packages/hyperwave-lib-core/   the reusable Bare engine (npm workspace)
     fees.js          shared fee flow (burn memo, payFee, confirmBurn, wireWallet)
     pay.js           WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx,
                      transactions (on-chain history via TronGrid, both directions)
-    wave.run.js      headless harness (one wave per process; WALLET=1)
-    bootstrap.js     local DHT for fast same-machine testing
     *.test.js        brittle unit-test suites (aggregated by test.js)
+  bin/               standalone dev CLIs (run under Bare)
+    wave.run.js      headless wave host (one wave per process; WALLET=1)
+    dht-local.js     local DHT for fast same-machine testing
   worklet/
     app.js           mobile bare-kit worklet entry (same init() over BareKit.IPC)
   e2e/               end-to-end harness + suites (wave.local.e2e.js, wave.onchain.e2e.js)

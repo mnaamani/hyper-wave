@@ -249,7 +249,7 @@ construction). `wave.js` is untouched.
   _transitively_ (C converges to A's writes through B). (2) the wave initiator retains its own
   gallery, other participants leave, a latecomer connected _only_ to the initiator still gets
   the full gallery. The §4.7 reach + persistence tests.
-- **Local DHT integration** (`bootstrap.js`): N processes; assert the ring converges (every
+- **Local DHT integration** (`dht-local.js`): N processes; assert the ring converges (every
   peer's successor is correct), a token completes a full lap visiting all seats, and the
   gallery replicates across the partial mesh.
 - **Churn:** kill a node mid-wave; assert successor-list failover + stabilize repair; the

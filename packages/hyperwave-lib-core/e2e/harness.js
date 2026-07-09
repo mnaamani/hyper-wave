@@ -1,5 +1,5 @@
 // End-to-end test harness. Runs the REAL app: it spawns a local DHT bootstrap and N actual
-// `bare lib/wave.run.js` peer processes, then lets a test await their log lines /
+// `bare bin/wave.run.js` peer processes, then lets a test await their log lines /
 // structured events (instead of sleeping) and asserts on the outcome. The harness itself runs
 // under Node (for ergonomic child-process orchestration); the processes under test are Bare —
 // the same binary the app ships. Used by e2e/*.e2e.js, run with `npm run test:e2e:local`.
@@ -144,7 +144,7 @@ class Cluster {
   }
 
   async start() {
-    this.boot = new Proc('boot', ['lib/bootstrap.js'], {});
+    this.boot = new Proc('boot', ['bin/dht-local.js'], {});
     this.procs.push(this.boot);
     const bootMatch = await this.boot.waitForLine(/BOOTSTRAP 127\.0\.0\.1:(\d+)/, 15000);
     this.port = bootMatch[1];
@@ -165,7 +165,7 @@ class Cluster {
     if (seed) {
       fs.writeFileSync(path.join(dir, 'wallet.seed'), seed.trim());
     }
-    const proc = new Proc(name, ['lib/wave.run.js', name, dir], {
+    const proc = new Proc(name, ['bin/wave.run.js', name, dir], {
       HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}`,
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,

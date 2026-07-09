@@ -5,6 +5,10 @@
   "license": "Apache-2.0",
   "type": "commonjs",
   "main": "index.js",
+  "bin": {
+    "hyperwave-wave": "bin/wave.run.js",
+    "hyperwave-dht": "bin/dht-local.js"
+  },
   "scripts": {
     "test": "bare test.js",
     "test:e2e:local": "node e2e/wave.local.e2e.js",

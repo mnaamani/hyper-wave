@@ -29,7 +29,7 @@ the 💰 chip / worker log). Full walkthrough incl. funding and local-DHT setup:
 README.
 
 > **Discovery latency:** cold discovery on a fresh public-DHT topic takes ~20–35s. For
-> demos use a local DHT bootstrap (`bare packages/hyperwave-lib-core/lib/bootstrap.js` +
+> demos use a local DHT bootstrap (`bare packages/hyperwave-lib-core/bin/dht-local.js` +
 > `HYPERWAVE_BOOTSTRAP=127.0.0.1:<port>`) for instant same-machine discovery.
 
 ## What's in this package

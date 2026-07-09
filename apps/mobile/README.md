@@ -22,7 +22,7 @@ Expo RN app (this package)                 Bare worklet (hyperwave-lib-core)
 ## Status: ✅ runs on the iOS simulator — cross-peer with a desktop peer verified
 
 Verified end-to-end on the iOS 26.5 simulator, **interoperating with a desktop peer over the
-public DHT**: a headless desktop peer (`bare lib/wave.run.js` on the same `matchId`) and the
+public DHT**: a headless desktop peer (`bare bin/wave.run.js` on the same `matchId`) and the
 phone discovered each other (`peers 2` on the phone), the desktop kicked off a wave, and the
 desktop peers' selfies **replicated into the phone's Autobase gallery** (`Gallery (2)`,
 "desktop was here"). Same engine, same protocol, mobile ↔ desktop.
