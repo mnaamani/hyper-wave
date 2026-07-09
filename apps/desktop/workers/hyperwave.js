@@ -17,9 +17,8 @@ const core = hyperwave.init({
   storageDir: Bare.argv[2],
   config: {
     bootstrap: env.HYPERWAVE_BOOTSTRAP, // optional host:port -> local DHT (instant same-machine discovery)
-    matchId: env.HYPERWAVE_MATCH || undefined, // isolate the ring
-    lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
-    wallet: env.HYPERWAVE_WALLET === 'false' ? false : undefined // HYPERWAVE_WALLET=false -> no-wallet (receipt-only) wave
+    matchId: env.HYPERWAVE_MATCH || undefined // isolate the ring
+    // lobby length is the engine's fixed 15s constant; the wallet is always on (fees/tips/paid-gate)
   },
   send
 })
