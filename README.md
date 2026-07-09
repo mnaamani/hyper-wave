@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="hyperwave-logo.png" alt="HyperWave" width="240" />
+</p>
+
 # HyperWave
 
 **The stadium Mexican wave, rebuilt as a peer-to-peer network game — with real money on the line.**
