@@ -1,7 +1,7 @@
 {
   "name": "hyperwave-monorepo",
   "private": true,
-  "description": "HyperWave \u2014 global P2P stadium wave (Tether Developers Cup). Monorepo: the reusable Bare engine (packages/hyperwave-lib-core) + hosts (apps/*).",
+  "description": "HyperWave — global P2P stadium wave (Tether Developers Cup). Monorepo: the reusable Bare engine (packages/hyperwave-lib-core) + hosts (apps/*).",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -21,5 +21,11 @@
     "prettier": "^3.8.1",
     "prettier-config-holepunch": "^2.0.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "volta": {
+    "node": "24.18.0"
+  }
 }
