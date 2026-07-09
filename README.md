@@ -4,28 +4,27 @@
 
 # HyperWave
 
-**The stadium Mexican wave, rebuilt as a peer-to-peer network game — with real money on the line.**
+**The stadium Mexican wave, rebuilt as a global peer-to-peer network experience.**
 
 HyperWave turns the stadium wave into a global P2P relay. Peers join a
 match-specific [Hyperswarm](https://github.com/holepunchto/hyperswarm) topic; each peer's
 public key deterministically maps to a fixed seat on a 256-bit ring — the ring _is_ the
-stadium seating chart. No registration, no server.
+stadium seating chart.
 
 Anyone can **kick off a wave**: a signed ⚽ token races peer-to-peer clockwise around the
-ring (~250ms/hop, visible on every screen), each hop cryptographically receipted into a
-constant-size chain. Participants frame a **selfie during the lobby**; as the ball passes
-them it posts into a shared per-wave [Autobase](https://github.com/holepunchto/autobase)
-gallery that converges on every peer, newest selfie featured in the ring centre.
+ring visible on every screen, each hop cryptographically receipted into a
+constant-size chain. As the ball passes each participant it posts a selfie into a shared per-wave
+[Autobase](https://github.com/holepunchto/autobase) gallery that converges on every peer, with the
+newest selfie featured in the ring centre.
 
-Real (testnet) money flows through it, self-custodial via
-[WDK](https://docs.wdk.tether.io/) on Tron Nile:
+With a built-in self-custodial wallet via
+[WDK](https://docs.wdk.tether.io/) (for demo purpouses using TRON Nile Testnet)
 
 - **Participation fees are burned** — initiator and joiners each send 1 TRX to Tron's
   black-hole address with an on-chain memo naming the wave. Skin in the game with no
   beneficiary: it's the anti-spam gate (peers verify the kick-off burn on-chain before
   joining).
-- **Gallery tips** — 💵 tip a selfie 1 TRX straight to its owner's wallet. The only way
-  anyone makes money; a tip always reaches a wallet that paid in.
+- **Gallery tips** — Tip a selfie 1 TRX straight to its owner's wallet.
 - **Optional raffle** — a wave's initiator can fund a prize; after the wave it draws one
   winner among gallery participants via an auditable **commit-reveal** draw (commits ride
   the burn memos on-chain) and pays from its own wallet, never itself.
