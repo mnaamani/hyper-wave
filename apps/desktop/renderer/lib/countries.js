@@ -1,13 +1,6 @@
 // Country + flag helpers for the renderer (ES module).
 
-// regional-indicator flag emoji from a 2-letter ISO code, e.g. 'BR' -> 🇧🇷
-export function flagOf(code) {
-  if (!code || code.length !== 2) {
-    return '';
-  }
-  const A = 0x1f1e6; // 🇦
-  return String.fromCodePoint(A + (code.charCodeAt(0) - 65), A + (code.charCodeAt(1) - 65));
-}
+const REGIONAL_INDICATOR_A = 0x1f1e6; // 🇦 — flag emoji are two regional-indicator letters
 
 // Officially assigned ISO 3166-1 alpha-2 codes. Only these have real flag emoji —
 // reserved/duplicate codes (UK, EU, old codes) render as plain letters, so we exclude
@@ -25,6 +18,17 @@ const ISO_CODES = (
   'SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO ' +
   'TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'
 ).split(' ');
+
+// regional-indicator flag emoji from a 2-letter ISO code, e.g. 'BR' -> 🇧🇷
+export function flagOf(code) {
+  if (!code || code.length !== 2) {
+    return '';
+  }
+  return String.fromCodePoint(
+    REGIONAL_INDICATOR_A + (code.charCodeAt(0) - 65),
+    REGIONAL_INDICATOR_A + (code.charCodeAt(1) - 65)
+  );
+}
 
 function buildCountries() {
   const names = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });

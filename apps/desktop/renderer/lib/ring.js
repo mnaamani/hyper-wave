@@ -7,10 +7,23 @@ const canvas = document.getElementById('ring');
 const ctx = canvas.getContext('2d');
 const meEl = document.getElementById('me');
 const RING_RADIUS = 170;
+const SWEEP_MS = 8000; // replay sweep duration — the ⚽'s lap around the ring
+const FLOURISH_MS = 1500; // completion flourish duration (ring pulses + confetti)
 
+// Module state — all declared up front (CLAUDE.md Code Style); each group's behaviour is
+// documented at the section that drives it below.
 let state = { me: null, peers: [], successor: null };
 let center = null; // gallery item shown in the centre (or null)
 const imgCache = new Map(); // dataURL -> HTMLImageElement
+// replay sweep (see "the football" section)
+let origin = null; // null = no active replay (ball hidden); else the sweep's start angle
+let sweepMs = SWEEP_MS;
+let playStart = 0; // performance.now() while auto-playing; 0 when frozen/scrubbing
+let frac = 0; // authoritative progress [0,1] when not auto-playing
+const frameListeners = []; // fn(frac, origin) called each render frame while a replay is live
+// completion flourish (see "completion flourish" section)
+let flourish = null; // { startedAt } | null
+let confetti = []; // particles for the current flourish (browser rAF, so Math.random is fine here)
 
 // Captions come from other peers' gallery entries — treat them as untrusted. We render on
 // <canvas> (fillText), so HTML/JS injection is already impossible; this strips control &
@@ -90,13 +103,7 @@ export function angleOfId(hex) {
 // feature the selfie the ball is passing. When the sweep reaches the end it FREEZES (the ball
 // parks and stays); the user can then drag it (see scrubber.js → scrubTo) to browse. `origin`
 // is the originator's seat angle (hop 0) — frac 0 sits there, frac 1 completes the lap.
-const SWEEP_MS = 8000;
-
-let origin = null; // null = no active replay (ball hidden); else the sweep's start angle
-let sweepMs = SWEEP_MS;
-let playStart = 0; // performance.now() while auto-playing; 0 when frozen/scrubbing
-let frac = 0; // authoritative progress [0,1] when not auto-playing
-const frameListeners = []; // fn(frac, origin) called each render frame while a replay is live
+// (State: origin/sweepMs/playStart/frac/frameListeners, declared at the top of the module.)
 
 // Register a per-frame progress listener (gallery featuring, scrubber handle).
 export function onSweepFrame(fn) {
@@ -172,10 +179,7 @@ function drawBall(angle, asHandle) {
 }
 
 // --- completion flourish: a golden ring pulse + light confetti when the wave makes it home ---
-let flourish = null; // { startedAt } | null
-let confetti = []; // particles for the current flourish (browser rAF, so Math.random is fine here)
-const FLOURISH_MS = 1500;
-
+// (State: flourish/confetti, declared at the top of the module.)
 export function startFlourish() {
   const PARTICLES = 26;
   const centerX = canvas.width / 2;
@@ -345,6 +349,7 @@ function drawCenterSelfie(centerX, centerY) {
 function render() {
   const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
+  const successorId = state.successor?.id;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   ctx.beginPath();
@@ -352,8 +357,6 @@ function render() {
   ctx.strokeStyle = 'rgba(255,255,255,0.18)';
   ctx.lineWidth = 2;
   ctx.stroke();
-
-  const successorId = state.successor?.id;
 
   // baton direction: line from me to my successor
   if (state.me && state.successor) {

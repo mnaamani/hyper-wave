@@ -26,6 +26,13 @@ const sendAmountInput = document.getElementById('send-amount');
 const sendBtn = document.getElementById('send-btn');
 const sendStatusEl = document.getElementById('send-status');
 
+// Icon + label per kind of outgoing tx the app itself makes (worker events).
+const SENT_META = {
+  burn: { icon: '🔥', label: 'Burned participation fee' },
+  tip: { icon: '💵', label: 'Tipped a selfie' },
+  send: { icon: '📤', label: 'Sent TRX' }
+};
+
 let walletAddress = ''; // full address, for copy + faucet + explorer links
 const txById = new Map(); // hash -> { hash, dir, icon, label, amount, ts } — merged history
 
@@ -38,12 +45,6 @@ export function walletStatus({ address, trx }) {
   balanceEl.innerText = `${trx.toFixed(2)} TRX` + (trx === 0 ? '  ⚠ unfunded' : '');
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
 }
-
-const SENT_META = {
-  burn: { icon: '🔥', label: 'Burned participation fee' },
-  tip: { icon: '💵', label: 'Tipped a selfie' },
-  send: { icon: '📤', label: 'Sent TRX' }
-};
 
 // Record an outgoing tx the app just made (burn / tip / send), from a worker event — instant,
 // with a specific label. Wins over the generic on-chain view for the same hash.

@@ -9,7 +9,11 @@ async function main() {
   const { host, port } = testnet.bootstrap[0];
   console.log(`BOOTSTRAP ${host}:${port}`);
   Bare.on('teardown', () => testnet.destroy());
-  setInterval(() => {}, 1 << 30);
+  // Hold the event loop open (self-rescheduling timeout; CLAUDE.md Code Style: no setInterval).
+  function keepAlive() {
+    setTimeout(keepAlive, 1 << 30);
+  }
+  keepAlive();
 }
 
 main().catch((err) => {

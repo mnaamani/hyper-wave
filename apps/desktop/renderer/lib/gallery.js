@@ -12,6 +12,7 @@ const progressEl = document.getElementById('progress');
 const progressFill = document.getElementById('progress-fill');
 const progressLabel = document.getElementById('progress-label');
 const tipBtn = document.getElementById('tip');
+const toastEl = document.getElementById('tip-toast');
 const TIP_TRX = 1;
 
 let items = [];
@@ -19,6 +20,7 @@ let centerIdx = 0;
 let expected = 0;
 let active = false;
 let myAddress = null; // my own wallet — never tip myself
+let pendingReplay = false; // replay requested but waiting for the first selfie (see startReplay)
 const shownKeys = new Set(); // waveId|peerId already featured
 
 // Tell the gallery our own wallet address so it hides the tip button on our own selfies.
@@ -66,7 +68,6 @@ function feature(index) {
   refreshTip();
 }
 
-const toastEl = document.getElementById('tip-toast');
 // Worker reply to a tip: show the clickable tx (success) or the error, then re-enable.
 export function tipResult({ hash, error }) {
   if (hash) {
@@ -82,9 +83,8 @@ export function tipResult({ hash, error }) {
 // each selfie as it passes. Origin = the first (hop 0 / originator) entry's seat angle, so the
 // sweep's angular progress lines up with the hopCount-ordered gallery. At network speed the
 // `completed` event can beat the local selfie's async append, so `items` may still be empty here
-// — mark the replay PENDING and start it the moment the first selfie lands (see handle()).
-let pendingReplay = false;
-
+// — mark the replay PENDING (`pendingReplay`, top of module) and start it the moment the first
+// selfie lands (see handle()).
 export function startReplay() {
   pendingReplay = true;
   tryStartReplay();

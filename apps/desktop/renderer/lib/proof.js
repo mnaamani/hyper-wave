@@ -43,9 +43,8 @@ export async function open(lobbyMsLeft) {
     preview.style.display = 'none';
   }
 
-  clearInterval(timer);
-  timer = setInterval(paint, 200);
-  paint();
+  clearTimeout(timer);
+  paintLoop();
 }
 
 function paint() {
@@ -59,22 +58,28 @@ function paint() {
     secs > 0 ? `📸 auto-capturing in ${secs}s — or press Capture now` : '📸 capturing…';
 }
 
+// Paint now, then re-arm — a self-rescheduling timeout (CLAUDE.md Code Style: no setInterval).
+function paintLoop() {
+  paint();
+  timer = setTimeout(paintLoop, 200);
+}
+
 // Grab the current frame + caption and hand it to the worker. Stays open (showing a
 // "ready" state) until kickoff frees the centre for the gallery.
 function capture() {
   if (captured) {
     return;
   }
-  captured = true;
-  clearInterval(timer);
   let image = '';
+  captured = true;
+  clearTimeout(timer);
   if (stream) {
-    const sctx = snap.getContext('2d');
+    const snapCtx = snap.getContext('2d');
     // mirror to match the preview
-    sctx.save();
-    sctx.scale(-1, 1);
-    sctx.drawImage(preview, -snap.width, 0, snap.width, snap.height);
-    sctx.restore();
+    snapCtx.save();
+    snapCtx.scale(-1, 1);
+    snapCtx.drawImage(preview, -snap.width, 0, snap.width, snap.height);
+    snapCtx.restore();
     image = snap.toDataURL('image/jpeg', 0.5);
   }
   stageSelfie({ image, caption: captionEl.value });
@@ -97,7 +102,7 @@ export function captureAndStage() {
 }
 
 export function close() {
-  clearInterval(timer);
+  clearTimeout(timer);
   timer = null;
   if (stream) {
     for (const track of stream.getTracks()) {

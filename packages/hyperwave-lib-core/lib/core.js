@@ -59,7 +59,16 @@ function init({
             ...(await pay.balances().catch(() => ({ address: pay.address, trx: 0 })))
           });
         await pushBalance();
-        tBalance = setInterval(pushBalance, 15000);
+        // Self-rescheduling poll (CLAUDE.md Code Style: no setInterval): the next poll is armed
+        // only after the previous one finishes, so slow balance fetches never overlap. dispose()
+        // nulls tBalance, which also tells an in-flight tick not to re-arm.
+        const balanceTick = async () => {
+          await pushBalance();
+          if (tBalance !== null) {
+            tBalance = setTimeout(balanceTick, 15000);
+          }
+        };
+        tBalance = setTimeout(balanceTick, 15000);
       })
       .catch((e) => {
         log('[wallet] init failed:', e.message);
@@ -196,8 +205,13 @@ function init({
   }
 
   async function close() {
-    if (tBalance) clearInterval(tBalance);
-    if (payments) payments.dispose();
+    if (tBalance) {
+      clearTimeout(tBalance);
+      tBalance = null; // also stops an in-flight balanceTick from re-arming
+    }
+    if (payments) {
+      payments.dispose();
+    }
     await wave.close();
   }
 

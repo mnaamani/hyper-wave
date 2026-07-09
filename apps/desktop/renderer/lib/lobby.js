@@ -27,9 +27,8 @@ export function open(e) {
   joinBtn.style.display = joined ? 'none' : 'inline-block';
   cancelBtn.style.display = joined ? 'none' : 'inline-block';
   lobbyEl.classList.add('show');
-  clearInterval(timer);
-  timer = setInterval(paint, 200);
-  paint();
+  clearTimeout(timer);
+  paintLoop();
 }
 
 export function update(newCount) {
@@ -50,7 +49,7 @@ export function setJoinable(ok) {
 }
 
 export function close() {
-  clearInterval(timer);
+  clearTimeout(timer);
   lobbyEl.classList.remove('show');
 }
 
@@ -61,6 +60,12 @@ function paint() {
   const secs = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
   countEl.innerText = secs;
   msgEl.innerText = `wave forming · ${joined ? 'you are in' : 'join in?'} · ${count} in`;
+}
+
+// Paint now, then re-arm — a self-rescheduling timeout (CLAUDE.md Code Style: no setInterval).
+function paintLoop() {
+  paint();
+  timer = setTimeout(paintLoop, 200);
 }
 
 joinBtn.onclick = () => {

@@ -8,6 +8,13 @@ const statusEl = document.getElementById('status');
 const waveEl = document.getElementById('wave-status');
 const updaterEl = document.getElementById('updater');
 const startBtn = document.getElementById('start');
+const introEl = document.getElementById('intro');
+const introCountryEl = document.getElementById('intro-country');
+const enterBtn = document.getElementById('enter');
+const globeBtn = document.getElementById('globe');
+const myFlagEl = document.getElementById('myflag');
+
+let country = localStorage.getItem('hyperwave-country') || '';
 
 document.getElementById('v').innerText = 'v' + appVersion();
 
@@ -42,29 +49,27 @@ startBtn.onclick = () => startWave();
 // --- country picker + intro screen ------------------------------------------
 // The intro overlay (pick your team) shows only on first launch — if a team is
 // already saved we skip straight to the ring. The top-right 🌐 button reopens it.
-const introEl = document.getElementById('intro');
-const introCountryEl = document.getElementById('intro-country');
-const enterBtn = document.getElementById('enter');
-const globeBtn = document.getElementById('globe');
-const myFlagEl = document.getElementById('myflag');
-
-let country = localStorage.getItem('hyperwave-country') || '';
 
 // Show the user's team flag next to the globe (hidden until a team is picked).
 function renderMyFlag() {
   myFlagEl.innerText = country ? flagOf(country) : '';
 }
 
-const placeholder = document.createElement('option');
-placeholder.value = '';
-placeholder.text = '🏳️ pick your team';
-introCountryEl.appendChild(placeholder);
-for (const [code, name] of COUNTRIES) {
-  const option = document.createElement('option');
-  option.value = code;
-  option.text = `${flagOf(code)} ${name}`;
-  introCountryEl.appendChild(option);
+// Fill the picker: a placeholder plus one option per country.
+function buildCountryPicker() {
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.text = '🏳️ pick your team';
+  introCountryEl.appendChild(placeholder);
+  for (const [code, name] of COUNTRIES) {
+    const option = document.createElement('option');
+    option.value = code;
+    option.text = `${flagOf(code)} ${name}`;
+    introCountryEl.appendChild(option);
+  }
 }
+
+buildCountryPicker();
 introCountryEl.value = country;
 renderMyFlag();
 

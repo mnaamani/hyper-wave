@@ -24,6 +24,15 @@ const state = {
 };
 const setState = (patch) => Object.assign(state, patch);
 
+const fieldEl = document.querySelector('.field'); // the ring + gallery canvas area (dimmable)
+
+// Why a selfie didn't make it into the gallery, keyed by the engine's gallery-error reason.
+const GALLERY_ERRORS = {
+  'fee-unpaid': "⚠️ your selfie wasn't added — the participation fee wasn't paid/confirmed in time",
+  'admit-timeout': "⚠️ your selfie wasn't added — gallery admission timed out (network); try again",
+  'no-gallery-yet': "⚠️ your selfie wasn't added — the gallery wasn't ready yet"
+};
+
 // Dev-only console handle (`hw` = HyperWave): reach the orchestrator state + view modules from the
 // DevTools console, e.g. `hw.state`, `hw.gallery.count()`, `hw.hud.waveStatus('test')`. ES modules
 // don't expose their bindings globally, so nothing is reachable unless we put it here — which is
@@ -35,7 +44,6 @@ if (window.bridge?.isPackaged && !window.bridge.isPackaged()) {
 
 // Fade the ring + gallery (a new wave's lobby is up) so the countdown reads clearly; the lobby
 // countdown is an HTML overlay above the canvas, so it stays crisp.
-const fieldEl = document.querySelector('.field');
 function setDim(on) {
   fieldEl.classList.toggle('dim', on);
 }
@@ -107,13 +115,6 @@ ipc.on('burn-result', (msg) => {
     wallet.record({ kind: 'burn', hash: msg.hash, amount: msg.amount }); // 'burned' stage
   }
 });
-
-// Why a selfie didn't make it into the gallery, keyed by the engine's gallery-error reason.
-const GALLERY_ERRORS = {
-  'fee-unpaid': "⚠️ your selfie wasn't added — the participation fee wasn't paid/confirmed in time",
-  'admit-timeout': "⚠️ your selfie wasn't added — gallery admission timed out (network); try again",
-  'no-gallery-yet': "⚠️ your selfie wasn't added — the gallery wasn't ready yet"
-};
 
 // One handler per engine event — a lookup table instead of a switch (CLAUDE.md Code Style).
 const EVENT_HANDLERS = {

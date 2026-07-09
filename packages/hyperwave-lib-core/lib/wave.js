@@ -748,19 +748,20 @@ function createWave({
     return myBurnProof;
   }
 
+  // Poll `pred` every 200ms (self-rescheduling timeout) until it's true or `timeoutMs` elapses.
   function waitFor(pred, timeoutMs) {
     return new Promise((resolve) => {
-      if (pred()) return resolve(true);
       const started = Date.now();
-      const iv = setInterval(() => {
+      function poll() {
         if (pred()) {
-          clearInterval(iv);
-          resolve(true);
-        } else if (Date.now() - started > timeoutMs) {
-          clearInterval(iv);
-          resolve(false);
+          return resolve(true);
         }
-      }, 200);
+        if (Date.now() - started > timeoutMs) {
+          return resolve(false);
+        }
+        setTimeout(poll, 200);
+      }
+      poll();
     });
   }
 
@@ -1289,26 +1290,44 @@ function createWave({
   });
 
   // --- timers ----------------------------------------------------------------
+  // All periodic work is a self-rescheduling setTimeout (CLAUDE.md Code Style: no setInterval):
+  // each tick re-arms itself as its last step, so a slow tick delays the next instead of stacking.
+  let tHeartbeat = null;
+  let tRing = null;
+  let tRepair = null;
+
   // The single heartbeat: pointers double as liveness (lastSeen refresh) and the slim
   // Phase-4 pointer exchange, so there's no separate presence message to keep in step.
-  const tHeartbeat = setInterval(() => {
+  function heartbeatTick() {
     broadcastToNeighbours(myPointers());
-  }, HEARTBEAT_MS);
-  const tRing = setInterval(() => {
+    tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
+  }
+  tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
+
+  function ringTick() {
     // re-pin ring edges from current discovery even if no 'update' fired
     maintainNeighbours();
-    emit(); // also re-evaluate TTL pruning
+    emit(); // also re-evaluate staleness pruning
     // Pull replicated gallery writes for every gallery I hold. For most peers that's just the
     // current wave's; for a peer that initiated waves it also includes the galleries it retains
     // (so each keeps syncing and stays a live source for latecomers).
-    for (const b of galleries.values()) b.update().catch(() => {});
-    if (base) emitGallery();
-  }, RINGUPDATE_MS);
+    for (const gallery of galleries.values()) {
+      gallery.update().catch(() => {});
+    }
+    if (base) {
+      emitGallery();
+    }
+    tRing = setTimeout(ringTick, RINGUPDATE_MS);
+  }
+  tRing = setTimeout(ringTick, RINGUPDATE_MS);
+
   // Chord repair via distributed findSuccessor — correct a successor pointer my local
   // (possibly partial) view missed. Slow cadence; a no-op when local knowledge suffices.
-  const tRepair = setInterval(() => {
+  function repairTick() {
     chord.repairSuccessor().catch(() => {});
-  }, RINGUPDATE_MS * 4);
+    tRepair = setTimeout(repairTick, RINGUPDATE_MS * 4);
+  }
+  tRepair = setTimeout(repairTick, RINGUPDATE_MS * 4);
 
   return {
     me,
@@ -1331,9 +1350,9 @@ function createWave({
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
     findSuccessor: chord.findSuccessor,
     async close() {
-      clearInterval(tHeartbeat);
-      clearInterval(tRing);
-      clearInterval(tRepair);
+      clearTimeout(tHeartbeat);
+      clearTimeout(tRing);
+      clearTimeout(tRepair);
       clearTimeout(lobbyTimer);
       clearTimeout(waveTimer);
       clearTimeout(healTimer);

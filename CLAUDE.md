@@ -77,6 +77,9 @@ Two hosts over one engine (`packages/hyperwave-lib-core`):
 - **One statement per line** — never `a; b` on one line or comma-operator statement chaining.
 - **Always use semicolons** — enforced by prettier (`.prettierrc.js` overrides holepunch's `semi: false` with `semi: true`).
 - **Always strict equality** — `===`/`!==`, never `==`/`!=`.
+- **Declare all variables at the top of their scope** — module state/DOM refs/config consts at the top of the module, function locals at the top of the function (guard clauses may precede them). Function and handler-table definitions are not "variables" and live in their sections.
+- **Never `setInterval`** — use a self-rescheduling `setTimeout`: the callback does its work, then re-arms itself (`timer = setTimeout(tick, ms)`) as its **last** step. Ticks can never overlap/stack, a slow or async tick delays the next instead of racing it, and each tick can decide not to continue. Clear with `clearTimeout`; the handle changes every tick, so keep it in a `let` and re-check it after async work before re-arming.
+- **Google TypeScript Style Guide** (https://google.github.io/styleguide/tsguide.html) is the baseline for anything not covered above, where it applies to plain JS and doesn't conflict with this list or the prettier config. Notably: named exports only (no `export default`; exception: framework-required, e.g. the Expo root component), `const`/`let` never `var`, `CONSTANT_CASE` for module-level constants, `camelCase`/`PascalCase` otherwise, prefer `for…of`.
 
 ## Message Types
 
