@@ -15,9 +15,9 @@ function angleOfId(hex) {
   return angleOf(b4a.from(hex, 'hex'))
 }
 
-// live peers, sorted clockwise by angle
-function liveRing(entries, now, ttl) {
-  return entries.filter((p) => now - p.lastSeen < ttl).sort((a, b) => a.angle - b.angle)
+// live peers, sorted clockwise by angle (a peer is live if its last heartbeat is newer than staleMs)
+function liveRing(entries, now, staleMs) {
+  return entries.filter((p) => now - p.lastSeen < staleMs).sort((a, b) => a.angle - b.angle)
 }
 
 // next peer clockwise from myAngle (smallest angle > mine), wrapping to the first

@@ -39,7 +39,7 @@ const { galleryConfig, readGallery } = require('./gallery')
 const MATCH = 'hyperwave:demo-match:v1'
 const HEARTBEAT_MS = 2000 // pointers-heartbeat cadence (liveness + Chord pointer exchange)
 const RINGUPDATE_MS = 4000 // re-pin + gallery-pull maintenance cadence
-const TTL_MS = 12000 // drop peers not refreshed within this window
+const PEER_STALE_MS = 12000 // a peer whose last heartbeat is older than this is stale (dropped)
 const MAX_HOPS = 5000 // safety cap against runaway tokens
 // The token races at network speed — there is no per-hop dwell. Visual pacing is a pure
 // renderer concern (the host replays the completed, hopCount-ordered gallery as a fixed-duration
@@ -201,7 +201,7 @@ function createWave({
     peers,
     senders,
     pinned,
-    ttlMs: TTL_MS,
+    staleMs: PEER_STALE_MS,
     trySend,
     maintainNeighbours,
     log
@@ -209,7 +209,7 @@ function createWave({
 
   // --- ring / peer table -----------------------------------------------------
   function emit() {
-    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
+    const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS)
     onState({ me, peers: ring, successor: nextClockwise(me.angle, ring) })
   }
 
@@ -313,7 +313,7 @@ function createWave({
   // Doubles as the liveness heartbeat (it refreshes lastSeen and carries country),
   // so there is no separate `presence` message.
   function myPointers() {
-    const ids = liveRing([...peers.values()], Date.now(), TTL_MS).map((p) => p.id)
+    const ids = liveRing([...peers.values()], Date.now(), PEER_STALE_MS).map((p) => p.id)
     return {
       kind: 'pointers',
       id: me.id,
@@ -450,7 +450,7 @@ function createWave({
     // third peer's advert can't resurrect a ghost seat.
     const now = Date.now()
     upsert(m.id, now, m.country)
-    const learned = now - Math.floor(TTL_MS / 2)
+    const learned = now - Math.floor(PEER_STALE_MS / 2)
     for (const id of [...(m.succ || []), m.pred]) {
       if (id && !(goneUntil.get(id) > now)) upsert(id, learned)
     }
@@ -464,7 +464,7 @@ function createWave({
   // My own periodic `pointers` advert is the reciprocal "notify" to my successor.
   function stabilize(m) {
     if (!m.pred) return
-    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
+    const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS)
     const succ = nextClockwise(me.angle, ring)
     if (!succ || succ.id !== m.id) return
     if (stabilizeStep(me.id, succ.id, m.pred) !== succ.id) {
@@ -943,7 +943,7 @@ function createWave({
 
   // Next reachable peer clockwise from me (directly connected, not already skipped).
   function pickSuccessor(skipped) {
-    const ring = liveRing([...peers.values()], Date.now(), TTL_MS)
+    const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS)
     return pickReachable(ring, me.angle, new Set(senders.keys()), skipped)
   }
 
@@ -1255,7 +1255,7 @@ function createWave({
     conn.on('close', () => {
       senders.delete(id)
       peers.delete(id) // direct disconnect is authoritative for that peer
-      goneUntil.set(id, Date.now() + TTL_MS) // cooldown: don't re-pin/re-hint it yet
+      goneUntil.set(id, Date.now() + PEER_STALE_MS) // cooldown: don't re-pin/re-hint it yet
       if (senders.size === 0) chord.markSolo() // went solo -> re-bootstrap on reconnect
       log('peer disconnected', shortId(id))
       // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —

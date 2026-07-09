@@ -183,7 +183,7 @@ Inputs that build the map:
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source.                                                                     |
 | connection **open**                                                              | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor); lift any churn cooldown. A direct connection is authoritative liveness. |
-| connection **close**                                                             | delete the peer (and its reachable mark); set a `goneUntil` cooldown (`TTL_MS`) so DHT re-seeding can't immediately resurrect the dead peer.         |
+| connection **close**                                                             | delete the peer (and its reachable mark); set a `goneUntil` cooldown (`PEER_STALE_MS`) so DHT re-seeding can't immediately resurrect the dead peer.  |
 | `pointers { id, country, succ: [id…], pred: id }`                                | `upsert(id, now, country)` (the heartbeat); upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step.                  |
 
 ```
@@ -199,7 +199,7 @@ upsert(id, lastSeen, country):
 So `lastSeen` is **monotonic per peer** (only advances) and `angle` is always recomputed
 from the id.
 
-**Liveness, ring, successor.** A peer is **live** if `now − lastSeen < TTL_MS`. The **ring**
+**Liveness, ring, successor.** A peer is **live** if `now − lastSeen < PEER_STALE_MS`. The **ring**
 is the live peers sorted by angle; the **successor** is the next live peer clockwise
 (§2.1). A direct disconnect removes a peer immediately (and cools it down against DHT
 re-seeding); the TTL only expires peers known _indirectly_ (a `pointers` discovery hint, or
@@ -870,7 +870,7 @@ the gate (waves announce immediately, unpaid).
 | ------------------- | ------ | --------------------------------------------------------------------- |
 | `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                            |
 | `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                             |
-| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                 |
+| `PEER_STALE_MS`     | 12000  | a peer with no heartbeat within this window is stale (dropped)        |
 | `LOBBY_MS`          | 15000  | lobby / opt-in window                                                 |
 | `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                   |
 | `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                               |

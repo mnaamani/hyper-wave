@@ -12,18 +12,18 @@ const { liveRing, nextClockwise } = require('./ring')
 
 const LOOKUP_TTL = 24 // max routing hops for a findSuccessor query (safety cap; O(log N) expected)
 const LOOKUP_TIMEOUT_MS = 5000 // how long the origin waits for a lookup reply
-const ROUTED_TTL_MS = 30000 // how long a routing-discovered successor stays a pin candidate
+const PIN_CANDIDATE_MS = 30000 // how long a routing-discovered successor stays a pin candidate
 const BOOTSTRAP_MS = 1500 // after my first connection, wait this long before self-placement
 
 // ctx: {
 //   me, peers, senders, pinned,  // shared ring state, by reference
-//   ttlMs,                       // peer-liveness window (TTL_MS) for the local ring snapshot
+//   staleMs,                     // peer-staleness window (PEER_STALE_MS) for the local ring snapshot
 //   trySend,                     // (id, obj) => bool — direct one-hop gossip send
 //   maintainNeighbours,          // re-pin ring edges (called when repair surfaces a truer succ)
 //   log
 // }
 function createChordRouting(ctx) {
-  const { me, peers, senders, pinned, ttlMs, trySend, maintainNeighbours, log } = ctx
+  const { me, peers, senders, pinned, staleMs, trySend, maintainNeighbours, log } = ctx
   const routed = new Map() // id -> expiry: successor found via lookup (a pin candidate)
   const pendingLookups = new Map() // qid -> { resolve, timer }: lookups I originated
   const lookupRoute = new Map() // qid -> upstream id: reverse path to return a reply
@@ -33,7 +33,7 @@ function createChordRouting(ctx) {
   // My current successor id (next reachable clockwise) + the finger/successor ids I know
   // — the inputs to Chord's per-hop routing decision.
   function mySuccessorId() {
-    const s = nextClockwise(me.angle, liveRing([...peers.values()], Date.now(), ttlMs))
+    const s = nextClockwise(me.angle, liveRing([...peers.values()], Date.now(), staleMs))
     return s ? s.id : null
   }
   const myKnownIds = () => [...new Set([...pinned, ...senders.keys()])]
@@ -113,7 +113,7 @@ function createChordRouting(ctx) {
     if (senders.size === 0) return
     const succId = await findSuccessor((nodeIdOfHex(me.id) + 1n) % RING)
     if (succId && succId !== me.id && !senders.has(succId)) {
-      routed.set(succId, Date.now() + ROUTED_TTL_MS)
+      routed.set(succId, Date.now() + PIN_CANDIDATE_MS)
       maintainNeighbours()
     }
   }
