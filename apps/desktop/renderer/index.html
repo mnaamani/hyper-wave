@@ -30,11 +30,20 @@
         opacity: 0.6;
         font-size: 13px;
       }
-      #globe {
+      /* top-right controls: wallet, team flag, globe — a flex row so items collapse cleanly
+         (e.g. #myflag hides until a team is picked) instead of juggling fixed offsets */
+      #topbar {
         position: fixed;
         top: 12px;
         right: 12px;
         z-index: 15;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #globe,
+      #wallet-btn,
+      #myflag {
         width: 38px;
         height: 38px;
         border-radius: 50%;
@@ -43,32 +52,21 @@
         color: #eafff0;
         font-size: 18px;
         cursor: pointer;
-      }
-      #globe:hover {
-        background: rgba(0, 0, 0, 0.6);
-      }
-      /* the user's team flag, sitting just left of the globe */
-      #myflag {
-        position: fixed;
-        top: 12px;
-        right: 58px;
-        z-index: 15;
-        width: 38px;
-        height: 38px;
-        border-radius: 50%;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        background: rgba(0, 0, 0, 0.35);
-        font-size: 20px;
         display: flex;
         align-items: center;
         justify-content: center;
-        cursor: pointer;
+      }
+      #globe:hover,
+      #wallet-btn:hover,
+      #myflag:hover {
+        background: rgba(0, 0, 0, 0.6);
+      }
+      /* the user's team flag (a little bigger emoji), hidden until a team is picked */
+      #myflag {
+        font-size: 20px;
       }
       #myflag:empty {
         display: none;
-      }
-      #myflag:hover {
-        background: rgba(0, 0, 0, 0.6);
       }
       /* intro / onboarding: pick your team before entering the ring */
       #intro {
@@ -152,30 +150,88 @@
         opacity: 0.6;
         font-family: ui-monospace, Menlo, monospace;
       }
-      #wallet {
-        display: none; /* revealed by hud.walletStatus once the wallet is ready */
+      /* status lines, docked at the bottom of the page (margin-top:auto pushes them down) */
+      #hud {
+        margin-top: auto;
+        padding: 14px 0 16px;
+        text-align: center;
+      }
+      /* wallet view: a modal (brought up by the top-right 💰) holding balance, address,
+         faucet, and this session's transaction history */
+      #wallet-view {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: rgba(2, 8, 4, 0.72);
+        align-items: center;
+        justify-content: center;
+      }
+      #wallet-view.show {
+        display: flex;
+      }
+      .wallet-card {
+        width: min(440px, 92vw);
+        max-height: 86vh;
+        overflow-y: auto;
+        background: #0b1f12;
+        border: 1px solid #2f5f43;
+        border-radius: 18px;
+        padding: 18px 22px 22px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+        font-family: ui-monospace, Menlo, monospace;
+      }
+      .wallet-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+      .wallet-card-head h2 {
+        font-size: 18px;
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #wallet-close {
+        border: none;
+        background: none;
+        color: #9fe8b8;
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      #wallet-close:hover {
+        color: #eafff0;
+      }
+      #wallet-balance {
+        font-size: 22px;
+        font-weight: 700;
+        color: #7fe3a0;
+      }
+      #wallet-balance:empty::after {
+        content: '… loading wallet';
+        font-size: 13px;
+        font-weight: 400;
+        opacity: 0.6;
+      }
+      .wallet-row {
+        display: flex;
         align-items: center;
         gap: 8px;
-        font-size: 12px;
-        font-family: ui-monospace, Menlo, monospace;
-        color: #7fe3a0;
-        opacity: 0.85;
-        margin-top: 2px;
+        margin-top: 10px;
+        flex-wrap: wrap;
       }
-      #wallet.ready {
-        display: inline-flex;
-      }
-      #wallet button {
+      .wallet-row .pill {
         font-family: inherit;
         font-size: 11px;
-        padding: 2px 9px;
+        padding: 3px 10px;
         border: 1px solid #2f5f43;
         border-radius: 999px;
         background: #123020;
         color: #9fe8b8;
         cursor: pointer;
       }
-      #wallet button:hover {
+      .wallet-row .pill:hover {
         background: #1a4530;
       }
       /* refresh is an icon-only button (no pill), so the spin reads cleanly */
@@ -183,10 +239,10 @@
         border: none;
         background: none;
         padding: 2px 3px;
-        font-size: 13px;
+        font-size: 15px;
+        cursor: pointer;
       }
       #wallet-refresh:hover {
-        background: none;
         opacity: 0.7;
       }
       @keyframes hw-spin {
@@ -197,14 +253,57 @@
       #wallet-refresh.spin {
         animation: hw-spin 0.6s linear;
       }
-      /* the address is a link to the block explorer, not a pill button */
+      /* the address is a link to the block explorer */
       #wallet-address {
         color: #7fe3a0;
         text-decoration: underline;
         text-underline-offset: 2px;
         cursor: pointer;
+        word-break: break-all;
       }
       #wallet-address:hover {
+        color: #b6f5cd;
+      }
+      .wallet-section {
+        margin-top: 18px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        opacity: 0.55;
+      }
+      #wallet-txs {
+        margin-top: 6px;
+      }
+      #wallet-txs:empty::after {
+        content: 'No transactions yet this session.';
+        opacity: 0.5;
+        font-size: 12px;
+      }
+      .tx-row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 7px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        font-size: 13px;
+      }
+      .tx-row .tx-label {
+        flex: 1;
+      }
+      .tx-row .tx-amt {
+        color: #ffd166;
+        font-variant-numeric: tabular-nums;
+      }
+      #wallet-explorer {
+        display: inline-block;
+        margin-top: 14px;
+        color: #7fe3a0;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      #wallet-explorer:hover {
         color: #b6f5cd;
       }
       /* clickable tx hash inside a toast/status line — inherits the line's colour */
@@ -467,26 +566,40 @@
       </div>
     </div>
 
-    <span id="myflag" title="Your team — click to change"></span>
-    <button id="globe" title="Change your team">🌐</button>
+    <div id="topbar">
+      <button id="wallet-btn" title="Wallet &amp; transactions">💰</button>
+      <span id="myflag" title="Your team — click to change"></span>
+      <button id="globe" title="Change your team">🌐</button>
+    </div>
+
+    <!-- wallet view: opened by the top-right 💰, dismissed by ✕ / backdrop / Esc -->
+    <div id="wallet-view">
+      <div class="wallet-card">
+        <div class="wallet-card-head">
+          <h2>💰 Wallet</h2>
+          <button id="wallet-close" title="Close">✕</button>
+        </div>
+        <div id="wallet-balance"></div>
+        <div class="wallet-row">
+          <button id="wallet-refresh" title="Re-check your balance">🔄</button>
+          <a id="wallet-address" title="View this address on Tronscan"></a>
+          <button id="wallet-copy" class="pill" title="Copy your wallet address">📋 Copy</button>
+          <button id="wallet-faucet" class="pill" title="Get free testnet TRX from the Nile faucet">
+            💧 Get test TRX
+          </button>
+        </div>
+        <div class="wallet-section">Transactions (this session)</div>
+        <div id="wallet-txs"></div>
+        <a id="wallet-explorer" title="Open the full on-chain history on Tronscan">
+          View full history on Tronscan →
+        </a>
+      </div>
+    </div>
 
     <header>
       <h1>HyperWave</h1>
       <span id="v">v</span>
     </header>
-    <div id="updater"></div>
-    <div id="status">connecting…</div>
-    <div id="wave-status"></div>
-    <div id="me"></div>
-    <div id="wallet" title="Your self-custodial TRX wallet (Tron testnet)">
-      <span id="wallet-balance"></span>
-      <button id="wallet-refresh" title="Re-check your balance">🔄</button>
-      <a id="wallet-address" title="View this address on Tronscan"></a>
-      <button id="wallet-copy" title="Copy your wallet address">📋 Copy</button>
-      <button id="wallet-faucet" title="Get free testnet TRX from the Nile faucet">
-        💧 Get test TRX
-      </button>
-    </div>
     <div class="field">
       <canvas id="ring" width="440" height="440"></canvas>
       <div id="center">
@@ -521,6 +634,14 @@
 
     <button id="tip" title="Send a real testnet TRX tip to this selfie">💵 Tip 1 TRX</button>
     <div id="tip-toast"></div>
+
+    <!-- status lines live at the bottom so the top stays uncluttered -->
+    <footer id="hud">
+      <div id="updater"></div>
+      <div id="status">connecting…</div>
+      <div id="wave-status"></div>
+      <div id="me"></div>
+    </footer>
 
     <canvas id="snap" width="240" height="180" style="display: none"></canvas>
     <script type="module" src="app.js"></script>

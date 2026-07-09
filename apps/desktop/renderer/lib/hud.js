@@ -1,57 +1,15 @@
 // HUD: the DOM chrome around the field — version label, status line, country picker,
-// and the Kick-off button (which docks below the ring once there's a gallery).
+// and the Kick-off button (which docks below the ring once there's a gallery). The wallet
+// view lives in its own module (wallet.js).
 import { COUNTRIES, flagOf } from './countries.js'
-import { startWave, setCountry, refreshWallet, appVersion } from './ipc.js'
-import { openAddress } from './explorer.js'
+import { startWave, setCountry, appVersion } from './ipc.js'
 
 const statusEl = document.getElementById('status')
 const waveEl = document.getElementById('wave-status')
 const updaterEl = document.getElementById('updater')
 const startBtn = document.getElementById('start')
-const walletEl = document.getElementById('wallet')
-const walletBalanceEl = document.getElementById('wallet-balance')
-const walletAddressEl = document.getElementById('wallet-address')
-const walletRefreshBtn = document.getElementById('wallet-refresh')
-const walletCopyBtn = document.getElementById('wallet-copy')
-const walletFaucetBtn = document.getElementById('wallet-faucet')
 
 document.getElementById('v').innerText = 'v' + appVersion()
-
-// --- wallet chip (self-custodial TRX wallet) -------------------------------
-const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage'
-let walletAddress = '' // full address, for the copy + faucet + explorer links
-
-export function walletStatus({ address, trx }) {
-  if (!address) return
-  walletAddress = address
-  walletBalanceEl.innerText = `💰 ${trx.toFixed(2)} TRX` + (trx === 0 ? ' · ⚠ unfunded' : '')
-  walletAddressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4)
-  walletEl.classList.add('ready') // reveal the chip + copy/faucet buttons now the wallet is up
-}
-
-// Open the address on the Nile block explorer (via main — the renderer is sandboxed).
-walletAddressEl.onclick = () => openAddress(walletAddress)
-
-// Copy the full wallet address to the clipboard (via main — the renderer is sandboxed), with
-// brief button feedback. New users copy this, then paste it into the faucet.
-walletCopyBtn.onclick = async () => {
-  if (!walletAddress) return
-  await window.bridge.copyText(walletAddress)
-  walletCopyBtn.innerText = '✓ Copied'
-  setTimeout(() => (walletCopyBtn.innerText = '📋 Copy'), 1500)
-}
-
-// Ask the worker to re-fetch the balance now (the auto-poll is every 15s) — handy right after
-// funding. The chip updates when the fresh `wallet` message lands; the spin is click feedback.
-walletRefreshBtn.onclick = () => {
-  refreshWallet()
-  walletRefreshBtn.classList.remove('spin')
-  void walletRefreshBtn.offsetWidth // restart the animation if clicked again mid-spin
-  walletRefreshBtn.classList.add('spin')
-}
-
-// Open the Nile faucet in the default browser, where they paste the address to receive test TRX.
-walletFaucetBtn.onclick = () => window.bridge.openExternal(NILE_FAUCET_URL)
 
 // --- status lines + start button --------------------------------------------
 // The persistent network status line (peer count).

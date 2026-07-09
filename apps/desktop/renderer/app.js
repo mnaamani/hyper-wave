@@ -7,6 +7,7 @@ import * as scrubber from './lib/scrubber.js'
 import * as lobby from './lib/lobby.js'
 import * as proof from './lib/proof.js'
 import * as hud from './lib/hud.js'
+import * as wallet from './lib/wallet.js'
 import { txLink } from './lib/explorer.js'
 
 // Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the ⚽
@@ -81,10 +82,13 @@ ipc.on('gallery', (msg) => {
 })
 
 ipc.on('wallet', (msg) => {
-  hud.walletStatus(msg) // self-custodial TRX wallet address + balance
+  wallet.walletStatus(msg) // self-custodial TRX wallet address + balance (wallet-view modal)
   gallery.setMyAddress(msg.address) // so we don't offer to tip our own selfie
 })
-ipc.on('tip-result', (msg) => gallery.tipResult(msg))
+ipc.on('tip-result', (msg) => {
+  gallery.tipResult(msg)
+  if (msg.hash) wallet.record({ kind: 'tip', hash: msg.hash, amount: msg.amount })
+})
 ipc.on('burn-result', (msg) => {
   // participation fee (kick-off or join), burned to the black hole (skin in the game). `stage`
   // keeps us from claiming "burned" before the tx is actually confirmed on-chain.
@@ -92,7 +96,10 @@ ipc.on('burn-result', (msg) => {
   const tx = msg.hash ? [' (', txLink(msg.hash), ')'] : []
   if (msg.stage === 'confirming') hud.waveStatusNodes(`⏳ confirming ${what} burn on-chain…`, ...tx)
   else if (msg.stage === 'failed') hud.waveStatus(`⚠️ ${what} fee burn failed: ${msg.error}`)
-  else hud.waveStatusNodes(`🔥 ${what} fee burned - ${msg.amount} TRX`, ...tx)
+  else {
+    hud.waveStatusNodes(`🔥 ${what} fee burned - ${msg.amount} TRX`, ...tx)
+    wallet.record({ kind: 'burn', hash: msg.hash, amount: msg.amount }) // 'burned' stage
+  }
 })
 
 ipc.on('event', (e) => {
@@ -216,12 +223,14 @@ ipc.on('event', (e) => {
       gallery.startReplay() // still replay whatever selfies were collected before the stall
       break
     case 'raffle-win':
-      // the wave's initiator drew a winner among the gallery participants (commit-reveal draw)
+      // the wave's initiator drew a winner among the gallery participants (commit-reveal draw).
+      // This only fires on the initiator, which actually paid the prize — so record it.
       hud.waveStatusNodes(
         `🎉 raffle winner: ${e.winner.slice(0, 8)}… - ${e.amount} TRX (of ${e.tickets} tickets, `,
         txLink(e.hash, `tx ${e.hash.slice(0, 8)}…`),
         ')'
       )
+      wallet.record({ kind: 'raffle', hash: e.hash, amount: e.amount })
       break
   }
 })
