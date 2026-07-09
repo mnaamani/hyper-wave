@@ -2,9 +2,11 @@
 
 // regional-indicator flag emoji from a 2-letter ISO code, e.g. 'BR' -> 🇧🇷
 export function flagOf(code) {
-  if (!code || code.length !== 2) return ''
-  const A = 0x1f1e6 // 🇦
-  return String.fromCodePoint(A + (code.charCodeAt(0) - 65), A + (code.charCodeAt(1) - 65))
+  if (!code || code.length !== 2) {
+    return '';
+  }
+  const A = 0x1f1e6; // 🇦
+  return String.fromCodePoint(A + (code.charCodeAt(0) - 65), A + (code.charCodeAt(1) - 65));
 }
 
 // Officially assigned ISO 3166-1 alpha-2 codes. Only these have real flag emoji —
@@ -22,21 +24,21 @@ const ISO_CODES = (
   'NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD ' +
   'SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO ' +
   'TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'
-).split(' ')
+).split(' ');
 
 function buildCountries() {
-  const names = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' })
-  const out = []
+  const names = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });
+  const out = [];
   for (const code of ISO_CODES) {
-    let name
+    let name;
     try {
-      name = names.of(code)
+      name = names.of(code);
     } catch {
-      name = null
+      name = null;
     }
-    out.push([code, name || code])
+    out.push([code, name || code]);
   }
-  return out.sort((x, y) => x[1].localeCompare(y[1]))
+  return out.sort(([, nameA], [, nameB]) => nameA.localeCompare(nameB));
 }
 
-export const COUNTRIES = buildCountries()
+export const COUNTRIES = buildCountries();

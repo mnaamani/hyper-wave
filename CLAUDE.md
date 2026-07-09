@@ -68,6 +68,16 @@ Two hosts over one engine (`packages/hyperwave-lib-core`):
 - `npm test` / `npm run test:e2e:local` / `npm run lint` / `npm run format` — from the repo root.
 - `npm run make` — build platform distributables. `pear build` / `pear stage` — Pear deployment (not needed for the local demo).
 
+## Code Style (beyond prettier/lunte — apply to all new and edited code)
+
+- **Always brace `if`/`else`/`for`/`while` bodies** — no brace-less single-statement bodies, even one-liners.
+- **No single-letter / cryptic variable names** (`s`, `f`, `r`, `t`, `pt`, `it`, `k`…). Use descriptive names. Acceptable idioms: loop index `i`, geometry locals (`dx`/`dy`/`x`/`y`), `ctx` (canvas), `ev`/`evt` (events).
+- **Avoid `switch` statements where possible** — prefer a lookup table (object keyed by case → value or handler function).
+- **Avoid deeply nested `if`/`else`** — prefer early returns / guard clauses; extract a helper when branching gets deep. Same spirit applies to nested ternaries.
+- **One statement per line** — never `a; b` on one line or comma-operator statement chaining.
+- **Always use semicolons** — enforced by prettier (`.prettierrc.js` overrides holepunch's `semi: false` with `semi: true`).
+- **Always strict equality** — `===`/`!==`, never `==`/`!=`.
+
 ## Message Types
 
 As built (`docs/protocol.md` §5 has the schemas): `pointers` (heartbeat/liveness/Chord pointers), `wave-announce`, `wave-join`, `wave-start`, `wave-end` (flooded lifecycle), `token` (the racing ball, unicast), `wave-pos` (one-hop position/heal-ACK), `wave-sync` (join-time catch-up, unicast), `add-writer` (gallery admission, flooded), `find-succ`/`find-succ-reply` (distributed successor lookup). Gallery entries are `wave-selfie` ops inside the Autobase (not on-wire messages).
