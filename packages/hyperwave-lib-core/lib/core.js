@@ -160,6 +160,26 @@ function init({
     }
   }
 
+  // Plain wallet transfer: send `amount` TRX to any address
+  async function handleSend({ to, amount }) {
+    if (!payments) return send({ type: 'send-result', error: 'wallet not ready', to })
+    const trx = Number(amount)
+    if (!to || !(trx > 0)) {
+      return send({ type: 'send-result', error: 'invalid recipient/amount', to })
+    }
+    const bal = await payments.balances().catch(() => null)
+    if (bal && bal.trx < trx) {
+      return send({ type: 'send-result', error: `insufficient balance (${bal.trx} TRX)`, to })
+    }
+    try {
+      const { hash } = await payments.send(to, trx)
+      send({ type: 'send-result', hash, to, amount: trx })
+      pushBalance?.()
+    } catch (e) {
+      send({ type: 'send-result', error: e.message, to })
+    }
+  }
+
   // Host -> engine commands (same message shapes the desktop renderer + the RN UI both speak).
   function onMessage(msg) {
     if (!msg || typeof msg !== 'object') return
@@ -168,6 +188,7 @@ function init({
     else if (msg.type === 'set-country') wave.setCountry(msg.country)
     else if (msg.type === 'stage-selfie') wave.stageSelfie(msg.selfie)
     else if (msg.type === 'tip') handleTip(msg)
+    else if (msg.type === 'send-trx') handleSend(msg)
     else if (msg.type === 'refresh-wallet') pushBalance?.() // manual balance re-check (after funding)
   }
 
