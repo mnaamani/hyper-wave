@@ -50,8 +50,12 @@ try {
 const TRICKY = /[\^~*]|\|\||\bx\b|\s-\s|[<>=]=?\s/i;
 
 function needsNormalizing(range) {
-  if (TRICKY.test(range)) return true;
-  if (!semver || !probe) return false; // no oracle and not obviously tricky — leave it alone
+  if (TRICKY.test(range)) {
+    return true;
+  }
+  if (!semver || !probe) {
+    return false;
+  } // no oracle and not obviously tricky — leave it alone
   try {
     semver.satisfies(probe, range); // throws INVALID_VERSION iff the range is unparseable
     return false;
@@ -61,25 +65,33 @@ function needsNormalizing(range) {
 }
 
 function walk(dir, depth = 0) {
-  if (depth > 6) return;
+  if (depth > 6) {
+    return;
+  }
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
     return;
   }
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    const full = path.join(dir, e.name);
-    if (e.name === '.bin') continue;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const full = path.join(dir, entry.name);
+    if (entry.name === '.bin') {
+      continue;
+    }
     // recurse into scopes (@scope/) and nested node_modules
-    if (e.name.startsWith('@')) {
+    if (entry.name.startsWith('@')) {
       walk(full, depth);
       continue;
     }
     fixPackage(full);
     const nested = path.join(full, 'node_modules');
-    if (fs.existsSync(nested)) walk(nested, depth + 1);
+    if (fs.existsSync(nested)) {
+      walk(nested, depth + 1);
+    }
   }
 }
 
@@ -93,11 +105,13 @@ function fixPackage(pkgDir) {
     return;
   }
   const eng = json.engines;
-  if (!eng || typeof eng !== 'object') return;
+  if (!eng || typeof eng !== 'object') {
+    return;
+  }
   let changed = false;
-  for (const [k, v] of Object.entries(eng)) {
-    if (typeof v === 'string' && needsNormalizing(v)) {
-      eng[k] = SAFE;
+  for (const [engineName, range] of Object.entries(eng)) {
+    if (typeof range === 'string' && needsNormalizing(range)) {
+      eng[engineName] = SAFE;
       changed = true;
     }
   }
@@ -109,6 +123,8 @@ function fixPackage(pkgDir) {
 }
 
 for (const nm of ROOTS) {
-  if (fs.existsSync(nm)) walk(nm);
+  if (fs.existsSync(nm)) {
+    walk(nm);
+  }
 }
 console.log(`[fix-bare-engines] done (${fixed} package.json normalized)`);

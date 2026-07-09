@@ -41,19 +41,27 @@ export function useEngine(config = {}) {
       }
       switch (msg.type) {
         case 'state':
-          if (msg.me) setMe(msg.me);
+          if (msg.me) {
+            setMe(msg.me);
+          }
           setPeers((msg.peers || []).length);
           break;
         case 'event':
-          if (msg.event === 'started' || msg.event === 'announced') setPhase('active');
-          else if (msg.event === 'completed' || msg.event === 'ended') setPhase('idle');
+          if (msg.event === 'started' || msg.event === 'announced') {
+            setPhase('active');
+          } else if (msg.event === 'completed' || msg.event === 'ended') {
+            setPhase('idle');
+          }
           break;
         case 'gallery':
           setGallery(msg.items || []);
           break;
         case 'wallet':
-          if (msg.error) setToast(`⚠ wallet: ${msg.error}`);
-          else setWallet({ address: msg.address, trx: msg.trx });
+          if (msg.error) {
+            setToast(`⚠ wallet: ${msg.error}`);
+          } else {
+            setWallet({ address: msg.address, trx: msg.trx });
+          }
           break;
         case 'burn-result':
         case 'tip-result':
@@ -89,10 +97,12 @@ export function useEngine(config = {}) {
         worklet.terminate();
       } catch {}
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // boot once on mount
 
   const send = useCallback((msg) => {
-    if (pipeRef.current) pipeRef.current.write(JSON.stringify(msg));
+    if (pipeRef.current) {
+      pipeRef.current.write(JSON.stringify(msg));
+    }
   }, []);
 
   return {

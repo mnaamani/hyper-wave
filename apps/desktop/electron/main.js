@@ -100,13 +100,15 @@ function getWorker(specifier) {
   } else {
     const isSnap = !!process.env.SNAP_USER_COMMON;
     const linuxConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-    dir = isMac
-      ? path.join(os.homedir(), 'Library', 'Application Support', appName)
-      : isLinux
-        ? isSnap
-          ? path.join(process.env.SNAP_USER_COMMON, appName)
-          : path.join(linuxConfigHome, appName)
-        : path.join(os.homedir(), 'AppData', 'Roaming', appName);
+    if (isMac) {
+      dir = path.join(os.homedir(), 'Library', 'Application Support', appName);
+    } else if (isSnap) {
+      dir = path.join(process.env.SNAP_USER_COMMON, appName);
+    } else if (isLinux) {
+      dir = path.join(linuxConfigHome, appName);
+    } else {
+      dir = path.join(os.homedir(), 'AppData', 'Roaming', appName);
+    }
     dirSource = 'default (packaged)';
   }
 
@@ -114,7 +116,12 @@ function getWorker(specifier) {
   // bare-fs/Corestore downstream) so the log shows the true on-disk location.
   console.log(`[main] storage dir: ${path.resolve(dir)}  (${dirSource})`);
 
-  const extension = isLinux ? '.AppImage' : isMac ? '.app' : '.msix';
+  let extension = '.msix';
+  if (isLinux) {
+    extension = '.AppImage';
+  } else if (isMac) {
+    extension = '.app';
+  }
 
   const worker = PearRuntime.run(require.resolve('..' + specifier), [
     dir,

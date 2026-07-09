@@ -65,50 +65,50 @@ function createChordRouting(ctx) {
 
   // A find-succ request reached me: answer if the target falls in (me, successor], else
   // forward to my closest preceding finger, remembering the upstream for the reply.
-  function handleFindSucc(m, fromId) {
+  function handleFindSucc(msg, fromId) {
     let target;
     try {
-      target = BigInt(m.target);
+      target = BigInt(msg.target);
     } catch {
       return;
     }
     const step = findSuccessorStep(me.id, mySuccessorId(), myKnownIds(), target);
-    if (step.done || (m.hops || 0) >= LOOKUP_TTL) {
+    if (step.done || (msg.hops || 0) >= LOOKUP_TTL) {
       trySend(fromId, {
         kind: 'find-succ-reply',
-        qid: m.qid,
+        qid: msg.qid,
         successor: step.done ? step.successor : mySuccessorId()
       });
       return;
     }
     if (!senders.has(step.next)) {
-      trySend(fromId, { kind: 'find-succ-reply', qid: m.qid, successor: mySuccessorId() });
+      trySend(fromId, { kind: 'find-succ-reply', qid: msg.qid, successor: mySuccessorId() });
       return;
     }
-    lookupRoute.set(m.qid, fromId);
-    setTimeout(() => lookupRoute.delete(m.qid), LOOKUP_TIMEOUT_MS);
+    lookupRoute.set(msg.qid, fromId);
+    setTimeout(() => lookupRoute.delete(msg.qid), LOOKUP_TIMEOUT_MS);
     trySend(step.next, {
       kind: 'find-succ',
-      qid: m.qid,
-      target: m.target,
-      hops: (m.hops || 0) + 1
+      qid: msg.qid,
+      target: msg.target,
+      hops: (msg.hops || 0) + 1
     });
   }
 
   // A find-succ-reply reached me: resolve it if I'm the origin, else pass it back up the
   // reverse path toward whoever asked me.
-  function handleFindSuccReply(m) {
-    const pend = pendingLookups.get(m.qid);
+  function handleFindSuccReply(msg) {
+    const pend = pendingLookups.get(msg.qid);
     if (pend) {
       clearTimeout(pend.timer);
-      pendingLookups.delete(m.qid);
-      pend.resolve(m.successor || null);
+      pendingLookups.delete(msg.qid);
+      pend.resolve(msg.successor || null);
       return;
     }
-    const up = lookupRoute.get(m.qid);
+    const up = lookupRoute.get(msg.qid);
     if (up) {
-      lookupRoute.delete(m.qid);
-      trySend(up, m);
+      lookupRoute.delete(msg.qid);
+      trySend(up, msg);
     }
   }
 

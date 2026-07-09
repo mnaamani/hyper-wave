@@ -28,7 +28,7 @@ for await (const _ of link(appDir, {
   // resources are written as they resolve; we just need it to run to completion
 }
 
-const n = fs.existsSync(out)
-  ? fs.readdirSync(out).filter((f) => f.endsWith('.xcframework')).length
+const vendoredCount = fs.existsSync(out)
+  ? fs.readdirSync(out).filter((name) => name.endsWith('.xcframework')).length
   : 0;
-console.log(`[link-ios-addons] vendored ${n} addon xcframeworks -> ${path.relative(appDir, out)}`);
+console.log(`[link-ios-addons] vendored  addon xcframeworks -> ${path.relative(appDir, out)}`);

@@ -140,13 +140,13 @@ function close() {
 }
 openBtn.onclick = open;
 closeBtn.onclick = close;
-viewEl.onclick = (e) => {
-  if (e.target === viewEl) {
+viewEl.onclick = (evt) => {
+  if (evt.target === viewEl) {
     close(); // click the backdrop to dismiss
   }
 };
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && viewEl.classList.contains('show')) {
+document.addEventListener('keydown', (evt) => {
+  if (evt.key === 'Escape' && viewEl.classList.contains('show')) {
     close();
   }
 });
@@ -209,8 +209,8 @@ function submitSend() {
   sendTrx(to, amount);
 }
 sendBtn.onclick = submitSend;
-sendAmountInput.onkeydown = (e) => {
-  if (e.key === 'Enter') {
+sendAmountInput.onkeydown = (evt) => {
+  if (evt.key === 'Enter') {
     submitSend();
   }
 };

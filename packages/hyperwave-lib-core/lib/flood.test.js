@@ -35,15 +35,16 @@ function simulateFlood(adj, origin, opts = {}) {
     const next = [];
     for (const { to, from } of frontier) {
       receipts.set(to, (receipts.get(to) || 0) + 1);
-      if (flood.get(to).firstSight(mid)) {
-        processed.add(to);
-        for (const neighbour of adj.get(to)) {
-          if (neighbour === from) {
-            continue; // don't echo straight back to the sender
-          }
-          next.push({ to: neighbour, from: to });
-          sends++;
+      if (!flood.get(to).firstSight(mid)) {
+        continue; // duplicate — dropped, not relayed
+      }
+      processed.add(to);
+      for (const neighbour of adj.get(to)) {
+        if (neighbour === from) {
+          continue; // don't echo straight back to the sender
         }
+        next.push({ to: neighbour, from: to });
+        sends++;
       }
     }
     frontier = next;
@@ -63,8 +64,8 @@ function link(graph, nodeA, nodeB) {
   graph.get(nodeA).push(nodeB);
   graph.get(nodeB).push(nodeA);
 }
-function makeIds(n) {
-  return [...Array(n)].map((_, i) => 'n' + i);
+function makeIds(count) {
+  return [...Array(count)].map((_, i) => 'n' + i);
 }
 function edgeCount(graph) {
   let degreeSum = 0;
@@ -73,26 +74,26 @@ function edgeCount(graph) {
   }
   return degreeSum / 2;
 }
-function lineGraph(n) {
-  const ids = makeIds(n);
+function lineGraph(count) {
+  const ids = makeIds(count);
   const graph = emptyGraph(ids);
-  for (let i = 0; i + 1 < n; i++) {
+  for (let i = 0; i + 1 < count; i++) {
     link(graph, ids[i], ids[i + 1]);
   }
   return { graph, ids };
 }
-function ringGraph(n) {
-  const ids = makeIds(n);
+function ringGraph(count) {
+  const ids = makeIds(count);
   const graph = emptyGraph(ids);
-  for (let i = 0; i < n; i++) {
-    link(graph, ids[i], ids[(i + 1) % n]);
+  for (let i = 0; i < count; i++) {
+    link(graph, ids[i], ids[(i + 1) % count]);
   }
   return { graph, ids };
 }
-function starGraph(n) {
-  const ids = makeIds(n);
+function starGraph(count) {
+  const ids = makeIds(count);
   const graph = emptyGraph(ids);
-  for (let i = 1; i < n; i++) {
+  for (let i = 1; i < count; i++) {
     link(graph, ids[0], ids[i]);
   }
   return { graph, ids };
@@ -109,16 +110,16 @@ function rngFrom(seed) {
 }
 // connected random partial mesh: a random spanning tree (guarantees connectivity) plus
 // `extra` random chords. Models the real Hyperswarm-past-mesh-limit topology.
-function randomMesh(n, extra, seed) {
-  const ids = makeIds(n);
+function randomMesh(count, extra, seed) {
+  const ids = makeIds(count);
   const graph = emptyGraph(ids);
   const rng = rngFrom(seed);
-  for (let i = 1; i < n; i++) {
+  for (let i = 1; i < count; i++) {
     link(graph, ids[i], ids[Math.floor(rng() * i)]);
   }
   for (let i = 0; i < extra; i++) {
-    const idxA = Math.floor(rng() * n);
-    const idxB = Math.floor(rng() * n);
+    const idxA = Math.floor(rng() * count);
+    const idxB = Math.floor(rng() * count);
     if (idxA !== idxB && !graph.get(ids[idxA]).includes(ids[idxB])) {
       link(graph, ids[idxA], ids[idxB]);
     }

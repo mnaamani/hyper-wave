@@ -19,10 +19,10 @@ export function onCancel(cb) {
   onCancelCb = cb;
 }
 
-export function open(e) {
-  count = e.count || 1;
-  joined = !!e.mine || !!e.joined;
-  deadline = performance.now() + (e.lobbyMs || 15000);
+export function open(evt) {
+  count = evt.count || 1;
+  joined = !!evt.mine || !!evt.joined;
+  deadline = performance.now() + (evt.lobbyMs || 15000);
   // a non-joiner gets Join + "Not now" (dismiss to keep browsing the previous gallery)
   joinBtn.style.display = joined ? 'none' : 'inline-block';
   cancelBtn.style.display = joined ? 'none' : 'inline-block';

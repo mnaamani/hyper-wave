@@ -12,22 +12,31 @@ const b4a = require('b4a');
 const RING = 1n << 64n; // 2^64
 
 function nodeId(key) {
-  let n = 0n;
+  let nid = 0n;
   for (let i = 0; i < 8; i++) {
-    n = (n << 8n) | BigInt(key[i]);
+    nid = (nid << 8n) | BigInt(key[i]);
   }
-  return n;
+  return nid;
 }
 
 function nodeIdOfHex(hex) {
   return nodeId(b4a.from(hex, 'hex'));
 }
 
+// Ascending BigInt comparator (BigInts can't use plain subtraction into a Number sort key).
+function byNid(a, b) {
+  if (a.nid < b.nid) {
+    return -1;
+  }
+  if (a.nid > b.nid) {
+    return 1;
+  }
+  return 0;
+}
+
 // Order a set of hex ids clockwise by nodeId (ascending, mod 2^64). Dedupes.
 function ringOrder(ids) {
-  return [...new Set(ids)]
-    .map((id) => ({ id, nid: nodeIdOfHex(id) }))
-    .sort((a, b) => (a.nid < b.nid ? -1 : a.nid > b.nid ? 1 : 0));
+  return [...new Set(ids)].map((id) => ({ id, nid: nodeIdOfHex(id) })).sort(byNid);
 }
 
 // The next up-to-k ids clockwise from me (the successor-list, §4.3). Wraps around
@@ -196,9 +205,9 @@ function stabilizeStep(myId, currentSuccId, succPredId) {
     return succPredId;
   }
   const me = nodeIdOfHex(myId);
-  const s = nodeIdOfHex(currentSuccId);
-  const x = nodeIdOfHex(succPredId);
-  return inOpenInterval(x, me, s) ? succPredId : currentSuccId;
+  const succNid = nodeIdOfHex(currentSuccId);
+  const candidateNid = nodeIdOfHex(succPredId);
+  return inOpenInterval(candidateNid, me, succNid) ? succPredId : currentSuccId;
 }
 
 // The full set of peers to keep physically connected (Phase 3): successor-list +
@@ -206,8 +215,8 @@ function stabilizeStep(myId, currentSuccId, succPredId) {
 // (for O(log N) ring-spanning reachability). This is what wave.js joinPeer()s.
 function pinTargets(ids, myId, k = 3) {
   const set = connectionTargets(ids, myId, k);
-  for (const f of fingers(ids, myId)) {
-    set.add(f);
+  for (const finger of fingers(ids, myId)) {
+    set.add(finger);
   }
   return set;
 }
