@@ -112,16 +112,14 @@ until each peer has independently verified the initiator's burn on-chain, then
 Joined peers **frame their selfie during the lobby** (camera + countdown). At
 kickoff the frame is captured automatically (or press 📸 early).
 
-The **⚽ races the ring** (~250ms/hop) on every screen. As it passes each
+The **⚽ races the ring** on every screen. As it passes each
 participant, their selfie posts and features in the ring centre — the gallery fills
 in ring order on all windows.
 
-**Tip**: when someone else's selfie is featured, press **💵 Tip 1 TRX** — a real
-transfer straight to that peer's wallet; the toast shows the tx hash. Tipping is the
-only way anyone makes money — there are no sponsor rewards.
+**Tip**: when someone else's selfie is featured, press **💵 Tip 1 TRX** — to
+transfer some tokens straight to that peer's wallet.
 
-The wave **completes** back at the originator and
-every window returns to idle together.
+The wave **completes** back at the originator and every window returns to idle together.
 
 ## License
 
