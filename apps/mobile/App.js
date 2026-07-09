@@ -2,7 +2,7 @@
 // through the worklet. It shows identity + peer count + wallet, lets you kick off / join a wave,
 // and lists the gallery. The rich UI (the ring canvas + the rolling ⚽ + the centre-selfie
 // player + camera capture) is the remaining RN work — see README "What's left".
-import { useState } from 'react'
+import { useState } from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -12,18 +12,18 @@ import {
   Image,
   StatusBar,
   StyleSheet
-} from 'react-native'
-import { useEngine } from './src/useEngine'
+} from 'react-native';
+import { useEngine } from './src/useEngine';
 
 // Isolate this build's ring so multiple test devices don't collide on the public DHT.
-const MATCH = 'hyperwave-mobile-demo'
+const MATCH = 'hyperwave-mobile-demo';
 
 export default function App() {
   // wallet on — testing WDK under the worklet (the chip populates on success; a failure
   // surfaces as a ⚠ wallet toast). Flip to wallet:false to run the engine wallet-less.
-  const engine = useEngine({ matchId: MATCH })
-  const { me, peers, phase, gallery, wallet, toast } = engine
-  const [joined, setJoined] = useState(false)
+  const engine = useEngine({ matchId: MATCH });
+  const { me, peers, phase, gallery, wallet, toast } = engine;
+  const [joined, setJoined] = useState(false);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -50,8 +50,8 @@ export default function App() {
           label={joined ? 'Joined' : 'Join wave'}
           disabled={joined}
           onPress={() => {
-            engine.joinWave()
-            setJoined(true)
+            engine.joinWave();
+            setJoined(true);
           }}
         />
       </View>
@@ -73,7 +73,7 @@ export default function App() {
         ))}
       </ScrollView>
     </SafeAreaView>
-  )
+  );
 }
 
 function Button({ label, onPress, disabled }) {
@@ -85,7 +85,7 @@ function Button({ label, onPress, disabled }) {
     >
       <Text style={styles.btnText}>{label}</Text>
     </Pressable>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
@@ -111,4 +111,4 @@ const styles = StyleSheet.create({
   thumb: { width: 160, height: 160, borderRadius: 8, marginBottom: 8 },
   caption: { color: '#cfe0ff' },
   tip: { color: '#7dffa1', marginTop: 6 }
-})
+});

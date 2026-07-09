@@ -7,18 +7,18 @@
 // addon dependencies. So we run `bare-link` ourselves from apps/mobile (which reaches the addons
 // via hyperwave-lib-core) and write into the hoisted react-native-bare-kit. bare-link just
 // packages the iOS prebuilds the addon packages already ship — no compiler needed, runs anywhere.
-import link from 'bare-link'
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import link from 'bare-link';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') // apps/mobile
-const rnbk = path.resolve(appDir, '../../node_modules/react-native-bare-kit')
-const out = path.join(rnbk, 'ios', 'addons')
+const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); // apps/mobile
+const rnbk = path.resolve(appDir, '../../node_modules/react-native-bare-kit');
+const out = path.join(rnbk, 'ios', 'addons');
 
 if (!fs.existsSync(rnbk)) {
-  console.log('[link-ios-addons] react-native-bare-kit not installed — skipping')
-  process.exit(0)
+  console.log('[link-ios-addons] react-native-bare-kit not installed — skipping');
+  process.exit(0);
 }
 
 for await (const _ of link(appDir, {
@@ -30,5 +30,5 @@ for await (const _ of link(appDir, {
 
 const n = fs.existsSync(out)
   ? fs.readdirSync(out).filter((f) => f.endsWith('.xcframework')).length
-  : 0
-console.log(`[link-ios-addons] vendored ${n} addon xcframeworks -> ${path.relative(appDir, out)}`)
+  : 0;
+console.log(`[link-ios-addons] vendored ${n} addon xcframeworks -> ${path.relative(appDir, out)}`);

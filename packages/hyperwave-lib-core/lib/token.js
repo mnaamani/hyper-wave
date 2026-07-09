@@ -1,21 +1,21 @@
 // Pure token crypto for the wave race. Ed25519 receipts + a constant-size blake2b
 // chain accumulator (docs/protocol.md §2.3 — NOT a growing hops[] array). No state,
 // no I/O — unit-tested in wave.token.test.js.
-const crypto = require('hypercore-crypto')
-const b4a = require('b4a')
+const crypto = require('hypercore-crypto');
+const b4a = require('b4a');
 
-const ZERO_HASH = b4a.toString(b4a.alloc(32), 'hex') // genesis accumulator
+const ZERO_HASH = b4a.toString(b4a.alloc(32), 'hex'); // genesis accumulator
 
 // A receipt binds a peer to a specific hop: sign(H(waveId|hop|prevChainHash|ts)).
 function receiptHash(waveId, hopCount, prevChainHash, timestamp) {
-  return crypto.hash(b4a.from(`${waveId}|${hopCount}|${prevChainHash}|${timestamp}`))
+  return crypto.hash(b4a.from(`${waveId}|${hopCount}|${prevChainHash}|${timestamp}`));
 }
 
 function signReceipt(keyPair, waveId, hopCount, prevChainHash, timestamp) {
   return b4a.toString(
     crypto.sign(receiptHash(waveId, hopCount, prevChainHash, timestamp), keyPair.secretKey),
     'hex'
-  )
+  );
 }
 
 // Verify a receipt is a valid Ed25519 signature by `peerId` over its hop tuple.
@@ -25,10 +25,10 @@ function signReceipt(keyPair, waveId, hopCount, prevChainHash, timestamp) {
 // (cross-checking against the real token chain) is the validator's job.
 function verifyReceipt(peerIdHex, waveId, hopCount, chainHash, timestamp, receiptSigHex) {
   try {
-    const h = receiptHash(waveId, hopCount, chainHash, timestamp)
-    return crypto.verify(h, b4a.from(receiptSigHex, 'hex'), b4a.from(peerIdHex, 'hex'))
+    const h = receiptHash(waveId, hopCount, chainHash, timestamp);
+    return crypto.verify(h, b4a.from(receiptSigHex, 'hex'), b4a.from(peerIdHex, 'hex'));
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -41,7 +41,7 @@ function verifyToken(token) {
     token.prevChainHash,
     token.timestamp,
     token.senderReceiptSig
-  )
+  );
 }
 
 // Constant-size rolling accumulator: newHash = blake2b(prevHash || receiptSig).
@@ -49,7 +49,7 @@ function advanceChain(prevChainHash, receiptSigHex) {
   return b4a.toString(
     crypto.hash(b4a.concat([b4a.from(prevChainHash, 'hex'), b4a.from(receiptSigHex, 'hex')])),
     'hex'
-  )
+  );
 }
 
 // --- burn attestation ------------------------------------------------------
@@ -62,11 +62,11 @@ function advanceChain(prevChainHash, receiptSigHex) {
 function burnHash({ waveId, peerId, reason, amount, txHash, tronAddress, burnTs }) {
   return crypto.hash(
     b4a.from(`${waveId}|${peerId}|${reason}|${amount}|${txHash}|${tronAddress}|${burnTs}`)
-  )
+  );
 }
 
 function signBurn(keyPair, fields) {
-  return b4a.toString(crypto.sign(burnHash(fields), keyPair.secretKey), 'hex')
+  return b4a.toString(crypto.sign(burnHash(fields), keyPair.secretKey), 'hex');
 }
 
 // Verify a burn attestation is a valid Ed25519 signature by `fields.peerId` over the tuple.
@@ -74,9 +74,9 @@ function signBurn(keyPair, fields) {
 // key is ignored).
 function verifyBurn(fields, sigHex) {
   try {
-    return crypto.verify(burnHash(fields), b4a.from(sigHex, 'hex'), b4a.from(fields.peerId, 'hex'))
+    return crypto.verify(burnHash(fields), b4a.from(sigHex, 'hex'), b4a.from(fields.peerId, 'hex'));
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -86,7 +86,7 @@ function verifyBurn(fields, sigHex) {
 // requires a real fee burn, which makes every tippable selfie one from a peer who paid in.
 // The on-chain reality of the txHash is verified separately by the admitter (network I/O).
 function burnAuthorizes(burn, peerId, waveId) {
-  return !!(burn && burn.peerId === peerId && burn.waveId === waveId && verifyBurn(burn, burn.sig))
+  return !!(burn && burn.peerId === peerId && burn.waveId === waveId && verifyBurn(burn, burn.sig));
 }
 
 // --- gallery-key attestation -----------------------------------------------
@@ -96,11 +96,11 @@ function burnAuthorizes(burn, peerId, waveId) {
 // signs (waveId, autobaseKey) with its ring key; every peer verifies the signature against
 // the wave's originator before opening the gallery. (Independent of payments — pure integrity.)
 function galleryKeyHash(waveId, autobaseKey) {
-  return crypto.hash(b4a.from(`gallery-key|${waveId}|${autobaseKey}`))
+  return crypto.hash(b4a.from(`gallery-key|${waveId}|${autobaseKey}`));
 }
 
 function signGalleryKey(keyPair, waveId, autobaseKey) {
-  return b4a.toString(crypto.sign(galleryKeyHash(waveId, autobaseKey), keyPair.secretKey), 'hex')
+  return b4a.toString(crypto.sign(galleryKeyHash(waveId, autobaseKey), keyPair.secretKey), 'hex');
 }
 
 // Verify the gallery key is the one the wave's `originatorHex` published for `waveId`.
@@ -110,9 +110,9 @@ function verifyGalleryKey(originatorHex, waveId, autobaseKey, sigHex) {
       galleryKeyHash(waveId, autobaseKey),
       b4a.from(sigHex, 'hex'),
       b4a.from(originatorHex, 'hex')
-    )
+    );
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -122,11 +122,11 @@ function verifyGalleryKey(originatorHex, waveId, autobaseKey, sigHex) {
 // so receivers can't be tricked into ending a wave that didn't really finish. Binds
 // (waveId, hops, chainHash) to the originator identity.
 function waveEndHash(waveId, hops, chainHash) {
-  return crypto.hash(b4a.from(`wave-end|${waveId}|${hops}|${chainHash}`))
+  return crypto.hash(b4a.from(`wave-end|${waveId}|${hops}|${chainHash}`));
 }
 
 function signWaveEnd(keyPair, waveId, hops, chainHash) {
-  return b4a.toString(crypto.sign(waveEndHash(waveId, hops, chainHash), keyPair.secretKey), 'hex')
+  return b4a.toString(crypto.sign(waveEndHash(waveId, hops, chainHash), keyPair.secretKey), 'hex');
 }
 
 // Verify a completion is validly signed by `originatorHex` over its (waveId, hops, chainHash).
@@ -136,9 +136,9 @@ function verifyWaveEnd(originatorHex, waveId, hops, chainHash, sigHex) {
       waveEndHash(waveId, hops, chainHash),
       b4a.from(sigHex, 'hex'),
       b4a.from(originatorHex, 'hex')
-    )
+    );
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -157,4 +157,4 @@ module.exports = {
   verifyGalleryKey,
   signWaveEnd,
   verifyWaveEnd
-}
+};

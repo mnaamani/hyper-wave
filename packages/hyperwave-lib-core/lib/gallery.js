@@ -2,16 +2,16 @@
 // view. Config + read/ordering helpers live here (pure/Autobase, no swarm); the
 // orchestrator in wave.js owns the live base instance. Unit-tested in
 // wave.gallery.test.js and wave.autobase.test.js.
-const b4a = require('b4a')
-const { verifyReceipt, burnAuthorizes } = require('./token')
+const b4a = require('b4a');
+const { verifyReceipt, burnAuthorizes } = require('./token');
 
 // Per-entry write budget (deterministic, enforced in apply on every peer). With OPTIMISTIC
 // admission a gallery seat no longer costs a verified on-chain burn, so bound what a seat can
 // write: one entry per peer (dedup below) + these size caps. Keeps a modified client from
 // bloating the replicated/retained gallery. The inline selfie image (a JPEG data URL) is the
 // dominant field; caption is short. Oversized entries are dropped (not truncated).
-const MAX_IMAGE_BYTES = 256 * 1024 // ~256 KB data-URL string (≈190 KB image after base64)
-const MAX_CAPTION_BYTES = 512
+const MAX_IMAGE_BYTES = 256 * 1024; // ~256 KB data-URL string (≈190 KB image after base64)
+const MAX_CAPTION_BYTES = 512;
 
 // A selfie is admitted to the gallery only if it carries a receipt validly signed
 // by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
@@ -22,7 +22,7 @@ function selfieHasValidReceipt(op) {
     op.peerId &&
     op.receiptSig &&
     verifyReceipt(op.peerId, op.waveId, op.hopCount, op.chainHash, op.receiptTs, op.receiptSig)
-  )
+  );
 }
 
 // Is this selfie's tip `address` provably the wallet that paid the peer's fee? The op carries
@@ -36,7 +36,7 @@ function tipAddressIsBackedByBurn(op) {
     op.burn &&
     burnAuthorizes(op.burn, op.peerId, op.waveId) &&
     op.burn.tronAddress === op.address
-  )
+  );
 }
 
 // Autobase config shared by the engine and tests so apply/view is exercised identically.
@@ -52,59 +52,59 @@ function galleryConfig() {
     valueEncoding: 'json',
     open: (s) => s.get('gallery', { valueEncoding: 'json' }),
     async apply(nodes, view, host) {
-      let seen = null // lazily-built set of peerIds already in the view (per-peer dedup)
+      let seen = null; // lazily-built set of peerIds already in the view (per-peer dedup)
       for (const node of nodes) {
-        const op = node.value
+        const op = node.value;
         if (op?.type === 'add-writer') {
           try {
-            await host.addWriter(b4a.from(op.key, 'hex'), { indexer: true })
+            await host.addWriter(b4a.from(op.key, 'hex'), { indexer: true });
           } catch {}
-          continue
+          continue;
         }
-        if (op?.type !== 'wave-selfie' || !selfieHasValidReceipt(op)) continue
+        if (op?.type !== 'wave-selfie' || !selfieHasValidReceipt(op)) continue;
         // size cap (optimistic admission → bound each seat's write); drop oversized entries
-        if ((op.image || '').length > MAX_IMAGE_BYTES) continue
-        if ((op.caption || '').length > MAX_CAPTION_BYTES) continue
+        if ((op.image || '').length > MAX_IMAGE_BYTES) continue;
+        if ((op.caption || '').length > MAX_CAPTION_BYTES) continue;
         if (seen === null) {
-          seen = new Set()
+          seen = new Set();
           for (let i = 0; i < view.length; i++) {
-            const e = await view.get(i)
-            if (e?.type === 'wave-selfie') seen.add(e.peerId)
+            const e = await view.get(i);
+            if (e?.type === 'wave-selfie') seen.add(e.peerId);
           }
         }
-        if (seen.has(op.peerId)) continue // one selfie per peer per wave — drop extras
-        seen.add(op.peerId)
-        const { burn, ...entry } = op
-        if (!tipAddressIsBackedByBurn(op)) entry.address = '' // unverified address → not tippable
+        if (seen.has(op.peerId)) continue; // one selfie per peer per wave — drop extras
+        seen.add(op.peerId);
+        const { burn, ...entry } = op;
+        if (!tipAddressIsBackedByBurn(op)) entry.address = ''; // unverified address → not tippable
         // Keep the burn txHash (the rest of the bulky attestation is dropped): it lets tippers
         // and any auditor fetch the tx and verify the fee burn on-chain.
-        if (burn && burn.txHash) entry.burnTx = burn.txHash
-        await view.append(entry)
+        if (burn && burn.txHash) entry.burnTx = burn.txHash;
+        await view.append(entry);
       }
     }
-  }
+  };
 }
 
 // Deterministic gallery: one entry per peer per wave (newest wins), ordered by hop.
 function buildGallery(entries) {
-  const byKey = new Map()
+  const byKey = new Map();
   for (const e of entries) {
-    const k = e.waveId + '|' + e.peerId
-    const prev = byKey.get(k)
-    if (!prev || e.timestamp > prev.timestamp) byKey.set(k, e)
+    const k = e.waveId + '|' + e.peerId;
+    const prev = byKey.get(k);
+    if (!prev || e.timestamp > prev.timestamp) byKey.set(k, e);
   }
-  return [...byKey.values()].sort((a, b) => a.hopCount - b.hopCount || a.timestamp - b.timestamp)
+  return [...byKey.values()].sort((a, b) => a.hopCount - b.hopCount || a.timestamp - b.timestamp);
 }
 
 // Read all wave-selfie entries out of an Autobase view into an ordered gallery.
 async function readGallery(base) {
-  const view = base.view
-  const items = []
+  const view = base.view;
+  const items = [];
   for (let i = 0; i < view.length; i++) {
-    const e = await view.get(i)
-    if (e?.type === 'wave-selfie') items.push(e)
+    const e = await view.get(i);
+    if (e?.type === 'wave-selfie') items.push(e);
   }
-  return buildGallery(items)
+  return buildGallery(items);
 }
 
-module.exports = { galleryConfig, buildGallery, readGallery }
+module.exports = { galleryConfig, buildGallery, readGallery };

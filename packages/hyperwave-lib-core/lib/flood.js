@@ -9,21 +9,21 @@
 // topologies to verify reach — both exercise the exact same decision code.
 
 function createFlood({ cap = 4096 } = {}) {
-  const seen = new Set()
+  const seen = new Set();
   return {
     // True the first time `mid` is seen (=> process it locally and relay it onward);
     // false on any repeat (=> drop). Past `cap` the set is cleared wholesale, which at
     // worst lets a lone straggler re-flood once — harmless and very rare.
     firstSight(mid) {
-      if (seen.has(mid)) return false
-      if (seen.size >= cap) seen.clear()
-      seen.add(mid)
-      return true
+      if (seen.has(mid)) return false;
+      if (seen.size >= cap) seen.clear();
+      seen.add(mid);
+      return true;
     },
     get size() {
-      return seen.size
+      return seen.size;
     }
-  }
+  };
 }
 
-module.exports = { createFlood }
+module.exports = { createFlood };

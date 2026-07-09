@@ -5,12 +5,12 @@
 //
 // A companion on-chain suite (funded wallets + Nile) covers the paid-wave gate, burns, and
 // tips — that one needs secrets + costs testnet TRX, so it runs gated/nightly.
-const test = require('brittle')
-const { Cluster, sleep, waitForAnyGallery } = require('./harness')
+const test = require('brittle');
+const { Cluster, sleep, waitForAnyGallery } = require('./harness');
 
 // 8 is a good default: enough hops that the token really races a ring and gossip really floods
 // a small mesh, but light enough for a 2-core CI runner. Turn it down on a constrained box.
-const N = Number(process.env.E2E_PEERS || 8)
+const N = Number(process.env.E2E_PEERS || 8);
 
 // Launch N equal peers, all auto-joining and auto-selfie-ing (no roles). p1 initiates: it kicks
 // off once it sees everyone (the N-1 other peers), and — as the initiator — it archives its
@@ -18,7 +18,7 @@ const N = Number(process.env.E2E_PEERS || 8)
 // of reliable DHT discovery (see harness.start's warm-up). Returns { peers } (peers[0] is the
 // initiator p1).
 async function launchWave(c, initEnv = {}) {
-  const peers = []
+  const peers = [];
   for (let i = 1; i <= N; i++) {
     peers.push(
       c.launch('p' + i, {
@@ -26,46 +26,46 @@ async function launchWave(c, initEnv = {}) {
         AUTOSELFIE: '1',
         ...(i === 1 ? { START: String(N - 1), ...initEnv } : {})
       })
-    )
-    await sleep(400)
+    );
+    await sleep(400);
   }
-  return { peers }
+  return { peers };
 }
 
 test(`a ${N}-peer wave converges the gallery on every node`, { timeout: 150000 }, async (t) => {
-  const c = await new Cluster({ lobbyMs: 8000 }).start()
-  t.teardown(() => c.destroy())
+  const c = await new Cluster({ lobbyMs: 8000 }).start();
+  t.teardown(() => c.destroy());
 
-  const { peers } = await launchWave(c)
+  const { peers } = await launchWave(c);
 
   // every participant — including the initiator p1, which retains the gallery — reaches all N
-  for (const p of peers) t.ok(await p.waitForGallery(N, 90000), `${p.name} converged to ${N}`)
+  for (const p of peers) t.ok(await p.waitForGallery(N, 90000), `${p.name} converged to ${N}`);
 
   // and the token actually completed the lap back to the originator (didn't stall)
-  t.ok(await peers[0].waitForEvent('completed', 10000), 'the wave completed at the originator')
-})
+  t.ok(await peers[0].waitForEvent('completed', 10000), 'the wave completed at the originator');
+});
 
 test(
   `the wave heals when peers die mid-race (${N} peers, kill 2)`,
   { timeout: 150000 },
   async (t) => {
-    const c = await new Cluster({ lobbyMs: 8000 }).start()
-    t.teardown(() => c.destroy())
+    const c = await new Cluster({ lobbyMs: 8000 }).start();
+    t.teardown(() => c.destroy());
 
-    const { peers } = await launchWave(c)
+    const { peers } = await launchWave(c);
 
     // once the ball is moving, kill two mid-ring peers (not the initiator p1, its archivist)
-    await peers[0].waitForEvent('started', 90000)
-    const survivors = peers.filter((_, i) => i !== 2 && i !== 4) // all live peers incl. p1
-    peers[2].kill() // p3
-    peers[4].kill() // p5
+    await peers[0].waitForEvent('started', 90000);
+    const survivors = peers.filter((_, i) => i !== 2 && i !== 4); // all live peers incl. p1
+    peers[2].kill(); // p3
+    peers[4].kill(); // p5
 
     // the wave must still finish — the ring routes around the dead peers (self-healing). This is
     // the core of the test: the token completes its lap despite two mid-race deaths.
     t.ok(
       await peers[1].waitForEvent('completed', 90000),
       'wave completed despite 2 peers dying mid-race'
-    )
+    );
     // The survivors' selfies then converge into the shared gallery. We check the survivor SET (not
     // only the non-hub initiator) reaching N-3 rather than the full N-2, because two SIMULTANEOUS
     // mid-race kills occasionally cost the token to one *extra* live neighbour: a healer skips a
@@ -77,6 +77,6 @@ test(
     t.ok(
       await waitForAnyGallery(survivors, N - 3, 90000),
       `the healed wave still populated the gallery (≥ ${N - 3} survivor selfies converged)`
-    )
+    );
   }
-)
+);

@@ -8,4 +8,4 @@ module.exports = {
   ...require('./lib/wave'), // createWave, parseBootstrap
   ...require('./lib/pay'), // createPayments
   ...require('./lib/fees') // FEE_TRX, payFee, confirmBurn, wireWallet
-}
+};
