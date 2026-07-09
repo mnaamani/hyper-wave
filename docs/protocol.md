@@ -400,7 +400,7 @@ sender's receipt over `(waveId, hopCount, prevChainHash, timestamp)`. Processing
 
 Primarily the **ACK** that healing (§7.3) waits for — the predecessor is a pinned neighbour, so
 it's received without needing a flood. Deliberately **not** relayed: it's emitted once per hop
-and the token now races at network speed (`HOP_DELAY_MS = 0`), so flooding it would be a burst
+and the token races at network speed, so flooding it would be a burst
 storm, and it doesn't need to reach everyone. `holder` is connection-bound (§11), and healing
 only accepts the ACK when `holder` is the **specific successor** it forwarded to, so a bogus
 `wave-pos` can't suppress healing of a dead successor.
@@ -516,8 +516,8 @@ hopCount', newChainHash, now)`. This is _my_ hop.
    - Broadcast `wave-pos { holder: me, hopCount' }`.
    - If I'm in the roster, **post my staged selfie now** (see below): I have my receipt for
      this hop, and my image was captured back in the lobby.
-   - After `HOP_DELAY_MS` (**default 0** — the token races at network speed), forward the
-     new token to my **successor** (§7.3 handles a dead successor).
+   - Forward the new token to my **successor** immediately — the token races at network speed,
+     with no per-hop dwell (§7.3 handles a dead successor).
 
 **The selfie is captured up-front, in the lobby.** The token must never wait on a human, so
 capture and posting are split:
@@ -525,22 +525,21 @@ capture and posting are split:
 - **Capture (lobby, synchronized):** when a peer opts in, the renderer opens the camera and
   shows a countdown to kickoff. At kickoff (or on a manual press) it grabs one frame and
   **stages** it to the worker (`stage-selfie` command → `stagedSelfie`). Everyone captures
-  around the same moment, at a relaxed pace — independent of ring size or dwell.
+  around the same moment, at a relaxed pace — independent of ring size.
 - **Post (race, on the ball):** when the token reaches me I record my hop's receipt
   (`recordMyReceipt`) and post the staged image to the gallery, gated on that receipt (the
   add-writer credential). `tryPostSelfie` fires once **both** the staged image and the
   receipt are present, so it's robust to either arriving first (e.g. the originator, which
   stages and holds at hop 0 almost simultaneously). Posted exactly once per wave.
 
-**`HOP_DELAY_MS` defaults to 0** — it never has to cover a human taking a selfie, and it is
-not a security/correctness mechanism, so the token races at network speed and a wave completes
-quickly regardless of ring size. **Visual pacing is a pure renderer concern**, decoupled from
-the protocol: each peer replicates the whole gallery, and the host replays the completed,
-`hopCount`-ordered gallery (see below) as a fixed-duration **sweep** — the ⚽ rolls around the
-ring over a constant wall-clock time independent of N, featuring each selfie as it passes. So
-selfies always present in **ring order** whatever the arrival timing, because ordering comes
-from the entry's `hopCount` (§8.3 / `buildGallery`), not from the dwell. (Set `HOP_DELAY_MS > 0`
-to demo a slow, live per-hop roll instead of the replay.)
+**There is no per-hop dwell** — the token never has to cover a human taking a selfie, and hop
+timing is not a security/correctness mechanism, so the token races at network speed and a wave
+completes quickly regardless of ring size. **Visual pacing is a pure renderer concern**,
+decoupled from the protocol: each peer replicates the whole gallery, and the host replays the
+completed, `hopCount`-ordered gallery (see below) as a fixed-duration **sweep** — the ⚽ rolls
+around the ring over a constant wall-clock time independent of N, featuring each selfie as it
+passes. So selfies always present in **ring order** whatever the arrival timing, because
+ordering comes from the entry's `hopCount` (§8.3 / `buildGallery`), not from arrival time.
 
 The originator starts the chain at hop 0: `prevChainHash = ZERO_HASH`, its own receipt,
 then hold & forward as above.
@@ -566,7 +565,7 @@ flowchart TD
   C -- yes --> E["broadcast wave-end · finish wave"]
   C -- no --> S{"seen or hop &gt; MAX_HOPS?"}
   S -- yes --> D3["drop — dupe / cap"]
-  S -- no --> H["adopt + open gallery ·<br/>advance chain · stamp my receipt ·<br/>broadcast wave-pos ·<br/>dwell then forward to successor"]
+  S -- no --> H["adopt + open gallery ·<br/>advance chain · stamp my receipt ·<br/>broadcast wave-pos ·<br/>forward to successor"]
 ```
 
 ## 7. Wave lifecycle state machine
@@ -867,19 +866,18 @@ the gate (waves announce immediately, unpaid).
 
 ## 10. Constants (reference build)
 
-| Constant            | Value  | Meaning                                                                                                                                           |
-| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                                                                                                        |
-| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                                                                                                         |
-| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                                                                                             |
-| `HOP_DELAY_MS`      | 0      | per-hop dwell; default 0 (token races at network speed). Visual pacing is a renderer replay, not the protocol (§6). Set > 0 for a slow live roll. |
-| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                                                                                             |
-| `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                                                                                               |
-| `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                                                                                                           |
-| `MAX_HOPS`          | 5000   | runaway-token safety cap                                                                                                                          |
-| `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2)                                                                             |
-| `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                                                                                            |
-| `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)                                                                                     |
+| Constant            | Value  | Meaning                                                               |
+| ------------------- | ------ | --------------------------------------------------------------------- |
+| `HEARTBEAT_MS`      | 2000   | pointers-heartbeat cadence                                            |
+| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                             |
+| `TTL_MS`            | 12000  | drop a peer not refreshed within this                                 |
+| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                 |
+| `WAVE_TIMEOUT_MS`   | 90000  | force-idle if a wave doesn't finish                                   |
+| `HEAL_TIMEOUT_MS`   | 3000   | no advance past my hop ⇒ skip successor                               |
+| `MAX_HOPS`          | 5000   | runaway-token safety cap                                              |
+| `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2) |
+| `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                |
+| `ADMIT_TIMEOUT_MS`  | 25000  | give up requesting gallery admission (re-broadcasts every 3s)         |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match.

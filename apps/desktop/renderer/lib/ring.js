@@ -76,7 +76,7 @@ export function angleOfId(hex) {
 }
 
 // --- the football: a local REPLAY sweep, decoupled from the (near-instant) race ---
-// The protocol races at network speed (HOP_DELAY_MS = 0); visual pacing lives here. On
+// The protocol races at network speed; visual pacing lives here. On
 // completion the host starts a fixed-duration sweep: the ⚽ rolls clockwise once around the
 // ring over SWEEP_MS regardless of N, and each frame we report progress so the gallery can
 // feature the selfie the ball is passing. When the sweep reaches the end it FREEZES (the ball

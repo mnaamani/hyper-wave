@@ -37,8 +37,9 @@ Scaling has **two independent axes**; this plan's primary focus is (A).
 the concrete work below: O(log N) connections + lookup.
 
 **(B) Propagation _time_ → deterministic sweep (a decision, not built here).** A _serial_
-token lap is inherently `O(N × HOP_DELAY_MS)` — at N=10,000 and 1.2s dwell that's hours,
-which defeats "a wave." Chord fixes connectivity, **not** lap time. For a truly global,
+token lap is inherently `O(N)` — each hop adds a network round-trip, so at N=10,000 the lap
+takes many seconds even at network speed, which defeats "a wave." Chord fixes connectivity,
+**not** lap time. For a truly global,
 near-instant wave the propagation model should become the **deterministic angular sweep**
 from the original design: publish `(waveStartTime, angularSpeed, direction)`, and every
 peer _independently_ computes when the wave reaches its seat
@@ -55,7 +56,7 @@ both: serial for intimate waves, sweep for stadium/global moments.
 
 **Status:** decided (keep serial for small, sweep for global) but the sweep is **not built**
 — the serial token remains the only propagation model, so a genuinely large wave is still
-O(N·dwell). Note the sweep's `(startTime, speed, direction)` params are exactly what the
+O(N) in per-hop network round-trips. Note the sweep's `(startTime, speed, direction)` params are exactly what the
 **control-plane flood** (§4.6) already delivers to every seat — so the flood is the
 delivery mechanism for _either_ model's kickoff; only the per-peer trigger logic differs.
 
@@ -268,8 +269,9 @@ things that decide whether this actually works at scale — in priority order:
    routed results back into pinning. Verified over simulated 64-node partial-knowledge networks
    (within the 2·log₂N ≤ 12-hop test bound) and end-to-end on the local DHT incl. a late joiner. _Still to harden:_ validate
    convergence under real large-N churn (can't force a partial mesh locally).
-2. **Propagation at scale — build the sweep (§3B / Phase 5).** The serial token is O(N·dwell)
-   ≈ hours at N=10k, so there is currently _no_ working large-N wave. The deterministic
+2. **Propagation at scale — build the sweep (§3B / Phase 5).** The serial token is O(N) in
+   per-hop network round-trips ≈ many seconds at N=10k, so there is currently _no_ working
+   large-N wave. The deterministic
    angular sweep (per-peer self-trigger, independent proofs) is the only path to a genuinely
    global wave; its kickoff already has a delivery mechanism (the §4.6 flood).
 3. ~~**Gallery persistence (§4.7).**~~ **Done (bounded)** — transitive reach _and_ per-wave

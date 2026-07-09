@@ -43,7 +43,7 @@ A submission for the **Tether Developers Cup** (DoraHacks), theme "football / gl
 - **No peer roles.** Every peer runs the same code; the only asymmetry is per-wave (the initiator archives its own wave's gallery).
 - **Constant-size hot path.** The token must NOT carry a growing `hops[]` array. Rolling accumulator: `newChainHash = blake2b(prevChainHash + thisReceiptSig)`.
 - **One wire encoding (JSON).** Every gossip message AND the token are `JSON.stringify`'d over a single `compact-encoding` **`string`** Protomux frame (no binary token structs). Ed25519-signed over Noise-encrypted Hyperswarm streams.
-- **Selfies never block the token.** Capture happens in the lobby (before the race); the staged frame posts when the ball arrives. The per-hop dwell is **experiential pacing, not security**.
+- **Selfies never block the token.** Capture happens in the lobby (before the race); the staged frame posts when the ball arrives. The token races at network speed with **no per-hop dwell**; any experiential pacing is a renderer-side replay concern, not the protocol.
 - **Optimistic gallery admission.** The admitter checks only the burn attestation _signature_ — no on-chain call on the write path; the burn is verified where it pays off (tippers/auditors via `burnTx`).
 - **Testnet only.** Native TRX on Nile (not TRC-20 USDT — a TRX transfer pays its own fee from the same balance). No smart contracts.
 

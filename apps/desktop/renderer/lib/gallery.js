@@ -75,7 +75,7 @@ export function tipResult({ hash, error }) {
 
 // Start the completion replay: roll the ball once around the ring from hop 0's seat, featuring
 // each selfie as it passes. Origin = the first (hop 0 / originator) entry's seat angle, so the
-// sweep's angular progress lines up with the hopCount-ordered gallery. At HOP_DELAY_MS = 0 the
+// sweep's angular progress lines up with the hopCount-ordered gallery. At network speed the
 // `completed` event can beat the local selfie's async append, so `items` may still be empty here
 // — mark the replay PENDING and start it the moment the first selfie lands (see handle()).
 let pendingReplay = false

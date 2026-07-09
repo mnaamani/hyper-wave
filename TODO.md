@@ -96,7 +96,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 
 ### Propagation at extreme scale (Phase 5 — decision deferred)
 
-Serial token is O(N·dwell) — hours at N=10k. The designed alternative is the
+Serial token is O(N) in per-hop network round-trips — many seconds at N=10k. The designed alternative is the
 **deterministic angular sweep** (each peer self-triggers from `(startTime, speed)`;
 independent per-seat proofs). Decision deliberately parked — the serial token is the product
 for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
@@ -128,7 +128,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       `requestAdmission`, `admitWriter` (`burnAuthorizes`) — has **no automated test**: the unit
       suites don't wire a wallet and the `e2e/` harness runs wallet-less (`enforcePaid` off,
       receipt-only admission), so this path is exercised only by manual two-peer runs. That's how
-      the zero-dwell regression slipped in: with `HOP_DELAY_MS = 0` a wave ends before a joiner's
+      the zero-dwell regression slipped in: the token races at network speed, so a wave ends before a joiner's
       fee burn confirms, and two bugs dropped the admission ticket — `recordBurn` refused once
       `wave` was null, and `resetSelfie` nulled `myBurnProof` on `goIdle` (fixed by threading
       `waveId` into `recordBurn` so a late burn still records into the persisted gallery, and by

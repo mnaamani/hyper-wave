@@ -37,7 +37,7 @@ test('ties on hop broken by timestamp', (t) => {
   )
 })
 
-// Regression guard for the zero-dwell race (HOP_DELAY_MS = 0): the token races at network
+// Regression guard for the zero-dwell race: the token races at network
 // speed, so selfies can be appended in a burst whose arrival order — and here whose timestamps
 // too — is the reverse of ring/hop order. Gallery order must still be strictly by hopCount, so
 // the renderer replay features participants in ring order regardless of how they arrived.

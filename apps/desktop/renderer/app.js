@@ -185,7 +185,7 @@ ipc.on('event', (e) => {
       break
     case 'holding':
       // the ball reached me - my staged selfie posts now (worker-side). The race is near-instant
-      // (HOP_DELAY_MS = 0); the visible ⚽ roll is the completion replay below, not this event.
+      // (network speed); the visible ⚽ roll is the completion replay below, not this event.
       hud.waveStatus(
         e.canSelfie
           ? `📸 your selfie joins the wave! - hop ${e.hopCount ?? ''}`

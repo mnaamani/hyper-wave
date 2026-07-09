@@ -41,13 +41,10 @@ const HEARTBEAT_MS = 2000 // pointers-heartbeat cadence (liveness + Chord pointe
 const RINGUPDATE_MS = 4000 // re-pin + gallery-pull maintenance cadence
 const TTL_MS = 12000 // drop peers not refreshed within this window
 const MAX_HOPS = 5000 // safety cap against runaway tokens
-// Dwell per hop. Defaults to 0: the token races at network speed and visual pacing is a
-// pure renderer concern (the host replays the completed, hopCount-ordered gallery as a
-// fixed-duration sweep — see docs/protocol.md §6). The selfie is captured up-front in the
-// lobby (not during the race), so the dwell never has to cover a human, and it is not a
-// security/correctness mechanism. Kept as a configurable option (set > 0 to demo a slow,
-// live per-hop roll).
-const HOP_DELAY_MS = 0
+// The token races at network speed — there is no per-hop dwell. Visual pacing is a pure
+// renderer concern (the host replays the completed, hopCount-ordered gallery as a fixed-duration
+// sweep — see docs/protocol.md §6). The selfie is captured up-front in the lobby (not during the
+// race), so nothing on the hot path ever has to cover a human.
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
 // (get ready / choose to selfie) before the token starts racing.
 const LOBBY_MS = 15000
@@ -132,7 +129,6 @@ function createWave({
   log = () => {},
   bootstrap = null,
   matchId = MATCH,
-  hopDelayMs = HOP_DELAY_MS,
   waveTimeoutMs = WAVE_TIMEOUT_MS,
   healTimeoutMs = HEAL_TIMEOUT_MS,
   lobbyMs = LOBBY_MS,
@@ -737,7 +733,7 @@ function createWave({
   // when it requests to write a selfie — so a gallery seat requires a real burn (ensureWriter).
   function recordBurn({ reason, amount, txHash, waveId }) {
     // The burn is for `waveId` (threaded from payFee). Record it even if the wave has already
-    // ended — at HOP_DELAY_MS = 0 the race completes before a fee burn confirms, and the burn is
+    // ended — the race completes at network speed, before a fee burn confirms, and the burn is
     // the ticket for a LATE gallery admission into the (still-open) originator gallery. Only drop
     // it if we've moved past that wave entirely (its gallery is no longer current) — never let a
     // stale burn overwrite the current wave's ticket.
@@ -916,7 +912,7 @@ function createWave({
     selfiePosted = false
     admissionPromise = null
     // NB: myBurnProof is NOT cleared here. The wave ends the instant the token completes
-    // (HOP_DELAY_MS = 0), but a joiner's fee burn can confirm slightly later; the gallery
+    // (it races at network speed), but a joiner's fee burn can confirm slightly later; the gallery
     // persists (the originator keeps it open) precisely so a late admission still lands, and
     // the burn attestation is that admission ticket. It's bound to its waveId (burnAuthorizes
     // checks burn.waveId), so keeping it is safe — it can only ever admit its own wave. It's
@@ -1023,7 +1019,7 @@ function createWave({
 
   // I now hold this token: post my lobby selfie (if opted in — emitHolding records my
   // receipt, which pairs with the staged image), tell everyone the ball is at me, and
-  // forward to my successor after the dwell.
+  // forward to my successor (at network speed — no dwell).
   function holdAndForward(token) {
     emitHolding(
       token.waveId,
@@ -1033,7 +1029,7 @@ function createWave({
       token.timestamp
     )
     announcePosition(token.waveId, token.hopCount)
-    setTimeout(() => forwardToken(token), hopDelayMs)
+    forwardToken(token)
   }
 
   function processToken(token) {
