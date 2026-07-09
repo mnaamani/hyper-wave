@@ -129,15 +129,7 @@ function createWave({
   log = () => {},
   bootstrap = null,
   matchId = MATCH,
-  waveTimeoutMs = WAVE_TIMEOUT_MS,
-  healTimeoutMs = HEAL_TIMEOUT_MS,
-  lobbyMs = LOBBY_MS,
-  // Anti-spam: when enabled, a wave is only announced once its initiator has PROVEN the
-  // kick-off fee burn, and peers refuse to join a wave whose kick-off isn't verified
-  // on-chain. `verifyBurnTx(txHash, {waveId, from, minTrx}) -> {ok}` is the on-chain check
-  // (provided by the payment layer once the wallet is up; off by default so no-wallet
-  // headless/tests behave as before — waves announce immediately, unpaid).
-  verifyBurnTx = null
+  lobbyMs = LOBBY_MS
 }) {
   // No roles — every peer is equal. The one asymmetry is per-wave: the peer that INITIATES a
   // wave keeps that wave's gallery open (so it survives for latecomers/replication);
@@ -157,7 +149,7 @@ function createWave({
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null }
   let walletAddress = null // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false // gate waves on a proven kick-off burn (enabled once wallet is up)
-  let verifyBurnOnChain = verifyBurnTx // on-chain burn check (may be set later via setWallet)
+  let verifyBurnOnChain = null // on-chain burn check (set once the wallet is up, via setWallet)
   const peers = new Map() // id -> { id, angle, lastSeen, country }
   const senders = new Map() // peerId -> gossip message send fn (for direct forwarding)
   const pinned = new Set() // ids we've swarm.joinPeer()'d (our physical ring edges)
@@ -853,7 +845,7 @@ function createWave({
     if (rosterIds) for (const id of rosterIds) wave.roster.add(id)
     clearTimeout(lobbyTimer)
     clearTimeout(waveTimer)
-    waveTimer = setTimeout(() => goIdle('timeout'), waveTimeoutMs)
+    waveTimer = setTimeout(() => goIdle('timeout'), WAVE_TIMEOUT_MS)
     onEvent({ event: 'wave-active', waveId: wave.id, joined: wave.joined, count: wave.roster.size })
   }
 
@@ -989,7 +981,7 @@ function createWave({
       log('healing: successor', shortId(succ.id), 'silent — skipping')
       onEvent({ event: 'healed', waveId: token.waveId, skipped: succ.id })
       forwardToken(token, skipped)
-    }, healTimeoutMs)
+    }, HEAL_TIMEOUT_MS)
   }
 
   function clearHeal() {
@@ -1337,4 +1329,4 @@ function createWave({
   }
 }
 
-module.exports = { createWave, parseBootstrap, MATCH }
+module.exports = { createWave, parseBootstrap }

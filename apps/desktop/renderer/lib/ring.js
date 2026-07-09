@@ -82,7 +82,7 @@ export function angleOfId(hex) {
 // feature the selfie the ball is passing. When the sweep reaches the end it FREEZES (the ball
 // parks and stays); the user can then drag it (see scrubber.js → scrubTo) to browse. `origin`
 // is the originator's seat angle (hop 0) — frac 0 sits there, frac 1 completes the lap.
-export const SWEEP_MS = 8000
+const SWEEP_MS = 8000
 
 let origin = null // null = no active replay (ball hidden); else the sweep's start angle
 let sweepMs = SWEEP_MS

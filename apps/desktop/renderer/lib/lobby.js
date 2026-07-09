@@ -37,11 +37,6 @@ export function update(n) {
   paint()
 }
 
-export function markJoined() {
-  joined = true
-  joinBtn.style.display = 'none'
-}
-
 // Gate the join button on the wave's kick-off payment being verified (anti-spam): show a
 // "verifying…" state until the initiator's burn is confirmed, then enable joining.
 export function setJoinable(ok) {

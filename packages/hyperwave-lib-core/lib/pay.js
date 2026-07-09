@@ -167,4 +167,4 @@ async function createPayments({
   }
 }
 
-module.exports = { createPayments, NILE_PROVIDER, BURN_ADDRESS, SUN, toSun, fromSun }
+module.exports = { createPayments, toSun, fromSun }

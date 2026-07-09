@@ -31,7 +31,6 @@ function init({
     storageDir,
     bootstrap: config.bootstrap ? parseBootstrap(config.bootstrap) : undefined,
     matchId: config.matchId,
-    lobbyMs: config.lobbyMs,
     onState: (state) => send({ type: 'state', ...state }),
     onEvent: (event) => send({ type: 'event', ...event }),
     onGallery: (items) => send({ type: 'gallery', items }),

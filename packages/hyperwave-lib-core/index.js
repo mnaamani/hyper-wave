@@ -7,5 +7,5 @@ module.exports = {
   ...require('./lib/core'), // init
   ...require('./lib/wave'), // createWave, parseBootstrap
   ...require('./lib/pay'), // createPayments
-  ...require('./lib/fees') // FEE_TRX, burnMemo, payFee, confirmBurn, wireWallet
+  ...require('./lib/fees') // FEE_TRX, payFee, confirmBurn, wireWallet
 }

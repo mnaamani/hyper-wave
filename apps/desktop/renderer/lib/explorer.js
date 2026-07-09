@@ -3,13 +3,13 @@
 // the app window. txLink() builds a clickable element for the transient toast/status lines.
 const BASE = 'https://nile.tronscan.io'
 
-export const addressUrl = (addr) => `${BASE}/address/${addr}/transactions`
-export const txUrl = (hash) => `${BASE}/transaction/${hash}/overview`
+const addressUrl = (addr) => `${BASE}/address/${addr}/transactions`
+const txUrl = (hash) => `${BASE}/transaction/${hash}/overview`
 
 export function openAddress(addr) {
   if (addr) window.bridge.openExternal(addressUrl(addr))
 }
-export function openTx(hash) {
+function openTx(hash) {
   if (hash) window.bridge.openExternal(txUrl(hash))
 }
 

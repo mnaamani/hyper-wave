@@ -47,4 +47,4 @@ function wireWallet(wave, payments) {
   wave.setWallet(payments.address, (txHash, expect) => payments.verifyBurnTx(txHash, expect))
 }
 
-module.exports = { FEE_TRX, burnMemo, payFee, confirmBurn, wireWallet }
+module.exports = { FEE_TRX, payFee, confirmBurn, wireWallet }
