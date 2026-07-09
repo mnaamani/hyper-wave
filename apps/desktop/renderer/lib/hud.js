@@ -2,13 +2,15 @@
 // and the Kick-off button (which docks below the ring once there's a gallery).
 import { COUNTRIES, flagOf } from './countries.js'
 import { startWave, setCountry, refreshWallet, appVersion } from './ipc.js'
+import { openAddress } from './explorer.js'
 
 const statusEl = document.getElementById('status')
 const waveEl = document.getElementById('wave-status')
 const updaterEl = document.getElementById('updater')
 const startBtn = document.getElementById('start')
 const walletEl = document.getElementById('wallet')
-const walletTextEl = document.getElementById('wallet-text')
+const walletBalanceEl = document.getElementById('wallet-balance')
+const walletAddressEl = document.getElementById('wallet-address')
 const walletRefreshBtn = document.getElementById('wallet-refresh')
 const walletCopyBtn = document.getElementById('wallet-copy')
 const walletFaucetBtn = document.getElementById('wallet-faucet')
@@ -17,16 +19,18 @@ document.getElementById('v').innerText = 'v' + appVersion()
 
 // --- wallet chip (self-custodial TRX wallet) -------------------------------
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage'
-let walletAddress = '' // full address, for the copy + faucet buttons
+let walletAddress = '' // full address, for the copy + faucet + explorer links
 
 export function walletStatus({ address, trx }) {
   if (!address) return
   walletAddress = address
-  const short = address.slice(0, 6) + '…' + address.slice(-4)
-  walletTextEl.innerText =
-    `💰 ${trx.toFixed(2)} TRX · ${short}` + (trx === 0 ? ' · ⚠ unfunded' : '')
+  walletBalanceEl.innerText = `💰 ${trx.toFixed(2)} TRX` + (trx === 0 ? ' · ⚠ unfunded' : '')
+  walletAddressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4)
   walletEl.classList.add('ready') // reveal the chip + copy/faucet buttons now the wallet is up
 }
+
+// Open the address on the Nile block explorer (via main — the renderer is sandboxed).
+walletAddressEl.onclick = () => openAddress(walletAddress)
 
 // Copy the full wallet address to the clipboard (via main — the renderer is sandboxed), with
 // brief button feedback. New users copy this, then paste it into the faucet.
@@ -59,6 +63,10 @@ export function networkStatus(text) {
 // never fight over one line — networkStatus() shows peer count even while a wave narrates here.
 export function waveStatus(text) {
   waveEl.innerText = text || ''
+}
+// Like waveStatus but for a mix of text + nodes (e.g. a clickable tx link from explorer.js).
+export function waveStatusNodes(...parts) {
+  waveEl.replaceChildren(...parts)
 }
 // OTA update notice (its own line), set by updater.js when the app is updating. Separate again so
 // it never collides with the network status line.

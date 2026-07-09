@@ -7,6 +7,7 @@ import * as scrubber from './lib/scrubber.js'
 import * as lobby from './lib/lobby.js'
 import * as proof from './lib/proof.js'
 import * as hud from './lib/hud.js'
+import { txLink } from './lib/explorer.js'
 
 // Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the ⚽
 // around the ring to browse the gallery once the completion replay has run).
@@ -88,10 +89,10 @@ ipc.on('burn-result', (msg) => {
   // participation fee (kick-off or join), burned to the black hole (skin in the game). `stage`
   // keeps us from claiming "burned" before the tx is actually confirmed on-chain.
   const what = msg.reason === 'join' ? 'join' : 'kick-off'
-  const tx = msg.hash ? ` (tx ${msg.hash.slice(0, 8)}…)` : ''
-  if (msg.stage === 'confirming') hud.waveStatus(`⏳ confirming ${what} burn on-chain…${tx}`)
+  const tx = msg.hash ? [' (', txLink(msg.hash), ')'] : []
+  if (msg.stage === 'confirming') hud.waveStatusNodes(`⏳ confirming ${what} burn on-chain…`, ...tx)
   else if (msg.stage === 'failed') hud.waveStatus(`⚠️ ${what} fee burn failed: ${msg.error}`)
-  else hud.waveStatus(`🔥 ${what} fee burned - ${msg.amount} TRX${tx}`)
+  else hud.waveStatusNodes(`🔥 ${what} fee burned - ${msg.amount} TRX`, ...tx)
 })
 
 ipc.on('event', (e) => {
@@ -216,8 +217,10 @@ ipc.on('event', (e) => {
       break
     case 'raffle-win':
       // the wave's initiator drew a winner among the gallery participants (commit-reveal draw)
-      hud.waveStatus(
-        `🎉 raffle winner: ${e.winner.slice(0, 8)}… - ${e.amount} TRX (of ${e.tickets} tickets, tx ${e.hash.slice(0, 8)}…)`
+      hud.waveStatusNodes(
+        `🎉 raffle winner: ${e.winner.slice(0, 8)}… - ${e.amount} TRX (of ${e.tickets} tickets, `,
+        txLink(e.hash, `tx ${e.hash.slice(0, 8)}…`),
+        ')'
       )
       break
   }

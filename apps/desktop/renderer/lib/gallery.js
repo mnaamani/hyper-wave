@@ -6,6 +6,7 @@
 // (buildGallery), so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js'
 import { tip } from './ipc.js'
+import { txLink } from './explorer.js'
 
 const progressEl = document.getElementById('progress')
 const progressFill = document.getElementById('progress-fill')
@@ -64,12 +65,11 @@ function feature(i) {
 }
 
 const toastEl = document.getElementById('tip-toast')
-// Worker reply to a tip: show the tx hash (success) or the error, then re-enable.
+// Worker reply to a tip: show the clickable tx (success) or the error, then re-enable.
 export function tipResult({ hash, error }) {
-  toastEl.innerText = hash
-    ? `✅ tipped — tx ${hash.slice(0, 10)}…`
-    : `⚠️ tip failed: ${error || 'unknown'}`
-  setTimeout(() => (toastEl.innerText = ''), 6000)
+  if (hash) toastEl.replaceChildren('✅ tipped — ', txLink(hash))
+  else toastEl.textContent = `⚠️ tip failed: ${error || 'unknown'}`
+  setTimeout(() => toastEl.replaceChildren(), 6000)
   refreshTip()
 }
 
