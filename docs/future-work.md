@@ -33,7 +33,7 @@ Strip away the football and HyperWave is:
 6. **Liveness and healing as a habit.** Heartbeats, successor repair, skip-dead-peer
    forwarding — the overlay assumes churn rather than hoping against it.
 
-Two honest limits carry over to everything below: a **serial token is O(N)** in wall
+Two limits carry over to everything below: a **serial token is O(N)** in wall
 clock (fine for auditability, wrong for latency-sensitive fan-out — use the flood or the
 planned deterministic sweep instead), and **data outlives peers only if someone chooses
 to hold it** (there is no protocol-level storage guarantee — a policy/incentive question,
@@ -165,7 +165,7 @@ control. Prior art: **Scribe** (on Pastry, academic), **GossipSub** (libp2p — 
 and successful as Ethereum/Filecoin's message bus, but with no economic spam layer;
 consensus rules do that job for it), **Coral CDN** (NSDI 2004 — worked, ran for years on
 PlanetLab, died with its testbed and its grant money). A paid-topic pub/sub for
-communities that want censorship-resistant fan-out is plausible; the honest question is
+communities that want censorship-resistant fan-out is plausible; the open question is
 demand — Nostr's relay model currently serves that niche with much simpler engineering
 (clients multi-home across dumb servers), and any pursuit here should articulate why
 relay-free matters enough to pay the P2P complexity tax.
@@ -179,7 +179,7 @@ about which ones this substrate actually addresses:
 | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | **No incentives / no spam cost**                          | OpenDHT, Whisper, most DHT storage                | **Yes** — wallets + burns are first-class (the one genuinely new card)                                                                      |
 | **NAT / transport pain**                                  | Tox, early P2P generally                          | **Yes** — Hyperswarm's hole-punching is the whole reason this stack exists                                                                  |
-| **Offline delivery / durability needs someone always-on** | Briar, Tox, SSB pubs, IPFS pinning                | **Partially** — payable storage helps, but paid always-on peers are just service providers wearing a P2P hat; design honestly around that   |
+| **Offline delivery / durability needs someone always-on** | Briar, Tox, SSB pubs, IPFS pinning                | **Partially** — payable storage helps, but paid always-on peers are just service providers wearing a P2P hat; design around that            |
 | **A centralised/federated rival is simply better UX**     | Matrix/Signal vs P2P chat, Dropbox vs DHT storage | **No** — this never goes away; pick niches where serverlessness is the _point_ (censorship resistance, no-operator liability, ephemerality) |
 
 ## 4. Ranked recommendations

@@ -26,7 +26,7 @@ Note: the gallery is gated at several points. (1) **admission** (`add-writer`, i
 
 **Gotchas learned:** (1) `package.json#upgrade` must be a valid `pear://` link (mint via `pear touch`) or `electron-forge start` refuses to boot. (2) Cold discovery on a fresh public-DHT topic takes **~20–35s** — launch demo instances early; consider a well-known bootstrap peer's `joinPeer` key or a local DHT bootstrap to speed it up. (3) Two Hyperswarm instances in one process don't reliably discover each other; always one instance per process. (4) A local DHT (`@hyperswarm/testnet` / `bootstrap` option) gives instant same-machine discovery and is confirmed working on the dev Mac (it only failed inside the build sandbox due to blocked loopback UDP) — use it for the live demo to avoid the ~30s public-DHT wait. (5) All instances on the same `matchId` share one ring; the app default (`hyperwave:demo-match:v1`) is fixed, so instances on the public DHT collide — isolate tests with `HYPERWAVE_MATCH`/the `matchId` engine option or the local bootstrap. Per-match topics are the production model.
 
-- `docs/idea.md` — **the idea in plain language** (what HyperWave is, how a wave works, the money model, the honest limitations). The original long-form design doc (`final-idea.md`) was retired once the build diverged from it; `docs/protocol.md` is now the authoritative spec.
+- `docs/idea.md` — **the idea in plain language** (what HyperWave is, how a wave works, the money model, the limitations). The original long-form design doc (`final-idea.md`) was retired once the build diverged from it; `docs/protocol.md` is now the authoritative spec.
 
 ## What This Project Is
 

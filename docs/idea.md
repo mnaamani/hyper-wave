@@ -93,7 +93,7 @@ only keeps connections to a handful of well-chosen neighbours around the circle 
 than everyone connecting to everyone), which is what lets the same design stretch toward
 very large rings.
 
-## Honest limitations
+## Limitations
 
 - **Testnet only.** The money is real in mechanism but test-value by design — no legal or
   regulatory work has been done to handle real funds.

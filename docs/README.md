@@ -2,7 +2,7 @@
 
 - [idea.md](./idea.md) — **the idea, in plain language** (read first). What HyperWave is,
   how a wave works, the money model (burned fees + tips), why P2P, and
-  the honest limitations — non-technical, describes the system as built.
+  the limitations — non-technical, describes the system as built.
 - [hyperwave-whitepaper.pdf](./hyperwave-whitepaper.pdf) — a two-page, scientific-style
   summary of the protocol (ring, token race + receipt accumulator, gallery, burn/tip
   economics, scaling + adversarial notes). Source: `whitepaper.html`, rendered via headless
@@ -27,7 +27,7 @@
 - [future-work.md](./future-work.md) — what else the substrate is good for: the general
   properties of the wave-over-Chord-over-Hyperswarm stack, candidate applications with
   real value (paid-postage messaging, rendezvous KV, auditable rotation/liveness primitives,
-  presence, pub/sub), and an honest read of the prior attempts' graveyard.
+  presence, pub/sub), and a review of the prior attempts' graveyard.
 
 Project overview, quickstart, and the local demo walkthrough: [`../README.md`](../README.md).
 Desktop app shell: [`../apps/desktop/README.md`](../apps/desktop/README.md). Mobile host:

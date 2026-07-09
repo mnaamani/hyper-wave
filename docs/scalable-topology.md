@@ -29,7 +29,7 @@ gallery, and lifecycle unchanged behind the existing `successor` seam (`ring.js`
 - **Isolate the change.** All of it lives behind `successor` / a new `chord` module; the
   wave engine (`wave.js`) keeps calling "who is my successor?".
 
-## 3. Two axes of scale (be honest about both)
+## 3. Two axes of scale (both matter)
 
 Scaling has **two independent axes**; this plan's primary focus is (A).
 
