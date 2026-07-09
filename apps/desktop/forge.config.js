@@ -7,18 +7,24 @@ const appName = pkg.productName ?? pkg.name;
 
 function getWindowsKitVersion() {
   const programFiles = process.env['PROGRAMFILES(X86)'] || process.env.PROGRAMFILES;
-  if (!programFiles) return undefined;
+  if (!programFiles) {
+    return undefined;
+  }
   const kitsDir = path.join(programFiles, 'Windows Kits');
   try {
     for (const kit of fs.readdirSync(kitsDir).sort().reverse()) {
       const binDir = path.join(kitsDir, kit, 'bin');
-      if (!fs.existsSync(binDir)) continue;
+      if (!fs.existsSync(binDir)) {
+        continue;
+      }
       const version = fs
         .readdirSync(binDir)
-        .filter((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d))
+        .filter((name) => /^\d+\.\d+\.\d+\.\d+$/.test(name))
         .sort()
         .pop();
-      if (version) return version;
+      if (version) {
+        return version;
+      }
     }
   } catch {
     return undefined;
@@ -118,19 +124,22 @@ module.exports = {
     // right in the packaged app, resolving the workspace dep from its real path, then normalize
     // engines so pear-runtime's bare-semver doesn't choke on the freshly-installed tree.
     packageAfterCopy: async (_forgeConfig, buildPath) => {
-      const cp = require('child_process');
+      const childProcess = require('child_process');
       const coreDir = path.resolve(__dirname, '..', '..', 'packages', 'hyperwave-lib-core');
       const shim = path.resolve(__dirname, '..', '..', 'scripts', 'fix-bare-engines.js');
       const pjPath = path.join(buildPath, 'package.json');
-      const pj = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
-      pj.dependencies['hyperwave-lib-core'] = 'file:' + coreDir;
-      delete pj.devDependencies;
-      fs.writeFileSync(pjPath, JSON.stringify(pj, null, 2));
-      cp.execSync('npm install --omit=dev --install-links --no-audit --no-fund --no-package-lock', {
-        cwd: buildPath,
-        stdio: 'inherit'
-      });
-      cp.execSync(`node "${shim}" "${buildPath}"`, { stdio: 'inherit' });
+      const packageJson = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
+      packageJson.dependencies['hyperwave-lib-core'] = 'file:' + coreDir;
+      delete packageJson.devDependencies;
+      fs.writeFileSync(pjPath, JSON.stringify(packageJson, null, 2));
+      childProcess.execSync(
+        'npm install --omit=dev --install-links --no-audit --no-fund --no-package-lock',
+        {
+          cwd: buildPath,
+          stdio: 'inherit'
+        }
+      );
+      childProcess.execSync(`node "${shim}" "${buildPath}"`, { stdio: 'inherit' });
     },
     readPackageJson: async (forgeConfig, packageJson) => {
       if (process.env.UPGRADE_KEY) {
@@ -155,9 +164,13 @@ module.exports = {
     },
     postMake: async (forgeConfig, results) => {
       for (const result of results) {
-        if (result.platform !== 'win32') continue;
+        if (result.platform !== 'win32') {
+          continue;
+        }
         for (const artifact of result.artifacts) {
-          if (!artifact.endsWith('.msix')) continue;
+          if (!artifact.endsWith('.msix')) {
+            continue;
+          }
           const standardDir = path.join(__dirname, 'out', `${appName}-win32-${result.arch}`);
           fs.mkdirSync(standardDir, { recursive: true });
           const dest = path.join(standardDir, path.basename(artifact));

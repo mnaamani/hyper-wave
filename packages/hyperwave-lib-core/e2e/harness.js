@@ -20,16 +20,17 @@ const os = require('node:os');
 const CORE_DIR = path.join(__dirname, '..'); // e2e/ lives in the core package; spawn with cwd here
 const BARE = process.env.BARE_BIN || 'bare'; // same runtime `npm test` uses
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // One launched process (a peer or the bootstrap). Buffers stdout and exposes
 // promise-based waiters over its lines and parsed `TOKEN {json}` events.
 class Proc {
+  #waiters = new Set(); // { ready:()=>bool, value:()=>any, resolve, timer }
+
   constructor(name, args, env) {
     this.name = name;
     this.out = '';
     this.events = []; // parsed onEvent events, in order
-    this._waiters = new Set(); // { ready:()=>bool, value:()=>any, resolve, timer }
     // `detached` puts the child in its OWN process group. `bare` here is a Node wrapper that
     // spawns the native runtime as a child, so killing the wrapper PID alone would orphan the
     // real process (and a "killed" peer would keep running — breaking the healing test). We
@@ -40,26 +41,26 @@ class Proc {
       detached: true
     });
     this.proc.stdout.setEncoding('utf8');
-    this.proc.stdout.on('data', (chunk) => this._ingest(chunk));
+    this.proc.stdout.on('data', (chunk) => this.#ingest(chunk));
     this.proc.stderr.on('data', () => {}); // swallow (bare prints diagnostics here)
     this.proc.on('error', () => {});
   }
 
-  _ingest(chunk) {
+  #ingest(chunk) {
     this.out += chunk;
     for (const line of chunk.split('\n')) {
-      const m = line.match(/\bTOKEN (\{.*\})\s*$/);
-      if (m) {
+      const tokenMatch = line.match(/\bTOKEN (\{.*\})\s*$/);
+      if (tokenMatch) {
         try {
-          this.events.push(JSON.parse(m[1]));
+          this.events.push(JSON.parse(tokenMatch[1]));
         } catch {}
       }
     }
-    for (const w of [...this._waiters]) {
-      if (w.ready()) {
-        clearTimeout(w.timer);
-        this._waiters.delete(w);
-        w.resolve(w.value());
+    for (const waiter of [...this.#waiters]) {
+      if (waiter.ready()) {
+        clearTimeout(waiter.timer);
+        this.#waiters.delete(waiter);
+        waiter.resolve(waiter.value());
       }
     }
   }
@@ -71,22 +72,24 @@ class Proc {
   // access on it (`evt.hops` for the `const x = await waitForEvent()` callers) yields
   // `undefined` rather than throwing. The tail is logged as a TAP diagnostic so a timeout is
   // still diagnosable.
-  _wait(ready, value, ms, what) {
-    if (ready()) return Promise.resolve(value());
+  #wait(ready, value, ms, what) {
+    if (ready()) {
+      return Promise.resolve(value());
+    }
     return new Promise((resolve) => {
-      const w = { ready, value, resolve };
-      w.timer = setTimeout(() => {
-        this._waiters.delete(w);
+      const waiter = { ready, value, resolve };
+      waiter.timer = setTimeout(() => {
+        this.#waiters.delete(waiter);
         console.error(`# ${this.name}: timed out (${ms}ms) waiting for ${what}\n` + this.tail());
         resolve(false);
       }, ms);
-      this._waiters.add(w);
+      this.#waiters.add(waiter);
     });
   }
 
   // Resolve when the accumulated stdout matches `re`; returns the match, or `false` on timeout.
   waitForLine(re, ms = 30000) {
-    return this._wait(
+    return this.#wait(
       () => re.test(this.out),
       () => this.out.match(re),
       ms,
@@ -96,23 +99,25 @@ class Proc {
 
   // Resolve with the first onEvent event named `name` (optionally matching `pred`).
   waitForEvent(name, ms = 30000, pred = () => true) {
-    const find = () => this.events.find((e) => e.event === name && pred(e));
-    return this._wait(() => !!find(), find, ms, `event ${name}`);
+    const find = () => this.events.find((evt) => evt.event === name && pred(evt));
+    return this.#wait(() => !!find(), find, ms, `event ${name}`);
   }
 
   // Resolve when the gallery has reached at least `min` entries (robust to batched updates,
   // which can skip intermediate sizes). Returns the max size seen.
   waitForGallery(min, ms = 60000) {
     const max = () => {
-      let mx = -1;
-      for (const m of this.out.matchAll(/GALLERY size=(\d+)/g)) mx = Math.max(mx, Number(m[1]));
-      return mx;
+      let maxSize = -1;
+      for (const match of this.out.matchAll(/GALLERY size=(\d+)/g)) {
+        maxSize = Math.max(maxSize, Number(match[1]));
+      }
+      return maxSize;
     };
-    return this._wait(() => max() >= min, max, ms, `gallery >= ${min}`);
+    return this.#wait(() => max() >= min, max, ms, `gallery >= ${min}`);
   }
 
-  tail(n = 1200) {
-    return `--- ${this.name} last output ---\n${this.out.slice(-n)}`;
+  tail(chars = 1200) {
+    return `--- ${this.name} last output ---\n${this.out.slice(-chars)}`;
   }
 
   kill() {
@@ -141,8 +146,8 @@ class Cluster {
   async start() {
     this.boot = new Proc('boot', ['lib/bootstrap.js'], {});
     this.procs.push(this.boot);
-    const m = await this.boot.waitForLine(/BOOTSTRAP 127\.0\.0\.1:(\d+)/, 15000);
-    this.port = m[1];
+    const bootMatch = await this.boot.waitForLine(/BOOTSTRAP 127\.0\.0\.1:(\d+)/, 15000);
+    this.port = bootMatch[1];
     // Let the local DHT fully warm up before peers join. Without this the very first peer can
     // announce onto a half-formed DHT and end up isolated (found by nobody). Staggering the
     // peer launches (see the tests) is the matching half of reliable discovery.
@@ -157,20 +162,24 @@ class Cluster {
   launch(name, env = {}, seed = null) {
     const dir = path.join(this.root, name);
     fs.mkdirSync(dir, { recursive: true });
-    if (seed) fs.writeFileSync(path.join(dir, 'wallet.seed'), seed.trim());
-    const p = new Proc(name, ['lib/wave.run.js', name, dir], {
+    if (seed) {
+      fs.writeFileSync(path.join(dir, 'wallet.seed'), seed.trim());
+    }
+    const proc = new Proc(name, ['lib/wave.run.js', name, dir], {
       HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}`,
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,
       ...env
     });
-    this.procs.push(p);
-    return p;
+    this.procs.push(proc);
+    return proc;
   }
 
   async destroy() {
-    for (const p of this.procs) p.kill();
-    await new Promise((r) => setTimeout(r, 300));
+    for (const proc of this.procs) {
+      proc.kill();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
     try {
       fs.rmSync(this.root, { recursive: true, force: true });
     } catch {}
@@ -182,7 +191,7 @@ class Cluster {
 // guaranteed hub — e.g. under churn, the slowest node to converge shouldn't fail the test.
 // (waitForGallery only ever settles truthy on success / false on timeout, so racing is sound.)
 function waitForAnyGallery(procs, min, ms = 60000) {
-  return Promise.race(procs.map((p) => p.waitForGallery(min, ms))).then(Boolean);
+  return Promise.race(procs.map((proc) => proc.waitForGallery(min, ms))).then(Boolean);
 }
 
 module.exports = { Cluster, Proc, sleep, waitForAnyGallery };

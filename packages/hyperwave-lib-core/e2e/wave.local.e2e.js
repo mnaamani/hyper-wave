@@ -17,11 +17,11 @@ const N = Number(process.env.E2E_PEERS || 8);
 // wave's gallery. `initEnv` passes extra env only to p1. Launches are staggered — the other half
 // of reliable DHT discovery (see harness.start's warm-up). Returns { peers } (peers[0] is the
 // initiator p1).
-async function launchWave(c, initEnv = {}) {
+async function launchWave(cluster, initEnv = {}) {
   const peers = [];
   for (let i = 1; i <= N; i++) {
     peers.push(
-      c.launch('p' + i, {
+      cluster.launch('p' + i, {
         AUTOJOIN: '1',
         AUTOSELFIE: '1',
         ...(i === 1 ? { START: String(N - 1), ...initEnv } : {})
@@ -33,13 +33,15 @@ async function launchWave(c, initEnv = {}) {
 }
 
 test(`a ${N}-peer wave converges the gallery on every node`, { timeout: 150000 }, async (t) => {
-  const c = await new Cluster({ lobbyMs: 8000 }).start();
-  t.teardown(() => c.destroy());
+  const cluster = await new Cluster({ lobbyMs: 8000 }).start();
+  t.teardown(() => cluster.destroy());
 
-  const { peers } = await launchWave(c);
+  const { peers } = await launchWave(cluster);
 
   // every participant — including the initiator p1, which retains the gallery — reaches all N
-  for (const p of peers) t.ok(await p.waitForGallery(N, 90000), `${p.name} converged to ${N}`);
+  for (const peer of peers) {
+    t.ok(await peer.waitForGallery(N, 90000), `${peer.name} converged to ${N}`);
+  }
 
   // and the token actually completed the lap back to the originator (didn't stall)
   t.ok(await peers[0].waitForEvent('completed', 10000), 'the wave completed at the originator');
@@ -49,10 +51,10 @@ test(
   `the wave heals when peers die mid-race (${N} peers, kill 2)`,
   { timeout: 150000 },
   async (t) => {
-    const c = await new Cluster({ lobbyMs: 8000 }).start();
-    t.teardown(() => c.destroy());
+    const cluster = await new Cluster({ lobbyMs: 8000 }).start();
+    t.teardown(() => cluster.destroy());
 
-    const { peers } = await launchWave(c);
+    const { peers } = await launchWave(cluster);
 
     // once the ball is moving, kill two mid-ring peers (not the initiator p1, its archivist)
     await peers[0].waitForEvent('started', 90000);

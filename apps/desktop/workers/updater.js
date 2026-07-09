@@ -45,7 +45,9 @@ pipe.on('data', async (data) => {
   if (message === 'pear:applyUpdate') {
     await pear.updater.applyUpdate();
     pipe.write('pear:updateApplied');
-  } else console.log(message);
+  } else {
+    console.log(message);
+  }
 });
 
 pipe.write('Hello from worker');

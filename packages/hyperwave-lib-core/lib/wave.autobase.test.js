@@ -13,20 +13,20 @@ const { galleryConfig, readGallery } = require('./gallery');
 const { signReceipt, signBurn } = require('./token');
 
 const WAVE = 'w';
-const CH = b4a.toString(b4a.alloc(32), 'hex'); // some chain hash value
-const RT = 1000; // receipt timestamp
+const CHAIN_HASH = b4a.toString(b4a.alloc(32), 'hex'); // some chain hash value
+const RECEIPT_TS = 1000; // receipt timestamp
 
-// build a wave-selfie op with a valid receipt signed by kp
-function selfie(kp, hopCount, caption, timestamp) {
-  const peerId = b4a.toString(kp.publicKey, 'hex');
-  const receiptSig = signReceipt(kp, WAVE, hopCount, CH, RT);
+// build a wave-selfie op with a valid receipt signed by keyPair
+function selfie(keyPair, hopCount, caption, timestamp) {
+  const peerId = b4a.toString(keyPair.publicKey, 'hex');
+  const receiptSig = signReceipt(keyPair, WAVE, hopCount, CHAIN_HASH, RECEIPT_TS);
   return {
     type: 'wave-selfie',
     waveId: WAVE,
     peerId,
     hopCount,
-    chainHash: CH,
-    receiptTs: RT,
+    chainHash: CHAIN_HASH,
+    receiptTs: RECEIPT_TS,
     receiptSig,
     caption,
     timestamp
@@ -47,29 +47,29 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
   t.ok(base.writable, 'creator is writable');
   t.ok(base.key, 'base has a bootstrap key');
 
-  const p1 = crypto.keyPair();
-  const p2 = crypto.keyPair();
+  const peer1 = crypto.keyPair();
+  const peer2 = crypto.keyPair();
 
-  await base.append(selfie(p2, 1, 'second', 100));
-  await base.append(selfie(p1, 0, 'first', 100));
-  await base.append(selfie(p1, 0, 'first-dupe', 200)); // a second selfie from p1 — dropped at write
+  await base.append(selfie(peer2, 1, 'second', 100));
+  await base.append(selfie(peer1, 0, 'first', 100));
+  await base.append(selfie(peer1, 0, 'first-dupe', 200)); // a second selfie from peer1 — dropped at write
   await base.update();
   t.alike(
-    (await readGallery(base)).map((g) => g.caption),
+    (await readGallery(base)).map((entry) => entry.caption),
     ['first', 'second'],
-    'ordered by hop; one entry per peer — p1’s second post is dropped at write (#3)'
+    'ordered by hop; one entry per peer — peer1’s second post is dropped at write (#3)'
   );
 
   // receipt gate: a selfie with a bad signature is dropped by apply()
-  const forged = selfie(p1, 2, 'forged', 300);
+  const forged = selfie(peer1, 2, 'forged', 300);
   forged.receiptSig = forged.receiptSig.replace(/^../, '00');
   await base.append(forged);
   await base.update();
   t.is((await readGallery(base)).length, 2, 'invalid receipt dropped');
 
   // receipt gate: impersonation (peerId != signer) is dropped
-  const impersonated = selfie(p1, 3, 'impostor', 400);
-  impersonated.peerId = b4a.toString(p2.publicKey, 'hex'); // claim to be p2
+  const impersonated = selfie(peer1, 3, 'impostor', 400);
+  impersonated.peerId = b4a.toString(peer2.publicKey, 'hex'); // claim to be peer2
   await base.append(impersonated);
   await base.update();
   t.is((await readGallery(base)).length, 2, 'impersonated selfie dropped');
@@ -103,17 +103,17 @@ test('gallery apply() keeps a tip address only if a matching burn backs it', asy
   });
   await base.ready();
 
-  const mkBurn = (kp, address) => {
-    const f = {
+  const makeBurn = (keyPair, address) => {
+    const fields = {
       waveId: WAVE,
-      peerId: b4a.toString(kp.publicKey, 'hex'),
+      peerId: b4a.toString(keyPair.publicKey, 'hex'),
       reason: 'join',
       amount: 1,
       txHash: 'abc123',
       tronAddress: address,
       burnTs: 1000
     };
-    return { ...f, sig: signBurn(kp, f) };
+    return { ...fields, sig: signBurn(keyPair, fields) };
   };
 
   const paid = crypto.keyPair(); // burns from TPaid and tips there — legit
@@ -121,20 +121,20 @@ test('gallery apply() keeps a tip address only if a matching burn backs it', asy
   await base.append({
     ...selfie(paid, 0, 'paid', 100),
     address: 'TPaid',
-    burn: mkBurn(paid, 'TPaid')
+    burn: makeBurn(paid, 'TPaid')
   });
   await base.append({ ...selfie(spoof, 1, 'spoof', 100), address: 'TSpoof' }); // no burn
   // a burn that names a DIFFERENT address than the selfie claims → not honoured
-  const mism = crypto.keyPair();
+  const mismatched = crypto.keyPair();
   await base.append({
-    ...selfie(mism, 2, 'mismatch', 100),
+    ...selfie(mismatched, 2, 'mismatch', 100),
     address: 'TClaim',
-    burn: mkBurn(mism, 'TReal')
+    burn: makeBurn(mismatched, 'TReal')
   });
   await base.update();
 
   const byCaption = Object.fromEntries(
-    (await readGallery(base)).map((g) => [g.caption, g.address])
+    (await readGallery(base)).map((entry) => [entry.caption, entry.address])
   );
   t.is(byCaption.paid, 'TPaid', 'burn-backed address is kept (tippable)');
   t.is(byCaption.spoof, '', 'unbacked address is stripped (not tippable)');

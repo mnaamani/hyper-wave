@@ -11,7 +11,7 @@ const Hyperswarm = require('hyperswarm');
 const Corestore = require('corestore');
 const Autobase = require('autobase');
 const Protomux = require('protomux');
-const c = require('compact-encoding');
+const cenc = require('compact-encoding');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const fs = require('bare-fs');
@@ -114,9 +114,11 @@ function shortId(hex) {
 // bootstrap option (a local DHT for instant same-machine discovery); falsy → null
 // (the public DHT). Shared by both engine hosts.
 function parseBootstrap(str) {
-  if (!str) return null;
-  return str.split(',').map((hp) => {
-    const [host, port] = hp.split(':');
+  if (!str) {
+    return null;
+  }
+  return str.split(',').map((hostPort) => {
+    const [host, port] = hostPort.split(':');
     return { host, port: Number(port) };
   });
 }
@@ -175,6 +177,9 @@ function createWave({
   let waveTimer = null; // racing timeout
   let healTimer = null; // watches my forward; fires if the wave doesn't advance
   let healPending = null; // { waveId, hop } I'm currently watching
+  let tHeartbeat = null; // heartbeat timer (self-rescheduling, see the timers section)
+  let tRing = null; // ring-maintenance timer
+  let tRepair = null; // Chord successor-repair timer
 
   // Selfie is captured up-front during the lobby (renderer stages it here), then posted
   // to the gallery when the token actually reaches me — signed with my hop's receipt.
@@ -208,7 +213,9 @@ function createWave({
   // Angle is always derived from the peer id, never trusted from the wire. Country
   // is the nation a peer supports (self-reported flag, purely cosmetic).
   function upsert(id, lastSeen, country) {
-    if (id === me.id) return;
+    if (id === me.id) {
+      return;
+    }
     const cur = peers.get(id);
     if (!cur || lastSeen > cur.lastSeen) {
       peers.set(id, {
@@ -237,7 +244,9 @@ function createWave({
       // re-pin a dead neighbour; the cooldown clears on reconnect or when it expires.
       const gone = goneUntil.get(id);
       if (gone) {
-        if (now < gone) continue;
+        if (now < gone) {
+          continue;
+        }
         goneUntil.delete(id);
       }
       ids.push(id);
@@ -268,7 +277,9 @@ function createWave({
     cand.delete(me.id);
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS);
     for (const id of targets) {
-      if (pinned.has(id)) continue;
+      if (pinned.has(id)) {
+        continue;
+      }
       pinned.add(id);
       try {
         swarm.joinPeer(b4a.from(id, 'hex'));
@@ -276,7 +287,9 @@ function createWave({
       } catch {}
     }
     for (const id of pinned) {
-      if (targets.has(id)) continue;
+      if (targets.has(id)) {
+        continue;
+      }
       pinned.delete(id);
       try {
         swarm.leavePeer(b4a.from(id, 'hex'));
@@ -305,7 +318,7 @@ function createWave({
   // Doubles as the liveness heartbeat (it refreshes lastSeen and carries country),
   // so there is no separate `presence` message.
   function myPointers() {
-    const ids = liveRing([...peers.values()], Date.now(), PEER_STALE_MS).map((p) => p.id);
+    const ids = liveRing([...peers.values()], Date.now(), PEER_STALE_MS).map((peer) => peer.id);
     return {
       kind: 'pointers',
       id: me.id,
@@ -315,138 +328,185 @@ function createWave({
     };
   }
 
-  function handleGossip(m, fromId) {
+  function handleGossip(msg, fromId) {
     // Identity binding (see SELF_ID_FIELD): drop a self-describing message that didn't come
     // from the peer it claims to be. Cheap string compare, before any signature work.
-    const idField = SELF_ID_FIELD[m.kind];
-    if (idField && m[idField] !== fromId) return;
+    const idField = SELF_ID_FIELD[msg.kind];
+    if (idField && msg[idField] !== fromId) {
+      return;
+    }
 
     // Flood relayable control messages across the partial mesh: process each exactly
     // once, and on first sight re-broadcast to my other neighbours (dedup by `mid`).
-    if (m.mid && RELAYED_KINDS.has(m.kind)) {
-      if (!flood.firstSight(m.mid)) return; // already seen -> drop (stops loops)
-      relayFlood(m, fromId);
+    if (msg.mid && RELAYED_KINDS.has(msg.kind)) {
+      if (!flood.firstSight(msg.mid)) {
+        return; // already seen -> drop (stops loops)
+      }
+      relayFlood(msg, fromId);
     }
-    if (m.kind === 'token') return processToken(m);
-    if (m.kind === 'find-succ') return chord.handleFindSucc(m, fromId);
-    if (m.kind === 'find-succ-reply') return chord.handleFindSuccReply(m);
-    if (m.kind === 'wave-pos') {
+    if (msg.kind === 'token') {
+      return processToken(msg);
+    }
+    if (msg.kind === 'find-succ') {
+      return chord.handleFindSucc(msg, fromId);
+    }
+    if (msg.kind === 'find-succ-reply') {
+      return chord.handleFindSuccReply(msg);
+    }
+    if (msg.kind === 'wave-pos') {
       // only animate the ball for the wave we're racing (angle derived locally)
-      if (wave && wave.phase === 'racing' && m.waveId === wave.id) {
+      if (wave && wave.phase === 'racing' && msg.waveId === wave.id) {
         // Heal-ACK: my forward is only ACKed when the peer I actually forwarded to holds the
-        // ball (m.holder is connection-bound to the real sender). Requiring the *successor*
+        // ball (msg.holder is connection-bound to the real sender). Requiring the *successor*
         // id — not just any hopCount past mine — stops a hostile peer from broadcasting a
         // bogus wave-pos to suppress healing while my real successor is dead.
         if (
           healPending &&
-          m.waveId === healPending.waveId &&
-          m.holder === healPending.succId &&
-          m.hopCount > healPending.hop
+          msg.waveId === healPending.waveId &&
+          msg.holder === healPending.succId &&
+          msg.hopCount > healPending.hop
         ) {
           clearHeal();
         }
         onEvent({
           event: 'position',
-          waveId: m.waveId,
-          holder: m.holder,
-          angle: angleOfId(m.holder),
-          hopCount: m.hopCount
+          waveId: msg.waveId,
+          holder: msg.holder,
+          angle: angleOfId(msg.holder),
+          hopCount: msg.hopCount
         });
       }
       return;
     }
-    if (m.kind === 'wave-sync') {
+    if (msg.kind === 'wave-sync') {
       // a peer told us the wave state when we joined mid-lobby / mid-race
-      if (!m.waveId || !shouldAdopt(m.waveId)) return;
+      if (!msg.waveId || !shouldAdopt(msg.waveId)) {
+        return;
+      }
       // anti-spam: adopt a synced wave (lobby OR racing) only with a valid kick-off proof.
       // Previously a *racing* sync skipped this — a hostile peer could unicast a fabricated
       // racing wave-sync on connect to force a newcomer into a bogus wave, bypassing the
       // paid gate. The signed burn-proof can't be forged for a key the attacker lacks.
-      if (enforcePaid && !validKickoff(m.paid, m.waveId, m.by)) return;
-      if (m.phase === 'racing') {
-        if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, 0, true);
-        if (m.paid) wave.kickoffProof = m.paid;
-        wave.paid = 'verified';
-        verifyAndOpenGallery(m.waveId, m.key, m.keySig, m.by);
-        beginRace(m.roster);
-      } else {
-        if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false, m.lobbyMsLeft);
-        if (enforcePaid && m.paid && !wave.kickoffProof) {
-          wave.kickoffProof = m.paid;
-          verifyKickoff(m.waveId, m.paid);
+      if (enforcePaid && !validKickoff(msg.paid, msg.waveId, msg.by)) {
+        return;
+      }
+      if (msg.phase === 'racing') {
+        if (!wave || wave.id !== msg.waveId) {
+          enterLobby(msg.waveId, msg.by, false, 0, true);
         }
-        for (const id of m.roster || []) wave.roster.add(id);
+        if (msg.paid) {
+          wave.kickoffProof = msg.paid;
+        }
+        wave.paid = 'verified';
+        verifyAndOpenGallery(msg.waveId, msg.key, msg.keySig, msg.by);
+        beginRace(msg.roster);
+      } else {
+        if (!wave || wave.id !== msg.waveId) {
+          enterLobby(msg.waveId, msg.by, false, msg.lobbyMsLeft);
+        }
+        if (enforcePaid && msg.paid && !wave.kickoffProof) {
+          wave.kickoffProof = msg.paid;
+          verifyKickoff(msg.waveId, msg.paid);
+        }
+        for (const id of msg.roster || []) {
+          wave.roster.add(id);
+        }
         onEvent({ event: 'roster', waveId: wave.id, count: wave.roster.size });
       }
       return;
     }
-    if (m.kind === 'wave-announce') {
+    if (msg.kind === 'wave-announce') {
       // anti-spam: an enforced peer ignores any announce lacking a validly-signed kick-off
       // proof (unpaid/spam waves are invisible). Then it verifies the burn on-chain.
-      if (enforcePaid && !validKickoff(m.paid, m.waveId, m.by)) return;
-      if (!shouldAdopt(m.waveId)) return;
-      enterLobby(m.waveId, m.by, false, m.lobbyMs);
-      if (enforcePaid && m.paid) {
-        wave.kickoffProof = m.paid;
-        verifyKickoff(m.waveId, m.paid);
+      if (enforcePaid && !validKickoff(msg.paid, msg.waveId, msg.by)) {
+        return;
+      }
+      if (!shouldAdopt(msg.waveId)) {
+        return;
+      }
+      enterLobby(msg.waveId, msg.by, false, msg.lobbyMs);
+      if (enforcePaid && msg.paid) {
+        wave.kickoffProof = msg.paid;
+        verifyKickoff(msg.waveId, msg.paid);
       }
       return;
     }
-    if (m.kind === 'wave-join') {
-      if (wave && m.waveId === wave.id && m.peerId) {
-        wave.roster.add(m.peerId);
+    if (msg.kind === 'wave-join') {
+      if (wave && msg.waveId === wave.id && msg.peerId) {
+        wave.roster.add(msg.peerId);
         onEvent({ event: 'roster', waveId: wave.id, count: wave.roster.size });
       }
       return;
     }
-    if (m.kind === 'wave-start') {
+    if (msg.kind === 'wave-start') {
       // initiator finalized the roster and kicked off the race. Gate on the same kick-off
       // proof as the announce, so a forged wave-start can't conjure a race + gallery either.
-      if (enforcePaid && !validKickoff(m.paid, m.waveId, m.by)) return;
-      if (m.waveId && m.key && shouldAdopt(m.waveId)) {
-        if (!wave || wave.id !== m.waveId) enterLobby(m.waveId, m.by, false);
-        if (m.paid) wave.kickoffProof = m.paid; // carry it so we can re-sync newcomers
-        verifyAndOpenGallery(m.waveId, m.key, m.keySig, m.by);
-        beginRace(m.roster);
+      if (enforcePaid && !validKickoff(msg.paid, msg.waveId, msg.by)) {
+        return;
+      }
+      if (msg.waveId && msg.key && shouldAdopt(msg.waveId)) {
+        if (!wave || wave.id !== msg.waveId) {
+          enterLobby(msg.waveId, msg.by, false);
+        }
+        if (msg.paid) {
+          wave.kickoffProof = msg.paid; // carry it so we can re-sync newcomers
+        }
+        verifyAndOpenGallery(msg.waveId, msg.key, msg.keySig, msg.by);
+        beginRace(msg.roster);
       }
       return;
     }
-    if (m.kind === 'wave-end') {
+    if (msg.kind === 'wave-end') {
       // The originator ended it (completed) or a real participant hit a dead end (stalled) —
       // everyone finishes together instead of each waiting out the timeout. wave-end is
       // flooded (forgeable by any relay), so it's only honoured with proof it's genuine:
       //  - completion: an Ed25519 signature by the originator over (waveId, hops, chainHash);
       //  - stall: the staller's own hop receipt, proving it was an admitted participant.
       // An outside attacker holding neither can no longer force-terminate a live wave.
-      if (!wave || m.waveId !== wave.id) return;
-      const authentic = m.stalled
-        ? verifyReceipt(m.staller, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)
-        : verifyWaveEnd(m.by, m.waveId, m.hops, m.chainHash, m.sig);
-      if (!authentic) return;
-      finishWave(m.waveId, {
-        stalled: m.stalled,
-        hops: m.hops,
-        chainHash: m.chainHash,
-        byId: m.by
+      if (!wave || msg.waveId !== wave.id) {
+        return;
+      }
+      const authentic = msg.stalled
+        ? verifyReceipt(
+            msg.staller,
+            msg.waveId,
+            msg.hopCount,
+            msg.chainHash,
+            msg.receiptTs,
+            msg.receiptSig
+          )
+        : verifyWaveEnd(msg.by, msg.waveId, msg.hops, msg.chainHash, msg.sig);
+      if (!authentic) {
+        return;
+      }
+      finishWave(msg.waveId, {
+        stalled: msg.stalled,
+        hops: msg.hops,
+        chainHash: msg.chainHash,
+        byId: msg.by
       });
       return;
     }
-    if (m.kind === 'add-writer') {
-      admitWriter(m);
+    if (msg.kind === 'add-writer') {
+      admitWriter(msg);
       return;
     }
-    if (m.kind !== 'pointers') return;
+    if (msg.kind !== 'pointers') {
+      return;
+    }
     // sender is a live neighbour (direct channel); its advertised succ/pred are
     // discovery hints, marked slightly stale so they age out unless independently
     // refreshed. Skip a hint for a peer we just saw disconnect (goneUntil), so a
     // third peer's advert can't resurrect a ghost seat.
     const now = Date.now();
-    upsert(m.id, now, m.country);
+    upsert(msg.id, now, msg.country);
     const learned = now - Math.floor(PEER_STALE_MS / 2);
-    for (const id of [...(m.succ || []), m.pred]) {
-      if (id && !(goneUntil.get(id) > now)) upsert(id, learned);
+    for (const id of [...(msg.succ || []), msg.pred]) {
+      if (id && !(goneUntil.get(id) > now)) {
+        upsert(id, learned);
+      }
     }
-    stabilize(m);
+    stabilize(msg);
     emit();
   }
 
@@ -454,13 +514,17 @@ function createWave({
   // its predecessor sits between us, that peer is my true successor — I've just
   // upserted it, so re-pin now (nextClockwise over the ring adopts it automatically).
   // My own periodic `pointers` advert is the reciprocal "notify" to my successor.
-  function stabilize(m) {
-    if (!m.pred) return;
+  function stabilize(msg) {
+    if (!msg.pred) {
+      return;
+    }
     const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS);
     const succ = nextClockwise(me.angle, ring);
-    if (!succ || succ.id !== m.id) return;
-    if (stabilizeStep(me.id, succ.id, m.pred) !== succ.id) {
-      log('stabilize: closer successor', shortId(m.pred));
+    if (!succ || succ.id !== msg.id) {
+      return;
+    }
+    if (stabilizeStep(me.id, succ.id, msg.pred) !== succ.id) {
+      log('stabilize: closer successor', shortId(msg.pred));
       maintainNeighbours();
     }
   }
@@ -486,10 +550,12 @@ function createWave({
   // Re-broadcast a flooded message to my other neighbours (everyone except whoever sent
   // it to me — dedup handles the remaining echoes). This is the relay step that carries
   // an announcement across a swarm too large to be a full mesh.
-  function relayFlood(m, fromId) {
-    const str = JSON.stringify(m);
+  function relayFlood(msg, fromId) {
+    const str = JSON.stringify(msg);
     for (const [id, send] of senders) {
-      if (id === fromId) continue;
+      if (id === fromId) {
+        continue;
+      }
       try {
         send(str);
       } catch {}
@@ -498,7 +564,9 @@ function createWave({
 
   function trySend(id, obj) {
     const send = senders.get(id);
-    if (!send) return false;
+    if (!send) {
+      return false;
+    }
     try {
       send(JSON.stringify(obj));
       return true;
@@ -515,7 +583,9 @@ function createWave({
     const str = JSON.stringify(obj);
     for (const id of pinned) {
       const send = senders.get(id);
-      if (!send) continue;
+      if (!send) {
+        continue;
+      }
       try {
         send(str);
       } catch {}
@@ -530,7 +600,9 @@ function createWave({
   // selfies. All peers share the originator's base; writes come from many admitted
   // writers, merged into one ordered view. Replication rides store.replicate(conn).
   function openGallery(waveId, bootstrapKey) {
-    if (currentWaveId === waveId && base) return base;
+    if (currentWaveId === waveId && base) {
+      return base;
+    }
     const kept = galleries.get(waveId);
     if (kept) {
       // I already hold this gallery (a wave I initiated) — make it current, don't reopen
@@ -543,36 +615,46 @@ function createWave({
     // I keep it open to archive it (so it survives for latecomers).
     if (base && !initiatedWaves.has(currentWaveId)) {
       base.close().catch(() => {});
-      if (currentWaveId) galleries.delete(currentWaveId);
+      if (currentWaveId) {
+        galleries.delete(currentWaveId);
+      }
     }
     currentWaveId = waveId;
     autobaseKey = null;
-    const b = new Autobase(
+    const autobase = new Autobase(
       store.namespace('wave-gallery:' + waveId),
       bootstrapKey,
       galleryConfig()
     );
-    base = b;
-    galleries.set(waveId, b);
-    b.on('update', () => {
-      if (base === b) emitGallery();
+    base = autobase;
+    galleries.set(waveId, autobase);
+    autobase.on('update', () => {
+      if (base === autobase) {
+        emitGallery();
+      }
     });
-    b.ready().then(() => {
-      if (galleries.get(waveId) !== b) return; // superseded (peer moved on and closed it)
-      const key = b4a.toString(b.key, 'hex');
-      if (base === b) autobaseKey = key;
+    autobase.ready().then(() => {
+      if (galleries.get(waveId) !== autobase) {
+        return; // superseded (peer moved on and closed it)
+      }
+      const key = b4a.toString(autobase.key, 'hex');
+      if (base === autobase) {
+        autobaseKey = key;
+      }
       log(
         'gallery ready',
         shortId(waveId),
         'key',
         shortId(key),
         'writable',
-        b.writable,
+        autobase.writable,
         initiatedWaves.has(waveId) ? '(mine)' : ''
       );
-      if (base === b) emitGallery();
+      if (base === autobase) {
+        emitGallery();
+      }
     });
-    return b;
+    return autobase;
   }
 
   // Open a gallery a peer advertised (wave-start / token / wave-sync), but ONLY after
@@ -582,19 +664,25 @@ function createWave({
   // it to newcomers we sync. `originatorId` is the wave's originator as this message claims it;
   // it must match the originator we already adopted (no mid-wave originator swap).
   function verifyAndOpenGallery(waveId, keyHex, keySig, originatorId) {
-    if (!keyHex) return;
+    if (!keyHex) {
+      return;
+    }
     if (wave && wave.id === waveId && wave.by !== originatorId) {
       return log('gallery-key: originator mismatch for wave', shortId(waveId));
     }
     if (!verifyGalleryKey(originatorId, waveId, keyHex, keySig)) {
       return log('gallery-key: rejected unsigned/forged key for wave', shortId(waveId));
     }
-    if (wave && wave.id === waveId) wave.keySig = keySig;
+    if (wave && wave.id === waveId) {
+      wave.keySig = keySig;
+    }
     openGallery(waveId, b4a.from(keyHex, 'hex'));
   }
 
   async function emitGallery() {
-    if (!base) return;
+    if (!base) {
+      return;
+    }
     onGallery(await readGallery(base));
   }
 
@@ -609,16 +697,31 @@ function createWave({
   // pays off — by tippers/auditors via the entry's `burnTx`. Spam is bounded locally: one entry
   // per peer + a byte-size cap on the image (gallery.js apply). So a fake-burn entry is cheap to
   // make but is worthless to tip and is publicly detectable. Fully local + synchronous.
-  function admitWriter(m) {
-    if (!base || !base.writable || !m.key || m.waveId !== currentWaveId) return;
-    if (admittedKeys.has(m.key)) return;
-    if (!verifyReceipt(m.peerId, m.waveId, m.hopCount, m.chainHash, m.receiptTs, m.receiptSig)) {
+  function admitWriter(msg) {
+    if (!base || !base.writable || !msg.key || msg.waveId !== currentWaveId) {
       return;
     }
-    if (enforcePaid && !burnAuthorizes(m.burn, m.peerId, m.waveId)) return; // needs a signed burn attestation
-    admittedKeys.add(m.key);
-    base.append({ type: 'add-writer', key: m.key });
-    log('admitted gallery writer', shortId(m.peerId));
+    if (admittedKeys.has(msg.key)) {
+      return;
+    }
+    if (
+      !verifyReceipt(
+        msg.peerId,
+        msg.waveId,
+        msg.hopCount,
+        msg.chainHash,
+        msg.receiptTs,
+        msg.receiptSig
+      )
+    ) {
+      return;
+    }
+    if (enforcePaid && !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)) {
+      return; // needs a signed burn attestation
+    }
+    admittedKeys.add(msg.key);
+    base.append({ type: 'add-writer', key: msg.key });
+    log('admitted gallery writer', shortId(msg.peerId));
   }
 
   // Become an admitted gallery writer: broadcast an add-writer request presenting (a) my hop
@@ -628,9 +731,15 @@ function createWave({
   // wait until writable. `admissionPromise` dedups concurrent callers into one in-flight request.
   // (The originator is already a writer and never comes here — it paid its kick-off burn.)
   function ensureWriter(receipt) {
-    if (!base) return Promise.resolve(false);
-    if (base.writable) return Promise.resolve(true);
-    if (admissionPromise) return admissionPromise;
+    if (!base) {
+      return Promise.resolve(false);
+    }
+    if (base.writable) {
+      return Promise.resolve(true);
+    }
+    if (admissionPromise) {
+      return admissionPromise;
+    }
     admissionPromise = base
       .ready()
       // when enforcing, my burn attestation is my admission ticket; wait for the burn tx to be
@@ -650,7 +759,9 @@ function createWave({
   // writable, false on timeout.
   function requestAdmission(receipt) {
     return new Promise((resolve) => {
-      if (base.writable) return resolve(true);
+      if (base.writable) {
+        return resolve(true);
+      }
       const req = {
         kind: 'add-writer',
         key: b4a.toString(base.local.key, 'hex'),
@@ -664,8 +775,12 @@ function createWave({
       };
       const started = Date.now();
       const tick = () => {
-        if (base.writable) return resolve(true);
-        if (Date.now() - started > ADMIT_TIMEOUT_MS) return resolve(false);
+        if (base.writable) {
+          return resolve(true);
+        }
+        if (Date.now() - started > ADMIT_TIMEOUT_MS) {
+          return resolve(false);
+        }
         floodGossip(req); // re-stamps req.mid each tick → floods anew across the partial mesh
         setTimeout(tick, ADMIT_RETRY_MS);
       };
@@ -734,7 +849,9 @@ function createWave({
     // it if we've moved past that wave entirely (its gallery is no longer current) — never let a
     // stale burn overwrite the current wave's ticket.
     const wid = waveId || wave?.id;
-    if (!wid || (wid !== wave?.id && wid !== currentWaveId)) return null;
+    if (!wid || (wid !== wave?.id && wid !== currentWaveId)) {
+      return null;
+    }
     const fields = {
       waveId: wid,
       peerId: me.id,
@@ -770,8 +887,12 @@ function createWave({
   // Accept this wave? Idle -> yes; same wave -> yes; a competing wave only if its
   // id is lower (deterministic tie-break so every peer converges on one wave).
   function shouldAdopt(waveId) {
-    if (endedWaves.has(waveId)) return false; // a finished wave never comes back
-    if (!wave || waveId === wave.id) return true;
+    if (endedWaves.has(waveId)) {
+      return false; // a finished wave never comes back
+    }
+    if (!wave || waveId === wave.id) {
+      return true;
+    }
     return waveId < wave.id;
   }
 
@@ -785,7 +906,9 @@ function createWave({
   // `silent` skips the wave-announce UI event (used when catching up straight into a
   // race, so no bogus lobby countdown flashes).
   function enterLobby(waveId, by, mine, dur = lobbyMs, silent = false) {
-    if (wave && wave.id === waveId) return;
+    if (wave && wave.id === waveId) {
+      return;
+    }
     if (wave) {
       // superseded by a lower-id wave — abandon the old one
       endedWaves.add(wave.id);
@@ -805,12 +928,16 @@ function createWave({
       kickoffProof: null,
       keySig: null // originator's signature over (waveId, galleryKey); set when we learn the key
     };
-    if (mine) wave.roster.add(me.id);
+    if (mine) {
+      wave.roster.add(me.id);
+    }
     lobbyEndsAt = Date.now() + dur;
     // fallback: if the race never starts (initiator vanished), drop back to idle
     clearTimeout(lobbyTimer);
     lobbyTimer = setTimeout(() => goIdle('lobby-timeout'), lobbyMs + 10000);
-    if (silent) return;
+    if (silent) {
+      return;
+    }
     onEvent({
       event: 'wave-announce',
       waveId,
@@ -826,7 +953,9 @@ function createWave({
   // Opt in to the current lobby (renderer command / harness). Returns the joined waveId
   // (so the worker can charge the join fee on a real opt-in), or null if it was a no-op.
   function join() {
-    if (!wave || wave.phase !== 'lobby' || wave.joined) return null;
+    if (!wave || wave.phase !== 'lobby' || wave.joined) {
+      return null;
+    }
     // anti-spam: never join (and pay) a wave whose kick-off fee isn't proven paid
     if (wave.paid !== 'verified') {
       onEvent({ event: 'join-blocked', waveId: wave.id, reason: wave.paid });
@@ -845,9 +974,15 @@ function createWave({
 
   // Transition the current wave from lobby to racing.
   function beginRace(rosterIds) {
-    if (!wave) return;
+    if (!wave) {
+      return;
+    }
     wave.phase = 'racing';
-    if (rosterIds) for (const id of rosterIds) wave.roster.add(id);
+    if (rosterIds) {
+      for (const id of rosterIds) {
+        wave.roster.add(id);
+      }
+    }
     clearTimeout(lobbyTimer);
     clearTimeout(waveTimer);
     waveTimer = setTimeout(() => goIdle('timeout'), WAVE_TIMEOUT_MS);
@@ -860,7 +995,9 @@ function createWave({
   }
 
   function goIdle(reason) {
-    if (!wave) return;
+    if (!wave) {
+      return;
+    }
     const waveId = wave.id;
     endedWaves.add(waveId);
     wave = null;
@@ -873,8 +1010,11 @@ function createWave({
   // Finish the current wave: emit the outcome to the UI and return to idle. Shared by
   // the originator (local completion), a dead-end stall, and receiving a `wave-end`.
   function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
-    if (stalled) onEvent({ event: 'stalled', waveId, reason: 'no successor' });
-    else onEvent({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) });
+    if (stalled) {
+      onEvent({ event: 'stalled', waveId, reason: 'no successor' });
+    } else {
+      onEvent({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) });
+    }
     goIdle(stalled ? 'stalled' : 'ended');
   }
 
@@ -894,7 +1034,9 @@ function createWave({
   // Record my hop's receipt when the token reaches me — the write-gate credential for
   // my staged selfie. Paired with stageSelfie() by tryPostSelfie().
   function recordMyReceipt(waveId, hopCount, receiptSig, chainHash, receiptTs) {
-    if (!canSelfieNow()) return;
+    if (!canSelfieNow()) {
+      return;
+    }
     myReceipt = { waveId, hopCount, receiptSig, chainHash, receiptTs };
     tryPostSelfie();
   }
@@ -902,8 +1044,12 @@ function createWave({
   // Post my lobby selfie once BOTH the receipt (token reached me) and the staged image
   // (captured in the lobby) are available, exactly once per wave.
   function tryPostSelfie() {
-    if (selfiePosted || !myReceipt || !stagedSelfie) return;
-    if (!wave || myReceipt.waveId !== wave.id) return;
+    if (selfiePosted || !myReceipt || !stagedSelfie) {
+      return;
+    }
+    if (!wave || myReceipt.waveId !== wave.id) {
+      return;
+    }
     selfiePosted = true;
     postSelfie({ ...myReceipt, image: stagedSelfie.image, caption: stagedSelfie.caption });
   }
@@ -1038,13 +1184,17 @@ function createWave({
     // Cheap rejects BEFORE the Ed25519 verify, to blunt a token-flood CPU DoS: drop a
     // competing/losing wave (single active wave at a time), and drop already-seen or
     // over-cap hops. Identity binding already guaranteed senderPeerId === the connection.
-    if (!shouldAdopt(token.waveId)) return;
+    if (!shouldAdopt(token.waveId)) {
+      return;
+    }
     const key = token.waveId + '|' + token.hopCount;
     // Completion only counts for a wave I'm actually running (else a token with
     // originator=me for a wave I never started could forge a completion).
     const isCompletion =
       wave && wave.id === token.waveId && token.originator === me.id && token.hopCount > 0;
-    if (!isCompletion && (seen.has(key) || token.hopCount > MAX_HOPS)) return;
+    if (!isCompletion && (seen.has(key) || token.hopCount > MAX_HOPS)) {
+      return;
+    }
 
     if (!verifyToken(token)) {
       log('token: bad receipt from', shortId(token.senderPeerId || ''));
@@ -1072,7 +1222,9 @@ function createWave({
     if (!wave || wave.id !== token.waveId) {
       enterLobby(token.waveId, token.originator, false, 0, true);
     }
-    if (wave.phase !== 'racing') beginRace();
+    if (wave.phase !== 'racing') {
+      beginRace();
+    }
     verifyAndOpenGallery(token.waveId, token.autobaseKey, token.autobaseKeySig, token.originator);
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig);
@@ -1127,8 +1279,12 @@ function createWave({
   // The worker proved the kick-off burn (after it confirmed on-chain) — attach the proof
   // and NOW announce. The initiator trusts its own confirmed burn (paid = 'verified').
   function announcePaid(proof) {
-    if (!wave || wave.phase !== 'lobby' || !enforcePaid) return;
-    if (!validKickoff(proof, wave.id, me.id)) return;
+    if (!wave || wave.phase !== 'lobby' || !enforcePaid) {
+      return;
+    }
+    if (!validKickoff(proof, wave.id, me.id)) {
+      return;
+    }
     wave.kickoffProof = proof;
     wave.paid = 'verified';
     doAnnounce(wave.id, proof);
@@ -1137,27 +1293,31 @@ function createWave({
 
   // A kick-off proof is structurally valid: signed (Ed25519) by the initiator over a
   // kick-off burn for this wave. (On-chain reality is checked separately, async.)
-  function validKickoff(p, waveId, byId) {
+  function validKickoff(proof, waveId, byId) {
     return !!(
-      p &&
-      p.reason === 'kickoff' &&
-      p.waveId === waveId &&
-      p.peerId === byId &&
-      verifyBurn(p, p.sig)
+      proof &&
+      proof.reason === 'kickoff' &&
+      proof.waveId === waveId &&
+      proof.peerId === byId &&
+      verifyBurn(proof, proof.sig)
     );
   }
 
   // Verify a wave's kick-off burn ON-CHAIN, then settle wave.paid. Abandons the wave if the
   // burn isn't real (anti-spam). No-op if enforcement is off or no verifier is wired.
   function verifyKickoff(waveId, proof) {
-    if (!enforcePaid || !verifyBurnOnChain) return;
+    if (!enforcePaid || !verifyBurnOnChain) {
+      return;
+    }
     verifyBurnOnChain(proof.txHash, {
       waveId,
       from: proof.tronAddress,
       minTrx: proof.amount
     })
       .then((res) => {
-        if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return;
+        if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
+          return;
+        }
         if (res && res.ok) {
           wave.paid = 'verified';
           onEvent({ event: 'wave-verified', waveId });
@@ -1171,7 +1331,9 @@ function createWave({
   }
 
   async function finalizeAndStart(waveId) {
-    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') return;
+    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
+      return;
+    }
     openGallery(waveId, null); // create this wave's gallery, then wait for its key
     await base.ready();
     // I'm the originator: sign (waveId, galleryKey) so peers can trust the key I publish
@@ -1214,15 +1376,15 @@ function createWave({
     const mux = Protomux.from(conn);
     const channel = mux.createChannel({ protocol: 'hyperwave/gossip' });
     const message = channel.addMessage({
-      encoding: c.string,
+      encoding: cenc.string,
       onmessage(str) {
-        let m;
+        let msg;
         try {
-          m = JSON.parse(str);
+          msg = JSON.parse(str);
         } catch {
           return;
         }
-        handleGossip(m, id);
+        handleGossip(msg, id);
       }
     });
     channel.open();
@@ -1258,13 +1420,17 @@ function createWave({
       senders.delete(id);
       peers.delete(id); // direct disconnect is authoritative for that peer
       goneUntil.set(id, Date.now() + PEER_STALE_MS); // cooldown: don't re-pin/re-hint it yet
-      if (senders.size === 0) chord.markSolo(); // went solo -> re-bootstrap on reconnect
+      if (senders.size === 0) {
+        chord.markSolo(); // went solo -> re-bootstrap on reconnect
+      }
       log('peer disconnected', shortId(id));
       // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
       // promotes the next successor-list entry and repairs fingers without waiting
       // for the next tick. `pinned` still holds the dead id; maintainNeighbours diffs
       // it out (leavePeer) and pins the replacement from the now-smaller ring.
-      if (pinned.has(id)) maintainNeighbours();
+      if (pinned.has(id)) {
+        maintainNeighbours();
+      }
       emit();
     });
     conn.on('error', () => {});
@@ -1292,10 +1458,6 @@ function createWave({
   // --- timers ----------------------------------------------------------------
   // All periodic work is a self-rescheduling setTimeout (CLAUDE.md Code Style: no setInterval):
   // each tick re-arms itself as its last step, so a slow tick delays the next instead of stacking.
-  let tHeartbeat = null;
-  let tRing = null;
-  let tRepair = null;
-
   // The single heartbeat: pointers double as liveness (lastSeen refresh) and the slim
   // Phase-4 pointer exchange, so there's no separate presence message to keep in step.
   function heartbeatTick() {
@@ -1358,7 +1520,9 @@ function createWave({
       clearTimeout(healTimer);
       chord.close();
       await swarm.destroy();
-      for (const b of galleries.values()) await b.close().catch(() => {});
+      for (const gallery of galleries.values()) {
+        await gallery.close().catch(() => {});
+      }
       await store.close();
     }
   };

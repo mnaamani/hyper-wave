@@ -33,8 +33,8 @@ function createChordRouting(ctx) {
   // My current successor id (next reachable clockwise) + the finger/successor ids I know
   // — the inputs to Chord's per-hop routing decision.
   function mySuccessorId() {
-    const s = nextClockwise(me.angle, liveRing([...peers.values()], Date.now(), staleMs));
-    return s ? s.id : null;
+    const succ = nextClockwise(me.angle, liveRing([...peers.values()], Date.now(), staleMs));
+    return succ ? succ.id : null;
   }
   const myKnownIds = () => [...new Set([...pinned, ...senders.keys()])];
 
@@ -43,17 +43,19 @@ function createChordRouting(ctx) {
   // fingers (findSuccessorStep chooses the next); the reply retraces the same path back to the
   // origin. Resolves to a peer id, or null on timeout / no peers.
   function findSuccessor(target) {
-    const t = typeof target === 'bigint' ? target : nodeIdOfHex(target);
+    const targetNid = typeof target === 'bigint' ? target : nodeIdOfHex(target);
     return new Promise((resolve) => {
-      const start = closestPrecedingNode(myKnownIds(), me.id, t) || mySuccessorId();
-      if (!start || !senders.has(start)) return resolve(null); // nobody to ask
+      const start = closestPrecedingNode(myKnownIds(), me.id, targetNid) || mySuccessorId();
+      if (!start || !senders.has(start)) {
+        return resolve(null); // nobody to ask
+      }
       const qid = b4a.toString(crypto.randomBytes(8), 'hex');
       const timer = setTimeout(() => {
         pendingLookups.delete(qid);
         resolve(null);
       }, LOOKUP_TIMEOUT_MS);
       pendingLookups.set(qid, { resolve, timer });
-      if (!trySend(start, { kind: 'find-succ', qid, target: t.toString(), hops: 0 })) {
+      if (!trySend(start, { kind: 'find-succ', qid, target: targetNid.toString(), hops: 0 })) {
         clearTimeout(timer);
         pendingLookups.delete(qid);
         resolve(null);
@@ -115,7 +117,9 @@ function createChordRouting(ctx) {
   // candidate so maintainNeighbours connects to it. Additive and safe: a no-op at small scale
   // (local knowledge already resolves the lookup with no hops).
   async function repairSuccessor() {
-    if (senders.size === 0) return;
+    if (senders.size === 0) {
+      return;
+    }
     const succId = await findSuccessor((nodeIdOfHex(me.id) + 1n) % RING);
     if (succId && succId !== me.id && !senders.has(succId)) {
       routed.set(succId, Date.now() + PIN_CANDIDATE_MS);
@@ -128,7 +132,9 @@ function createChordRouting(ctx) {
   // O(log N) routing even when its own DHT sample is incomplete, instead of waiting for the slow
   // periodic repair. One-shot per connected session; re-armed (markSolo) if I go solo.
   function scheduleBootstrap() {
-    if (bootstrapDone || bootstrapTimer) return;
+    if (bootstrapDone || bootstrapTimer) {
+      return;
+    }
     bootstrapTimer = setTimeout(() => {
       bootstrapTimer = null;
       bootstrapDone = true;
@@ -146,13 +152,19 @@ function createChordRouting(ctx) {
   // in addition to its local ring neighbours.
   function pinCandidates() {
     const now = Date.now();
-    for (const [id, exp] of routed) if (exp <= now) routed.delete(id);
+    for (const [id, exp] of routed) {
+      if (exp <= now) {
+        routed.delete(id);
+      }
+    }
     return [...routed.keys()];
   }
 
   function close() {
     clearTimeout(bootstrapTimer);
-    for (const { timer } of pendingLookups.values()) clearTimeout(timer);
+    for (const { timer } of pendingLookups.values()) {
+      clearTimeout(timer);
+    }
   }
 
   return {

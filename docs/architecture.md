@@ -74,14 +74,17 @@ renderer  ──(commands)──▶  worker
   { type: 'set-country', country }
   { type: 'stage-selfie', selfie: { image, caption } }  // lobby-captured; posts when the ball arrives
   { type: 'tip', to, amount }                         // real TRX to a selfie owner
+  { type: 'send-trx', to, amount }                    // plain transfer to any address (wallet Send form)
   { type: 'refresh-wallet' }                          // manual balance re-check (after funding)
+  { type: 'fetch-transactions' }                      // pull the on-chain tx history (wallet view)
 
 worker  ──(events)──▶  renderer
   { type: 'state',   me, peers[], successor }         // ring membership (every change)
   { type: 'event',   event, ... }                     // lifecycle + race events (protocol.md)
   { type: 'gallery', items[] }                        // ordered selfies (every change)
   { type: 'wallet',  address, trx }                   // wallet chip (on ready + every 15s; { error } on init failure)
-  { type: 'burn-result' | 'tip-result', ... }         // fee/tip outcomes (toasts)
+  { type: 'burn-result' | 'tip-result' | 'send-result', ... }  // fee/tip/send outcomes (toasts)
+  { type: 'transactions', list[] }                    // on-chain history, both directions, newest first
 ```
 
 Transport (desktop): `hyperwave.js` wraps `Bare.IPC` in a `FramedStream` and JSON-encodes
@@ -139,8 +142,9 @@ packages/hyperwave-lib-core/   the reusable Bare engine (npm workspace)
   index.js           package entry: re-exports init (core), wave, pay, fees
   lib/
     core.js          init(): the host-agnostic engine host — wires wave.js + pay.js + fees.js,
-                     owns the command dispatch (start/join/tip/stage-selfie/refresh-wallet)
-                     and the fee flow; both hosts are thin shims over this
+                     owns the command dispatch (start/join/tip/send-trx/stage-selfie/
+                     refresh-wallet/fetch-transactions) and the fee flow; both hosts are
+                     thin shims over this
     wave.js          orchestrator: transport + ring pinning + lifecycle + gallery + healing
     ring.js          pure ring geometry (angleOf, liveRing, nextClockwise, pickReachable)
     chord.js         pure Chord math (nodeId, successors, fingers, findSuccessorStep, stabilizeStep)
@@ -149,7 +153,8 @@ packages/hyperwave-lib-core/   the reusable Bare engine (npm workspace)
     token.js         pure token crypto (receipts, chain accumulator, burn + wave-end attestations)
     gallery.js       Autobase config + ordering (galleryConfig, buildGallery, readGallery)
     fees.js          shared fee flow (burn memo, payFee, confirmBurn, wireWallet)
-    pay.js           WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx
+    pay.js           WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx,
+                     transactions (on-chain history via TronGrid, both directions)
     wave.run.js      headless harness (one wave per process; WALLET=1)
     bootstrap.js     local DHT for fast same-machine testing
     *.test.js        brittle unit-test suites (aggregated by test.js)
@@ -167,12 +172,17 @@ apps/desktop/        the Electron shell (npm workspace)
     app.js           orchestrator: wire ipc events → views
     updater.js       OTA-updater renderer half (template)
     lib/
-      ipc.js         worker channel: route state/event/gallery/wallet/tip/burn + command senders
+      ipc.js         worker channel: route state/event/gallery/wallet/tip/burn/send/
+                     transactions + command senders
       ring.js        all <canvas> drawing (ring, dots, flags, football, centre selfie)
       gallery.js     centre-selfie slideshow + collection progress + 💵 tip button
       lobby.js       lobby panel (countdown + join, gated on payment verification)
       proof.js       lobby webcam capture (staged selfie)
-      hud.js         status line, Kick-off button, 💰 wallet chip, country picker + intro
+      scrubber.js    circular scrubber: drag the frozen ⚽ around the ring to browse the gallery
+      hud.js         status line, Kick-off button, country picker + intro
+      wallet.js      💰 wallet view modal: balance/address, copy/faucet, Send form (send-trx),
+                     merged tx history (app events + on-chain transactions)
+      explorer.js    Tronscan links (openAddress, txLink)
       countries.js   ISO country list + flag emoji
   workers/           Bare, CJS
     hyperwave.js     thin worker host: FramedStream over Bare.IPC → hyperwave-lib-core init()

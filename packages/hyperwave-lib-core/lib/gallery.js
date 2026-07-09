@@ -50,7 +50,7 @@ function tipAddressIsBackedByBurn(op) {
 function galleryConfig() {
   return {
     valueEncoding: 'json',
-    open: (s) => s.get('gallery', { valueEncoding: 'json' }),
+    open: (store) => store.get('gallery', { valueEncoding: 'json' }),
     async apply(nodes, view, host) {
       let seen = null; // lazily-built set of peerIds already in the view (per-peer dedup)
       for (const node of nodes) {
@@ -61,24 +61,38 @@ function galleryConfig() {
           } catch {}
           continue;
         }
-        if (op?.type !== 'wave-selfie' || !selfieHasValidReceipt(op)) continue;
+        if (op?.type !== 'wave-selfie' || !selfieHasValidReceipt(op)) {
+          continue;
+        }
         // size cap (optimistic admission → bound each seat's write); drop oversized entries
-        if ((op.image || '').length > MAX_IMAGE_BYTES) continue;
-        if ((op.caption || '').length > MAX_CAPTION_BYTES) continue;
+        if ((op.image || '').length > MAX_IMAGE_BYTES) {
+          continue;
+        }
+        if ((op.caption || '').length > MAX_CAPTION_BYTES) {
+          continue;
+        }
         if (seen === null) {
           seen = new Set();
           for (let i = 0; i < view.length; i++) {
-            const e = await view.get(i);
-            if (e?.type === 'wave-selfie') seen.add(e.peerId);
+            const existing = await view.get(i);
+            if (existing?.type === 'wave-selfie') {
+              seen.add(existing.peerId);
+            }
           }
         }
-        if (seen.has(op.peerId)) continue; // one selfie per peer per wave — drop extras
+        if (seen.has(op.peerId)) {
+          continue; // one selfie per peer per wave — drop extras
+        }
         seen.add(op.peerId);
         const { burn, ...entry } = op;
-        if (!tipAddressIsBackedByBurn(op)) entry.address = ''; // unverified address → not tippable
+        if (!tipAddressIsBackedByBurn(op)) {
+          entry.address = ''; // unverified address → not tippable
+        }
         // Keep the burn txHash (the rest of the bulky attestation is dropped): it lets tippers
         // and any auditor fetch the tx and verify the fee burn on-chain.
-        if (burn && burn.txHash) entry.burnTx = burn.txHash;
+        if (burn && burn.txHash) {
+          entry.burnTx = burn.txHash;
+        }
         await view.append(entry);
       }
     }
@@ -88,10 +102,12 @@ function galleryConfig() {
 // Deterministic gallery: one entry per peer per wave (newest wins), ordered by hop.
 function buildGallery(entries) {
   const byKey = new Map();
-  for (const e of entries) {
-    const k = e.waveId + '|' + e.peerId;
-    const prev = byKey.get(k);
-    if (!prev || e.timestamp > prev.timestamp) byKey.set(k, e);
+  for (const entry of entries) {
+    const key = entry.waveId + '|' + entry.peerId;
+    const prev = byKey.get(key);
+    if (!prev || entry.timestamp > prev.timestamp) {
+      byKey.set(key, entry);
+    }
   }
   return [...byKey.values()].sort((a, b) => a.hopCount - b.hopCount || a.timestamp - b.timestamp);
 }
@@ -101,8 +117,10 @@ async function readGallery(base) {
   const view = base.view;
   const items = [];
   for (let i = 0; i < view.length; i++) {
-    const e = await view.get(i);
-    if (e?.type === 'wave-selfie') items.push(e);
+    const entry = await view.get(i);
+    if (entry?.type === 'wave-selfie') {
+      items.push(entry);
+    }
   }
   return buildGallery(items);
 }

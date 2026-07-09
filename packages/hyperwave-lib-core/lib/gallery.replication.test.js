@@ -15,32 +15,32 @@ const { galleryConfig, readGallery } = require('./gallery');
 const { signReceipt } = require('./token');
 
 const WAVE = 'w';
-const CH = b4a.toString(b4a.alloc(32), 'hex');
-const RT = 1000;
+const CHAIN_HASH = b4a.toString(b4a.alloc(32), 'hex');
+const RECEIPT_TS = 1000;
 
-// a wave-selfie op with a valid receipt signed by kp (apply() drops invalid ones)
-function selfie(kp, hopCount, caption) {
+// a wave-selfie op with a valid receipt signed by keyPair (apply() drops invalid ones)
+function selfie(keyPair, hopCount, caption) {
   return {
     type: 'wave-selfie',
     waveId: WAVE,
-    peerId: b4a.toString(kp.publicKey, 'hex'),
+    peerId: b4a.toString(keyPair.publicKey, 'hex'),
     hopCount,
-    chainHash: CH,
-    receiptTs: RT,
-    receiptSig: signReceipt(kp, WAVE, hopCount, CH, RT),
+    chainHash: CHAIN_HASH,
+    receiptTs: RECEIPT_TS,
+    receiptSig: signReceipt(keyPair, WAVE, hopCount, CHAIN_HASH, RECEIPT_TS),
     caption,
     timestamp: hopCount
   };
 }
 
 // wire two stores together with a single replication stream pair (one direct edge)
-function link(s1, s2) {
-  const a = s1.replicate(true);
-  const b = s2.replicate(false);
-  a.pipe(b).pipe(a);
-  a.on('error', () => {});
-  b.on('error', () => {});
-  return [a, b];
+function link(store1, store2) {
+  const stream1 = store1.replicate(true);
+  const stream2 = store2.replicate(false);
+  stream1.pipe(stream2).pipe(stream1);
+  stream1.on('error', () => {});
+  stream2.on('error', () => {});
+  return [stream1, stream2];
 }
 
 function until(pred, timeoutMs = 20000) {
@@ -51,8 +51,12 @@ function until(pred, timeoutMs = 20000) {
       try {
         ok = await pred();
       } catch {}
-      if (ok) return resolve(true);
-      if (Date.now() - started > timeoutMs) return resolve(false);
+      if (ok) {
+        return resolve(true);
+      }
+      if (Date.now() - started > timeoutMs) {
+        return resolve(false);
+      }
       setTimeout(tick, 120);
     };
     tick();
@@ -61,12 +65,12 @@ function until(pred, timeoutMs = 20000) {
 
 async function captions(base) {
   await base.update();
-  return (await readGallery(base)).map((g) => g.caption).sort();
+  return (await readGallery(base)).map((entry) => entry.caption).sort();
 }
 
 test('gallery replicates transitively across a line A—B—C (no A<->C link)', async (t) => {
-  const dirs = ['a', 'b', 'c'].map((n) => `/tmp/hyperwave-repl-${n}-${Date.now()}`);
-  const [storeA, storeB, storeC] = dirs.map((d) => new Corestore(d));
+  const dirs = ['a', 'b', 'c'].map((name) => `/tmp/hyperwave-repl-${name}-${Date.now()}`);
+  const [storeA, storeB, storeC] = dirs.map((dir) => new Corestore(dir));
 
   // A creates the gallery; B and C open it from A's bootstrap key.
   const baseA = new Autobase(storeA.namespace('wave-gallery:' + WAVE), null, galleryConfig());
@@ -81,19 +85,23 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
   const streams = [...link(storeA, storeB), ...link(storeB, storeC)];
 
   t.teardown(async () => {
-    for (const s of streams) s.destroy();
+    for (const stream of streams) {
+      stream.destroy();
+    }
     await baseA.close();
     await baseB.close();
     await baseC.close();
     await storeA.close();
     await storeB.close();
     await storeC.close();
-    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+    for (const dir of dirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
-  const kpA = crypto.keyPair();
-  const kpB = crypto.keyPair();
-  const kpC = crypto.keyPair();
+  const keyPairA = crypto.keyPair();
+  const keyPairB = crypto.keyPair();
+  const keyPairC = crypto.keyPair();
 
   // A admits B and C as writers (in the app this is the add-writer gossip; applied
   // directly here — this test is about the *data* plane, not the control plane).
@@ -117,9 +125,9 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
   );
 
   // each peer writes one selfie into its own input core
-  await baseA.append(selfie(kpA, 0, 'A'));
-  await baseB.append(selfie(kpB, 1, 'B'));
-  await baseC.append(selfie(kpC, 2, 'C'));
+  await baseA.append(selfie(keyPairA, 0, 'A'));
+  await baseB.append(selfie(keyPairB, 1, 'B'));
+  await baseC.append(selfie(keyPairC, 2, 'C'));
 
   // C must converge to all three — crucially A's, which reaches C only by forwarding
   // through B (A and C share no direct connection).
@@ -141,14 +149,14 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
 // full gallery. (If the initiator itself goes offline, the gallery isn't archived by anyone
 // else — the accepted simplification of dropping the standalone seed role.)
 test('the initiator retains its gallery and serves a latecomer', async (t) => {
-  const dirs = ['orig', 'late'].map((n) => `/tmp/hyperwave-retain-${n}-${Date.now()}`);
-  const [storeA, storeC] = dirs.map((d) => new Corestore(d));
+  const dirs = ['orig', 'late'].map((name) => `/tmp/hyperwave-retain-${name}-${Date.now()}`);
+  const [storeA, storeC] = dirs.map((dir) => new Corestore(dir));
   const streams = [];
   const closed = new Set();
-  const shut = async (x) => {
-    if (x && !closed.has(x)) {
-      closed.add(x);
-      await x.close().catch(() => {});
+  const shut = async (resource) => {
+    if (resource && !closed.has(resource)) {
+      closed.add(resource);
+      await resource.close().catch(() => {});
     }
   };
 
@@ -159,16 +167,18 @@ test('the initiator retains its gallery and serves a latecomer', async (t) => {
   let baseC = null;
 
   t.teardown(async () => {
-    for (const s of streams) {
+    for (const stream of streams) {
       try {
-        s.destroy();
+        stream.destroy();
       } catch {}
     }
     await shut(baseA);
     await shut(baseC);
     await shut(storeA);
     await shut(storeC);
-    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+    for (const dir of dirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   await baseA.append(selfie(crypto.keyPair(), 0, 'A'));

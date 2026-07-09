@@ -20,7 +20,7 @@ test('liveRing drops stale peers and sorts clockwise', (t) => {
   ];
   const ring = liveRing(entries, now, 12000);
   t.alike(
-    ring.map((p) => p.id),
+    ring.map((peer) => peer.id),
     ['b', 'a'],
     'c pruned, sorted by angle'
   );
@@ -52,31 +52,31 @@ test('single-peer ring: successor is always that peer (even if behind me)', (t) 
 });
 
 // healing: pickReachable = next clockwise that is reachable and not skipped
-const R = [
+const RING = [
   { id: 'b', angle: 10 },
   { id: 'c', angle: 150 },
   { id: 'a', angle: 300 }
 ];
-const all = new Set(['a', 'b', 'c']);
+const ALL_REACHABLE = new Set(['a', 'b', 'c']);
 
 test('pickReachable picks the next clockwise when all reachable', (t) => {
-  t.is(pickReachable(R, 100, all, new Set()).id, 'c'); // 100 -> c@150
-  t.is(pickReachable(R, 200, all, new Set()).id, 'a'); // 200 -> a@300
+  t.is(pickReachable(RING, 100, ALL_REACHABLE, new Set()).id, 'c'); // 100 -> c@150
+  t.is(pickReachable(RING, 200, ALL_REACHABLE, new Set()).id, 'a'); // 200 -> a@300
 });
 
 test('pickReachable wraps around', (t) => {
-  t.is(pickReachable(R, 320, all, new Set()).id, 'b'); // past a -> wrap to b
+  t.is(pickReachable(RING, 320, ALL_REACHABLE, new Set()).id, 'b'); // past a -> wrap to b
 });
 
 test('pickReachable skips a skipped (dead) successor to the next live one', (t) => {
-  t.is(pickReachable(R, 100, all, new Set(['c'])).id, 'a');
+  t.is(pickReachable(RING, 100, ALL_REACHABLE, new Set(['c'])).id, 'a');
 });
 
 test('pickReachable skips peers we have no connection to (not reachable)', (t) => {
-  t.is(pickReachable(R, 100, new Set(['a', 'b']), new Set()).id, 'a'); // c unreachable
+  t.is(pickReachable(RING, 100, new Set(['a', 'b']), new Set()).id, 'a'); // c unreachable
 });
 
 test('pickReachable returns null when nobody qualifies', (t) => {
-  t.is(pickReachable(R, 0, new Set(), new Set()), null); // none reachable
-  t.is(pickReachable(R, 0, all, new Set(['a', 'b', 'c'])), null); // all skipped
+  t.is(pickReachable(RING, 0, new Set(), new Set()), null); // none reachable
+  t.is(pickReachable(RING, 0, ALL_REACHABLE, new Set(['a', 'b', 'c'])), null); // all skipped
 });

@@ -3,7 +3,7 @@
 const test = require('brittle');
 const { buildGallery } = require('./gallery');
 
-const e = (waveId, peerId, hopCount, timestamp) => ({
+const makeEntry = (waveId, peerId, hopCount, timestamp) => ({
   type: 'wave-selfie',
   waveId,
   peerId,
@@ -12,27 +12,31 @@ const e = (waveId, peerId, hopCount, timestamp) => ({
 });
 
 test('orders selfies by hop count', (t) => {
-  const g = buildGallery([e('w', 'c', 2, 10), e('w', 'a', 0, 10), e('w', 'b', 1, 10)]);
+  const gallery = buildGallery([
+    makeEntry('w', 'c', 2, 10),
+    makeEntry('w', 'a', 0, 10),
+    makeEntry('w', 'b', 1, 10)
+  ]);
   t.alike(
-    g.map((x) => x.peerId),
+    gallery.map((item) => item.peerId),
     ['a', 'b', 'c']
   );
 });
 
 test('newest entry wins per (wave, peer)', (t) => {
-  const g = buildGallery([e('w', 'a', 1, 10), e('w', 'a', 1, 50)]);
-  t.is(g.length, 1);
-  t.is(g[0].timestamp, 50);
+  const gallery = buildGallery([makeEntry('w', 'a', 1, 10), makeEntry('w', 'a', 1, 50)]);
+  t.is(gallery.length, 1);
+  t.is(gallery[0].timestamp, 50);
 });
 
 test('keeps entries from different waves separate', (t) => {
-  t.is(buildGallery([e('w1', 'a', 0, 10), e('w2', 'a', 0, 10)]).length, 2);
+  t.is(buildGallery([makeEntry('w1', 'a', 0, 10), makeEntry('w2', 'a', 0, 10)]).length, 2);
 });
 
 test('ties on hop broken by timestamp', (t) => {
-  const g = buildGallery([e('w', 'b', 1, 99), e('w', 'a', 1, 5)]);
+  const gallery = buildGallery([makeEntry('w', 'b', 1, 99), makeEntry('w', 'a', 1, 5)]);
   t.alike(
-    g.map((x) => x.peerId),
+    gallery.map((item) => item.peerId),
     ['a', 'b']
   );
 });
@@ -43,14 +47,14 @@ test('ties on hop broken by timestamp', (t) => {
 // the renderer replay features participants in ring order regardless of how they arrived.
 test('hop order wins even when insertion and timestamp order are both inverted', (t) => {
   // fed last-hop-first, and later hops carry LARGER timestamps (arrived sooner in the burst)
-  const g = buildGallery([
-    e('w', 'd', 3, 400),
-    e('w', 'c', 2, 300),
-    e('w', 'b', 1, 200),
-    e('w', 'a', 0, 100)
+  const gallery = buildGallery([
+    makeEntry('w', 'd', 3, 400),
+    makeEntry('w', 'c', 2, 300),
+    makeEntry('w', 'b', 1, 200),
+    makeEntry('w', 'a', 0, 100)
   ]);
   t.alike(
-    g.map((x) => x.peerId),
+    gallery.map((item) => item.peerId),
     ['a', 'b', 'c', 'd'],
     'ordered by hopCount, not by arrival/timestamp'
   );
@@ -61,6 +65,6 @@ test('empty input -> empty gallery', (t) => {
 });
 
 test('preserves the wallet address (for gallery tipping)', (t) => {
-  const entry = { ...e('w', 'a', 0, 10), address: 'TXYZ...ownerWallet' };
+  const entry = { ...makeEntry('w', 'a', 0, 10), address: 'TXYZ...ownerWallet' };
   t.is(buildGallery([entry])[0].address, 'TXYZ...ownerWallet', 'address rides through to the view');
 });

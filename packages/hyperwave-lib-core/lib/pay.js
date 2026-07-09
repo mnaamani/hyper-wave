@@ -79,7 +79,9 @@ async function createPayments({
         Number(toSun(amountTrx)),
         address
       );
-      if (memo) tx = await tronweb.transactionBuilder.addUpdateData(tx, memo, 'utf8');
+      if (memo) {
+        tx = await tronweb.transactionBuilder.addUpdateData(tx, memo, 'utf8');
+      }
       const res = await account.sendTransaction(tx); // prebuilt (has txID) -> WDK signs + broadcasts
       log('burned', amountTrx, 'TRX 🔥 hash', res.hash, memo ? `memo=${memo}` : '');
       return { hash: res.hash, fee: res.fee };
@@ -94,22 +96,22 @@ async function createPayments({
     async verifyBurnTx(txHash, expect = {}) {
       try {
         const tx = await tronweb.trx.getTransaction(txHash);
-        const c = tx?.raw_data?.contract?.[0];
-        if (c?.type !== 'TransferContract') {
+        const contract = tx?.raw_data?.contract?.[0];
+        if (contract?.type !== 'TransferContract') {
           return { ok: false, reason: 'not-found-or-not-transfer' };
         }
-        const v = c.parameter.value;
+        const value = contract.parameter.value;
         const burnHex = tronweb.address.toHex(BURN_ADDRESS).toLowerCase();
-        if ((v.to_address || '').toLowerCase() !== burnHex) {
+        if ((value.to_address || '').toLowerCase() !== burnHex) {
           return { ok: false, reason: 'not-burned' };
         }
         if (expect.from) {
           const fromHex = tronweb.address.toHex(expect.from).toLowerCase();
-          if ((v.owner_address || '').toLowerCase() !== fromHex) {
+          if ((value.owner_address || '').toLowerCase() !== fromHex) {
             return { ok: false, reason: 'wrong-sender' };
           }
         }
-        if (expect.minTrx !== undefined && BigInt(v.amount || 0) < toSun(expect.minTrx)) {
+        if (expect.minTrx !== undefined && BigInt(value.amount || 0) < toSun(expect.minTrx)) {
           return { ok: false, reason: 'amount-too-low' };
         }
         // Memo is `hyperwave:<waveId>:<peerId>` — check it commits the waveId.
@@ -118,8 +120,8 @@ async function createPayments({
           return { ok: false, reason: 'memo-mismatch' };
         }
         return { ok: true };
-      } catch (e) {
-        return { ok: false, reason: e.message };
+      } catch (err) {
+        return { ok: false, reason: err.message };
       }
     },
     // Recent native-TRX transfers for this wallet, newest first — reads TronGrid's v1
@@ -139,29 +141,33 @@ async function createPayments({
         const myHex = tronweb.address.toHex(address).toLowerCase();
         const out = [];
         for (const tx of (res && res.data) || []) {
-          const c = tx.raw_data && tx.raw_data.contract && tx.raw_data.contract[0];
-          if (!c || c.type !== 'TransferContract') continue; // native TRX transfers only
-          const v = (c.parameter && c.parameter.value) || {};
+          const contract = tx.raw_data && tx.raw_data.contract && tx.raw_data.contract[0];
+          if (!contract || contract.type !== 'TransferContract') {
+            continue; // native TRX transfers only
+          }
+          const value = (contract.parameter && contract.parameter.value) || {};
           const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : '';
           out.push({
             hash: tx.txID,
-            direction: (v.owner_address || '').toLowerCase() === myHex ? 'out' : 'in',
-            amount: fromSun(v.amount || 0),
-            from: v.owner_address ? tronweb.address.fromHex(v.owner_address) : '',
-            to: v.to_address ? tronweb.address.fromHex(v.to_address) : '',
+            direction: (value.owner_address || '').toLowerCase() === myHex ? 'out' : 'in',
+            amount: fromSun(value.amount || 0),
+            from: value.owner_address ? tronweb.address.fromHex(value.owner_address) : '',
+            to: value.to_address ? tronweb.address.fromHex(value.to_address) : '',
             timestamp: tx.block_timestamp || 0,
             memo
           });
         }
         return out;
-      } catch (e) {
-        log('transactions fetch failed:', e.message);
+      } catch (err) {
+        log('transactions fetch failed:', err.message);
         return [];
       }
     },
     dispose() {
       try {
-        if (wallet.dispose) wallet.dispose();
+        if (wallet.dispose) {
+          wallet.dispose();
+        }
       } catch {}
     }
   };

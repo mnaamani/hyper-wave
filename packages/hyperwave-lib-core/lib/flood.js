@@ -15,8 +15,12 @@ function createFlood({ cap = 4096 } = {}) {
     // false on any repeat (=> drop). Past `cap` the set is cleared wholesale, which at
     // worst lets a lone straggler re-flood once — harmless and very rare.
     firstSight(mid) {
-      if (seen.has(mid)) return false;
-      if (seen.size >= cap) seen.clear();
+      if (seen.has(mid)) {
+        return false;
+      }
+      if (seen.size >= cap) {
+        seen.clear();
+      }
       seen.add(mid);
       return true;
     },

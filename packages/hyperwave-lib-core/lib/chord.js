@@ -13,7 +13,9 @@ const RING = 1n << 64n; // 2^64
 
 function nodeId(key) {
   let n = 0n;
-  for (let i = 0; i < 8; i++) n = (n << 8n) | BigInt(key[i]);
+  for (let i = 0; i < 8; i++) {
+    n = (n << 8n) | BigInt(key[i]);
+  }
   return n;
 }
 
@@ -33,11 +35,15 @@ function ringOrder(ids) {
 // ring doesn't wrap back onto myself.
 function successors(ids, myId, k = 3) {
   const ring = ringOrder([myId, ...ids]);
-  const n = ring.length;
-  if (n <= 1) return [];
-  const i = ring.findIndex((x) => x.id === myId);
+  const ringSize = ring.length;
+  if (ringSize <= 1) {
+    return [];
+  }
+  const myIndex = ring.findIndex((node) => node.id === myId);
   const out = [];
-  for (let j = 1; j <= k && j < n; j++) out.push(ring[(i + j) % n].id);
+  for (let j = 1; j <= k && j < ringSize; j++) {
+    out.push(ring[(myIndex + j) % ringSize].id);
+  }
   return out;
 }
 
@@ -45,10 +51,12 @@ function successors(ids, myId, k = 3) {
 // wrapping to the highest nodeId. null if I'm the only node.
 function predecessor(ids, myId) {
   const ring = ringOrder([myId, ...ids]);
-  const n = ring.length;
-  if (n <= 1) return null;
-  const i = ring.findIndex((x) => x.id === myId);
-  return ring[(i - 1 + n) % n].id;
+  const ringSize = ring.length;
+  if (ringSize <= 1) {
+    return null;
+  }
+  const myIndex = ring.findIndex((node) => node.id === myId);
+  return ring[(myIndex - 1 + ringSize) % ringSize].id;
 }
 
 // The set of ids whose ring edges we want physically connected (Phase 2):
@@ -56,7 +64,9 @@ function predecessor(ids, myId) {
 function connectionTargets(ids, myId, k = 3) {
   const set = new Set(successors(ids, myId, k));
   const pred = predecessor(ids, myId);
-  if (pred) set.add(pred);
+  if (pred) {
+    set.add(pred);
+  }
   return set;
 }
 
@@ -64,8 +74,14 @@ function connectionTargets(ids, myId, k = 3) {
 // clockwise-after keyspace position `target` (BigInt, mod 2^64), wrapping to the
 // lowest nodeId. `ring` is the output of ringOrder (ascending by nid). null if empty.
 function successorOf(ring, target) {
-  if (ring.length === 0) return null;
-  for (const node of ring) if (node.nid >= target) return node;
+  if (ring.length === 0) {
+    return null;
+  }
+  for (const node of ring) {
+    if (node.nid >= target) {
+      return node;
+    }
+  }
   return ring[0]; // wrapped past the top of the ring
 }
 
@@ -87,7 +103,9 @@ function fingers(ids, myId) {
   const out = new Set();
   for (let i = 0; i < 64; i++) {
     const node = successorOf(ring, (myNid + (1n << BigInt(i))) % RING);
-    if (node && node.id !== myId) out.add(node.id);
+    if (node && node.id !== myId) {
+      out.add(node.id);
+    }
   }
   return out;
 }
@@ -95,15 +113,21 @@ function fingers(ids, myId) {
 // Is nodeId `x` strictly inside the open ring interval (a, b), moving clockwise
 // (mod 2^64)? When a >= b the interval wraps past the top of the ring. All BigInt.
 function inOpenInterval(x, a, b) {
-  if (a < b) return x > a && x < b;
+  if (a < b) {
+    return x > a && x < b;
+  }
   return x > a || x < b;
 }
 
 // x ∈ (a, b] on the mod-2^64 ring (half-open, includes the upper end). a === b is the
 // whole ring (single-node case). Used for Chord's "target ∈ (me, successor]" test.
 function inHalfOpenInterval(x, a, b) {
-  if (a === b) return true;
-  if (a < b) return x > a && x <= b;
+  if (a === b) {
+    return true;
+  }
+  if (a < b) {
+    return x > a && x <= b;
+  }
   return x > a || x <= b;
 }
 
@@ -121,9 +145,13 @@ function closestPrecedingNode(known, myId, target) {
   let best = null;
   let bestFwd = -1n;
   for (const id of known) {
-    if (id === myId) continue;
+    if (id === myId) {
+      continue;
+    }
     const nid = nodeIdOfHex(id);
-    if (!inOpenInterval(nid, myNid, target)) continue;
+    if (!inOpenInterval(nid, myNid, target)) {
+      continue;
+    }
     const fwd = ringForward(myNid, nid);
     if (fwd > bestFwd) {
       best = id;
@@ -146,9 +174,13 @@ function closestPrecedingNode(known, myId, target) {
 function findSuccessorStep(me, successor, known, target) {
   const myNid = nodeIdOfHex(me);
   const succNid = successor !== null ? nodeIdOfHex(successor) : myNid;
-  if (inHalfOpenInterval(target, myNid, succNid)) return { done: true, successor };
+  if (inHalfOpenInterval(target, myNid, succNid)) {
+    return { done: true, successor };
+  }
   const next = closestPrecedingNode(known, me, target);
-  if (next === null) return { done: true, successor };
+  if (next === null) {
+    return { done: true, successor };
+  }
   return { done: false, next };
 }
 
@@ -157,8 +189,12 @@ function findSuccessorStep(me, successor, known, target) {
 // node joined (or was discovered) between us. Returns the id to use as successor
 // (`succPred` if it's closer, else the unchanged current). Ids are hex; null-safe.
 function stabilizeStep(myId, currentSuccId, succPredId) {
-  if (!succPredId || succPredId === myId || succPredId === currentSuccId) return currentSuccId;
-  if (!currentSuccId) return succPredId;
+  if (!succPredId || succPredId === myId || succPredId === currentSuccId) {
+    return currentSuccId;
+  }
+  if (!currentSuccId) {
+    return succPredId;
+  }
   const me = nodeIdOfHex(myId);
   const s = nodeIdOfHex(currentSuccId);
   const x = nodeIdOfHex(succPredId);
@@ -170,7 +206,9 @@ function stabilizeStep(myId, currentSuccId, succPredId) {
 // (for O(log N) ring-spanning reachability). This is what wave.js joinPeer()s.
 function pinTargets(ids, myId, k = 3) {
   const set = connectionTargets(ids, myId, k);
-  for (const f of fingers(ids, myId)) set.add(f);
+  for (const f of fingers(ids, myId)) {
+    set.add(f);
+  }
   return set;
 }
 

@@ -35,7 +35,9 @@ const pearStore = cmd.flags.storage
   : cmd.flags.storage;
 const updates = cmd.flags.updates;
 
-if (pearStore) app.setPath('userData', pearStore);
+if (pearStore) {
+  app.setPath('userData', pearStore);
+}
 
 ipcMain.on('pkg', (evt) => {
   evt.returnValue = pkg;
@@ -54,24 +56,36 @@ ipcMain.handle('copy-text', (_evt, text) => clipboard.writeText(String(text ?? '
 // Open a URL in the user's default browser (e.g. the Nile faucet). Restricted to http(s) so a
 // compromised renderer can't ask main to open file:// or other schemes.
 ipcMain.handle('open-external', (_evt, url) => {
-  if (typeof url === 'string' && /^https?:\/\//i.test(url)) return shell.openExternal(url);
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+    return shell.openExternal(url);
+  }
 });
 
 function getAppPath() {
-  if (!app.isPackaged) return null;
-  if (isLinux && process.env.APPIMAGE) return process.env.APPIMAGE;
-  if (isWindows) return process.execPath;
+  if (!app.isPackaged) {
+    return null;
+  }
+  if (isLinux && process.env.APPIMAGE) {
+    return process.env.APPIMAGE;
+  }
+  if (isWindows) {
+    return process.execPath;
+  }
   return path.join(process.resourcesPath, '..', '..');
 }
 
 function sendToAll(name, data) {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(name, data);
+    if (!win.isDestroyed()) {
+      win.webContents.send(name, data);
+    }
   }
 }
 
 function getWorker(specifier) {
-  if (workers.has(specifier)) return workers.get(specifier);
+  if (workers.has(specifier)) {
+    return workers.get(specifier);
+  }
   const appPath = getAppPath();
   let dir = null;
   let dirSource = null;
@@ -157,15 +171,17 @@ async function createWindow() {
   });
 
   // allow webcam access for the proof-window selfie capture
-  win.webContents.session.setPermissionRequestHandler((wc, permission, cb) =>
-    cb(permission === 'media')
+  win.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) =>
+    callback(permission === 'media')
   );
 
   // Right-click edit menu for text fields (e.g. paste a wallet address into Send). Electron
   // ships no default context menu, so without this only the keyboard shortcuts work. Built from
   // roles (cut/copy/paste/select-all) with editing entries shown only when a field is editable.
   win.webContents.on('context-menu', (_evt, params) => {
-    if (!params.isEditable && !params.selectionText) return;
+    if (!params.isEditable && !params.selectionText) {
+      return;
+    }
     const items = [];
     if (params.isEditable) {
       items.push({ role: 'cut', enabled: !!params.selectionText });
@@ -178,7 +194,9 @@ async function createWindow() {
       items.push({ type: 'separator' });
       items.push({ role: 'selectAll' });
     }
-    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
+    if (items.length) {
+      Menu.buildFromTemplate(items).popup({ window: win });
+    }
   });
 
   const devServerUrl = process.env.PEAR_DEV_SERVER_URL;
@@ -246,7 +264,9 @@ if (!lock) {
 } else {
   app.on('second-instance', (evt, args) => {
     const url = args.find((arg) => arg.startsWith(protocol + '://'));
-    if (url) handleDeepLink(url);
+    if (url) {
+      handleDeepLink(url);
+    }
   });
 
   app.whenReady().then(() => {

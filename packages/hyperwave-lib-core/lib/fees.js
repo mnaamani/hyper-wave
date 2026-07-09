@@ -30,12 +30,14 @@ async function payFee(wave, payments, waveId, reason) {
 // succeeds the moment the wave is announced. Resolves true when confirmed.
 async function confirmBurn(payments, waveId, hash) {
   for (let i = 0; i < CONFIRM_ATTEMPTS; i++) {
-    const r = await payments.verifyBurnTx(hash, {
+    const result = await payments.verifyBurnTx(hash, {
       waveId,
       from: payments.address,
       minTrx: FEE_TRX
     });
-    if (r.ok) return true;
+    if (result.ok) {
+      return true;
+    }
     await new Promise((res) => setTimeout(res, CONFIRM_INTERVAL_MS));
   }
   return false;

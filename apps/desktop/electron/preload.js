@@ -1,7 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 function toBuffer(data) {
-  if (data === null || data === undefined || typeof data === 'number') return data;
+  if (data === null || data === undefined || typeof data === 'number') {
+    return data;
+  }
   return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
 }
 

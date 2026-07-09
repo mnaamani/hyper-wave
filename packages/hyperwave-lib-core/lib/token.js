@@ -25,8 +25,8 @@ function signReceipt(keyPair, waveId, hopCount, prevChainHash, timestamp) {
 // (cross-checking against the real token chain) is the validator's job.
 function verifyReceipt(peerIdHex, waveId, hopCount, chainHash, timestamp, receiptSigHex) {
   try {
-    const h = receiptHash(waveId, hopCount, chainHash, timestamp);
-    return crypto.verify(h, b4a.from(receiptSigHex, 'hex'), b4a.from(peerIdHex, 'hex'));
+    const hash = receiptHash(waveId, hopCount, chainHash, timestamp);
+    return crypto.verify(hash, b4a.from(receiptSigHex, 'hex'), b4a.from(peerIdHex, 'hex'));
   } catch {
     return false;
   }

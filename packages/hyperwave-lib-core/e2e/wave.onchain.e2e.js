@@ -23,15 +23,19 @@ test(
   opts,
   async (t) => {
     // 20s lobby: room for P2 to verify the kick-off burn on-chain and burn its own join fee.
-    const c = await new Cluster({ lobbyMs: 20000 }).start();
-    t.teardown(() => c.destroy());
+    const cluster = await new Cluster({ lobbyMs: 20000 }).start();
+    t.teardown(() => cluster.destroy());
 
     // stagger the launches (with the DHT warm-up in start(), this is what makes discovery
     // reliable — otherwise a peer can join a half-formed DHT and stay isolated). P2 first, then
     // the initiator P1 (which kicks off once it sees P2).
-    const p2 = c.launch('p2', { AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' }, P2_SEED);
+    const p2 = cluster.launch('p2', { AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' }, P2_SEED);
     await sleep(600);
-    const p1 = c.launch('p1', { START: '1', AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' }, P1_SEED);
+    const p1 = cluster.launch(
+      'p1',
+      { START: '1', AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' },
+      P1_SEED
+    );
 
     // wallets load from the funded seeds (WDK init) — p1 only auto-kicks-off once its wallet is up
     await Promise.all([

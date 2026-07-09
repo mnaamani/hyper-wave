@@ -4,9 +4,11 @@ const b4a = require('b4a');
 
 // Ring position: top 6 bytes of the key mapped onto [0, 360).
 function angleOf(key) {
-  let n = 0;
-  for (let i = 0; i < 6; i++) n = n * 256 + key[i];
-  return (n / 2 ** 48) * 360;
+  let topBytes = 0;
+  for (let i = 0; i < 6; i++) {
+    topBytes = topBytes * 256 + key[i];
+  }
+  return (topBytes / 2 ** 48) * 360;
 }
 
 // Same, from a hex peer id. Angle is always DERIVED from identity, never trusted
@@ -17,13 +19,19 @@ function angleOfId(hex) {
 
 // live peers, sorted clockwise by angle (a peer is live if its last heartbeat is newer than staleMs)
 function liveRing(entries, now, staleMs) {
-  return entries.filter((p) => now - p.lastSeen < staleMs).sort((a, b) => a.angle - b.angle);
+  return entries.filter((peer) => now - peer.lastSeen < staleMs).sort((a, b) => a.angle - b.angle);
 }
 
 // next peer clockwise from myAngle (smallest angle > mine), wrapping to the first
 function nextClockwise(myAngle, sortedRing) {
-  if (sortedRing.length === 0) return null;
-  for (const p of sortedRing) if (p.angle > myAngle) return p;
+  if (sortedRing.length === 0) {
+    return null;
+  }
+  for (const peer of sortedRing) {
+    if (peer.angle > myAngle) {
+      return peer;
+    }
+  }
   return sortedRing[0];
 }
 
@@ -31,10 +39,12 @@ function nextClockwise(myAngle, sortedRing) {
 // skipped. Walks the ring from just after me, wrapping around. `reachable` and
 // `skipped` are Sets of peer ids. Returns null if none qualifies.
 function pickReachable(sortedRing, myAngle, reachable, skipped) {
-  const after = sortedRing.filter((p) => p.angle > myAngle);
-  const before = sortedRing.filter((p) => p.angle <= myAngle);
-  for (const p of [...after, ...before]) {
-    if (!skipped.has(p.id) && reachable.has(p.id)) return p;
+  const after = sortedRing.filter((peer) => peer.angle > myAngle);
+  const before = sortedRing.filter((peer) => peer.angle <= myAngle);
+  for (const peer of [...after, ...before]) {
+    if (!skipped.has(peer.id) && reachable.has(peer.id)) {
+      return peer;
+    }
   }
   return null;
 }

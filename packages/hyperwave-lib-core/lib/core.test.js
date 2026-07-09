@@ -10,22 +10,28 @@ const hyperwave = require('./core');
 // so the test can fire engine events (onState/onEvent/onGallery) itself.
 function fakeWave() {
   const calls = [];
-  const w = {
+  const wave = {
     me: { id: 'ab'.repeat(32), angle: 12.3 },
     calls,
     opts: null,
-    startWave: () => (calls.push('startWave'), 'wave-1'),
-    join: () => (calls.push('join'), 'wave-1'),
-    announcePaid: (p) => calls.push(['announcePaid', p]),
-    setCountry: (c) => calls.push(['setCountry', c]),
-    stageSelfie: (s) => calls.push(['stageSelfie', s]),
+    startWave: () => {
+      calls.push('startWave');
+      return 'wave-1';
+    },
+    join: () => {
+      calls.push('join');
+      return 'wave-1';
+    },
+    announcePaid: (paid) => calls.push(['announcePaid', paid]),
+    setCountry: (country) => calls.push(['setCountry', country]),
+    stageSelfie: (selfie) => calls.push(['stageSelfie', selfie]),
     setWallet: (addr) => calls.push(['setWallet', addr]),
     close: async () => calls.push('close')
   };
-  return w;
+  return wave;
 }
 
-const flush = () => new Promise((r) => setTimeout(r, 0)); // let the async wallet init settle
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0)); // let the async wallet init settle
 
 test('core routes commands to the engine and forwards engine events to send', async (t) => {
   const sent = [];
@@ -33,10 +39,13 @@ test('core routes commands to the engine and forwards engine events to send', as
   const core = hyperwave.init({
     storageDir: '/tmp/e',
     config: { matchId: 'm', bootstrap: '' },
-    send: (m) => sent.push(m),
+    send: (msg) => sent.push(msg),
     log: () => {},
     deps: {
-      createWave: (opts) => ((wave.opts = opts), wave),
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
       createPayments: async () => {
         throw new Error('no wallet in this test');
       }
@@ -49,9 +58,9 @@ test('core routes commands to the engine and forwards engine events to send', as
   wave.opts.onEvent({ event: 'started', waveId: 'wave-1' });
   wave.opts.onGallery([{ caption: 'hi' }]);
   t.ok(
-    sent.find((m) => m.type === 'state') &&
-      sent.find((m) => m.type === 'event' && m.event === 'started') &&
-      sent.find((m) => m.type === 'gallery' && m.items.length === 1),
+    sent.find((msg) => msg.type === 'state') &&
+      sent.find((msg) => msg.type === 'event' && msg.event === 'started') &&
+      sent.find((msg) => msg.type === 'gallery' && msg.items.length === 1),
     'state / token / gallery events forwarded with type envelopes'
   );
 
@@ -70,15 +79,15 @@ test('core routes commands to the engine and forwards engine events to send', as
   core.onMessage({ type: 'tip', to: 'Trecipient', amount: 1 });
   await flush();
   t.ok(
-    sent.find((m) => m.type === 'tip-result' && m.error === 'wallet not ready'),
+    sent.find((msg) => msg.type === 'tip-result' && msg.error === 'wallet not ready'),
     'tip with no wallet returns an error result'
   );
   t.ok(
-    sent.find((m) => m.type === 'wallet' && m.error),
+    sent.find((msg) => msg.type === 'wallet' && msg.error),
     'a wallet init failure surfaces a { wallet, error } message (no balance)'
   );
   t.absent(
-    sent.find((m) => m.type === 'wallet' && m.address),
+    sent.find((msg) => msg.type === 'wallet' && msg.address),
     'no wallet balance message when the wallet failed to init'
   );
 });
@@ -90,7 +99,10 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
   const pay = {
     address: 'Tmywallet',
     balances: async () => ({ address: 'Tmywallet', trx: 7 }),
-    send: async (to, amount) => (tipped.push([to, amount]), { hash: 'f'.repeat(64) }),
+    send: async (to, amount) => {
+      tipped.push([to, amount]);
+      return { hash: 'f'.repeat(64) };
+    },
     transactions: async () => [
       { hash: 'a'.repeat(64), direction: 'in', amount: 5, timestamp: 1, memo: '' }
     ],
@@ -99,10 +111,13 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
   const core = hyperwave.init({
     storageDir: '/tmp/e',
     config: {},
-    send: (m) => sent.push(m),
+    send: (msg) => sent.push(msg),
     log: () => {},
     deps: {
-      createWave: (opts) => ((wave.opts = opts), wave),
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
       createPayments: async () => pay
     }
   });
@@ -110,11 +125,13 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
 
   await flush(); // wallet init resolves
   t.ok(
-    sent.find((m) => m.type === 'wallet' && m.address === 'Tmywallet' && m.trx === 7),
+    sent.find((msg) => msg.type === 'wallet' && msg.address === 'Tmywallet' && msg.trx === 7),
     'balance pushed to the host once the wallet is ready'
   );
   t.ok(
-    wave.calls.find((c) => Array.isArray(c) && c[0] === 'setWallet' && c[1] === 'Tmywallet'),
+    wave.calls.find(
+      (call) => Array.isArray(call) && call[0] === 'setWallet' && call[1] === 'Tmywallet'
+    ),
     'the wallet is wired into the engine (setWallet)'
   );
 
@@ -122,7 +139,7 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
   await flush();
   t.alike(tipped, [['Trecipient', 2]], 'tip forwarded to payments.send');
   t.ok(
-    sent.find((m) => m.type === 'tip-result' && m.hash && m.to === 'Trecipient'),
+    sent.find((msg) => msg.type === 'tip-result' && msg.hash && msg.to === 'Trecipient'),
     'tip-result with the tx hash returned to the host'
   );
 
@@ -130,13 +147,15 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
   await flush();
   t.alike(tipped.at(-1), ['Tfriend', 3], 'send-trx forwarded to payments.send');
   t.ok(
-    sent.find((m) => m.type === 'send-result' && m.hash && m.to === 'Tfriend' && m.amount === 3),
+    sent.find(
+      (msg) => msg.type === 'send-result' && msg.hash && msg.to === 'Tfriend' && msg.amount === 3
+    ),
     'send-result with the tx hash returned to the host'
   );
 
   core.onMessage({ type: 'fetch-transactions' });
   await flush();
-  const txMsg = sent.find((m) => m.type === 'transactions');
+  const txMsg = sent.find((msg) => msg.type === 'transactions');
   t.ok(
     txMsg && txMsg.list.length === 1 && txMsg.list[0].direction === 'in',
     'on-chain history forwarded'

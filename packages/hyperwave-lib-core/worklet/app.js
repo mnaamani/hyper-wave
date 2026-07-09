@@ -17,8 +17,8 @@ const hyperwave = require('../lib/core');
 // per-run store is ephemeral anyway — wiped on startup; a persistent Documents path is future
 // work for the wallet seed.)
 function resolveStorage(dir) {
-  const d = dir || 'hyperwave';
-  return path.isAbsolute(d) ? d : path.join(os.tmpdir(), d);
+  const resolved = dir || 'hyperwave';
+  return path.isAbsolute(resolved) ? resolved : path.join(os.tmpdir(), resolved);
 }
 
 const pipe = new FramedStream(BareKit.IPC); // bare-kit's worklet-side IPC (cf. Bare.IPC on desktop)

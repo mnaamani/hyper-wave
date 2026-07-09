@@ -14,7 +14,7 @@ function init({
   storageDir,
   config = {},
   send,
-  log = (...a) => console.log('[hyperwave]', ...a),
+  log = (...args) => console.log('[hyperwave]', ...args),
   deps = {}
 }) {
   const makeWave = deps.createWave || createWave;
@@ -47,7 +47,7 @@ function init({
   let tBalance = null;
   let pushBalance = null; // re-fetch the balance + send a `wallet` msg; set once the wallet is up
   if (config.wallet !== false) {
-    makePayments({ storageDir, seed: config.seed, log: (...a) => log('[wallet]', ...a) })
+    makePayments({ storageDir, seed: config.seed, log: (...args) => log('[wallet]', ...args) })
       .then(async (pay) => {
         payments = pay;
         wireWallet(wave, pay);
@@ -70,9 +70,9 @@ function init({
         };
         tBalance = setTimeout(balanceTick, 15000);
       })
-      .catch((e) => {
-        log('[wallet] init failed:', e.message);
-        send({ type: 'wallet', error: e.message }); // surface to the host (mobile has no console)
+      .catch((err) => {
+        log('[wallet] init failed:', err.message);
+        send({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)
       });
   }
 
@@ -101,7 +101,9 @@ function init({
       }
     }
     const waveId = wave.startWave();
-    if (!waveId || !payments) return; // busy / no wallet (unpaid path already announced)
+    if (!waveId || !payments) {
+      return; // busy / no wallet (unpaid path already announced)
+    }
     try {
       const { hash, proof } = await payFee(wave, payments, waveId, 'kickoff');
       send({ type: 'burn-result', stage: 'confirming', hash, waveId, reason: 'kickoff' });
@@ -119,8 +121,8 @@ function init({
         const error = 'burn not confirmed on-chain';
         send({ type: 'burn-result', stage: 'failed', error, waveId, reason: 'kickoff' });
       }
-    } catch (e) {
-      send({ type: 'burn-result', stage: 'failed', error: e.message, waveId, reason: 'kickoff' });
+    } catch (err) {
+      send({ type: 'burn-result', stage: 'failed', error: err.message, waveId, reason: 'kickoff' });
     }
   }
 
@@ -144,29 +146,35 @@ function init({
       }
     }
     const waveId = wave.join();
-    if (!waveId || !payments) return;
+    if (!waveId || !payments) {
+      return;
+    }
     try {
       const { hash } = await payFee(wave, payments, waveId, 'join');
       send({ type: 'burn-result', stage: 'burned', hash, amount: FEE_TRX, waveId, reason: 'join' });
-    } catch (e) {
-      send({ type: 'burn-result', stage: 'failed', error: e.message, waveId, reason: 'join' });
+    } catch (err) {
+      send({ type: 'burn-result', stage: 'failed', error: err.message, waveId, reason: 'join' });
     }
   }
 
   // Gallery tip: a real testnet TRX transfer to the selfie owner's wallet.
   async function handleTip({ to, amount }) {
-    if (!payments) return send({ type: 'tip-result', error: 'wallet not ready' });
+    if (!payments) {
+      return send({ type: 'tip-result', error: 'wallet not ready' });
+    }
     try {
       const { hash } = await payments.send(to, amount);
       send({ type: 'tip-result', hash, to, amount });
-    } catch (e) {
-      send({ type: 'tip-result', error: e.message, to });
+    } catch (err) {
+      send({ type: 'tip-result', error: err.message, to });
     }
   }
 
   // Plain wallet transfer: send `amount` TRX to any address
   async function handleSend({ to, amount }) {
-    if (!payments) return send({ type: 'send-result', error: 'wallet not ready', to });
+    if (!payments) {
+      return send({ type: 'send-result', error: 'wallet not ready', to });
+    }
     const trx = Number(amount);
     if (!to || !(trx > 0)) {
       return send({ type: 'send-result', error: 'invalid recipient/amount', to });
@@ -179,8 +187,8 @@ function init({
       const { hash } = await payments.send(to, trx);
       send({ type: 'send-result', hash, to, amount: trx });
       pushBalance?.();
-    } catch (e) {
-      send({ type: 'send-result', error: e.message, to });
+    } catch (err) {
+      send({ type: 'send-result', error: err.message, to });
     }
   }
 
@@ -193,15 +201,26 @@ function init({
 
   // Host -> engine commands (same message shapes the desktop renderer + the RN UI both speak).
   function onMessage(msg) {
-    if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'start-wave') handleStartWave();
-    else if (msg.type === 'join-wave') handleJoin();
-    else if (msg.type === 'set-country') wave.setCountry(msg.country);
-    else if (msg.type === 'stage-selfie') wave.stageSelfie(msg.selfie);
-    else if (msg.type === 'tip') handleTip(msg);
-    else if (msg.type === 'send-trx') handleSend(msg);
-    else if (msg.type === 'fetch-transactions') handleTransactions();
-    else if (msg.type === 'refresh-wallet') pushBalance?.(); // manual balance re-check (after funding)
+    if (!msg || typeof msg !== 'object') {
+      return;
+    }
+    if (msg.type === 'start-wave') {
+      handleStartWave();
+    } else if (msg.type === 'join-wave') {
+      handleJoin();
+    } else if (msg.type === 'set-country') {
+      wave.setCountry(msg.country);
+    } else if (msg.type === 'stage-selfie') {
+      wave.stageSelfie(msg.selfie);
+    } else if (msg.type === 'tip') {
+      handleTip(msg);
+    } else if (msg.type === 'send-trx') {
+      handleSend(msg);
+    } else if (msg.type === 'fetch-transactions') {
+      handleTransactions();
+    } else if (msg.type === 'refresh-wallet') {
+      pushBalance?.(); // manual balance re-check (after funding)
+    }
   }
 
   async function close() {
