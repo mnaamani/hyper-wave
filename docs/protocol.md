@@ -786,9 +786,7 @@ sorted by `hopCount` then `timestamp`.
 
 ## 9. Participation fees — burning & verification
 
-The money layer is deliberately minimal: **burned fees** (anti-spam / skin in the game) and
-**gallery tips** (§8.3). There are **no sponsor rewards** — nothing pays participants for
-racing, so there's no reward ledger, no proof-collection, and no chain-walk to arbitrate.
+The money layer is **burned fees** (anti-spam / skin in the game) and **gallery tips** (§8.3).
 Each burn does real work: the **kick-off** burn gates whether a wave is adoptable at all (the
 paid-wave gate, §9.3), and a **join** burn gates whether a peer may write to the gallery (the
 admission gate, §8.2). (Wire details: the paid-wave gate on
@@ -801,8 +799,16 @@ A fee burn is attested by a signed proof. The **kick-off** attestation is carrie
 carried as the `burn` field on `add-writer` (§8.2). It is **not** an on-wire gallery entry:
 
 ```json
-{ "waveId": "<hex16>", "peerId": "<peerId>", "reason": "kickoff" | "join", "amount": 1,
-  "txHash": "<tron-tx-hash>", "tronAddress": "T…", "burnTs": 1719705612080, "sig": "<hex128>" }
+{
+  "waveId": "<hex16>",
+  "peerId": "<peerId>",
+  "reason": "kickoff" | "join",
+  "amount": 1,
+  "txHash": "<tron-tx-hash>",
+  "tronAddress": "T…",
+  "burnTs": 1719705612080,
+  "sig": "<hex128>"
+}
 ```
 
 Two independent bindings make it verifiable (the Tron key that signs the burn is a different
@@ -828,11 +834,10 @@ T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb        (base58check of the all-zero EVM addre
 ```
 
 for which no private key exists — the funds are provably unspendable by _anyone_. This is
-deliberate: the fee creates **skin in the game with no beneficiary**. Nobody (not even the
-wave's initiator) profits from fees, so there is no censorship or collusion
-incentive, no custodial ledger, and no refund path to dispute. (Tron rejects zero-amount
-transfers, so a burn is a real small transfer; Tron also burns tx fees at the protocol
-level.) Spamming waves or Sybil-joining costs real, irrecoverable value.
+deliberate: the fee creates **skin in the game with no beneficiary** — nobody, not even the
+wave's initiator, profits from a fee. (Tron rejects zero-amount transfers, so a burn is a real
+small transfer; Tron also burns tx fees at the protocol level.) Spamming waves or Sybil-joining
+costs real, irrecoverable value.
 
 ### 9.2 Binding a burn to its wave and its peer
 
