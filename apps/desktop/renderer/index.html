@@ -264,6 +264,65 @@
       #wallet-address:hover {
         color: #b6f5cd;
       }
+      /* send form (revealed by the "Send ▸" pill) */
+      #wallet-send {
+        display: none;
+        margin-top: 12px;
+      }
+      #wallet-send.show {
+        display: block;
+      }
+      #wallet-send input {
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 13px;
+        padding: 7px 10px;
+        border: 1px solid #2f5f43;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.35);
+        color: #eafff0;
+        box-sizing: border-box;
+      }
+      #send-to {
+        width: 100%;
+      }
+      .send-amt-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #send-amount {
+        width: 120px;
+      }
+      .send-unit {
+        opacity: 0.6;
+        font-size: 12px;
+      }
+      .send-go {
+        margin-left: auto;
+        background: #2fbf6b;
+        color: #06210d;
+        border-color: #2fbf6b;
+        font-weight: 700;
+      }
+      .send-go:hover {
+        background: #46d17f;
+      }
+      .send-go:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #send-status {
+        margin-top: 8px;
+        font-size: 12px;
+        min-height: 14px;
+      }
+      #send-status.err {
+        color: #ff9b8a;
+      }
+      #send-status.ok {
+        color: #7fe3a0;
+      }
       .wallet-section {
         margin-top: 18px;
         font-size: 11px;
@@ -587,6 +646,19 @@
           <button id="wallet-faucet" class="pill" title="Get free testnet TRX from the Nile faucet">
             💧 Get test TRX
           </button>
+          <button id="wallet-send-toggle" class="pill" title="Send TRX to another address">
+            Send ▸
+          </button>
+        </div>
+        <!-- send form: revealed by the "Send ▸" pill; a plain TRX transfer to any address -->
+        <div id="wallet-send">
+          <input id="send-to" placeholder="Recipient address (T…)" spellcheck="false" />
+          <div class="send-amt-row">
+            <input id="send-amount" type="number" min="0" step="1" placeholder="Amount" />
+            <span class="send-unit">TRX</span>
+            <button id="send-btn" class="pill send-go">Send</button>
+          </div>
+          <div id="send-status"></div>
         </div>
         <div class="wallet-section">Transactions (this session)</div>
         <div id="wallet-txs"></div>

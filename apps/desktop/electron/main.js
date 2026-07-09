@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, shell, clipboard } = require('electron')
 const os = require('os')
 const path = require('path')
 const PearRuntime = require('pear-runtime')
@@ -160,6 +160,26 @@ async function createWindow() {
   win.webContents.session.setPermissionRequestHandler((wc, permission, cb) =>
     cb(permission === 'media')
   )
+
+  // Right-click edit menu for text fields (e.g. paste a wallet address into Send). Electron
+  // ships no default context menu, so without this only the keyboard shortcuts work. Built from
+  // roles (cut/copy/paste/select-all) with editing entries shown only when a field is editable.
+  win.webContents.on('context-menu', (_evt, params) => {
+    if (!params.isEditable && !params.selectionText) return
+    const items = []
+    if (params.isEditable) {
+      items.push({ role: 'cut', enabled: !!params.selectionText })
+    }
+    if (params.isEditable || params.selectionText) {
+      items.push({ role: 'copy', enabled: !!params.selectionText })
+    }
+    if (params.isEditable) {
+      items.push({ role: 'paste' })
+      items.push({ type: 'separator' })
+      items.push({ role: 'selectAll' })
+    }
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: win })
+  })
 
   const devServerUrl = process.env.PEAR_DEV_SERVER_URL
 

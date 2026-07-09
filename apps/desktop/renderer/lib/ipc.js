@@ -44,6 +44,7 @@ export const joinWave = () => send('join-wave')
 export const setCountry = (country) => send('set-country', { country })
 export const stageSelfie = (selfie) => send('stage-selfie', { selfie })
 export const tip = (to, amount, peerId) => send('tip', { to, amount, peerId })
+export const sendTrx = (to, amount) => send('send-trx', { to, amount })
 export const refreshWallet = () => send('refresh-wallet')
 
 export const appVersion = () => bridge.pkg().version

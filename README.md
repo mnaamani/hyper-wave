@@ -80,7 +80,7 @@ little more to tip selfies.
 npm start -- --storage demo/one
 ```
 
-Get the first instance's address from its  : .
+Get the first instance's address from its : .
 
 Fund the first instance wallet. Open the wallet view by clicking on **💰**.
 
@@ -96,14 +96,11 @@ npm start -- --storage demo/two
 npm start -- --storage demo/three
 ```
 
-```bash
-# From the funded instance's wallet, send 100 TRX to another instance's address
-WALLET=1 WALLET_SEND=<wallet-address-of-instance-two>:100 \
-  bare packages/hyperwave-lib-core/lib/wave.run.js fund demo/one
-
-WALLET=1 WALLET_SEND=<wallet-address-of-instance-three>:100 \
-  bare packages/hyperwave-lib-core/lib/wave.run.js fund demo/one
-```
+Now fund the other instances from the first one, right in the app: on each of instance
+two and three, open **💰** and **Copy** its address. Back on the funded first instance,
+open **💰**, click **Send ▸**, paste the recipient address, enter an amount (e.g. `100`),
+and hit **Send**. Repeat for the other address. Each transfer shows up in that wallet's
+**Transactions** list with a clickable Tronscan link, and balances refresh automatically.
 
 ### 2. Run the wave
 

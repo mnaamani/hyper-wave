@@ -89,6 +89,7 @@ ipc.on('tip-result', (msg) => {
   gallery.tipResult(msg)
   if (msg.hash) wallet.record({ kind: 'tip', hash: msg.hash, amount: msg.amount })
 })
+ipc.on('send-result', (msg) => wallet.sendResult(msg))
 ipc.on('burn-result', (msg) => {
   // participation fee (kick-off or join), burned to the black hole (skin in the game). `stage`
   // keeps us from claiming "burned" before the tx is actually confirmed on-chain.

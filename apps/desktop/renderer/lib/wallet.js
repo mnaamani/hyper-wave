@@ -3,7 +3,7 @@
 // each burn/tip/raffle payout the app made, as a clickable Tronscan link. A "full history"
 // link deep-links to the address's on-chain history for anything not captured here (e.g.
 // incoming tips). Extracted from hud.js so the wallet chrome lives in one place.
-import { refreshWallet } from './ipc.js'
+import { refreshWallet, sendTrx } from './ipc.js'
 import { openAddress, txLink } from './explorer.js'
 
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage'
@@ -18,6 +18,12 @@ const copyBtn = document.getElementById('wallet-copy')
 const faucetBtn = document.getElementById('wallet-faucet')
 const txsEl = document.getElementById('wallet-txs')
 const explorerEl = document.getElementById('wallet-explorer')
+const sendToggleBtn = document.getElementById('wallet-send-toggle')
+const sendEl = document.getElementById('wallet-send')
+const sendToInput = document.getElementById('send-to')
+const sendAmountInput = document.getElementById('send-amount')
+const sendBtn = document.getElementById('send-btn')
+const sendStatusEl = document.getElementById('send-status')
 
 let walletAddress = '' // full address, for copy + faucet + explorer links
 const history = [] // { icon, label, amount, hash } — this session's outgoing txns, newest first
@@ -37,7 +43,8 @@ export function record({ kind, hash, amount }) {
   const meta = {
     burn: { icon: '🔥', label: 'Burned participation fee' },
     tip: { icon: '💵', label: 'Tipped a selfie' },
-    raffle: { icon: '🎁', label: 'Paid raffle prize' }
+    raffle: { icon: '🎁', label: 'Paid raffle prize' },
+    send: { icon: '📤', label: 'Sent TRX' }
   }[kind] || { icon: '•', label: kind }
   history.unshift({ ...meta, amount, hash })
   renderHistory()
@@ -100,3 +107,44 @@ refreshBtn.onclick = () => {
 
 // Open the Nile faucet in the default browser, where they paste the address to receive test TRX.
 faucetBtn.onclick = () => window.bridge.openExternal(NILE_FAUCET_URL)
+
+// --- send TRX ---------------------------------------------------------------
+// A plain transfer to any address — mainly to fund another peer's wallet (replacing the
+// wave.run.js CLI dance). The worker does the real send + a balance check; here we only do
+// cheap input validation and drive the button/status.
+function setSendStatus(text, cls) {
+  sendStatusEl.textContent = text || ''
+  sendStatusEl.className = cls || ''
+}
+
+sendToggleBtn.onclick = () => {
+  const showing = sendEl.classList.toggle('show')
+  sendToggleBtn.textContent = showing ? 'Send ▾' : 'Send ▸'
+  if (showing) sendToInput.focus()
+}
+
+function submitSend() {
+  const to = sendToInput.value.trim()
+  const amount = Number(sendAmountInput.value)
+  if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(to)) {
+    return setSendStatus('Enter a valid Tron address (T…)', 'err')
+  }
+  if (!(amount > 0)) return setSendStatus('Enter an amount greater than 0', 'err')
+  sendBtn.disabled = true
+  setSendStatus(`Sending ${amount} TRX…`, '')
+  sendTrx(to, amount)
+}
+sendBtn.onclick = submitSend
+sendAmountInput.onkeydown = (e) => {
+  if (e.key === 'Enter') submitSend()
+}
+
+// Worker reply to a send: success → record it + reset the form; error → surface it.
+export function sendResult({ hash, to, amount, error }) {
+  sendBtn.disabled = false
+  if (error) return setSendStatus(`⚠️ send failed: ${error}`, 'err')
+  record({ kind: 'send', hash, amount })
+  setSendStatus(`✅ sent ${amount} TRX to ${to.slice(0, 6)}…${to.slice(-4)}`, 'ok')
+  sendToInput.value = ''
+  sendAmountInput.value = ''
+}
