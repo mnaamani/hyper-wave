@@ -9,8 +9,28 @@
 // deterministically. BigInt keeps the 64-bit math exact without overflow surprises.
 const b4a = require('b4a');
 
+/**
+ * A hex peer id paired with its numeric ring position (nodeId).
+ * @typedef {{id: string, nid: bigint}} RingNode
+ */
+
+/**
+ * The result of one distributed findSuccessor hop (see {@link findSuccessorStep}).
+ * `done` true means `successor` is the answer; otherwise forward the lookup to `next`.
+ * @typedef {{done: boolean, successor?: (string|null), next?: string}} FindSuccessorStepResult
+ */
+
+/**
+ * Size of the identifier ring: 2^64. All nodeId math is mod this value.
+ * @type {bigint}
+ */
 const RING = 1n << 64n; // 2^64
 
+/**
+ * nodeId = top 8 bytes of the key as an unsigned 64-bit integer (big-endian).
+ * @param {Buffer} key - the raw peer key buffer.
+ * @returns {bigint} the node's keyspace position (mod 2^64).
+ */
 function nodeId(key) {
   let nid = 0n;
   for (let i = 0; i < 8; i++) {
@@ -19,11 +39,21 @@ function nodeId(key) {
   return nid;
 }
 
+/**
+ * nodeId of a hex-encoded peer key.
+ * @param {string} hex - the peer id as a hex string.
+ * @returns {bigint} the node's keyspace position (mod 2^64).
+ */
 function nodeIdOfHex(hex) {
   return nodeId(b4a.from(hex, 'hex'));
 }
 
-// Ascending BigInt comparator (BigInts can't use plain subtraction into a Number sort key).
+/**
+ * Ascending BigInt comparator (BigInts can't use plain subtraction into a Number sort key).
+ * @param {RingNode} a - first ring node.
+ * @param {RingNode} b - second ring node.
+ * @returns {number} -1, 0, or 1 ordering `a` before/equal/after `b` by nodeId.
+ */
 function byNid(a, b) {
   if (a.nid < b.nid) {
     return -1;
@@ -34,14 +64,24 @@ function byNid(a, b) {
   return 0;
 }
 
-// Order a set of hex ids clockwise by nodeId (ascending, mod 2^64). Dedupes.
+/**
+ * Order a set of hex ids clockwise by nodeId (ascending, mod 2^64). Dedupes.
+ * @param {string[]} ids - hex peer ids (may contain duplicates).
+ * @returns {RingNode[]} the deduped ids sorted ascending by nodeId.
+ */
 function ringOrder(ids) {
   return [...new Set(ids)].map((id) => ({ id, nid: nodeIdOfHex(id) })).sort(byNid);
 }
 
-// The next up-to-k ids clockwise from me (the successor-list, §4.3). Wraps around
-// the ring; never includes me, and caps at the number of other nodes so a small
-// ring doesn't wrap back onto myself.
+/**
+ * The next up-to-k ids clockwise from me (the successor-list, §4.3). Wraps around
+ * the ring; never includes me, and caps at the number of other nodes so a small
+ * ring doesn't wrap back onto myself.
+ * @param {string[]} ids - the other known hex peer ids.
+ * @param {string} myId - my hex peer id.
+ * @param {number} [k=3] - the maximum number of successors to return.
+ * @returns {string[]} up to k successor ids clockwise from me.
+ */
 function successors(ids, myId, k = 3) {
   const ring = ringOrder([myId, ...ids]);
   const ringSize = ring.length;
@@ -56,8 +96,13 @@ function successors(ids, myId, k = 3) {
   return out;
 }
 
-// The single id immediately counter-clockwise from me (the predecessor, §4.3),
-// wrapping to the highest nodeId. null if I'm the only node.
+/**
+ * The single id immediately counter-clockwise from me (the predecessor, §4.3),
+ * wrapping to the highest nodeId. null if I'm the only node.
+ * @param {string[]} ids - the other known hex peer ids.
+ * @param {string} myId - my hex peer id.
+ * @returns {(string|null)} the predecessor's hex id, or null if I'm alone.
+ */
 function predecessor(ids, myId) {
   const ring = ringOrder([myId, ...ids]);
   const ringSize = ring.length;
@@ -68,8 +113,14 @@ function predecessor(ids, myId) {
   return ring[(myIndex - 1 + ringSize) % ringSize].id;
 }
 
-// The set of ids whose ring edges we want physically connected (Phase 2):
-// my successor-list plus my predecessor. This is what wave.js joinPeer()s.
+/**
+ * The set of ids whose ring edges we want physically connected (Phase 2):
+ * my successor-list plus my predecessor. This is what wave.js joinPeer()s.
+ * @param {string[]} ids - the other known hex peer ids.
+ * @param {string} myId - my hex peer id.
+ * @param {number} [k=3] - the successor-list size.
+ * @returns {Set<string>} the ids to physically connect to.
+ */
 function connectionTargets(ids, myId, k = 3) {
   const set = new Set(successors(ids, myId, k));
   const pred = predecessor(ids, myId);
@@ -79,9 +130,14 @@ function connectionTargets(ids, myId, k = 3) {
   return set;
 }
 
-// Chord's findSuccessor over a pre-ordered ring (§4.5): the first node at-or-
-// clockwise-after keyspace position `target` (BigInt, mod 2^64), wrapping to the
-// lowest nodeId. `ring` is the output of ringOrder (ascending by nid). null if empty.
+/**
+ * Chord's findSuccessor over a pre-ordered ring (§4.5): the first node at-or-
+ * clockwise-after keyspace position `target` (mod 2^64), wrapping to the
+ * lowest nodeId. `ring` is the output of ringOrder (ascending by nid).
+ * @param {RingNode[]} ring - nodes ordered ascending by nodeId (from ringOrder).
+ * @param {bigint} target - the keyspace position to locate the successor of.
+ * @returns {(RingNode|null)} the successor node, or null if the ring is empty.
+ */
 function successorOf(ring, target) {
   if (ring.length === 0) {
     return null;
@@ -94,18 +150,28 @@ function successorOf(ring, target) {
   return ring[0]; // wrapped past the top of the ring
 }
 
-// Public findSuccessor: the id of the first node clockwise from keyspace position
-// `target`. Used to build the finger table; also the lookup primitive for placing
-// where a token starts / where a joining node inserts (§4.5).
+/**
+ * Public findSuccessor: the id of the first node clockwise from keyspace position
+ * `target`. Used to build the finger table; also the lookup primitive for placing
+ * where a token starts / where a joining node inserts (§4.5).
+ * @param {string[]} ids - the known hex peer ids to search.
+ * @param {bigint} target - the keyspace position to locate the successor of.
+ * @returns {(string|null)} the successor's hex id, or null if no ids.
+ */
 function findSuccessor(ids, target) {
   const node = successorOf(ringOrder(ids), target);
   return node ? node.id : null;
 }
 
-// Chord finger table (§4.3): finger[i] = successor of (myNid + 2^i) mod 2^64, for
-// i in 0..63. Returns the DISTINCT finger node ids (excluding me). For a ring of N
-// nodes the distinct fingers collapse to O(log N) — the whole point: deliberate
-// connections stay logarithmic instead of a full mesh, while still spanning the ring.
+/**
+ * Chord finger table (§4.3): finger[i] = successor of (myNid + 2^i) mod 2^64, for
+ * i in 0..63. Returns the DISTINCT finger node ids (excluding me). For a ring of N
+ * nodes the distinct fingers collapse to O(log N) — the whole point: deliberate
+ * connections stay logarithmic instead of a full mesh, while still spanning the ring.
+ * @param {string[]} ids - the other known hex peer ids.
+ * @param {string} myId - my hex peer id.
+ * @returns {Set<string>} the distinct finger node ids (excluding me).
+ */
 function fingers(ids, myId) {
   const myNid = nodeIdOfHex(myId);
   const ring = ringOrder([myId, ...ids]);
@@ -119,8 +185,14 @@ function fingers(ids, myId) {
   return out;
 }
 
-// Is nodeId `x` strictly inside the open ring interval (a, b), moving clockwise
-// (mod 2^64)? When a >= b the interval wraps past the top of the ring. All BigInt.
+/**
+ * Is nodeId `x` strictly inside the open ring interval (a, b), moving clockwise
+ * (mod 2^64)? When a >= b the interval wraps past the top of the ring.
+ * @param {bigint} x - the nodeId to test.
+ * @param {bigint} a - the exclusive lower bound of the interval.
+ * @param {bigint} b - the exclusive upper bound of the interval.
+ * @returns {boolean} true if x ∈ (a, b) clockwise.
+ */
 function inOpenInterval(x, a, b) {
   if (a < b) {
     return x > a && x < b;
@@ -128,8 +200,14 @@ function inOpenInterval(x, a, b) {
   return x > a || x < b;
 }
 
-// x ∈ (a, b] on the mod-2^64 ring (half-open, includes the upper end). a === b is the
-// whole ring (single-node case). Used for Chord's "target ∈ (me, successor]" test.
+/**
+ * x ∈ (a, b] on the mod-2^64 ring (half-open, includes the upper end). a === b is the
+ * whole ring (single-node case). Used for Chord's "target ∈ (me, successor]" test.
+ * @param {bigint} x - the nodeId to test.
+ * @param {bigint} a - the exclusive lower bound of the interval.
+ * @param {bigint} b - the inclusive upper bound of the interval.
+ * @returns {boolean} true if x ∈ (a, b] clockwise.
+ */
 function inHalfOpenInterval(x, a, b) {
   if (a === b) {
     return true;
@@ -140,15 +218,26 @@ function inHalfOpenInterval(x, a, b) {
   return x > a || x <= b;
 }
 
-// Clockwise ring distance from a to b (mod 2^64).
+/**
+ * Clockwise ring distance from a to b (mod 2^64).
+ * @param {bigint} a - the starting nodeId.
+ * @param {bigint} b - the target nodeId.
+ * @returns {bigint} the clockwise distance (b - a) mod 2^64.
+ */
 function ringForward(a, b) {
   return (b - a + RING) % RING;
 }
 
-// Chord's closest_preceding_node: among the ids I know (fingers + successors), the one
-// whose nodeId lies in the open interval (me, target) and is *closest* to target — the
-// finger to forward a lookup for `target` to, so each hop jumps as far as possible
-// without overshooting. `target` is a BigInt keyspace position. null if none precedes it.
+/**
+ * Chord's closest_preceding_node: among the ids I know (fingers + successors), the one
+ * whose nodeId lies in the open interval (me, target) and is *closest* to target — the
+ * finger to forward a lookup for `target` to, so each hop jumps as far as possible
+ * without overshooting.
+ * @param {(string[]|Set<string>)} known - the hex peer ids I know (fingers + successors).
+ * @param {string} myId - my hex peer id.
+ * @param {bigint} target - the keyspace position being looked up.
+ * @returns {(string|null)} the closest preceding node's hex id, or null if none precedes target.
+ */
 function closestPrecedingNode(known, myId, target) {
   const myNid = nodeIdOfHex(myId);
   let best = null;
@@ -170,16 +259,22 @@ function closestPrecedingNode(known, myId, target) {
   return best;
 }
 
-// One hop of Chord's DISTRIBUTED findSuccessor (§4.5), evaluated over MY local knowledge
-// only — this is what lets a lookup resolve correctly when no single node knows the whole
-// ring. `me`/`successor` = my id and my successor's id; `known` = my finger + successor
-// ids; `target` = the keyspace position (BigInt) whose successor we're locating.
-//   - target ∈ (me, successor]  → the answer is my successor: { done: true, successor }
-//   - otherwise                 → forward to my closest preceding finger: { done: false, next }
-//   - no finger precedes target → my successor is the best answer: { done: true, successor }
-// Applied hop-to-hop (each node using its own `known`), this converges to the true
-// successor in O(log N) hops with a full finger table, or degrades to a correct linear
-// walk along successors if a node only knows its successor.
+/**
+ * One hop of Chord's DISTRIBUTED findSuccessor (§4.5), evaluated over MY local knowledge
+ * only — this is what lets a lookup resolve correctly when no single node knows the whole
+ * ring.
+ *   - target ∈ (me, successor]  → the answer is my successor: { done: true, successor }
+ *   - otherwise                 → forward to my closest preceding finger: { done: false, next }
+ *   - no finger precedes target → my successor is the best answer: { done: true, successor }
+ * Applied hop-to-hop (each node using its own `known`), this converges to the true
+ * successor in O(log N) hops with a full finger table, or degrades to a correct linear
+ * walk along successors if a node only knows its successor.
+ * @param {string} me - my hex peer id.
+ * @param {(string|null)} successor - my successor's hex id, or null if I have none.
+ * @param {(string[]|Set<string>)} known - my finger + successor hex ids.
+ * @param {bigint} target - the keyspace position whose successor we're locating.
+ * @returns {FindSuccessorStepResult} whether we're done (with the answer) or must forward to `next`.
+ */
 function findSuccessorStep(me, successor, known, target) {
   const myNid = nodeIdOfHex(me);
   const succNid = successor !== null ? nodeIdOfHex(successor) : myNid;
@@ -193,10 +288,15 @@ function findSuccessorStep(me, successor, known, target) {
   return { done: false, next };
 }
 
-// One Chord stabilize step (§4.4): my successor's predecessor `succPred` becomes my
-// successor if it sits strictly between me and my current successor — that means a
-// node joined (or was discovered) between us. Returns the id to use as successor
-// (`succPred` if it's closer, else the unchanged current). Ids are hex; null-safe.
+/**
+ * One Chord stabilize step (§4.4): my successor's predecessor `succPredId` becomes my
+ * successor if it sits strictly between me and my current successor — that means a
+ * node joined (or was discovered) between us.
+ * @param {string} myId - my hex peer id.
+ * @param {(string|null)} currentSuccId - my current successor's hex id, or null if none.
+ * @param {(string|null)} succPredId - my successor's reported predecessor hex id, or null.
+ * @returns {(string|null)} the id to use as successor (`succPredId` if closer, else the unchanged current).
+ */
 function stabilizeStep(myId, currentSuccId, succPredId) {
   if (!succPredId || succPredId === myId || succPredId === currentSuccId) {
     return currentSuccId;
@@ -210,9 +310,15 @@ function stabilizeStep(myId, currentSuccId, succPredId) {
   return inOpenInterval(candidateNid, me, succNid) ? succPredId : currentSuccId;
 }
 
-// The full set of peers to keep physically connected (Phase 3): successor-list +
-// predecessor (for the token walk / fault tolerance) unioned with the finger table
-// (for O(log N) ring-spanning reachability). This is what wave.js joinPeer()s.
+/**
+ * The full set of peers to keep physically connected (Phase 3): successor-list +
+ * predecessor (for the token walk / fault tolerance) unioned with the finger table
+ * (for O(log N) ring-spanning reachability). This is what wave.js joinPeer()s.
+ * @param {string[]} ids - the other known hex peer ids.
+ * @param {string} myId - my hex peer id.
+ * @param {number} [k=3] - the successor-list size.
+ * @returns {Set<string>} the full set of hex ids to physically connect to.
+ */
 function pinTargets(ids, myId, k = 3) {
   const set = connectionTargets(ids, myId, k);
   for (const finger of fingers(ids, myId)) {

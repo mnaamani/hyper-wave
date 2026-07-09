@@ -10,6 +10,35 @@ const { createWave, parseBootstrap } = require('./wave');
 const { createPayments } = require('./pay');
 const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees');
 
+/**
+ * Host-supplied engine configuration (only these fields are read).
+ * @typedef {Object} EngineConfig
+ * @property {string} [bootstrap] - Bootstrap peer(s) for the swarm DHT (parsed by parseBootstrap).
+ * @property {string} [matchId] - Match-specific swarm topic id (isolates rings).
+ * @property {boolean} [wallet] - Set `false` to run wallet-less (no burns/paid-gate/tips).
+ * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by pay.js).
+ */
+
+/**
+ * The engine handle returned by init.
+ * @typedef {Object} Engine
+ * @property {Object} wave - The live createWave engine instance.
+ * @property {(msg: Object) => void} onMessage - Feed a decoded host->engine command message.
+ * @property {() => Promise<void>} close - Tear down timers, wallet, and the wave engine.
+ */
+
+/**
+ * The HyperWave engine, host-agnostic: wires the P2P engine (wave.js) + the WDK wallet (pay.js)
+ * together and exposes a tiny message surface. The host supplies { storageDir, config, send } and
+ * feeds it decoded messages via onMessage(). `deps` lets tests inject fake factories.
+ * @param {Object} options - Engine options.
+ * @param {string} options.storageDir - Corestore/wallet storage directory for this instance.
+ * @param {EngineConfig} [options.config] - Host-supplied engine configuration.
+ * @param {(msg: Object) => void} options.send - Callback the engine calls to emit messages to the host.
+ * @param {(...args: any[]) => void} [options.log] - Logger callback.
+ * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests).
+ * @returns {Engine} The engine handle (`wave`, `onMessage`, `close`).
+ */
 function init({
   storageDir,
   config = {},

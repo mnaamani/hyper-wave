@@ -5,6 +5,23 @@
 const b4a = require('b4a');
 const { verifyReceipt, burnAuthorizes } = require('./token');
 
+/**
+ * A `wave-selfie` op (the shape appended to the Autobase log and read back into the gallery).
+ * @typedef {Object} SelfieOp
+ * @property {string} type - Op discriminator; a gallery selfie is `'wave-selfie'`.
+ * @property {string} waveId - The wave this selfie belongs to.
+ * @property {string} peerId - Hex id of the peer that posted the selfie.
+ * @property {number} hopCount - The peer's hop index in the token lap (gallery ordering key).
+ * @property {string} chainHash - Rolling receipt-chain hash at this hop (hex).
+ * @property {number} receiptTs - Timestamp (ms) the receipt was signed.
+ * @property {string} receiptSig - Ed25519 receipt signature (hex) binding the op to `peerId`.
+ * @property {string} image - Inline selfie image as a JPEG data URL.
+ * @property {string} caption - Short caption text.
+ * @property {number} timestamp - Wall-clock time (ms) the entry was created.
+ * @property {string} [address] - Tip destination Tron address (kept only if backed by a burn).
+ * @property {Object} [burn] - Burn attestation proof (verified then dropped; `burnTx` kept).
+ */
+
 // Per-entry write budget (deterministic, enforced in apply on every peer). With OPTIMISTIC
 // admission a gallery seat no longer costs a verified on-chain burn, so bound what a seat can
 // write: one entry per peer (dedup below) + these size caps. Keeps a modified client from
@@ -13,10 +30,14 @@ const { verifyReceipt, burnAuthorizes } = require('./token');
 const MAX_IMAGE_BYTES = 256 * 1024; // ~256 KB data-URL string (≈190 KB image after base64)
 const MAX_CAPTION_BYTES = 512;
 
-// A selfie is admitted to the gallery only if it carries a receipt validly signed
-// by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
-// Runs in apply() so every peer enforces it identically. (Authenticity, not proof
-// of token-holding — see verifyReceipt.)
+/**
+ * A selfie is admitted to the gallery only if it carries a receipt validly signed
+ * by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
+ * Runs in apply() so every peer enforces it identically. (Authenticity, not proof
+ * of token-holding — see verifyReceipt.)
+ * @param {SelfieOp} op - The candidate selfie op.
+ * @returns {boolean} True if the op carries a valid receipt signed by its own peerId.
+ */
 function selfieHasValidReceipt(op) {
   return (
     op.peerId &&
@@ -25,11 +46,15 @@ function selfieHasValidReceipt(op) {
   );
 }
 
-// Is this selfie's tip `address` provably the wallet that paid the peer's fee? The op carries
-// the peer's burn attestation; the address is trusted only if it's the `tronAddress` of a
-// validly-signed burn by this peer for this wave. (The burn's on-chain reality is checked at
-// admission, §8.2 — here we bind the address to that same burn deterministically.) So a tip
-// always goes to the wallet that burned in, never a self-declared unrelated address.
+/**
+ * Is this selfie's tip `address` provably the wallet that paid the peer's fee? The op carries
+ * the peer's burn attestation; the address is trusted only if it's the `tronAddress` of a
+ * validly-signed burn by this peer for this wave. (The burn's on-chain reality is checked at
+ * admission, §8.2 — here we bind the address to that same burn deterministically.) So a tip
+ * always goes to the wallet that burned in, never a self-declared unrelated address.
+ * @param {SelfieOp} op - The candidate selfie op.
+ * @returns {boolean} True if `op.address` is backed by a validly-signed burn naming that address.
+ */
 function tipAddressIsBackedByBurn(op) {
   return !!(
     op.address &&
@@ -39,14 +64,19 @@ function tipAddressIsBackedByBurn(op) {
   );
 }
 
-// Autobase config shared by the engine and tests so apply/view is exercised identically.
-// apply() admits writers and appends receipt-valid wave-selfie ops into one ordered view,
-// enforcing two rules deterministically on every peer:
-//   - one entry per peer per wave (first write wins) — bounds the log so a paid seat can't be
-//     used to append unbounded entries (only the display was deduped before);
-//   - the tip `address` survives only if a signed burn backs it, else it's stripped (the
-//     selfie still shows, but isn't tippable to an unverified wallet).
-// The bulky `burn` attestation is verified then dropped, so stored entries stay lean.
+/**
+ * Autobase config shared by the engine and tests so apply/view is exercised identically.
+ * apply() admits writers and appends receipt-valid wave-selfie ops into one ordered view,
+ * enforcing two rules deterministically on every peer:
+ *   - one entry per peer per wave (first write wins) — bounds the log so a paid seat can't be
+ *     used to append unbounded entries (only the display was deduped before);
+ *   - the tip `address` survives only if a signed burn backs it, else it's stripped (the
+ *     selfie still shows, but isn't tippable to an unverified wallet).
+ * The bulky `burn` attestation is verified then dropped, so stored entries stay lean.
+ * @returns {{valueEncoding: string, open: (store: Object) => Object, apply: (nodes: Object[], view: Object, host: Object) => Promise<void>}}
+ *   An Autobase config: `valueEncoding` (`'json'`), `open(store)` (opens the `gallery` view core),
+ *   and the async `apply(nodes, view, host)` reducer described above.
+ */
 function galleryConfig() {
   return {
     valueEncoding: 'json',
@@ -99,7 +129,11 @@ function galleryConfig() {
   };
 }
 
-// Deterministic gallery: one entry per peer per wave (newest wins), ordered by hop.
+/**
+ * Deterministic gallery: one entry per peer per wave (newest wins), ordered by hop.
+ * @param {SelfieOp[]} entries - The raw wave-selfie entries read from the view.
+ * @returns {SelfieOp[]} The deduped, hop-ordered gallery entries.
+ */
 function buildGallery(entries) {
   const byKey = new Map();
   for (const entry of entries) {
@@ -112,7 +146,11 @@ function buildGallery(entries) {
   return [...byKey.values()].sort((a, b) => a.hopCount - b.hopCount || a.timestamp - b.timestamp);
 }
 
-// Read all wave-selfie entries out of an Autobase view into an ordered gallery.
+/**
+ * Read all wave-selfie entries out of an Autobase view into an ordered gallery.
+ * @param {Object} base - A live Autobase instance (its `.view` is iterated).
+ * @returns {Promise<SelfieOp[]>} The deduped, hop-ordered gallery entries.
+ */
 async function readGallery(base) {
   const view = base.view;
   const items = [];

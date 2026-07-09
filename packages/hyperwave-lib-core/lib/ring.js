@@ -2,7 +2,16 @@
 // (docs/protocol.md §2.1). No state, no I/O — unit-tested in wave.logic.test.js.
 const b4a = require('b4a');
 
-// Ring position: top 6 bytes of the key mapped onto [0, 360).
+/**
+ * A live peer occupying a seat on the ring.
+ * @typedef {{id: string, angle: number, lastSeen: number}} RingPeer
+ */
+
+/**
+ * Ring position: top 6 bytes of the key mapped onto [0, 360).
+ * @param {Buffer} key - The peer's Noise public key (raw bytes).
+ * @returns {number} The seat angle in degrees, in [0, 360).
+ */
 function angleOf(key) {
   let topBytes = 0;
   for (let i = 0; i < 6; i++) {
@@ -11,18 +20,34 @@ function angleOf(key) {
   return (topBytes / 2 ** 48) * 360;
 }
 
-// Same, from a hex peer id. Angle is always DERIVED from identity, never trusted
-// from the wire — your key is your seat.
+/**
+ * Same as angleOf, from a hex peer id. Angle is always DERIVED from identity,
+ * never trusted from the wire — your key is your seat.
+ * @param {string} hex - The peer id as a hex string.
+ * @returns {number} The seat angle in degrees, in [0, 360).
+ */
 function angleOfId(hex) {
   return angleOf(b4a.from(hex, 'hex'));
 }
 
-// live peers, sorted clockwise by angle (a peer is live if its last heartbeat is newer than staleMs)
+/**
+ * Live peers, sorted clockwise by angle (a peer is live if its last heartbeat is
+ * newer than staleMs).
+ * @param {RingPeer[]} entries - All known ring entries.
+ * @param {number} now - Current timestamp (ms).
+ * @param {number} staleMs - Liveness window in ms; peers not seen within it are dropped.
+ * @returns {RingPeer[]} The live peers sorted clockwise by angle.
+ */
 function liveRing(entries, now, staleMs) {
   return entries.filter((peer) => now - peer.lastSeen < staleMs).sort((a, b) => a.angle - b.angle);
 }
 
-// next peer clockwise from myAngle (smallest angle > mine), wrapping to the first
+/**
+ * Next peer clockwise from myAngle (smallest angle > mine), wrapping to the first.
+ * @param {number} myAngle - My own seat angle in degrees.
+ * @param {RingPeer[]} sortedRing - Live peers already sorted clockwise by angle.
+ * @returns {RingPeer | null} The successor peer, or null if the ring is empty.
+ */
 function nextClockwise(myAngle, sortedRing) {
   if (sortedRing.length === 0) {
     return null;
@@ -35,9 +60,16 @@ function nextClockwise(myAngle, sortedRing) {
   return sortedRing[0];
 }
 
-// Healing: the next peer clockwise that is directly reachable and not already
-// skipped. Walks the ring from just after me, wrapping around. `reachable` and
-// `skipped` are Sets of peer ids. Returns null if none qualifies.
+/**
+ * Healing: the next peer clockwise that is directly reachable and not already
+ * skipped. Walks the ring from just after me, wrapping around. Returns null if
+ * none qualifies.
+ * @param {RingPeer[]} sortedRing - Live peers already sorted clockwise by angle.
+ * @param {number} myAngle - My own seat angle in degrees.
+ * @param {Set<string>} reachable - Ids of peers directly reachable from me.
+ * @param {Set<string>} skipped - Ids of peers already skipped this heal round.
+ * @returns {RingPeer | null} The next reachable, non-skipped peer, or null.
+ */
 function pickReachable(sortedRing, myAngle, reachable, skipped) {
   const after = sortedRing.filter((peer) => peer.angle > myAngle);
   const before = sortedRing.filter((peer) => peer.angle <= myAngle);

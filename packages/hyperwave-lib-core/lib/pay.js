@@ -10,6 +10,29 @@
 const fs = require('bare-fs');
 const b4a = require('b4a');
 
+/**
+ * The self-custodial Tron wallet handle returned by createPayments.
+ * @typedef {Object} Payments
+ * @property {string} address - This wallet's Tron (base58check) address, derived offline.
+ * @property {() => Promise<{address: string, trx: number}>} balances - Fetch the on-chain balance
+ *   in whole TRX (network call).
+ * @property {(recipient: string, amountTrx: number) => Promise<{hash: string, fee: number}>} send -
+ *   Send `amountTrx` whole TRX to a Tron address; resolves the tx hash and fee.
+ * @property {(amountTrx: number, memo?: string) => Promise<{hash: string, fee: number}>} burn -
+ *   Burn `amountTrx` whole TRX to the black hole, optionally tagging the tx with an on-chain memo.
+ * @property {(txHash: string, expect?: {waveId?: string, from?: string, minTrx?: number}) => Promise<{ok: boolean, reason?: string}>} verifyBurnTx -
+ *   Verify on-chain that `txHash` is a burn matching `expect` (fails closed on missing tx / RPC error).
+ * @property {(limit?: number) => Promise<Object[]>} transactions - Recent native-TRX transfers,
+ *   newest first (normalized; [] on error).
+ * @property {() => void} dispose - Release the underlying wallet manager.
+ */
+
+/**
+ * Convert whole TRX to sun (1 TRX = 1e6 sun).
+ * @param {number} trx - Amount in whole TRX.
+ * @returns {bigint} The amount in sun.
+ */
+
 const NILE_PROVIDER = 'https://nile.trongrid.io';
 const SUN = 1_000_000; // 1 TRX = 1e6 sun
 // Tron's black hole (base58check of the all-zero EVM address, 41 + 20×00): no key exists,
@@ -19,8 +42,24 @@ const SUN = 1_000_000; // 1 TRX = 1e6 sun
 const BURN_ADDRESS = 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb';
 
 const toSun = (trx) => BigInt(Math.round(Number(trx) * SUN));
+/**
+ * Convert sun to whole TRX (1 TRX = 1e6 sun).
+ * @param {number|bigint|string} raw - Amount in sun.
+ * @returns {number} The amount in whole TRX.
+ */
 const fromSun = (raw) => Number(raw) / SUN;
 
+/**
+ * Create a self-custodial Tron wallet (WDK layer) for burned fees and gallery tips. WDK is
+ * ESM-only, so this bridges via dynamic import(). Seed precedence: injected -> file -> generate
+ * and persist (a mobile host injects from secure storage; desktop persists to `wallet.seed`).
+ * @param {Object} [options] - Wallet options.
+ * @param {string} options.storageDir - Directory holding the persisted `wallet.seed` file.
+ * @param {string} [options.seed] - Injected seed phrase (skips the filesystem when provided).
+ * @param {string} [options.provider] - Tron JSON-RPC provider URL (defaults to Nile testnet).
+ * @param {(...args: any[]) => void} [options.log] - Logger callback.
+ * @returns {Promise<Payments>} The ready wallet handle.
+ */
 async function createPayments({
   storageDir,
   seed: injectedSeed,
