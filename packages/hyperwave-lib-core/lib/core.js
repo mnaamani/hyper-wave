@@ -180,6 +180,13 @@ function init({
     }
   }
 
+  // On-chain transaction history for the wallet view — includes funds/tips RECEIVED (which the
+  // app never sees as events), not just what we initiated. Read-only; [] without a wallet.
+  async function handleTransactions() {
+    const list = payments ? await payments.transactions().catch(() => []) : []
+    send({ type: 'transactions', list })
+  }
+
   // Host -> engine commands (same message shapes the desktop renderer + the RN UI both speak).
   function onMessage(msg) {
     if (!msg || typeof msg !== 'object') return
@@ -189,6 +196,7 @@ function init({
     else if (msg.type === 'stage-selfie') wave.stageSelfie(msg.selfie)
     else if (msg.type === 'tip') handleTip(msg)
     else if (msg.type === 'send-trx') handleSend(msg)
+    else if (msg.type === 'fetch-transactions') handleTransactions()
     else if (msg.type === 'refresh-wallet') pushBalance?.() // manual balance re-check (after funding)
   }
 

@@ -123,6 +123,43 @@ async function createPayments({
         return { ok: false, reason: e.message }
       }
     },
+    // Recent native-TRX transfers for this wallet, newest first — reads TronGrid's v1
+    // account-transactions API through WDK's (Bare-compatible) TronWeb HTTP client, so it
+    // surfaces funds/tips RECEIVED as well as the sends/burns we made (which the app already
+    // logs from its own events). Native TransferContract only (no TRC-20). Normalized to
+    // { hash, direction: 'in'|'out', amount (TRX), from, to, timestamp (ms), memo }. Returns []
+    // on any error — the UI falls back to the session log + the "full history" Tronscan link.
+    // Capped at the 10 most recent (the UI only shows 10).
+    async transactions(limit = 10) {
+      try {
+        const res = await tronweb.fullNode.request(
+          `v1/accounts/${address}/transactions?limit=${limit}&only_confirmed=true&order_by=block_timestamp,desc`,
+          {},
+          'get'
+        )
+        const myHex = tronweb.address.toHex(address).toLowerCase()
+        const out = []
+        for (const tx of (res && res.data) || []) {
+          const c = tx.raw_data && tx.raw_data.contract && tx.raw_data.contract[0]
+          if (!c || c.type !== 'TransferContract') continue // native TRX transfers only
+          const v = (c.parameter && c.parameter.value) || {}
+          const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : ''
+          out.push({
+            hash: tx.txID,
+            direction: (v.owner_address || '').toLowerCase() === myHex ? 'out' : 'in',
+            amount: fromSun(v.amount || 0),
+            from: v.owner_address ? tronweb.address.fromHex(v.owner_address) : '',
+            to: v.to_address ? tronweb.address.fromHex(v.to_address) : '',
+            timestamp: tx.block_timestamp || 0,
+            memo
+          })
+        }
+        return out
+      } catch (e) {
+        log('transactions fetch failed:', e.message)
+        return []
+      }
+    },
     dispose() {
       try {
         if (wallet.dispose) wallet.dispose()

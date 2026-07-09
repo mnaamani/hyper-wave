@@ -91,6 +91,9 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
     address: 'Tmywallet',
     balances: async () => ({ address: 'Tmywallet', trx: 7 }),
     send: async (to, amount) => (tipped.push([to, amount]), { hash: 'f'.repeat(64) }),
+    transactions: async () => [
+      { hash: 'a'.repeat(64), direction: 'in', amount: 5, timestamp: 1, memo: '' }
+    ],
     dispose: () => {}
   }
   const core = hyperwave.init({
@@ -121,5 +124,21 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
   t.ok(
     sent.find((m) => m.type === 'tip-result' && m.hash && m.to === 'Trecipient'),
     'tip-result with the tx hash returned to the host'
+  )
+
+  core.onMessage({ type: 'send-trx', to: 'Tfriend', amount: 3 })
+  await flush()
+  t.alike(tipped.at(-1), ['Tfriend', 3], 'send-trx forwarded to payments.send')
+  t.ok(
+    sent.find((m) => m.type === 'send-result' && m.hash && m.to === 'Tfriend' && m.amount === 3),
+    'send-result with the tx hash returned to the host'
+  )
+
+  core.onMessage({ type: 'fetch-transactions' })
+  await flush()
+  const txMsg = sent.find((m) => m.type === 'transactions')
+  t.ok(
+    txMsg && txMsg.list.length === 1 && txMsg.list[0].direction === 'in',
+    'on-chain history forwarded'
   )
 })

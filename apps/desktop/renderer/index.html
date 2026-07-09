@@ -334,7 +334,7 @@
         margin-top: 6px;
       }
       #wallet-txs:empty::after {
-        content: 'No transactions yet this session.';
+        content: 'No transactions yet.';
         opacity: 0.5;
         font-size: 12px;
       }
@@ -349,9 +349,17 @@
       .tx-row .tx-label {
         flex: 1;
       }
-      .tx-row .tx-amt {
-        color: #ffd166;
+      .tx-row .tx-time {
+        opacity: 0.45;
+        font-size: 11px;
         font-variant-numeric: tabular-nums;
+      }
+      .tx-row .tx-amt {
+        color: #ffd166; /* outgoing */
+        font-variant-numeric: tabular-nums;
+      }
+      .tx-row .tx-amt.in {
+        color: #7fe3a0; /* incoming */
       }
       #wallet-explorer {
         display: inline-block;

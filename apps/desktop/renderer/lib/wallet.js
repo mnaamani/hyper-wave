@@ -1,9 +1,10 @@
 // Wallet view: the self-custodial TRX wallet modal, opened from the top-right 💰. Shows the
-// balance + address (with refresh / copy / faucet) and this session's transaction history —
-// each burn/tip/raffle payout the app made, as a clickable Tronscan link. A "full history"
-// link deep-links to the address's on-chain history for anything not captured here (e.g.
-// incoming tips). Extracted from hud.js so the wallet chrome lives in one place.
-import { refreshWallet, sendTrx } from './ipc.js'
+// balance + address (with refresh / copy / faucet / send) and a transaction history that merges
+// two sources by tx hash: the app's own events (burns / tips / sends / raffle payouts — instant,
+// optimistic) and the wallet's on-chain history fetched from the worker (which also surfaces
+// funds/tips RECEIVED — things the app never sees as events). Each row links to Tronscan; a
+// "full history" link deep-links to the address page. Extracted from hud.js.
+import { refreshWallet, sendTrx, fetchTransactions } from './ipc.js'
 import { openAddress, txLink } from './explorer.js'
 
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage'
@@ -26,7 +27,7 @@ const sendBtn = document.getElementById('send-btn')
 const sendStatusEl = document.getElementById('send-status')
 
 let walletAddress = '' // full address, for copy + faucet + explorer links
-const history = [] // { icon, label, amount, hash } — this session's outgoing txns, newest first
+const txById = new Map() // hash -> { hash, dir, icon, label, amount, ts } — merged history
 
 // Worker `wallet` message (address + balance): keep the modal live whether open or not.
 export function walletStatus({ address, trx }) {
@@ -36,32 +37,73 @@ export function walletStatus({ address, trx }) {
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4)
 }
 
-// Record an outgoing transaction the app just made (burn / tip / raffle payout) so it shows in
-// the history list. Called from app.js as the tx-bearing worker events land.
+const SENT_META = {
+  burn: { icon: '🔥', label: 'Burned participation fee' },
+  tip: { icon: '💵', label: 'Tipped a selfie' },
+  raffle: { icon: '🎁', label: 'Paid raffle prize' },
+  send: { icon: '📤', label: 'Sent TRX' }
+}
+
+// Record an outgoing tx the app just made (burn / tip / send / raffle payout), from a worker
+// event — instant, with a specific label. Wins over the generic on-chain view for the same hash.
 export function record({ kind, hash, amount }) {
   if (!hash) return
-  const meta = {
-    burn: { icon: '🔥', label: 'Burned participation fee' },
-    tip: { icon: '💵', label: 'Tipped a selfie' },
-    raffle: { icon: '🎁', label: 'Paid raffle prize' },
-    send: { icon: '📤', label: 'Sent TRX' }
-  }[kind] || { icon: '•', label: kind }
-  history.unshift({ ...meta, amount, hash })
+  const meta = SENT_META[kind] || { icon: '•', label: kind }
+  txById.set(hash, { hash, dir: 'out', amount, ts: Date.now(), fromEvent: true, ...meta })
   renderHistory()
 }
 
+// Merge the wallet's on-chain history (both directions) fetched by the worker. A hash the app
+// already logged from its own event keeps that richer label; everything else — crucially funds
+// and tips RECEIVED — is added here.
+export function setTransactions(list) {
+  for (const tx of list || []) {
+    if (txById.get(tx.hash)?.fromEvent) continue // keep the app's own labelled entry
+    const meta =
+      tx.direction === 'in'
+        ? { icon: '📥', label: 'Received TRX' }
+        : tx.memo?.startsWith('hyperwave:')
+          ? { icon: '🔥', label: 'Burned participation fee' }
+          : { icon: '📤', label: 'Sent TRX' }
+    txById.set(tx.hash, {
+      hash: tx.hash,
+      dir: tx.direction,
+      amount: tx.amount,
+      ts: tx.timestamp || 0,
+      ...meta
+    })
+  }
+  renderHistory()
+}
+
+// "5m", "3h", "2d" — compact age; blank if we have no timestamp (optimistic just-sent entry).
+function ago(ts) {
+  if (!ts) return ''
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000))
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
+}
+
 function renderHistory() {
+  const rows = [...txById.values()].sort((a, b) => b.ts - a.ts).slice(0, 10)
   txsEl.replaceChildren(
-    ...history.map((tx) => {
+    ...rows.map((tx) => {
       const row = document.createElement('div')
       row.className = 'tx-row'
       const label = document.createElement('span')
       label.className = 'tx-label'
       label.textContent = `${tx.icon} ${tx.label}`
+      const time = document.createElement('span')
+      time.className = 'tx-time'
+      time.textContent = ago(tx.ts)
       const amt = document.createElement('span')
-      amt.className = 'tx-amt'
-      if (typeof tx.amount === 'number') amt.textContent = `−${tx.amount} TRX`
-      row.append(label, amt, txLink(tx.hash))
+      amt.className = tx.dir === 'in' ? 'tx-amt in' : 'tx-amt'
+      if (typeof tx.amount === 'number') {
+        amt.textContent = `${tx.dir === 'in' ? '+' : '−'}${tx.amount} TRX`
+      }
+      row.append(label, time, amt, txLink(tx.hash))
       return row
     })
   )
@@ -70,6 +112,7 @@ function renderHistory() {
 // --- modal open/close -------------------------------------------------------
 function open() {
   refreshWallet() // grab a fresh balance each time it's opened
+  fetchTransactions() // pull the on-chain history (incoming funds/tips + everything else)
   viewEl.classList.add('show')
 }
 function close() {
@@ -100,6 +143,7 @@ copyBtn.onclick = async () => {
 // updates when the fresh `wallet` message lands; the spin is click feedback.
 refreshBtn.onclick = () => {
   refreshWallet()
+  fetchTransactions() // also re-pull the on-chain history
   refreshBtn.classList.remove('spin')
   void refreshBtn.offsetWidth // restart the animation if clicked again mid-spin
   refreshBtn.classList.add('spin')
