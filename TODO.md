@@ -244,6 +244,19 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       work, though both move toward schema'd messages. Check the encoding fit under Bare (both
       modules are Holepunch-native, so they should run in the worker; the desktop side crosses the
       Electron main↔renderer bridge too — verify bare-rpc rides that or wrap it).
+- [ ] **Secure seed storage on desktop (OS keychain via Electron `safeStorage`).** Today
+      `wallet.seed` + `swarm.seed` are **plaintext files**; file permissions only stop other OS
+      users, not disk theft / backups / casual inspection. Move desktop secret storage to the OS
+      keychain: Electron **main** owns `safeStorage` (encrypt-at-rest, key in Keychain/DPAPI/
+      libsecret) and **injects** the decrypted seeds into the Bare worker over the IPC pipe (not
+      argv/env) — reusing the injection seam mobile already uses (`createPayments({ seed })`,
+      `createWave({ swarmSeed })`, both used-verbatim-never-written). Requires making the desktop
+      worker **init-message-driven** (like `worklet/app.js`) and a `config.swarmSeed` passthrough in
+      `core.js`; the engine's plaintext files stay as the headless/dev fallback. Handle the Linux
+      `basic_text` fallback (warn, don't imply false security) + plaintext→`.enc` migration. Honest
+      ceiling: protects at-rest / cross-user, **not** same-user malware (needs a signed build +
+      keychain ACL, ultimately hardware wallet). Low urgency (testnet, no real value) but the right
+      foundation for mainnet. **Full design: [`docs/secure-seed-storage.md`](docs/secure-seed-storage.md).**
 - [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
       `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
       commit `hyperwave:<waveId>:<peerId>` in an **`OP_RETURN`** output (≤ 80 bytes, with the
