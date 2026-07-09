@@ -80,11 +80,15 @@ little more to tip selfies.
 npm start -- --storage demo/one
 ```
 
-Get the first instance's address from its **💰 chip** : click the copy button next to the address.
+Get the first instance's address from its  : .
 
-Fund the address via the **Nile Testnet faucet** — https://nileex.io/join/getJoinPage
+Fund the first instance wallet. Open the wallet view by clicking on **💰**.
 
-Balances refresh in the 💰 chip every ~15s. `⚠ unfunded` means 0 TRX.
+Then click the "Copy" button next to the address. Click "Get test TRX" to visit the free token faucet page.
+
+Paste the address in the "Account Address" field and click 'Obtain' button.
+
+The Balances refresh in the wallet view every ~15s. `⚠ unfunded` means 0 TRX.
 
 ```bash
 # Run additional instances in separate terminals
@@ -93,11 +97,11 @@ npm start -- --storage demo/three
 ```
 
 ```bash
-# From the funded instance's storage dir, send 20 TRX to another instance's address
-WALLET=1 WALLET_SEND=<wallet-address-of-instance-two>:20 \
+# From the funded instance's wallet, send 100 TRX to another instance's address
+WALLET=1 WALLET_SEND=<wallet-address-of-instance-two>:100 \
   bare packages/hyperwave-lib-core/lib/wave.run.js fund demo/one
 
-WALLET=1 WALLET_SEND=<wallet-address-of-instance-three>:20 \
+WALLET=1 WALLET_SEND=<wallet-address-of-instance-three>:100 \
   bare packages/hyperwave-lib-core/lib/wave.run.js fund demo/one
 ```
 
