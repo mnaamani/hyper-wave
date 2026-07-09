@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Wallets must stay funded (Nile faucet: https://nileex.io/join/getJoinPage): 
+      # Wallets must stay funded (Nile faucet: https://nileex.io/join/getJoinPage):
       # burn a 1 TRX fee per run, so keep them funded.
       - name: On-chain e2e (Tron Nile testnet)
         run: npm run test:e2e:onchain
