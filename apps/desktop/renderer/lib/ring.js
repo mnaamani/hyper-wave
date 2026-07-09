@@ -12,6 +12,24 @@ let state = { me: null, peers: [], successor: null }
 let center = null // gallery item shown in the centre (or null)
 const imgCache = new Map() // dataURL -> HTMLImageElement
 
+// Captions come from other peers' gallery entries — treat them as untrusted. We render on
+// <canvas> (fillText), so HTML/JS injection is already impossible; this strips control &
+// bidi-override characters (e.g. U+202E, which can visually spoof/scramble text) and clamps
+// the length as defence-in-depth. Newlines/control chars are stripped so a caption stays on
+// its single row and can't paint outside it.
+function safeCaption(s) {
+  return String(s || '')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .slice(0, 60)
+}
+
+// The centre selfie image is peer-supplied and is only ever an inline JPEG dataURL. Reject
+// anything else (e.g. a crafted http(s) URL) so a malicious entry can't turn viewers into a
+// tracking beacon / leak their IP via a remote fetch. Canvas-only, so no script exec either.
+function safeImage(url) {
+  return typeof url === 'string' && url.startsWith('data:image/') ? url : ''
+}
+
 export function setState(s) {
   state = s
 }
@@ -244,8 +262,9 @@ function drawCenterSelfie(cx, cy) {
   ctx.beginPath()
   ctx.arc(cx, cy, rad, 0, Math.PI * 2)
   ctx.clip()
-  const img = ensureImg(center.image)
-  if (center.image && img && img.complete && img.naturalWidth) {
+  const safeSrc = safeImage(center.image)
+  const img = ensureImg(safeSrc)
+  if (safeSrc && img && img.complete && img.naturalWidth) {
     drawCover(img, cx, cy, rad * 2)
   } else {
     ctx.fillStyle = 'rgba(255,255,255,0.06)'
@@ -284,7 +303,7 @@ function drawCenterSelfie(cx, cy) {
   ctx.textAlign = 'center'
   ctx.fillStyle = 'rgba(234,255,240,0.92)'
   ctx.font = '13px -apple-system, sans-serif'
-  const cap = center.caption || center.peerId.slice(0, 6)
+  const cap = safeCaption(center.caption) || center.peerId.slice(0, 6)
   ctx.fillText(`hop ${center.hopCount} · ${cap}`, cx, cy + rad + 20)
 }
 
