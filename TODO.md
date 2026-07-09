@@ -22,6 +22,15 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] Fast dwell (250ms) + **lobby selfie capture**: selfies are framed/captured during the
       lobby (camera + countdown), staged to the worker, and posted when the ball reaches the
       peer — the token never waits on a human; gallery fills in ring order
+- [x] **Persistent peer identity across runs.** The swarm keypair is derived from a seed
+      persisted at `<storage>/swarm.seed` (`loadOrCreateSwarmSeed` in `wave.js`, passed as
+      Hyperswarm's `keyPair`) — the peer id, ring **seat**, and receipt/burn signing key are
+      now stable across restarts (before, `new Hyperswarm()` minted a fresh Noise keypair each
+      run). Independent of `wallet.seed` for **key isolation** (a leaked wallet seed shouldn't
+      also compromise the ring identity) — _not_ unlinkability: a fee burn already ties the wallet
+      address to the `peerId` on-chain via its `hyperwave:<waveId>:<peerId>` memo. A host may
+      inject a hex seed (mobile secure storage) — used verbatim, never written. A missing/corrupt
+      file regenerates rather than bricking startup. Suite: `swarm.seed.test.js`.
 
 ### Scalable topology (Chord over Hyperswarm) — `docs/scalable-topology.md`
 
@@ -235,14 +244,6 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       work, though both move toward schema'd messages. Check the encoding fit under Bare (both
       modules are Holepunch-native, so they should run in the worker; the desktop side crosses the
       Electron main↔renderer bridge too — verify bare-rpc rides that or wrap it).
-- [ ] **Persist the peer identity (swarm keypair) across runs.** `wave.js` constructs
-      `new Hyperswarm({...})` with no `keyPair`, so every run generates a fresh Noise
-      keypair — the peer id, and therefore the **ring seat**, changes on every restart
-      (only `wallet.seed` persists today). Fix: persist a DHT keypair seed alongside the
-      wallet (e.g. `<storage>/swarm.seed` → `hyperdht.keyPair(seed)` passed as the
-      Hyperswarm `keyPair` option), giving a stable seat + stable identity for burns/
-      receipts across restarts. Consider the privacy trade-off of deriving it from the
-      wallet seed (would publicly link wallet ↔ swarm identity — keep the seeds separate).
 - [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
       `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
       commit `hyperwave:<waveId>:<peerId>` in an **`OP_RETURN`** output (≤ 80 bytes, with the

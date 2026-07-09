@@ -91,7 +91,8 @@ const core = init({
     matchId: 'hyperwave:my-match:v1', // isolate the ring (peers on the same matchId share it)
     bootstrap: '127.0.0.1:49737', // optional host:port → local DHT (instant same-machine discovery)
     wallet: true // default; set false to run wallet-less (receipt-only gallery, no fees/tips)
-    // seed: <hex> // optional wallet seed; omitted → derived + persisted under storageDir
+    // seed: <mnemonic> // optional WALLET seed phrase; omitted → derived + persisted at
+    //                  // <storage>/wallet.seed. (The swarm identity has its own <storage>/swarm.seed.)
   },
   send: (msg) => {
     // engine → host: { type: 'state' | 'event' | 'gallery' | 'wallet' | 'burn-result' | ... }
@@ -153,10 +154,15 @@ rolling-ball animation), `forwarded`, `healed`, `stalled`, `completed`, `wave-id
 harness `bin/wave.run.js` uses these directly):
 
 - **`createWave(opts)`** → the engine object. `opts`: `{ storageDir, onState, onEvent, onGallery,
-log, bootstrap, matchId, lobbyMs }`. Returns `{ me, startWave, join, setCountry, stageSelfie,
-setWallet, announcePaid, recordBurn, findSuccessor, close }`. `me` is `{ id, angle, country }`.
+log, bootstrap, matchId, lobbyMs, swarmSeed }`. `swarmSeed` is an optional hex seed for the swarm
+  identity (else persisted at `<storage>/swarm.seed`) — distinct from the wallet seed below. Returns
+  `{ me, startWave, join, setCountry, stageSelfie, setWallet, announcePaid, recordBurn,
+findSuccessor, close }`. `me` is `{ id, angle, country }`.
 - **`parseBootstrap(hostPort)`** → `{ host, port }` for the `bootstrap` option.
-- **`createPayments({ storageDir, seed, log })`** → `Promise` of the wallet:
+- **`loadOrCreateSwarmSeed(storageDir, injectedSeed?, log?)`** → the persisted 32-byte swarm-identity
+  seed (creates + writes `<storage>/swarm.seed` on first run; an injected hex seed is used verbatim).
+- **`createPayments({ storageDir, seed, log })`** → `Promise` of the wallet (`seed` here is the
+  **wallet** mnemonic, a separate seed from the swarm one):
   `{ address, balances(), send(to, trx), burn(trx, memo), verifyBurnTx(hash, expect),
 transactions(limit=10), dispose() }`. Async because WDK is ESM-only.
 - **`FEE_TRX`, `payFee`, `confirmBurn`, `wireWallet`** — the shared fee-burn flow (`fees.js`).

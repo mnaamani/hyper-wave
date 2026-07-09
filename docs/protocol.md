@@ -15,7 +15,11 @@ Reference implementation: `packages/hyperwave-lib-core/lib/{wave,ring,token,gall
 - A **match** is a swarm identified by a `matchId` string. Everyone on the same match is
   on one **ring**.
 - A **peer**'s cryptographic identity (an Ed25519 key pair) determines its fixed **seat**
-  on the ring (an angle derived from its public key).
+  on the ring (an angle derived from its public key). The key pair is derived from a seed
+  persisted at `<storage>/swarm.seed`, so a peer keeps the **same seat and identity across
+  restarts** (independent of the wallet seed for key isolation — a leaked wallet seed shouldn't
+  also compromise the ring signing identity. Note this is not unlinkability: a fee burn already
+  ties the wallet address to the `peerId` on-chain via its `hyperwave:<waveId>:<peerId>` memo).
 - A **wave** is a single, one-at-a-time event with a random `waveId`. Its lifecycle is
   **idle → lobby → racing → idle**. An **originator** announces it; peers **opt in**
   (the **roster**); then a **token** (the ⚽) is passed peer-to-peer around the ring,

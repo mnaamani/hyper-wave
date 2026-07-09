@@ -123,6 +123,48 @@ function parseBootstrap(str) {
   });
 }
 
+const SWARM_SEED_BYTES = 32; // hypercore-crypto.keyPair seed length
+
+// Load (or first-time create + persist) the 32-byte seed that derives this peer's swarm keypair —
+// its ring seat AND the key that signs receipts/burns/wave-end/gallery keys. Without a persisted
+// seed, Hyperswarm mints a fresh keypair each run, so the peer id (and its ring position) changes
+// on every restart. Persisted as hex at <storageDir>/swarm.seed — a sibling of wallet.seed and
+// OUTSIDE the per-run hyperwave store that createWave wipes — so the identity/seat is stable across
+// restarts. A host may inject a hex seed (e.g. mobile secure storage); an injected seed is used
+// verbatim and never written to disk. Independent of the wallet seed for KEY ISOLATION, not
+// privacy: a leaked wallet.seed (funds) shouldn't also hand over the ring signing identity, and
+// vice versa. (It buys no unlinkability — a fee burn is sent from the wallet with an on-chain memo
+// `hyperwave:<waveId>:<peerId>`, so any paid wave already ties the wallet address to the peerId.)
+// A missing/corrupt file is regenerated rather than fatal (a bad seed shouldn't brick startup —
+// worst case the seat moves once).
+function loadOrCreateSwarmSeed(storageDir, injectedSeed = null, log = () => {}) {
+  const seedFile = storageDir + '/swarm.seed';
+  let seed = null;
+  if (injectedSeed && injectedSeed.trim()) {
+    const parsed = b4a.from(injectedSeed.trim(), 'hex');
+    if (parsed.length === SWARM_SEED_BYTES) {
+      return parsed; // injected: used as-is, not persisted
+    }
+  }
+  try {
+    const parsed = b4a.from(fs.readFileSync(seedFile, 'utf8').trim(), 'hex');
+    if (parsed.length === SWARM_SEED_BYTES) {
+      seed = parsed;
+    }
+  } catch {}
+  if (!seed) {
+    seed = crypto.randomBytes(SWARM_SEED_BYTES);
+    try {
+      fs.mkdirSync(storageDir, { recursive: true });
+      fs.writeFileSync(seedFile, b4a.toString(seed, 'hex'));
+      log('swarm identity seed created:', seedFile);
+    } catch (err) {
+      log('swarm seed persist failed (ephemeral identity this run):', err.message);
+    }
+  }
+  return seed;
+}
+
 function createWave({
   storageDir,
   onState,
@@ -131,7 +173,8 @@ function createWave({
   log = () => {},
   bootstrap = null,
   matchId = MATCH,
-  lobbyMs = LOBBY_MS
+  lobbyMs = LOBBY_MS,
+  swarmSeed = null // hex seed for the swarm identity; distinct from the wallet seed (createPayments)
 }) {
   // No roles — every peer is equal. The one asymmetry is per-wave: the peer that INITIATES a
   // wave keeps that wave's gallery open (so it survives for latecomers/replication);
@@ -143,9 +186,13 @@ function createWave({
     fs.rmSync(storePath, { recursive: true, force: true });
   } catch {}
   const store = new Corestore(storePath);
+  // Persisted swarm identity: derive the Noise keypair from a seed that survives restarts, so a
+  // peer keeps the SAME id / ring seat / signing key across runs (loadOrCreateSwarmSeed). Passing
+  // an explicit keyPair overrides Hyperswarm's fresh-per-run default.
+  const swarmKeyPair = crypto.keyPair(loadOrCreateSwarmSeed(storageDir, swarmSeed, log));
   // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
-  const swarm = new Hyperswarm(bootstrap ? { bootstrap } : {});
+  const swarm = new Hyperswarm({ keyPair: swarmKeyPair, ...(bootstrap ? { bootstrap } : {}) });
 
   const meKey = swarm.keyPair.publicKey;
   const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null };
@@ -1528,4 +1575,4 @@ function createWave({
   };
 }
 
-module.exports = { createWave, parseBootstrap };
+module.exports = { createWave, parseBootstrap, loadOrCreateSwarmSeed };
