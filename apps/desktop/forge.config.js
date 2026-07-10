@@ -119,17 +119,17 @@ module.exports = {
 
   hooks: {
     // The npm workspace hoists this app's runtime deps (pear-runtime, corestore, the Bare stack,
-    // hyperwave-lib-core) to the REPO ROOT node_modules, so the copied app ships with an empty
+    // hyperwave) to the REPO ROOT node_modules, so the copied app ships with an empty
     // node_modules and can't resolve them at runtime. Assemble a self-contained production install
     // right in the packaged app, resolving the workspace dep from its real path, then normalize
     // engines so pear-runtime's bare-semver doesn't choke on the freshly-installed tree.
     packageAfterCopy: async (_forgeConfig, buildPath) => {
       const childProcess = require('child_process');
-      const coreDir = path.resolve(__dirname, '..', '..', 'packages', 'hyperwave-lib-core');
+      const coreDir = path.resolve(__dirname, '..', '..', 'packages', 'hyper-wave');
       const shim = path.resolve(__dirname, '..', '..', 'scripts', 'fix-bare-engines.js');
       const pjPath = path.join(buildPath, 'package.json');
       const packageJson = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
-      packageJson.dependencies['hyperwave-lib-core'] = 'file:' + coreDir;
+      packageJson.dependencies['hyper-wave'] = 'file:' + coreDir;
       delete packageJson.devDependencies;
       fs.writeFileSync(pjPath, JSON.stringify(packageJson, null, 2));
       childProcess.execSync(

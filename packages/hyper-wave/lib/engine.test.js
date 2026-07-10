@@ -1,13 +1,13 @@
-// The host-agnostic engine core (core.js): does it route host commands to the engine and
+// The host-agnostic engine (engine.js): does it route host commands to the wave protocol and
 // forward engine events to `send`, in both the no-wallet and wallet-ready paths? Runs with
 // FAKE wave + payments factories (injected via `deps`), so no real swarm / no network — this
-// is exactly what the extraction bought: core is testable without a host. Runs under Bare:
-//   bare workers/lib/core.test.js   (or `npm test`)
+// is exactly what the extraction bought: the engine is testable without a host. Runs under Bare:
+//   bare lib/engine.test.js   (or `npm test`)
 const test = require('brittle');
-const hyperwave = require('./core');
+const { createEngine } = require('./engine');
 
-// A fake engine that records the calls core makes on it, and hands core the option callbacks
-// so the test can fire engine events (onState/onEvent/onGallery) itself.
+// A fake wave that records the calls the engine makes on it, and hands the engine the option
+// callbacks so the test can fire wave events (onState/onEvent/onGallery) itself.
 function fakeWave() {
   const calls = [];
   const wave = {
@@ -33,10 +33,10 @@ function fakeWave() {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0)); // let the async wallet init settle
 
-test('core routes commands to the engine and forwards engine events to send', async (t) => {
+test('the engine routes commands to the wave protocol and forwards its events to send', async (t) => {
   const sent = [];
   const wave = fakeWave();
-  const core = hyperwave.init({
+  const engine = createEngine({
     storageDir: '/tmp/e',
     config: { matchId: 'm', bootstrap: '' },
     send: (msg) => sent.push(msg),
@@ -51,7 +51,7 @@ test('core routes commands to the engine and forwards engine events to send', as
       }
     }
   });
-  t.teardown(() => core.close());
+  t.teardown(() => engine.close());
 
   // engine callbacks are wired through to send with the right envelope
   wave.opts.onState({ me: wave.me, peers: [] });
@@ -65,18 +65,18 @@ test('core routes commands to the engine and forwards engine events to send', as
   );
 
   // plain commands are dispatched to the engine
-  core.onMessage({ type: 'set-country', country: 'JP' });
-  core.onMessage({ type: 'stage-selfie', selfie: 'data:image/jpeg;base64,xxx' });
-  core.onMessage({ type: 'start-wave' });
+  engine.onMessage({ type: 'set-country', country: 'JP' });
+  engine.onMessage({ type: 'stage-selfie', selfie: 'data:image/jpeg;base64,xxx' });
+  engine.onMessage({ type: 'start-wave' });
   t.alike(
     wave.calls,
     [['setCountry', 'JP'], ['stageSelfie', 'data:image/jpeg;base64,xxx'], 'startWave'],
-    'set-country / stage-selfie / start-wave routed to the engine'
+    'set-country / stage-selfie / start-wave routed to the wave protocol'
   );
 
   await flush();
   // with no wallet, a tip is refused rather than silently dropped
-  core.onMessage({ type: 'tip', to: 'Trecipient', amount: 1 });
+  engine.onMessage({ type: 'tip', to: 'Trecipient', amount: 1 });
   await flush();
   t.ok(
     sent.find((msg) => msg.type === 'tip-result' && msg.error === 'wallet not ready'),
@@ -92,7 +92,7 @@ test('core routes commands to the engine and forwards engine events to send', as
   );
 });
 
-test('core wires a ready wallet into the engine and pushes the balance + pays tips', async (t) => {
+test('the engine wires a ready wallet into the wave protocol and pushes the balance + pays tips', async (t) => {
   const sent = [];
   const wave = fakeWave();
   const tipped = [];
@@ -108,7 +108,7 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
     ],
     dispose: () => {}
   };
-  const core = hyperwave.init({
+  const engine = createEngine({
     storageDir: '/tmp/e',
     config: {},
     send: (msg) => sent.push(msg),
@@ -121,7 +121,7 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
       createPayments: async () => pay
     }
   });
-  t.teardown(() => core.close());
+  t.teardown(() => engine.close());
 
   await flush(); // wallet init resolves
   t.ok(
@@ -132,10 +132,10 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
     wave.calls.find(
       (call) => Array.isArray(call) && call[0] === 'setWallet' && call[1] === 'Tmywallet'
     ),
-    'the wallet is wired into the engine (setWallet)'
+    'the wallet is wired into the wave protocol (setWallet)'
   );
 
-  core.onMessage({ type: 'tip', to: 'Trecipient', amount: 2 });
+  engine.onMessage({ type: 'tip', to: 'Trecipient', amount: 2 });
   await flush();
   t.alike(tipped, [['Trecipient', 2]], 'tip forwarded to payments.send');
   t.ok(
@@ -143,7 +143,7 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
     'tip-result with the tx hash returned to the host'
   );
 
-  core.onMessage({ type: 'send-trx', to: 'Tfriend', amount: 3 });
+  engine.onMessage({ type: 'send-trx', to: 'Tfriend', amount: 3 });
   await flush();
   t.alike(tipped.at(-1), ['Tfriend', 3], 'send-trx forwarded to payments.send');
   t.ok(
@@ -153,7 +153,7 @@ test('core wires a ready wallet into the engine and pushes the balance + pays ti
     'send-result with the tx hash returned to the host'
   );
 
-  core.onMessage({ type: 'fetch-transactions' });
+  engine.onMessage({ type: 'fetch-transactions' });
   await flush();
   const txMsg = sent.find((msg) => msg.type === 'transactions');
   t.ok(

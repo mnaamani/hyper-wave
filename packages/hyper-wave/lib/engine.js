@@ -1,10 +1,10 @@
 // The HyperWave engine, host-agnostic. Everything the desktop worker (workers/hyperwave.js) and
-// a mobile bare-kit worklet (workers/worklet/app.js) share lives here: it wires the P2P engine
+// a mobile bare-kit worklet (worklet/app.js) share lives here: it wires the wave protocol
 // (wave.js) + the WDK wallet (pay.js) together and exposes a tiny message surface. The host
 // supplies { storageDir, config, send } and feeds it decoded messages via onMessage() — there's
-// no Bare.argv / bare-env / IPC transport in here, so the same core boots under Electron-spawned
+// no Bare.argv / bare-env / IPC transport in here, so the same engine boots under Electron-spawned
 // Bare and a react-native-bare-kit worklet unchanged. `deps` lets tests inject fake factories
-// (so core is unit-testable without a real swarm or a wallet). Unit-tested in core.test.js.
+// (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('./wave');
 const { createPayments } = require('./pay');
@@ -20,15 +20,15 @@ const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees');
  */
 
 /**
- * The engine handle returned by init.
+ * The engine handle returned by createEngine.
  * @typedef {Object} Engine
- * @property {Object} wave - The live createWave engine instance.
+ * @property {Object} wave - The live createWave instance (the wave protocol).
  * @property {(msg: Object) => void} onMessage - Feed a decoded host->engine command message.
- * @property {() => Promise<void>} close - Tear down timers, wallet, and the wave engine.
+ * @property {() => Promise<void>} close - Tear down timers, wallet, and the wave protocol.
  */
 
 /**
- * The HyperWave engine, host-agnostic: wires the P2P engine (wave.js) + the WDK wallet (pay.js)
+ * The HyperWave engine, host-agnostic: wires the wave protocol (wave.js) + the WDK wallet (pay.js)
  * together and exposes a tiny message surface. The host supplies { storageDir, config, send } and
  * feeds it decoded messages via onMessage(). `deps` lets tests inject fake factories.
  * @param {Object} options - Engine options.
@@ -39,7 +39,7 @@ const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees');
  * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests).
  * @returns {Engine} The engine handle (`wave`, `onMessage`, `close`).
  */
-function init({
+function createEngine({
   storageDir,
   config = {},
   send,
@@ -266,4 +266,4 @@ function init({
   return { wave, onMessage, close };
 }
 
-module.exports = { init };
+module.exports = { createEngine };

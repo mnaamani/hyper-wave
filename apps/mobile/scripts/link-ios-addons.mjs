@@ -5,7 +5,7 @@
 // but (a) CocoaPods skips prepare_command for local path pods — how node_modules pods install —
 // and (b) that script scans from the *repo root*, which in this npm-workspaces monorepo has no
 // addon dependencies. So we run `bare-link` ourselves from apps/mobile (which reaches the addons
-// via hyperwave-lib-core) and write into the hoisted react-native-bare-kit. bare-link just
+// via hyperwave) and write into the hoisted react-native-bare-kit. bare-link just
 // packages the iOS prebuilds the addon packages already ship — no compiler needed, runs anywhere.
 import link from 'bare-link';
 import fs from 'fs';

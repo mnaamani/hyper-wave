@@ -6,7 +6,7 @@ what peers exchange over the network; the Electron/renderer split (see
 [`architecture.md`](./architecture.md)) is one implementation and is **not** part of the
 protocol.
 
-Reference implementation: `packages/hyperwave-lib-core/lib/{wave,ring,token,gallery}.js`.
+Reference implementation: `packages/hyper-wave/lib/{wave,ring,token,gallery}.js`.
 
 ---
 

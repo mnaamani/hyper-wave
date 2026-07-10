@@ -4,7 +4,7 @@
 // Run:  bare examples/wave.js
 const fs = require('bare-fs');
 const env = require('bare-env');
-const { createWave, parseBootstrap } = require('hyperwave-lib-core');
+const { createWave, parseBootstrap } = require('hyper-wave');
 
 async function main() {
   const dir = '/tmp/hw-example-wave-' + Date.now();

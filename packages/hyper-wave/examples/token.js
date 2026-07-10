@@ -16,7 +16,7 @@ const {
   verifyGalleryKey,
   signWaveEnd,
   verifyWaveEnd
-} = require('hyperwave-lib-core/lib/token');
+} = require('hyper-wave/lib/token');
 
 const kp = crypto.keyPair();
 const peerId = b4a.toString(kp.publicKey, 'hex');

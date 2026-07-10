@@ -32,12 +32,12 @@ Built for the [Tether Developers Cup](https://dorahacks.io/hackathon/tether-deve
 
 ## Repo layout
 
-| Path                                                           | What                                                                                                                                                                                                                              |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`packages/hyperwave-lib-core/`](packages/hyperwave-lib-core/) | The reusable Bare engine: ring, token race, gossip/Chord topology, Autobase gallery, WDK wallet, fees. Unit + e2e tests.                                                                                                          |
-| [`apps/desktop/`](apps/desktop/)                               | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                                                                                                    |
-| [`apps/mobile/`](apps/mobile/)                                 | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                           |
-| [`docs/`](docs/)                                               | [`architecture.md`](docs/architecture.md) · [`protocol.md`](docs/protocol.md) (on-wire spec) · [`scalable-topology.md`](docs/scalable-topology.md) (Chord over Hyperswarm) · [`idea.md`](docs/idea.md) (the idea, plain language) |
+| Path                                           | What                                                                                                                                                                                                                              |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`packages/hyper-wave/`](packages/hyper-wave/) | The reusable Bare engine: ring, token race, gossip/Chord topology, Autobase gallery, WDK wallet, fees. Unit + e2e tests.                                                                                                          |
+| [`apps/desktop/`](apps/desktop/)               | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                                                                                                    |
+| [`apps/mobile/`](apps/mobile/)                 | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                           |
+| [`docs/`](docs/)                               | [`architecture.md`](docs/architecture.md) · [`protocol.md`](docs/protocol.md) (on-wire spec) · [`scalable-topology.md`](docs/scalable-topology.md) (Chord over Hyperswarm) · [`idea.md`](docs/idea.md) (the idea, plain language) |
 
 ## Quickstart
 

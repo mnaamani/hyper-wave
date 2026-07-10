@@ -3,7 +3,7 @@
 // network. This example derives + prints the address and attempts a balance read (which
 // needs network + a funded wallet to be interesting). Run:  bare examples/payments.js
 const fs = require('bare-fs');
-const { createPayments } = require('hyperwave-lib-core');
+const { createPayments } = require('hyper-wave');
 
 async function main() {
   const dir = '/tmp/hw-example-wallet-' + Date.now();
@@ -27,7 +27,7 @@ async function main() {
   //   await pay.transactions(10);                             // recent txs, both directions
   //
   // fees.js composes these into a wave (see examples/wave.js for a createWave instance):
-  //   const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-lib-core');
+  //   const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyper-wave');
   //   wireWallet(wave, pay);                                  // address (tips) + burn verifier (paid gate)
   //   const { hash, proof } = await payFee(wave, pay, waveId, 'kickoff'); // burn FEE_TRX + sign attestation
   //   if (await confirmBurn(pay, waveId, hash)) { wave.announcePaid(proof); }

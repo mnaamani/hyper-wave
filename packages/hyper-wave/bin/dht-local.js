@@ -1,6 +1,6 @@
 #!/usr/bin/env bare
 // Standalone local DHT bootstrap for fast same-machine testing/demo. Runs under Bare:
-//   bare bin/dht-local.js   (or, if installed: hyperwave-dht)
+//   bare bin/dht-local.js   (or, if installed: hyper-wave-dev-dht)
 // Needs `bare` on PATH — it's a separate runtime, not an npm dependency.
 // Prints "BOOTSTRAP host:port" then stays alive. Point peers at it via
 // HYPERWAVE_BOOTSTRAP=host:port. Ctrl-C to stop.

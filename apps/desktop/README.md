@@ -4,7 +4,7 @@ Electron + Pear desktop host for the HyperWave P2P stadium wave. Forked from
 [`holepunchto/hello-pear-electron`](https://github.com/holepunchto/hello-pear-electron).
 
 This package is only the **shell**: window, renderer UI, and a thin Bare worker that boots
-the shared engine (`hyperwave-lib-core`). Everything general lives in the docs:
+the shared engine (`hyper-wave`). Everything general lives in the docs:
 
 - Project overview + quickstart: [`../../README.md`](../../README.md)
 - Architecture (processes, IPC surface, module map): [`../../docs/architecture.md`](../../docs/architecture.md)
@@ -29,7 +29,7 @@ the 💰 chip / worker log). Full walkthrough incl. funding and local-DHT setup:
 README.
 
 > **Discovery latency:** cold discovery on a fresh public-DHT topic takes ~20–35s. For
-> demos use a local DHT bootstrap (`bare packages/hyperwave-lib-core/bin/dht-local.js` +
+> demos use a local DHT bootstrap (`bare packages/hyper-wave/bin/dht-local.js` +
 > `HYPERWAVE_BOOTSTRAP=127.0.0.1:<port>`) for instant same-machine discovery.
 
 ## What's in this package
@@ -45,7 +45,7 @@ README.
   `isPackaged`). Spawns Bare workers with `PearRuntime.run(specifier, [dir, ...])`;
   `--storage <dir>` becomes the worker's `Bare.argv[2]`.
 - **`workers/hyperwave.js`** (Bare, CJS) — a ~40-line host: wraps `Bare.IPC` in a
-  `FramedStream` and calls `hyperwave-lib-core`'s `init()`. All P2P/protocol/wallet logic
+  `FramedStream` and calls `hyper-wave`'s `createEngine()`. All P2P/protocol/wallet logic
   lives in the engine package.
 - **`workers/updater.js`** — the template's OTA updater worker, left intact.
 
@@ -79,7 +79,7 @@ sends real testnet TRX to its owner.
 ## Tests
 
 There are no desktop-specific tests; the engine's unit + e2e suites live in
-`packages/hyperwave-lib-core` and run from the repo root:
+`packages/hyper-wave` and run from the repo root:
 
 ```bash
 npm test                  # engine unit suites (brittle, under Bare)

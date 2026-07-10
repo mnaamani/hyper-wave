@@ -1,6 +1,6 @@
 // flood.js — gossip dedup. One rule turns a one-hop broadcast into an epidemic across
 // a partial mesh: relay each message id on FIRST SIGHT only. Run:  bare examples/flood.js
-const { createFlood } = require('hyperwave-lib-core/lib/flood');
+const { createFlood } = require('hyper-wave/lib/flood');
 
 const flood = createFlood({ cap: 4096 });
 

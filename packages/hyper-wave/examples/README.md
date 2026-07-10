@@ -2,7 +2,7 @@
 
 Runnable, self-contained examples — one per module. Companion to
 [`../usage.md`](../usage.md) (the prose walkthrough). Each file requires the package by name
-(`hyperwave-lib-core/...`), exactly as a consumer would.
+(`hyper-wave/...`), exactly as a consumer would.
 
 Run any of them under **Bare**, from the package root:
 
@@ -14,7 +14,7 @@ bare examples/flood.js      # first-sight gossip dedup
 bare examples/gallery.js    # a real Autobase: append receipt-valid selfies + read them ordered
 bare examples/seeds.js      # parseBootstrap + persistent swarm identity seed
 bare examples/payments.js   # WDK wallet: derive address (offline) + balance (network)
-bare examples/engine.js     # host the whole engine via init() (wallet-less), then close
+bare examples/engine.js     # host the whole engine via createEngine() (wallet-less), then close
 bare examples/wave.js       # the lower-level createWave() transport, then close
 ```
 

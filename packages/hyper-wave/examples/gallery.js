@@ -7,8 +7,8 @@ const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const fs = require('bare-fs');
-const { galleryConfig, readGallery } = require('hyperwave-lib-core/lib/gallery');
-const { signReceipt } = require('hyperwave-lib-core/lib/token');
+const { galleryConfig, readGallery } = require('hyper-wave/lib/gallery');
+const { signReceipt } = require('hyper-wave/lib/token');
 
 const waveId = 'w1';
 const chainHash = b4a.toString(b4a.alloc(32), 'hex');

@@ -9,4 +9,4 @@ require('./lib/wave.gallery.test.js');
 require('./lib/wave.autobase.test.js');
 require('./lib/gallery.replication.test.js');
 require('./lib/pay.test.js');
-require('./lib/core.test.js');
+require('./lib/engine.test.js');

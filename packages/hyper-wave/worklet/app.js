@@ -1,6 +1,6 @@
 /* global BareKit */
 // HyperWave mobile worklet entry: the react-native-bare-kit host for the shared engine
-// (lib/core.js) — the mobile counterpart of workers/hyperwave.js. It is NOT run in this repo
+// (lib/engine.js) — the mobile counterpart of workers/hyperwave.js. It is NOT run in this repo
 // (there's no RN host here); it's the bundle target `bare-pack` compiles for iOS/Android, e.g.
 //   bare-pack -p ios --linked --out bundles/app-ios.bundle.js worklet/app.js
 // The RN side boots it with `new Worklet().start('/app.js', bundle)`, then sends one
@@ -9,7 +9,7 @@
 const os = require('bare-os');
 const path = require('bare-path');
 const FramedStream = require('framed-stream');
-const hyperwave = require('../lib/core');
+const { createEngine } = require('../lib/engine');
 
 // On mobile the process cwd is the (read-only) app bundle, so a relative storageDir like
 // 'hyperwave' resolves somewhere bare-fs can't write — Corestore then fails with "Corestore is
@@ -36,7 +36,7 @@ if (typeof Bare !== 'undefined' && Bare.on) {
 }
 
 // RN host -> Worker commands.
-let core = null;
+let engine = null;
 pipe.on('data', (data) => {
   let msg;
   try {
@@ -45,14 +45,14 @@ pipe.on('data', (data) => {
     return;
   }
   // First message from the RN host should be the init: storageDir + config (matchId, seed, ...)
-  if (msg.type === 'init' && !core) {
-    core = hyperwave.init({
+  if (msg.type === 'init' && !engine) {
+    engine = createEngine({
       storageDir: resolveStorage(msg.storageDir),
       config: msg.config || {},
       send
     });
-  } else if (core) {
-    core.onMessage(msg);
+  } else if (engine) {
+    engine.onMessage(msg);
   } else {
     // RN host did not yet send an init message, so whatever this message is, its too early to be sending.
     console.warn(`Dropped message of type ${msg.type}. Init message not yet received`);

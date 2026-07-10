@@ -1,19 +1,19 @@
-// HyperWave desktop worker: the Electron host for the shared engine (the hyperwave-lib-core
-// package's init). Started by the renderer via bridge.startWorker('/workers/hyperwave.js');
+// HyperWave desktop worker: the Electron host for the shared engine (the hyperwave
+// package's createEngine). Started by the renderer via bridge.startWorker('/workers/hyperwave.js');
 // the storage dir arrives as Bare.argv[2] (see electron/main.js getWorker) and optional config
-// via bare-env. A mobile react-native-bare-kit worklet (hyperwave-lib-core/worklet/app.js) hosts
-// the SAME core over its own IPC + an init message instead — this file is the desktop half.
+// via bare-env. A mobile react-native-bare-kit worklet (hyperwave/worklet/app.js) hosts
+// the SAME engine over its own IPC + an init message instead — this file is the desktop half.
 const FramedStream = require('framed-stream');
 const goodbye = require('graceful-goodbye');
 const env = require('bare-env');
-const hyperwave = require('hyperwave-lib-core');
+const { createEngine } = require('hyper-wave');
 
 const pipe = new FramedStream(Bare.IPC);
 
 // Send a message Worker -> Host (Electron Renderer)
 const send = (msg) => pipe.write(JSON.stringify(msg));
 
-const core = hyperwave.init({
+const engine = createEngine({
   storageDir: Bare.argv[2],
   config: {
     bootstrap: env.HYPERWAVE_BOOTSTRAP, // optional host:port -> local DHT (instant same-machine discovery)
@@ -31,7 +31,7 @@ pipe.on('data', (data) => {
   } catch {
     return;
   }
-  core.onMessage(msg);
+  engine.onMessage(msg);
 });
 
-goodbye(() => core.close());
+goodbye(() => engine.close());

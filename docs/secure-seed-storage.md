@@ -82,7 +82,7 @@ flowchart LR
     SS <--> F
   end
   subgraph Worker["Bare worker"]
-    ENG["hyperwave-lib-core init()<br/>createPayments({ seed })<br/>createWave({ swarmSeed })"]
+    ENG["hyperwave createEngine()<br/>createPayments({ seed })<br/>createWave({ swarmSeed })"]
   end
   Main -->|"init message over the IPC pipe:<br/>{ type:'init', config:{ seed, swarmSeed } }"| Worker
   ENG -.->|"fallback only (no Electron):<br/>plaintext &lt;storage&gt;/*.seed"| Disk[(disk)]
@@ -98,7 +98,7 @@ Flow:
    worker to **wait for an init message** carrying the config, rather than booting immediately from
    `Bare.argv` / `bare-env` as it does today. The worklet is already init-message-driven; the
    desktop worker adopts the same shape.
-3. **`core.js` passes `config.swarmSeed` through to `createWave({ swarmSeed })`** (today it only
+3. **`engine.js` passes `config.swarmSeed` through to `createWave({ swarmSeed })`** (today it only
    forwards `config.seed` → the wallet). One-line passthrough; the param already exists.
 4. **The engine no longer writes plaintext on desktop** — both seeds are injected, so
    `loadOrCreateSwarmSeed` and `pay.js` take the injected branch and never touch disk. The file
@@ -146,9 +146,9 @@ would be worse than today — it would _imply_ security we don't have. Also gate
   read/decrypt-or-generate/encrypt/write per seed, plaintext→`.enc` migration, deliver via the init
   message. (~40–60 lines.)
 - `workers/hyperwave.js` — become **init-message-driven** (wait for `{ type:'init', config }` before
-  calling `hyperwave.init`), mirroring `worklet/app.js`. Also handle the first-run "here is the
+  calling `createEngine`), mirroring `worklet/app.js`. Also handle the first-run "here is the
   generated seed, please store it" message back to main (option A).
-- `core.js` — forward `config.swarmSeed` to `createWave` (one line); optionally surface the
+- `engine.js` — forward `config.swarmSeed` to `createWave` (one line); optionally surface the
   first-run generated seeds so the host can persist them.
 - No `wave.js` / `pay.js` change — both already support injected, non-persisted seeds.
 - Docs: fold the outcome into `architecture.md` (the worker init flow) and note it in
@@ -158,7 +158,7 @@ would be worse than today — it would _imply_ security we don't have. Also gate
 
 - **First-run seed hand-off (option A):** exact message shape for the worker→main "store this seed"
   round-trip, and whether main or worker decides "first run."
-- **Swarm-seed injection through `core.js`:** confirm `config.swarmSeed` is the name we want on the
+- **Swarm-seed injection through `engine.js`:** confirm `config.swarmSeed` is the name we want on the
   host config (parallel to `config.seed` for the wallet).
 - **Do we want the passphrase layer (§3.3)** as a follow-up for same-user-malware resistance, or is
   keychain-at-rest sufficient for the project's scope?
@@ -168,5 +168,5 @@ would be worse than today — it would _imply_ security we don't have. Also gate
 ## 11. References
 
 - Electron `safeStorage`: https://www.electronjs.org/docs/latest/api/safe-storage
-- Mobile secure-storage seam: `apps/mobile/README.md`, `packages/hyperwave-lib-core/worklet/app.js`
+- Mobile secure-storage seam: `apps/mobile/README.md`, `packages/hyper-wave/worklet/app.js`
 - Seed persistence today: `loadOrCreateSwarmSeed` (`wave.js`), `createPayments` (`pay.js`)

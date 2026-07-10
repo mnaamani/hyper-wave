@@ -224,7 +224,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 - [ ] **Typed RPC seam between renderer/host and worker (`hyperschema` + `bare-rpc`).** The
       renderer↔worker IPC today is hand-rolled and one-directional in both halves: the host sends
-      **fire-and-forget commands** (`onMessage` in `core.js`: `start-wave`, `join-wave`,
+      **fire-and-forget commands** (`onMessage` in `engine.js`: `start-wave`, `join-wave`,
       `stage-selfie`, `tip`, `refresh-wallet` — no reply), and the worker pushes a **stream of
       untyped `type`-tagged events** back (`onEvent → send({type:'event', …})`, plus one-offs like
       `wallet`, `tip-result`, `burn-result`). Request/response is **faked by correlation** — e.g. a
@@ -236,7 +236,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       existing worker pipe, giving (1) real **request/response** methods (`await tip(...)` resolves
       with the result or throws — no `tip-result` correlation dance), (2) a typed **events/
       notification** channel for the genuinely one-way stream (ring/position/wave-state pushes), and
-      (3) a **single source of truth** for the wire shapes shared by `core.js`, the desktop
+      (3) a **single source of truth** for the wire shapes shared by `engine.js`, the desktop
       renderer, and the mobile worklet (kills the "same message shapes both hosts speak" comment
       that's currently enforced only by convention). Cleans up the renderer command handlers
       (`app.js`) and the RN `useEngine.js` symmetrically. Scope note: it's an **internal app IPC**
@@ -252,7 +252,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       argv/env) — reusing the injection seam mobile already uses (`createPayments({ seed })`,
       `createWave({ swarmSeed })`, both used-verbatim-never-written). Requires making the desktop
       worker **init-message-driven** (like `worklet/app.js`) and a `config.swarmSeed` passthrough in
-      `core.js`; the engine's plaintext files stay as the headless/dev fallback. Handle the Linux
+      `engine.js`; the engine's plaintext files stay as the headless/dev fallback. Handle the Linux
       `basic_text` fallback (warn, don't imply false security) + plaintext→`.enc` migration. Honest
       ceiling: protects at-rest / cross-user, **not** same-user malware (needs a signed build +
       keychain ACL, ultimately hardware wallet). Low urgency (testnet, no real value) but the right

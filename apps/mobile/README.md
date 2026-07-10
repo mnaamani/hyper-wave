@@ -1,6 +1,6 @@
 # HyperWave mobile (Expo + Bare)
 
-A **scaffold** that runs the shared HyperWave engine (`hyperwave-lib-core`) on iOS/Android by
+A **scaffold** that runs the shared HyperWave engine (`hyperwave`) on iOS/Android by
 hosting it in a Bare worklet via [`react-native-bare-kit`](https://github.com/holepunchto/react-native-bare-kit).
 The engine — the wave race, gallery, and WDK wallet — is the **same code** the desktop app runs;
 only the host (this Expo app) and the UI differ.
@@ -8,12 +8,12 @@ only the host (this Expo app) and the UI differ.
 ## How it fits together
 
 ```
-Expo RN app (this package)                 Bare worklet (hyperwave-lib-core)
+Expo RN app (this package)                 Bare worklet (hyper-wave)
   App.js  ── useEngine() ──► FramedStream ⇄ IPC ⇄ FramedStream ──► worklet/app.js ──► init
   (React UI)                 (JSON messages)                        (wave + gallery + wallet)
 ```
 
-- `bare-pack` bundles `../../packages/hyperwave-lib-core/worklet/app.js` (+ its whole
+- `bare-pack` bundles `../../packages/hyper-wave/worklet/app.js` (+ its whole
   Hyperswarm/Autobase/WDK require graph) into `bundles/app.bundle.mjs`.
 - `react-native-bare-kit`'s `Worklet` boots that bundle inside the app; `src/useEngine.js` speaks
   the exact same JSON protocol the desktop renderer uses (`start-wave`, `tip`, `state`,
@@ -68,7 +68,7 @@ to package those prebuilds into `ios/addons/*.xcframework`, which it then vendor
 snags break the built-in version: CocoaPods **skips `prepare_command` for local path pods** (how
 `node_modules` pods install), and that script scans from the **repo root**, which in an
 npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs `bare-link` from
-`apps/mobile` (which reaches the addons via `hyperwave-lib-core`) and writes into the hoisted
+`apps/mobile` (which reaches the addons via `hyper-wave`) and writes into the hoisted
 `react-native-bare-kit` — wired into `postinstall` (auto after every install) and `npm run ios`.
 
 ## What's left (none of which touch the engine)
@@ -80,7 +80,7 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
   `engine.stageSelfie(...)` (the worklet already handles the rest, incl. the gallery blob).
 - **Wallet persistence + funding** — WDK works in the worklet (wallet is **on**), but the seed
   currently persists in the tmp dir (wiped per run → fresh unfunded wallet each launch). Inject
-  the seed from `expo-secure-store` via the init `config.seed` (the core already accepts it,
+  the seed from `expo-secure-store` via the init `config.seed` (the engine already accepts it,
   `lib/pay.js`) for a stable, secure wallet, then faucet-fund it to exercise burns/tips.
   Note: a wallet-enabled phone runs **paid** waves (enforces the burn gate), so a cross-peer demo
   needs the other peers funded too — or set `wallet: false` in `App.js` for a no-wallet demo.

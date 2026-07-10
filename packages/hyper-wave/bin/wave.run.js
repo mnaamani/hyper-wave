@@ -1,6 +1,6 @@
 #!/usr/bin/env bare
 // One wave instance per process (the real topology: each worker is its own process).
-// Runs under Bare:  bare bin/wave.run.js <name> <storageDir>  (or, if installed: hyperwave-wave)
+// Runs under Bare:  bare bin/wave.run.js <name> <storageDir>  (or, if installed: hyper-wave)
 // Needs `bare` on PATH — it's a separate runtime, not an npm dependency.
 //   env HYPERWAVE_BOOTSTRAP=host:port  -> local DHT (fast same-machine discovery)
 //   env HYPERWAVE_MATCH=<id>           -> isolated match topic

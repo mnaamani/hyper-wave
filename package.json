@@ -1,18 +1,18 @@
 {
   "name": "hyperwave-monorepo",
   "private": true,
-  "description": "HyperWave — global P2P stadium wave (Tether Developers Cup). Monorepo: the reusable Bare engine (packages/hyperwave-lib-core) + hosts (apps/*).",
+  "description": "HyperWave — global P2P stadium wave (Tether Developers Cup). Monorepo: the reusable Bare engine (packages/hyper-wave) + hosts (apps/*).",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "scripts": {
     "postinstall": "node scripts/fix-bare-engines.js",
-    "test": "npm test -w hyperwave-lib-core",
-    "test:e2e:local": "npm run test:e2e:local -w hyperwave-lib-core",
-    "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-lib-core",
+    "test": "npm test -w hyper-wave",
+    "test:e2e:local": "npm run test:e2e:local -w hyper-wave",
+    "test:e2e:onchain": "npm run test:e2e:onchain -w hyper-wave",
     "start": "npm start -w hyperwave-desktop --",
-    "lint": "prettier --check . && lunte packages apps/desktop scripts && eslint . && npm run lint:jsdoc -w hyperwave-lib-core",
+    "lint": "prettier --check . && lunte packages apps/desktop scripts && eslint . && npm run lint:jsdoc -w hyper-wave",
     "format": "prettier --write . && lunte --fix packages apps/desktop scripts"
   },
   "devDependencies": {

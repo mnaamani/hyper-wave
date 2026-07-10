@@ -4,7 +4,7 @@
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const fs = require('bare-fs');
-const { parseBootstrap, loadOrCreateSwarmSeed } = require('hyperwave-lib-core');
+const { parseBootstrap, loadOrCreateSwarmSeed } = require('hyper-wave');
 
 // "host:port[,host:port…]" → bootstrap array (a local DHT); '' / undefined → null (public DHT).
 console.log('parseBootstrap:', parseBootstrap('127.0.0.1:49737'));
