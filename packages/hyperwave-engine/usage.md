@@ -25,14 +25,20 @@ const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine')
 const ring = require('hyperwave-engine/lib/ring');
 const token = require('hyperwave-engine/lib/token');
 const chord = require('hyperwave-engine/lib/chord');
-const { createFlood } = require('hyperwave-engine/lib/flood');
+const { Flood } = require('hyperwave-engine/lib/flood');
 const gallery = require('hyperwave-engine/lib/gallery');
+
+// 3. The stateful classes wave.js composes (also subpath imports — see §10):
+const { PeerTable } = require('hyperwave-engine/lib/peer-table');
+const { SelfiePipeline } = require('hyperwave-engine/lib/selfie');
+const { GallerySession } = require('hyperwave-engine/lib/gallery-session');
 ```
 
 Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it headless](#2-drive-a-wave-headless-createwave) ·
 [ring.js](#3-ringjs--seats--successors) · [chord.js](#4-chordjs--topology-math) · [token.js](#5-tokenjs--receipts--attestations) ·
 [flood.js](#6-floodjs--gossip-dedup) · [gallery.js](#7-galleryjs--the-autobase-selfie-gallery) ·
-[payments](#8-payments--feesjs--payjs) · [seeds & bootstrap](#9-seed--bootstrap-helpers)
+[payments](#8-payments--feesjs--payjs) · [seeds & bootstrap](#9-seed--bootstrap-helpers) ·
+[stateful classes](#10-the-stateful-classes-wavejs-composes)
 
 ---
 
@@ -293,9 +299,9 @@ One rule turns a one-hop broadcast into an epidemic across a partial mesh: relay
 **first sight only**. Size-capped so the set can't grow unbounded.
 
 ```js
-const { createFlood } = require('hyperwave-engine/lib/flood');
+const { Flood } = require('hyperwave-engine/lib/flood');
 
-const flood = createFlood({ cap: 4096 });
+const flood = new Flood({ cap: 4096 });
 
 function onGossip(msg, fromPeer) {
   if (!flood.firstSight(msg.mid)) {
@@ -425,6 +431,31 @@ const keyPair = crypto.keyPair(seed); // the same identity every run (see docs/p
 `createWave` calls `loadOrCreateSwarmSeed` for you; pass `createWave({ swarmSeed })` only to inject
 an identity (e.g. from mobile secure storage). It is a **separate** seed from the wallet seed
 (`createPayments({ seed })`) — see [`docs/secure-seed-storage.md`](../../docs/secure-seed-storage.md).
+
+---
+
+## 10. The stateful classes wave.js composes
+
+`createWave` is a composition root: the per-concern state machines live in their own classes,
+each subpath-importable and unit-tested. `Flood` is shown in §6; the others:
+
+- **`PeerTable`** (`lib/peer-table.js`) — live peer bookkeeping: ring seats (angle always
+  derived from the id), direct-send channels, pinned ring edges (returned as a mirrorable
+  `{added, removed}` diff for `swarm.joinPeer`/`leavePeer`), and churn cooldowns that stop a
+  just-disconnected peer being resurrected as a ghost seat. `bare examples/peer-table.js`
+- **`SelfiePipeline`** (`lib/selfie.js`) — pairs the lobby-staged selfie with the hop receipt
+  (either order), posts exactly once per wave and only for the current wave, and owns the
+  burn-proof ticket lifetime (survives `reset()`, dropped by `clearBurnProof()` on a new
+  wave). `bare examples/selfie.js`
+- **`GallerySession`** (`lib/gallery-session.js`) — the per-wave gallery lifecycle over a
+  Corestore: `open(waveId, bootstrapKey)` creates/opens the current Autobase, `retain(waveId)`
+  marks a wave I initiated (its gallery is kept open for latecomers and reused on return;
+  others are closed when moving on), `admitWriter`/`postSelfie` are the two ends of the
+  optimistic writer-admission flow, `tick()` pulls replication. `bare examples/gallery-session.js`
+- **`ChordRouting`** (`lib/chord-routing.js`) — the distributed findSuccessor control plane
+  (find-succ RPC, join-time self-placement, successor repair). Transport-bound: it needs a
+  live gossip mesh, so drive it through `wave.findSuccessor(target)` (§2) rather than
+  standalone; the pure per-hop math it applies is `chord.findSuccessorStep` (§4).
 
 ---
 

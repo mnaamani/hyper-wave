@@ -1,6 +1,6 @@
 // Partial-topology harness for gossip flooding (protocol.md §3.1). Hyperswarm
 // full-meshes small swarms, so we can't force a partial mesh through the real
-// transport — instead we drive the *real* per-node flood decision (createFlood) over
+// transport — instead we drive the *real* per-node flood decision (Flood) over
 // synthetic graphs (line, ring, star, random partial mesh, disconnected) and assert:
 //   1. reach — every node in the origin's connected component processes the message;
 //   2. dedup — each node processes exactly once, even with many redundant copies;
@@ -8,17 +8,17 @@
 //   4. latency — rounds ≈ graph diameter (a few hops on a well-connected mesh).
 // Runs under Bare:  bare workers/lib/flood.test.js   (or `npm test`)
 const test = require('brittle');
-const { createFlood } = require('./flood');
+const { Flood } = require('./flood');
 
 // --- flood simulation over an undirected graph ------------------------------
 // `adj` is Map<id, ids[]> (symmetric). The origin stamps one message id and sends to
-// its neighbours; each node, on FIRST sight (the exact createFlood rule wave.js uses),
+// its neighbours; each node, on FIRST sight (the exact Flood rule wave.js uses),
 // relays to its other neighbours. Returns reach/dedup/cost/latency stats.
 function simulateFlood(adj, origin, opts = {}) {
   const mid = 'm';
   const flood = new Map();
   for (const id of adj.keys()) {
-    flood.set(id, createFlood(opts));
+    flood.set(id, new Flood(opts));
   }
   const receipts = new Map(); // id -> raw copies received (before dedup)
   const processed = new Set(); // nodes that accepted + relayed it (firstSight true)

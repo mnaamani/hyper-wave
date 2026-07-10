@@ -1,6 +1,10 @@
-// HyperWave orchestrator. Wires the transport (Hyperswarm + Protomux gossip) to the
-// pure domains — ring geometry (ring.js), Chord topology (chord.js), flood dedup
-// (flood.js), token crypto (token.js), and the selfie gallery (gallery.js).
+// HyperWave orchestrator — the composition root. Wires the transport (Hyperswarm +
+// Protomux gossip) to the pure domains — ring geometry (ring.js), Chord topology
+// (chord.js), token crypto (token.js), gallery ordering (gallery.js) — and composes the
+// stateful machines: PeerTable (seats/channels/pins), ChordRouting (distributed
+// findSuccessor), Flood (gossip dedup), SelfiePipeline (stage+receipt pairing), and
+// GallerySession (per-wave Autobase + writer admission). What remains here is the wave
+// lifecycle FSM, the token race + healing, and the gossip dispatch that binds them.
 // The payment layer (pay.js, WDK) is injected by the worker via setWallet(): wallet
 // address (for gallery tips) + the on-chain burn verifier (the paid-wave anti-spam gate).
 // Money model: burned fees (skin in the game) + gallery tips; there are no sponsor rewards.
@@ -9,17 +13,19 @@
 
 const Hyperswarm = require('hyperswarm');
 const Corestore = require('corestore');
-const Autobase = require('autobase');
 const Protomux = require('protomux');
 const cenc = require('compact-encoding');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const fs = require('bare-fs');
 
-const { angleOf, angleOfId, liveRing, nextClockwise, pickReachable } = require('./ring');
+const { angleOf, angleOfId, nextClockwise, pickReachable } = require('./ring');
 const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord');
-const { createChordRouting } = require('./chord-routing');
-const { createFlood } = require('./flood');
+const { ChordRouting } = require('./chord-routing');
+const { Flood } = require('./flood');
+const { GallerySession } = require('./gallery-session');
+const { PeerTable } = require('./peer-table');
+const { SelfiePipeline } = require('./selfie');
 const {
   ZERO_HASH,
   signReceipt,
@@ -28,13 +34,11 @@ const {
   advanceChain,
   signBurn,
   verifyBurn,
-  burnAuthorizes,
   signGalleryKey,
   verifyGalleryKey,
   signWaveEnd,
   verifyWaveEnd
 } = require('./token');
-const { galleryConfig, readGallery } = require('./gallery');
 
 const MATCH = 'hyperwave:demo-match:v1';
 const HEARTBEAT_MS = 2000; // pointers-heartbeat cadence (liveness + Chord pointer exchange)
@@ -65,7 +69,8 @@ const K_SUCCESSORS = 3;
 // add-writer floods too: a gallery seat is granted only by a current writer, so on a sparse
 // (Chord) mesh — especially after peers die and churn connections — a requester may not be
 // directly connected to any writer. Relaying lets the request reach one several hops away.
-// Authenticity is the carried receipt signature (admitWriter → verifyReceipt), not the hop.
+// Authenticity is the carried receipt signature (gallery-session.js admitWriter →
+// verifyReceipt), not the hop.
 const RELAYED_KINDS = new Set([
   'wave-announce',
   'wave-join',
@@ -86,8 +91,8 @@ const SELF_ID_FIELD = {
   'wave-pos': 'holder', // whoever currently holds the ball (broadcast by the holder)
   token: 'senderPeerId' // the immediate forwarder (re-stamped every hop)
   // NB: add-writer is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its `peerId`
-  // is a third party; it's authenticated by its carried receipt signature (admitWriter), not
-  // the connection. Binding it to `fromId` would make every relay drop it.
+  // is a third party; it's authenticated by its carried receipt signature (gallery-session.js
+  // admitWriter), not the connection. Binding it to `fromId` would make every relay drop it.
 };
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
@@ -96,15 +101,8 @@ const GOSSIP_SEEN_CAP = 4096;
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000;
-// Gallery-writer admission (§8.2). The requester re-broadcasts its add-writer every
-// ADMIT_RETRY_MS (a single one-hop broadcast can race connection setup) until admitted or
-// ADMIT_TIMEOUT_MS — generous because in a fast few-peer wave the race finishes first (the
-// admitter's check itself is a cheap local signature check — burnAuthorizes, no on-chain
-// call); the gallery persists after the wave, so a late admission still lands. BURN_WAIT_MS:
-// how long to wait for my own join burn to be recorded before requesting admission.
-const ADMIT_TIMEOUT_MS = 25000;
-const ADMIT_RETRY_MS = 3000;
-const BURN_WAIT_MS = 10000;
+// (Gallery-writer admission timing — ADMIT_TIMEOUT_MS/ADMIT_RETRY_MS/BURN_WAIT_MS — lives
+// with the admission flow in gallery-session.js.)
 
 /**
  * Short 8-char prefix of a hex id, for readable logs.
@@ -248,19 +246,26 @@ function createWave({
   let walletAddress = null; // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false; // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = null; // on-chain burn check (set once the wallet is up, via setWallet)
-  const peers = new Map(); // id -> { id, angle, lastSeen, country }
-  const senders = new Map(); // peerId -> gossip message send fn (for direct forwarding)
-  const pinned = new Set(); // ids we've swarm.joinPeer()'d (our physical ring edges)
-  const goneUntil = new Map(); // id -> ts: suppress re-seeding a just-closed peer (churn)
+  // Live peer bookkeeping (peer-table.js): seats, direct channels, pins, churn cooldowns.
+  const table = new PeerTable({ meId: me.id, staleMs: PEER_STALE_MS });
   const seen = new Set(); // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set(); // waves that finished — never re-adopt (prevents revival)
-  const flood = createFlood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
+  const flood = new Flood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
 
-  let base = null; // the CURRENT wave's gallery Autobase (created by originator, opened by others)
-  let autobaseKey = null; // hex bootstrap key of `base`, shared via gossip + token
-  let currentWaveId = null; // which wave `base` belongs to (galleries are per-wave)
-  const galleries = new Map(); // waveId -> base (I retain the galleries for waves I initiated)
-  const initiatedWaves = new Set(); // waveIds I started — I keep their galleries open (archivist)
+  // Per-wave gallery session (gallery-session.js): the current Autobase, the galleries I
+  // retain as an initiator, and the optimistic writer-admission flow. `floodGossip` is a
+  // function declaration below (hoisted); the accessors read live wave.js state.
+  const session = new GallerySession({
+    store,
+    me,
+    floodGossip,
+    onGallery,
+    onEvent,
+    enforcePaid: () => enforcePaid,
+    walletAddress: () => walletAddress,
+    burnProof: () => selfie.burnProof,
+    log
+  });
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
   // concurrent starts resolve deterministically (lower waveId wins). During the
@@ -277,59 +282,26 @@ function createWave({
   let tRing = null; // ring-maintenance timer
   let tRepair = null; // Chord successor-repair timer
 
-  // Selfie is captured up-front during the lobby (renderer stages it here), then posted
-  // to the gallery when the token actually reaches me — signed with my hop's receipt.
-  let stagedSelfie = null; // { image, caption } captured in the lobby, awaiting my hop
-  let myReceipt = null; // my hop's receipt once the token reaches me, awaiting the selfie
-  let selfiePosted = false; // guard: post my selfie exactly once per wave
-  let admissionPromise = null; // in-flight add-writer request (dedup concurrent callers)
-  let myBurnProof = null; // my signed fee-burn attestation — my gallery-admission ticket
-  const admittedKeys = new Set(); // (admitter) writer core keys I've already admitted this wave
+  // Selfie is captured up-front during the lobby (renderer stages it into the pipeline),
+  // then posted to the gallery when the token actually reaches me — signed with my hop's
+  // receipt. The pipeline (selfie.js) owns the pairing/once-per-wave/burn-ticket invariants;
+  // `canSelfieNow`/`postSelfie` are function declarations below (hoisted), safe to pass here.
+  const selfie = new SelfiePipeline({
+    canSelfie: () => canSelfieNow(),
+    currentWaveId: () => (wave ? wave.id : null),
+    post: (entry) => session.postSelfie(entry)
+  });
 
   // Distributed findSuccessor routing (chord-routing.js) — the Chord control plane over the
   // gossip mesh: join-time self-placement, periodic successor repair, and the find-succ RPC.
   // `trySend`/`maintainNeighbours` are function declarations below (hoisted), safe to pass here.
-  const chord = createChordRouting({
-    me,
-    peers,
-    senders,
-    pinned,
-    staleMs: PEER_STALE_MS,
-    trySend,
-    maintainNeighbours,
-    log
-  });
+  const chord = new ChordRouting({ me, table, trySend, maintainNeighbours, log });
 
   // --- ring / peer table -----------------------------------------------------
   /** Recompute the live ring and push `{ me, peers, successor }` to the host (onState). */
   function emit() {
-    const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS);
+    const ring = table.liveRing();
     onState({ me, peers: ring, successor: nextClockwise(me.angle, ring) });
-  }
-
-  /**
-   * Insert or refresh a peer in the local table. Angle is always derived from the peer id,
-   * never trusted from the wire. Country is the nation a peer supports (self-reported flag,
-   * purely cosmetic).
-   * @param {string} id Peer hex id (its Noise public key).
-   * @param {number} lastSeen Epoch ms of this sighting (drives staleness).
-   * @param {string} [country] Optional supported-nation code.
-   */
-  function upsert(id, lastSeen, country) {
-    if (id === me.id) {
-      return;
-    }
-    const cur = peers.get(id);
-    if (!cur || lastSeen > cur.lastSeen) {
-      peers.set(id, {
-        id,
-        angle: angleOfId(id),
-        lastSeen,
-        country: country ?? cur?.country ?? null
-      });
-    } else if (country && cur) {
-      cur.country = country;
-    }
   }
 
   // Phase 1 (scalable-topology.md §4.2/§6): the peer keys Hyperswarm has DISCOVERED on
@@ -346,12 +318,8 @@ function createWave({
       const id = b4a.toString(info.publicKey, 'hex');
       // Skip a peer we just saw disconnect (Hyperswarm keeps retrying it) so we don't
       // re-pin a dead neighbour; the cooldown clears on reconnect or when it expires.
-      const gone = goneUntil.get(id);
-      if (gone) {
-        if (now < gone) {
-          continue;
-        }
-        goneUntil.delete(id);
+      if (table.coolingDown(id, now)) {
+        continue;
       }
       ids.push(id);
     }
@@ -362,41 +330,37 @@ function createWave({
    * Phase 2+3 (scalable-topology.md §4.3/§4.5/§6): make the ring's edges *physical*.
    * We deliberately swarm.joinPeer() our successor-list (k clockwise) + predecessor
    * (the token walk / fault tolerance) plus our finger table (O(log N) ring-spanning
-   * reachability), then diff against `pinned` as the ring churns — joinPeer new
-   * targets, leavePeer former ones. Recomputing the fingers here each refresh *is*
-   * Chord's fixFingers. leavePeer only drops the explicit pin (not a live topic-
-   * driven connection), so the full mesh stays as a fallback until gossip is slimmed
-   * (Phase 4); the finger set means we no longer *rely* on that mesh for reachability.
+   * reachability), then diff against the table's pinned set as the ring churns
+   * (table.updatePins) — joinPeer the additions, leavePeer the removals. Recomputing
+   * the fingers here each refresh *is* Chord's fixFingers. leavePeer only drops the
+   * explicit pin (not a live topic-driven connection), so the full mesh stays as a
+   * fallback until gossip is slimmed (Phase 4); the finger set means we no longer
+   * *rely* on that mesh for reachability.
    *
    * Candidates = DHT-discovered ∪ already-connected ∪ gossip-known (live seats). The
-   * token-walk seats (`peers`) still come only from connections + gossip, so a stale
-   * discovery we can't reach is pinned (dialed) but never shown as a seat.
+   * token-walk seats (the table's live ring) still come only from connections +
+   * gossip, so a stale discovery we can't reach is pinned (dialed) but never shown
+   * as a seat.
    */
   function maintainNeighbours() {
     // Candidates: DHT-discovered ∪ connected ∪ gossip-known ∪ routing-discovered (chord).
     const cand = new Set([
       ...discoveredIds(),
-      ...senders.keys(),
-      ...peers.keys(),
+      ...table.senderIds(),
+      ...table.peerIds(),
       ...chord.pinCandidates()
     ]);
     cand.delete(me.id);
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS);
-    for (const id of targets) {
-      if (pinned.has(id)) {
-        continue;
-      }
-      pinned.add(id);
+    // The table diffs `pinned`; we mirror the diff into the swarm (side-effects here).
+    const { added, removed } = table.updatePins(targets);
+    for (const id of added) {
       try {
         swarm.joinPeer(b4a.from(id, 'hex'));
         log('pin neighbour', shortId(id));
       } catch {}
     }
-    for (const id of pinned) {
-      if (targets.has(id)) {
-        continue;
-      }
-      pinned.delete(id);
+    for (const id of removed) {
       try {
         swarm.leavePeer(b4a.from(id, 'hex'));
         log('unpin neighbour', shortId(id));
@@ -428,7 +392,7 @@ function createWave({
   // so there is no separate `presence` message.
   /** @returns {Object} A `pointers` gossip message: my id, country, successor-list, and predecessor. */
   function myPointers() {
-    const ids = liveRing([...peers.values()], Date.now(), PEER_STALE_MS).map((peer) => peer.id);
+    const ids = table.liveRing().map((peer) => peer.id);
     return {
       kind: 'pointers',
       id: me.id,
@@ -622,7 +586,7 @@ function createWave({
       return;
     }
     if (msg.kind === 'add-writer') {
-      admitWriter(msg);
+      session.admitWriter(msg);
       return;
     }
     if (msg.kind !== 'pointers') {
@@ -630,14 +594,14 @@ function createWave({
     }
     // sender is a live neighbour (direct channel); its advertised succ/pred are
     // discovery hints, marked slightly stale so they age out unless independently
-    // refreshed. Skip a hint for a peer we just saw disconnect (goneUntil), so a
-    // third peer's advert can't resurrect a ghost seat.
+    // refreshed. Skip a hint for a peer we just saw disconnect (the table's churn
+    // cooldown), so a third peer's advert can't resurrect a ghost seat.
     const now = Date.now();
-    upsert(msg.id, now, msg.country);
+    table.upsert(msg.id, now, msg.country);
     const learned = now - Math.floor(PEER_STALE_MS / 2);
     for (const id of [...(msg.succ || []), msg.pred]) {
-      if (id && !(goneUntil.get(id) > now)) {
-        upsert(id, learned);
+      if (id && !table.coolingDown(id, now)) {
+        table.upsert(id, learned);
       }
     }
     stabilize(msg);
@@ -655,8 +619,7 @@ function createWave({
     if (!msg.pred) {
       return;
     }
-    const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS);
-    const succ = nextClockwise(me.angle, ring);
+    const succ = nextClockwise(me.angle, table.liveRing());
     if (!succ || succ.id !== msg.id) {
       return;
     }
@@ -672,7 +635,7 @@ function createWave({
    */
   function broadcast(obj) {
     const str = JSON.stringify(obj);
-    for (const send of senders.values()) {
+    for (const [, send] of table.senderEntries()) {
       try {
         send(str);
       } catch {}
@@ -700,7 +663,7 @@ function createWave({
    */
   function relayFlood(msg, fromId) {
     const str = JSON.stringify(msg);
-    for (const [id, send] of senders) {
+    for (const [id, send] of table.senderEntries()) {
       if (id === fromId) {
         continue;
       }
@@ -717,7 +680,7 @@ function createWave({
    * @returns {boolean} True if it was sent, false if there's no channel (or the send threw).
    */
   function trySend(id, obj) {
-    const send = senders.get(id);
+    const send = table.send(id);
     if (!send) {
       return false;
     }
@@ -738,8 +701,8 @@ function createWave({
    */
   function broadcastToNeighbours(obj) {
     const str = JSON.stringify(obj);
-    for (const id of pinned) {
-      const send = senders.get(id);
+    for (const id of table.pinnedIds()) {
+      const send = table.send(id);
       if (!send) {
         continue;
       }
@@ -750,74 +713,8 @@ function createWave({
   }
 
   // --- gallery (Autobase multi-writer) --------------------------------------
-
-  /**
-   * Open (or, with bootstrapKey=null, create) the gallery Autobase for `waveId`.
-   * Galleries are PER-WAVE: the namespace is keyed by waveId so each wave (and each
-   * fresh run, since waveId is random) starts empty instead of accumulating old
-   * selfies. All peers share the originator's base; writes come from many admitted
-   * writers, merged into one ordered view. Replication rides store.replicate(conn).
-   * @param {string} waveId The wave whose gallery to open/create.
-   * @param {Buffer|null} bootstrapKey The originator's autobase key, or null to create a fresh gallery.
-   * @returns {Object} The Autobase instance for this wave.
-   */
-  function openGallery(waveId, bootstrapKey) {
-    if (currentWaveId === waveId && base) {
-      return base;
-    }
-    const kept = galleries.get(waveId);
-    if (kept) {
-      // I already hold this gallery (a wave I initiated) — make it current, don't reopen
-      base = kept;
-      currentWaveId = waveId;
-      autobaseKey = b4a.toString(kept.key, 'hex');
-      return base;
-    }
-    // Close the previous wave's gallery when moving on — UNLESS I initiated it, in which case
-    // I keep it open to archive it (so it survives for latecomers).
-    if (base && !initiatedWaves.has(currentWaveId)) {
-      base.close().catch(() => {});
-      if (currentWaveId) {
-        galleries.delete(currentWaveId);
-      }
-    }
-    currentWaveId = waveId;
-    autobaseKey = null;
-    const autobase = new Autobase(
-      store.namespace('wave-gallery:' + waveId),
-      bootstrapKey,
-      galleryConfig()
-    );
-    base = autobase;
-    galleries.set(waveId, autobase);
-    autobase.on('update', () => {
-      if (base === autobase) {
-        emitGallery();
-      }
-    });
-    autobase.ready().then(() => {
-      if (galleries.get(waveId) !== autobase) {
-        return; // superseded (peer moved on and closed it)
-      }
-      const key = b4a.toString(autobase.key, 'hex');
-      if (base === autobase) {
-        autobaseKey = key;
-      }
-      log(
-        'gallery ready',
-        shortId(waveId),
-        'key',
-        shortId(key),
-        'writable',
-        autobase.writable,
-        initiatedWaves.has(waveId) ? '(mine)' : ''
-      );
-      if (base === autobase) {
-        emitGallery();
-      }
-    });
-    return autobase;
-  }
+  // The open/create/retain/admission machinery lives in gallery-session.js; wave.js keeps
+  // only the protocol-coupled gate below (the gallery-key attestation, tied to `wave`).
 
   // Open a gallery a peer advertised (wave-start / token / wave-sync), but ONLY after
   // verifying the key is the one the wave's originator signed (§ gallery-key attestation).
@@ -847,206 +744,15 @@ function createWave({
     if (wave && wave.id === waveId) {
       wave.keySig = keySig;
     }
-    openGallery(waveId, b4a.from(keyHex, 'hex'));
-  }
-
-  /**
-   * Read the current gallery's ordered view and push it to the host (onGallery).
-   * @returns {Promise<void>}
-   */
-  async function emitGallery() {
-    if (!base) {
-      return;
-    }
-    onGallery(await readGallery(base));
-  }
-
-  // (Admitter side) Grant gallery write access — OPTIMISTIC admission. Only a current writer
-  // (the originator, or an already-admitted writer) admits, and only if the requester presents:
-  //   1. a valid hop receipt for the current wave (authenticity: the receipt signature binds
-  //      the request to peerId, so it stays sound even when flooded through relays), and
-  //   2. a fee-burn attestation SIGNED for that peerId + wave (burnAuthorizes) — carrying the
-  //      txHash + tip address, but NOT verified on-chain here.
-  // We deliberately do *not* verify the burn on-chain at admission: that's O(N) REST calls
-  // concentrated on the admitter and doesn't scale. Instead the burn is verified only when it
-  // pays off — by tippers/auditors via the entry's `burnTx`. Spam is bounded locally: one entry
-  // per peer + a byte-size cap on the image (gallery.js apply). So a fake-burn entry is cheap to
-  // make but is worthless to tip and is publicly detectable. Fully local + synchronous.
-  /**
-   * @param {Object} msg An `add-writer` request (carries the requester's writer key, hop receipt,
-   *   and — when enforcing — its signed burn attestation).
-   */
-  function admitWriter(msg) {
-    if (!base || !base.writable || !msg.key || msg.waveId !== currentWaveId) {
-      return;
-    }
-    if (admittedKeys.has(msg.key)) {
-      return;
-    }
-    if (
-      !verifyReceipt(
-        {
-          peerId: msg.peerId,
-          waveId: msg.waveId,
-          hopCount: msg.hopCount,
-          prevChainHash: msg.chainHash,
-          timestamp: msg.receiptTs
-        },
-        msg.receiptSig
-      )
-    ) {
-      return;
-    }
-    if (enforcePaid && !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)) {
-      return; // needs a signed burn attestation
-    }
-    admittedKeys.add(msg.key);
-    base.append({ type: 'add-writer', key: msg.key });
-    log('admitted gallery writer', shortId(msg.peerId));
-  }
-
-  // Become an admitted gallery writer: broadcast an add-writer request presenting (a) my hop
-  // receipt for this wave and (b) my fee-burn attestation — admission is OPTIMISTIC: the
-  // admitter checks only the attestation signature (burnAuthorizes), no on-chain call; the
-  // burn is verified later where it pays off (tippers/auditors via burnTx). Then
-  // wait until writable. `admissionPromise` dedups concurrent callers into one in-flight request.
-  // (The originator is already a writer and never comes here — it paid its kick-off burn.)
-  /**
-   * @param {{waveId: string, hopCount: number, chainHash: string, receiptTs: number, receiptSig: string}} receipt
-   *   My hop receipt, presented as the admission credential.
-   * @returns {Promise<boolean>} True once this peer's gallery core is writable, false on timeout.
-   */
-  function ensureWriter(receipt) {
-    if (!base) {
-      return Promise.resolve(false);
-    }
-    if (base.writable) {
-      return Promise.resolve(true);
-    }
-    if (admissionPromise) {
-      return admissionPromise;
-    }
-    admissionPromise = base
-      .ready()
-      // when enforcing, my burn attestation is my admission ticket; wait for the burn tx to be
-      // recorded (join burns are fire-and-forget from the lobby) before requesting admission
-      .then(() => (enforcePaid && !myBurnProof ? waitFor(() => !!myBurnProof, BURN_WAIT_MS) : true))
-      .then(() => requestAdmission(receipt));
-    admissionPromise.finally(() => {
-      admissionPromise = null;
-    });
-    return admissionPromise;
-  }
-
-  // Flood add-writer and wait until admitted, re-flooding every ADMIT_RETRY_MS (each retry gets
-  // a fresh flood id via floodGossip, so it re-blankets the mesh rather than being deduped away
-  // — the reach a churny post-heal topology needs). The burn (my admission ticket) is pinned
-  // into the request now, so a later resetSelfie can't blank it mid-wait. Resolves true once
-  // writable, false on timeout.
-  /**
-   * @param {{waveId: string, hopCount: number, chainHash: string, receiptTs: number, receiptSig: string}} receipt
-   *   My hop receipt, carried in the add-writer request.
-   * @returns {Promise<boolean>} True once writable, false on ADMIT_TIMEOUT_MS timeout.
-   */
-  function requestAdmission(receipt) {
-    return new Promise((resolve) => {
-      if (base.writable) {
-        resolve(true);
-        return;
-      }
-      const req = {
-        kind: 'add-writer',
-        key: b4a.toString(base.local.key, 'hex'),
-        peerId: me.id,
-        waveId: receipt.waveId,
-        hopCount: receipt.hopCount,
-        chainHash: receipt.chainHash,
-        receiptTs: receipt.receiptTs,
-        receiptSig: receipt.receiptSig,
-        burn: myBurnProof || undefined
-      };
-      const started = Date.now();
-      const tick = () => {
-        if (base.writable) {
-          resolve(true);
-          return;
-        }
-        if (Date.now() - started > ADMIT_TIMEOUT_MS) {
-          resolve(false);
-          return;
-        }
-        floodGossip(req); // re-stamps req.mid each tick → floods anew across the partial mesh
-        setTimeout(tick, ADMIT_RETRY_MS);
-      };
-      tick();
-    });
-  }
-
-  /**
-   * Post my selfie to the gallery (admission first, then append).
-   * @param {Object} entry The staged selfie + my hop receipt.
-   * @param {string} entry.waveId Wave this selfie belongs to.
-   * @param {number} entry.hopCount My hop position.
-   * @param {string} entry.receiptSig My hop receipt signature (the write-gate credential).
-   * @param {string} entry.chainHash Accumulator chain hash at my hop.
-   * @param {number} entry.receiptTs My receipt timestamp.
-   * @param {string} [entry.caption] Optional caption.
-   * @param {string} [entry.image] Inline JPEG data URL.
-   * @returns {Promise<void>}
-   */
-  async function postSelfie({
-    waveId,
-    hopCount,
-    receiptSig,
-    chainHash,
-    receiptTs,
-    caption,
-    image
-  }) {
-    if (!base) {
-      onEvent({ event: 'gallery-error', reason: 'no-gallery-yet' });
-      return;
-    }
-    // Capture closure state NOW, before the admission await: in a fast (few-peer) wave the
-    // race can complete during ensureWriter, and goIdle→resetSelfie would clear this before
-    // the append — dropping our own tip address. (The staged image/receipt are already captured
-    // as args.)
-    const burnProof = myBurnProof;
-    if (!(await ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
-      // distinguish the two failure modes so the UI can tell the user what actually went wrong:
-      // no burn ticket at all (fee never paid/confirmed) vs. a valid ticket that timed out being
-      // admitted (network/mesh). enforcePaid off (headless) → always the timeout case.
-      const reason = enforcePaid && !myBurnProof ? 'fee-unpaid' : 'admit-timeout';
-      onEvent({ event: 'gallery-error', reason });
-      return;
-    }
-    await base.append({
-      type: 'wave-selfie',
-      waveId,
-      peerId: me.id,
-      hopCount,
-      receiptSig,
-      chainHash,
-      receiptTs,
-      country: me.country || '',
-      caption: caption || '',
-      image: image || '',
-      address: walletAddress || '', // my TRX wallet, so viewers can tip this selfie (§WDK)
-      // my burn attestation — apply() keeps the tip `address` only if it's the wallet this
-      // burn came from, so a tip always reaches the wallet that paid in (§ tip-address gate).
-      // It's verified then dropped from the stored entry (kept lean); `tronAddress === address`.
-      burn: burnProof || undefined,
-      timestamp: Date.now()
-    });
-    log('posted selfie hop', hopCount);
-    emitGallery();
+    session.open(waveId, b4a.from(keyHex, 'hex'));
   }
 
   // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
   // identity to the on-chain tx), stash it as my gallery-admission ticket, and return it.
   // Two consumers: the initiator attaches its KICK-OFF proof to the wave-announce (the
   // paid-wave gate, announcePaid); and any participant presents its proof (kick-off OR join)
-  // when it requests to write a selfie — so a gallery seat requires a real burn (ensureWriter).
+  // when it requests to write a selfie — so a gallery seat requires a real burn (the
+  // session's admission flow).
   /**
    * @param {Object} fields The confirmed on-chain burn.
    * @param {string} fields.reason 'kickoff' (initiator) or 'join' (participant).
@@ -1062,7 +768,7 @@ function createWave({
     // it if we've moved past that wave entirely (its gallery is no longer current) — never let a
     // stale burn overwrite the current wave's ticket.
     const wid = waveId || wave?.id;
-    if (!wid || (wid !== wave?.id && wid !== currentWaveId)) {
+    if (!wid || (wid !== wave?.id && wid !== session.waveId)) {
       return null;
     }
     const fields = {
@@ -1074,32 +780,9 @@ function createWave({
       tronAddress: walletAddress || '',
       burnTs: Date.now()
     };
-    myBurnProof = { ...fields, sig: signBurn(swarm.keyPair, fields) };
-    return myBurnProof;
-  }
-
-  /**
-   * Poll `pred` every 200ms (self-rescheduling timeout) until it's true or `timeoutMs` elapses.
-   * @param {() => boolean} pred Predicate polled each tick.
-   * @param {number} timeoutMs Give-up window in ms.
-   * @returns {Promise<boolean>} True if `pred` became true, false on timeout.
-   */
-  function waitFor(pred, timeoutMs) {
-    return new Promise((resolve) => {
-      const started = Date.now();
-      function poll() {
-        if (pred()) {
-          resolve(true);
-          return;
-        }
-        if (Date.now() - started > timeoutMs) {
-          resolve(false);
-          return;
-        }
-        setTimeout(poll, 200);
-      }
-      poll();
-    });
+    const proof = { ...fields, sig: signBurn(swarm.keyPair, fields) };
+    selfie.setBurnProof(proof);
+    return proof;
   }
 
   // --- wave lifecycle (idle -> lobby -> racing -> idle) ----------------------
@@ -1148,7 +831,7 @@ function createWave({
       teardown();
     }
     resetSelfie(); // fresh wave — clear any staged selfie/receipt from a prior one
-    myBurnProof = null; // a genuinely new wave (guarded above): drop the previous wave's burn ticket
+    selfie.clearBurnProof(); // a genuinely new wave (guarded above): drop the previous wave's burn ticket
     // paid: 'verified' when the kick-off burn is confirmed (or enforcement is off);
     // 'pending' while a peer verifies it on-chain; 'rejected' if it isn't a real burn.
     wave = {
@@ -1277,77 +960,22 @@ function createWave({
   }
 
   /**
-   * The renderer captured my selfie during the lobby and stages it here; it's posted
-   * to the gallery when the token reaches me (below). Staging may arrive before or
-   * after my hop — tryPostSelfie() fires once both the image and my receipt are ready.
-   * @param {{image?: string, caption?: string}} [selfie] The captured frame + optional caption.
+   * Clear this wave's selfie-pipeline + admission state (but NOT the burn ticket — the
+   * pipeline keeps it for a late admission; see selfie.js).
    */
-  function stageSelfie({ image, caption } = {}) {
-    stagedSelfie = { image: image || '', caption: caption || '' };
-    tryPostSelfie();
-  }
-
-  /**
-   * Record my hop's receipt when the token reaches me — the write-gate credential for
-   * my staged selfie. Paired with stageSelfie() by tryPostSelfie().
-   * @param {Object} receipt My hop receipt.
-   * @param {string} receipt.waveId The current wave.
-   * @param {number} receipt.hopCount My hop position.
-   * @param {string} receipt.receiptSig My hop receipt signature.
-   * @param {string} receipt.chainHash Accumulator chain hash at my hop.
-   * @param {number} receipt.receiptTs My receipt timestamp.
-   */
-  function recordMyReceipt({ waveId, hopCount, receiptSig, chainHash, receiptTs }) {
-    if (!canSelfieNow()) {
-      return;
-    }
-    myReceipt = { waveId, hopCount, receiptSig, chainHash, receiptTs };
-    tryPostSelfie();
-  }
-
-  /**
-   * Post my lobby selfie once BOTH the receipt (token reached me) and the staged image
-   * (captured in the lobby) are available, exactly once per wave.
-   */
-  function tryPostSelfie() {
-    if (selfiePosted || !myReceipt || !stagedSelfie) {
-      return;
-    }
-    if (!wave || myReceipt.waveId !== wave.id) {
-      return;
-    }
-    selfiePosted = true;
-    postSelfie({ ...myReceipt, image: stagedSelfie.image, caption: stagedSelfie.caption });
-  }
-
-  /** Clear this wave's staged selfie / receipt / admission state (but NOT the burn ticket — see below). */
   function resetSelfie() {
-    stagedSelfie = null;
-    myReceipt = null;
-    selfiePosted = false;
-    admissionPromise = null;
-    // NB: myBurnProof is NOT cleared here. The wave ends the instant the token completes
-    // (it races at network speed), but a joiner's fee burn can confirm slightly later; the gallery
-    // persists (the originator keeps it open) precisely so a late admission still lands, and
-    // the burn attestation is that admission ticket. It's bound to its waveId (burnAuthorizes
-    // checks burn.waveId), so keeping it is safe — it can only ever admit its own wave. It's
-    // cleared instead when a genuinely new wave's lobby begins (enterLobby).
-    admittedKeys.clear();
+    selfie.reset();
+    session.resetAdmission();
   }
 
   /**
    * Emit a holding event; canSelfie tells the renderer this peer is a participant (its
    * staged selfie will post now). Everyone else just relays the ball.
-   * @param {Object} receipt My hop receipt (same shape as recordMyReceipt's).
-   * @param {string} receipt.waveId The current wave.
-   * @param {number} receipt.hopCount My hop position.
-   * @param {string} receipt.receiptSig My hop receipt signature.
-   * @param {string} receipt.chainHash Accumulator chain hash at my hop.
-   * @param {number} receipt.receiptTs My receipt timestamp.
+   * @param {import('./selfie').SelfieReceipt} receipt My hop receipt.
    */
   function emitHolding(receipt) {
     const { waveId, hopCount } = receipt;
-    recordMyReceipt(receipt);
+    selfie.recordReceipt(receipt);
     onEvent({
       event: 'holding',
       waveId,
@@ -1375,11 +1003,10 @@ function createWave({
    * @returns {{id: string, angle: number}|null} The chosen successor seat, or null at a dead end.
    */
   function pickSuccessor(skipped) {
-    const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS);
     return pickReachable({
-      sortedRing: ring,
+      sortedRing: table.liveRing(),
       myAngle: me.angle,
-      reachable: new Set(senders.keys()),
+      reachable: new Set(table.senderIds()),
       skipped
     });
   }
@@ -1417,7 +1044,7 @@ function createWave({
       goIdle('stalled');
       return;
     }
-    senders.get(succ.id)(JSON.stringify(token));
+    table.send(succ.id)(JSON.stringify(token));
     onEvent({ event: 'forwarded', waveId: token.waveId, hopCount: token.hopCount, to: succ.id });
 
     // heal: expect the peer I forwarded to (succ) to hold the ball soon; its wave-pos is the
@@ -1574,7 +1201,7 @@ function createWave({
       return null;
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
-    initiatedWaves.add(waveId); // I own this wave: I keep its gallery open (archivist)
+    session.retain(waveId); // I own this wave: I keep its gallery open (archivist)
     enterLobby({ waveId, by: me.id, mine: true }); // initiator auto-joins (marks its own lobby)
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the kick-off fee and
@@ -1685,11 +1312,11 @@ function createWave({
     if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
       return;
     }
-    openGallery(waveId, null); // create this wave's gallery, then wait for its key
-    await base.ready();
+    const gallery = session.open(waveId, null); // create this wave's gallery, wait for its key
+    await gallery.ready();
     // I'm the originator: sign (waveId, galleryKey) so peers can trust the key I publish
     // (it rides unsigned/relayed fields otherwise — § gallery-key attestation).
-    wave.keySig = signGalleryKey(swarm.keyPair, { waveId, autobaseKey });
+    wave.keySig = signGalleryKey(swarm.keyPair, { waveId, autobaseKey: session.key });
 
     log(
       'starting wave',
@@ -1697,14 +1324,14 @@ function createWave({
       'roster',
       wave.roster.size,
       'gallery',
-      shortId(autobaseKey)
+      shortId(session.key)
     );
     floodGossip({
       kind: 'wave-start',
       waveId,
       by: me.id,
       roster: [...wave.roster],
-      key: autobaseKey,
+      key: session.key,
       keySig: wave.keySig,
       paid: wave.kickoffProof || undefined // so peers adopting via start can re-sync newcomers
     });
@@ -1718,7 +1345,7 @@ function createWave({
         originator: me.id,
         hopCount: 0,
         prevChainHash: ZERO_HASH,
-        autobaseKeyHex: autobaseKey
+        autobaseKeyHex: session.key
       })
     );
   }
@@ -1728,8 +1355,6 @@ function createWave({
     store.replicate(conn); // carries gossip mux + Autobase gallery replication
 
     const id = b4a.toString(conn.remotePublicKey, 'hex');
-    goneUntil.delete(id); // reconnected — lift any churn cooldown
-    upsert(id, Date.now());
     log('peer connected', shortId(id));
 
     const mux = Protomux.from(conn);
@@ -1749,7 +1374,7 @@ function createWave({
     channel.open();
 
     const send = (str) => message.send(str);
-    senders.set(id, send);
+    table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
     chord.scheduleBootstrap(); // first connection -> place myself in the ring via findSuccessor
 
     // greet: my compact pointers (Phase 4 — no O(N) snapshot; carries liveness +
@@ -1766,7 +1391,7 @@ function createWave({
           phase: wave.phase,
           by: wave.by,
           roster: [...wave.roster],
-          key: autobaseKey,
+          key: session.key,
           keySig: wave.keySig || undefined, // originator's signed gallery key (§ gallery-key)
           paid: wave.kickoffProof || undefined, // so a mid-lobby newcomer can verify + join
           lobbyMsLeft: wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
@@ -1776,18 +1401,17 @@ function createWave({
     emit();
 
     conn.on('close', () => {
-      senders.delete(id);
-      peers.delete(id); // direct disconnect is authoritative for that peer
-      goneUntil.set(id, Date.now() + PEER_STALE_MS); // cooldown: don't re-pin/re-hint it yet
-      if (senders.size === 0) {
+      // authoritative disconnect: drop the channel + seat, start the churn cooldown
+      const { solo, wasPinned } = table.onDisconnect(id);
+      if (solo) {
         chord.markSolo(); // went solo -> re-bootstrap on reconnect
       }
       log('peer disconnected', shortId(id));
       // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
       // promotes the next successor-list entry and repairs fingers without waiting
-      // for the next tick. `pinned` still holds the dead id; maintainNeighbours diffs
+      // for the next tick. The table still holds the dead pin; maintainNeighbours diffs
       // it out (leavePeer) and pins the replacement from the now-smaller ring.
-      if (pinned.has(id)) {
+      if (wasPinned) {
         maintainNeighbours();
       }
       emit();
@@ -1831,15 +1455,8 @@ function createWave({
     // re-pin ring edges from current discovery even if no 'update' fired
     maintainNeighbours();
     emit(); // also re-evaluate staleness pruning
-    // Pull replicated gallery writes for every gallery I hold. For most peers that's just the
-    // current wave's; for a peer that initiated waves it also includes the galleries it retains
-    // (so each keeps syncing and stays a live source for latecomers).
-    for (const gallery of galleries.values()) {
-      gallery.update().catch(() => {});
-    }
-    if (base) {
-      emitGallery();
-    }
+    // Pull replicated gallery writes for every gallery held (current + retained) and repaint.
+    session.tick();
     tRing = setTimeout(ringTick, RINGUPDATE_MS);
   }
   tRing = setTimeout(ringTick, RINGUPDATE_MS);
@@ -1858,7 +1475,7 @@ function createWave({
     startWave,
     join,
     setCountry,
-    stageSelfie,
+    stageSelfie: (input) => selfie.stage(input),
     // Wire the payment layer once the wallet is up: my address (for gallery tips /
     // attestations) and the on-chain burn verifier (enables the paid-wave anti-spam gate).
     setWallet: (address, verifier) => {
@@ -1872,7 +1489,7 @@ function createWave({
     recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)
     // Distributed Chord lookup: the true successor of a peer id's ring position (or a
     // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
-    findSuccessor: chord.findSuccessor,
+    findSuccessor: (target) => chord.findSuccessor(target),
     async close() {
       clearTimeout(tHeartbeat);
       clearTimeout(tRing);
@@ -1882,9 +1499,7 @@ function createWave({
       clearTimeout(healTimer);
       chord.close();
       await swarm.destroy();
-      for (const gallery of galleries.values()) {
-        await gallery.close().catch(() => {});
-      }
+      await session.close();
       await store.close();
     }
   };

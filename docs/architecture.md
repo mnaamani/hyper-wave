@@ -145,13 +145,20 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
                      owns the command dispatch (start/join/tip/send-trx/stage-selfie/
                      refresh-wallet/fetch-transactions) and the fee flow; both hosts are
                      thin shims over this
-    wave.js          orchestrator: transport + ring pinning + lifecycle + gallery + healing
+    wave.js          orchestrator (composition root): transport + gossip dispatch + wave
+                     lifecycle + token race/healing; composes the stateful classes below
     ring.js          pure ring geometry (angleOf, liveRing, nextClockwise, pickReachable)
     chord.js         pure Chord math (nodeId, successors, fingers, findSuccessorStep, stabilizeStep)
-    chord-routing.js createChordRouting: distributed findSuccessor RPC + join placement + repair
-    flood.js         pure gossip-flood dedup (firstSight) for relayed lifecycle messages
+    chord-routing.js ChordRouting class: distributed findSuccessor RPC + join placement + repair
+    flood.js         Flood class: gossip-flood dedup (firstSight) for relayed lifecycle messages
+    peer-table.js    PeerTable class: seats/channels/pins/churn-cooldowns (angle always derived
+                     from the id; disconnects are authoritative + cooled down)
+    selfie.js        SelfiePipeline class: pairs the staged lobby selfie with my hop receipt,
+                     posts exactly once per wave, owns the burn-ticket lifetime
     token.js         pure token crypto (receipts, chain accumulator, burn + wave-end attestations)
     gallery.js       Autobase config + ordering (galleryConfig, buildGallery, readGallery)
+    gallery-session.js GallerySession class: per-wave open/create/retain (archivist rule) +
+                     the optimistic writer-admission flow (flooded add-writer)
     fees.js          shared fee flow (burn memo, payFee, confirmBurn, wireWallet)
     pay.js           WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx,
                      transactions (on-chain history via TronGrid, both directions)

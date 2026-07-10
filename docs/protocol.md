@@ -187,7 +187,7 @@ Inputs that build the map:
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source.                                                                     |
 | connection **open**                                                              | `upsert(remoteId, now)`; also mark **reachable** (eligible token successor); lift any churn cooldown. A direct connection is authoritative liveness. |
-| connection **close**                                                             | delete the peer (and its reachable mark); set a `goneUntil` cooldown (`PEER_STALE_MS`) so DHT re-seeding can't immediately resurrect the dead peer.  |
+| connection **close**                                                             | delete the peer (and its reachable mark); set a churn cooldown (`PEER_STALE_MS`) so DHT re-seeding can't immediately resurrect the dead peer.        |
 | `pointers { id, country, succ: [id…], pred: id }`                                | `upsert(id, now, country)` (the heartbeat); upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step.                  |
 
 ```
@@ -528,12 +528,12 @@ capture and posting are split:
 
 - **Capture (lobby, synchronized):** when a peer opts in, the renderer opens the camera and
   shows a countdown to kickoff. At kickoff (or on a manual press) it grabs one frame and
-  **stages** it to the worker (`stage-selfie` command → `stagedSelfie`). Everyone captures
+  **stages** it to the worker (`stage-selfie` command → the selfie pipeline). Everyone captures
   around the same moment, at a relaxed pace — independent of ring size.
-- **Post (race, on the ball):** when the token reaches me I record my hop's receipt
-  (`recordMyReceipt`) and post the staged image to the gallery, gated on that receipt (the
-  add-writer credential). `tryPostSelfie` fires once **both** the staged image and the
-  receipt are present, so it's robust to either arriving first (e.g. the originator, which
+- **Post (race, on the ball):** when the token reaches me I record my hop's receipt into
+  the selfie pipeline (`selfie.js`) and post the staged image to the gallery, gated on that
+  receipt (the add-writer credential). The pipeline posts once **both** the staged image and
+  the receipt are present, so it's robust to either arriving first (e.g. the originator, which
   stages and holds at hop 0 almost simultaneously). Posted exactly once per wave.
 
 **There is no per-hop dwell** — the token never has to cover a human taking a selfie, and hop

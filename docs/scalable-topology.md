@@ -110,7 +110,7 @@ whole ring** (the partial-knowledge case that a purely local computation gets wr
   with only a successor pointer it degrades to a _correct_ linear walk. Brittle-tested,
   including a simulation over 64-node partial-knowledge networks (correct within the
   2·log₂N ≤ 12-hop test bound).
-- **Transport** (`chord-routing.js`, `createChordRouting`): `find-succ` / `find-succ-reply`
+- **Transport** (`chord-routing.js`, the `ChordRouting` class): `find-succ` / `find-succ-reply`
   messages. `findSuccessor` sends the query to the closest preceding _connected_ finger;
   each hop forwards along connected fingers and the reply **retraces the same path** back to
   the origin (no ad-hoc connections), with a hop cap + timeout. Wired by `wave.js` and
@@ -154,7 +154,7 @@ flood has already passed.
 ### 4.7 Gallery replication over a partial mesh — **reach verified; persistence held by the initiator**
 
 `Corestore.replicate(conn)` runs on every connection, and the gallery Autobase is opened by
-essentially every peer that sees the wave (`openGallery` fires on `wave-start`, inside
+essentially every peer that sees the wave (the gallery session opens on `wave-start`, inside
 `processToken` so even non-roster **relayers** open it, and on `wave-sync`) — so intermediate
 peers hold the cores and can re-serve them. Selfie images are **inline** (JSON dataURL, no
 separate Hyperblobs), so this is the only core set to propagate.
@@ -226,7 +226,7 @@ construction). `wave.js` is untouched.
    `chord.js` adds `inOpenInterval` + `stabilizeStep` (brittle-tested); a `pointers` from
    my current successor whose predecessor sits between us triggers an immediate re-pin
    (nextClockwise then adopts the closer successor). Churn: on a pinned-neighbour close we
-   re-pin immediately (successor-list failover / finger repair), and a `goneUntil` cooldown
+   re-pin immediately (successor-list failover / finger repair), and a churn cooldown
    stops DHT re-seeding from resurrecting a just-dead peer. Verified end-to-end on the local
    DHT: 4 peers converge + gallery replicates with the slim gossip; killing a node mid-wave
    heals (token skips it, `wave` completes, gallery minus the dead peer) with no ghost seat.

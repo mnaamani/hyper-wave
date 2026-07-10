@@ -38,7 +38,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       (no phantom seats from stale announces)
 - [x] Phase 2: `joinPeer` pinning of successor-list (k=3) + predecessor — ring edges physical
 - [x] Phase 3: finger table + `findSuccessor` + `fixFingers` → O(log N) connections
-- [x] Phase 4: stabilize + churn handling (re-pin on close, `goneUntil` cooldown) + slim
+- [x] Phase 4: stabilize + churn handling (re-pin on close, churn cooldown) + slim
       gossip (O(N) `peers` snapshot → a single neighbour-scoped `pointers` heartbeat)
 - [x] Control-plane flooding: `wave-announce/join/start/end` relayed with `mid` dedup
       (`flood.js` + partial-topology reach harness `flood.test.js`)
@@ -133,13 +133,14 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 ### Adversarial hardening still open (`docs/protocol.md` §11.3)
 
 - [ ] **Automated coverage for the paid gate + late gallery admission (currently a test gap).**
-      The whole burn/attestation/admission path — `enforcePaid`, `recordBurn`, `ensureWriter` →
-      `requestAdmission`, `admitWriter` (`burnAuthorizes`) — has **no automated test**: the unit
+      The whole burn/attestation/admission path — `enforcePaid`, `recordBurn`, the gallery
+      session's admission flow → `admitWriter` (`burnAuthorizes`, `gallery-session.js`) — has
+      **no automated test with a wallet**: the unit
       suites don't wire a wallet and the `e2e/` harness runs wallet-less (`enforcePaid` off,
       receipt-only admission), so this path is exercised only by manual two-peer runs. That's how
       the zero-dwell regression slipped in: the token races at network speed, so a wave ends before a joiner's
       fee burn confirms, and two bugs dropped the admission ticket — `recordBurn` refused once
-      `wave` was null, and `resetSelfie` nulled `myBurnProof` on `goIdle` (fixed by threading
+      `wave` was null, and the selfie reset nulled the burn proof on `goIdle` (fixed by threading
       `waveId` into `recordBurn` so a late burn still records into the persisted gallery, and by
       keeping the waveId-bound proof alive across `goIdle`, clearing it only in `enterLobby`).
       Add a **wallet-mocked engine test** (stub `payments` with a controllable `burn`/`verifyBurnTx`
@@ -163,7 +164,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       envelope `ts` item (§5.0) — a per-message timestamp would let the same freshness check apply
       to every flooded message, not just the kick-off.
 - [ ] Per-connection rate limiting (token buckets per message kind) + bounds on auxiliary maps
-      (`seen`/`endedWaves`/`routed`/`lookupRoute`/`goneUntil`). More important now that
+      (`seen`/`endedWaves`/`routed`/`lookupRoute`/the churn-cooldown map). More important now that
       admission is optimistic (gallery seats are cheap) — the token bucket caps how many
       add-writer/selfie one peer can push. (Per-entry byte cap already done.)
 - [ ] Ban peers by IP for invalid protocol messages: track per-connection violations (bad

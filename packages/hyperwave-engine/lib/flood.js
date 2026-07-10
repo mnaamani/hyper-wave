@@ -9,39 +9,45 @@
 // topologies to verify reach — both exercise the exact same decision code.
 
 /**
- * Create a flood dedup tracker: the "have I seen this id?" decision, size-capped.
- * @param {object} [options] - Options.
- * @param {number} [options.cap=4096] - Max ids to remember before wholesale clear.
- * @returns {{firstSight(mid: string): boolean, readonly size: number}} The tracker.
+ * A flood dedup tracker: the "have I seen this id?" decision, size-capped.
  */
-function createFlood({ cap = 4096 } = {}) {
-  const seen = new Set();
-  return {
-    /**
-     * True the first time `mid` is seen (=> process it locally and relay it onward);
-     * false on any repeat (=> drop). Past `cap` the set is cleared wholesale, which at
-     * worst lets a lone straggler re-flood once — harmless and very rare.
-     * @param {string} mid - The unique flood message id.
-     * @returns {boolean} True on first sight, false on a repeat.
-     */
-    firstSight(mid) {
-      if (seen.has(mid)) {
-        return false;
-      }
-      if (seen.size >= cap) {
-        seen.clear();
-      }
-      seen.add(mid);
-      return true;
-    },
-    /**
-     * The number of ids currently remembered.
-     * @returns {number} The current size of the seen set.
-     */
-    get size() {
-      return seen.size;
+class Flood {
+  #seen = new Set();
+  #cap;
+
+  /**
+   * @param {object} [options] - Options.
+   * @param {number} [options.cap=4096] - Max ids to remember before wholesale clear.
+   */
+  constructor({ cap = 4096 } = {}) {
+    this.#cap = cap;
+  }
+
+  /**
+   * True the first time `mid` is seen (=> process it locally and relay it onward);
+   * false on any repeat (=> drop). Past `cap` the set is cleared wholesale, which at
+   * worst lets a lone straggler re-flood once — harmless and very rare.
+   * @param {string} mid - The unique flood message id.
+   * @returns {boolean} True on first sight, false on a repeat.
+   */
+  firstSight(mid) {
+    if (this.#seen.has(mid)) {
+      return false;
     }
-  };
+    if (this.#seen.size >= this.#cap) {
+      this.#seen.clear();
+    }
+    this.#seen.add(mid);
+    return true;
+  }
+
+  /**
+   * The number of ids currently remembered.
+   * @returns {number} The current size of the seen set.
+   */
+  get size() {
+    return this.#seen.size;
+  }
 }
 
-module.exports = { createFlood };
+module.exports = { Flood };
