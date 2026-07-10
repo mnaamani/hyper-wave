@@ -24,7 +24,7 @@ console.log('findSuccessor(target):', short(chord.findSuccessor(ids, target)));
 // hop-to-hop (each node using its own `known`) this converges in O(log N) hops.
 const succId = chord.successors(ids, myId, 3)[0] ?? null;
 const known = [...chord.fingers(ids, myId), ...chord.successors(ids, myId, 3)];
-const step = chord.findSuccessorStep(myId, succId, known, target);
+const step = chord.findSuccessorStep({ me: myId, successor: succId, known, target });
 console.log(
   'findSuccessorStep:',
   step.done

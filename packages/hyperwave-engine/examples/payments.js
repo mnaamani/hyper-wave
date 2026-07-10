@@ -29,7 +29,7 @@ async function main() {
   // fees.js composes these into a wave (see examples/wave.js for a createWave instance):
   //   const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine');
   //   wireWallet(wave, pay);                                  // address (tips) + burn verifier (paid gate)
-  //   const { hash, proof } = await payFee(wave, pay, waveId, 'kickoff'); // burn FEE_TRX + sign attestation
+  //   const { hash, proof } = await payFee({ wave, payments: pay, waveId, reason: 'kickoff' }); // burn FEE_TRX + sign attestation
   //   if (await confirmBurn(pay, waveId, hash)) { wave.announcePaid(proof); }
 
   pay.dispose();

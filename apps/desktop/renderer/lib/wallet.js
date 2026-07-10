@@ -199,10 +199,12 @@ function submitSend() {
   const to = sendToInput.value.trim();
   const amount = Number(sendAmountInput.value);
   if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(to)) {
-    return setSendStatus('Enter a valid Tron address (T…)', 'err');
+    setSendStatus('Enter a valid Tron address (T…)', 'err');
+    return;
   }
   if (!(amount > 0)) {
-    return setSendStatus('Enter an amount greater than 0', 'err');
+    setSendStatus('Enter an amount greater than 0', 'err');
+    return;
   }
   sendBtn.disabled = true;
   setSendStatus(`Sending ${amount} TRX…`, '');
@@ -219,7 +221,8 @@ sendAmountInput.onkeydown = (evt) => {
 export function sendResult({ hash, to, amount, error }) {
   sendBtn.disabled = false;
   if (error) {
-    return setSendStatus(`⚠️ send failed: ${error}`, 'err');
+    setSendStatus(`⚠️ send failed: ${error}`, 'err');
+    return;
   }
   record({ kind: 'send', hash, amount });
   setSendStatus(`✅ sent ${amount} TRX to ${to.slice(0, 6)}…${to.slice(-4)}`, 'ok');

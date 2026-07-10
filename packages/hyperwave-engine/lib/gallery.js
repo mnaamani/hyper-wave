@@ -42,7 +42,16 @@ function selfieHasValidReceipt(op) {
   return !!(
     op.peerId &&
     op.receiptSig &&
-    verifyReceipt(op.peerId, op.waveId, op.hopCount, op.chainHash, op.receiptTs, op.receiptSig)
+    verifyReceipt(
+      {
+        peerId: op.peerId,
+        waveId: op.waveId,
+        hopCount: op.hopCount,
+        prevChainHash: op.chainHash,
+        timestamp: op.receiptTs
+      },
+      op.receiptSig
+    )
   );
 }
 

@@ -59,24 +59,35 @@ const RING = [
 ];
 const ALL_REACHABLE = new Set(['a', 'b', 'c']);
 
+// pickReachable inputs with per-test overrides
+function pick(overrides) {
+  return pickReachable({
+    sortedRing: RING,
+    myAngle: 100,
+    reachable: ALL_REACHABLE,
+    skipped: new Set(),
+    ...overrides
+  });
+}
+
 test('pickReachable picks the next clockwise when all reachable', (t) => {
-  t.is(pickReachable(RING, 100, ALL_REACHABLE, new Set()).id, 'c'); // 100 -> c@150
-  t.is(pickReachable(RING, 200, ALL_REACHABLE, new Set()).id, 'a'); // 200 -> a@300
+  t.is(pick({ myAngle: 100 }).id, 'c'); // 100 -> c@150
+  t.is(pick({ myAngle: 200 }).id, 'a'); // 200 -> a@300
 });
 
 test('pickReachable wraps around', (t) => {
-  t.is(pickReachable(RING, 320, ALL_REACHABLE, new Set()).id, 'b'); // past a -> wrap to b
+  t.is(pick({ myAngle: 320 }).id, 'b'); // past a -> wrap to b
 });
 
 test('pickReachable skips a skipped (dead) successor to the next live one', (t) => {
-  t.is(pickReachable(RING, 100, ALL_REACHABLE, new Set(['c'])).id, 'a');
+  t.is(pick({ skipped: new Set(['c']) }).id, 'a');
 });
 
 test('pickReachable skips peers we have no connection to (not reachable)', (t) => {
-  t.is(pickReachable(RING, 100, new Set(['a', 'b']), new Set()).id, 'a'); // c unreachable
+  t.is(pick({ reachable: new Set(['a', 'b']) }).id, 'a'); // c unreachable
 });
 
 test('pickReachable returns null when nobody qualifies', (t) => {
-  t.is(pickReachable(RING, 0, new Set(), new Set()), null); // none reachable
-  t.is(pickReachable(RING, 0, ALL_REACHABLE, new Set(['a', 'b', 'c'])), null); // all skipped
+  t.is(pick({ myAngle: 0, reachable: new Set() }), null); // none reachable
+  t.is(pick({ myAngle: 0, skipped: new Set(['a', 'b', 'c']) }), null); // all skipped
 });

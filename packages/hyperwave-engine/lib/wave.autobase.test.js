@@ -19,7 +19,12 @@ const RECEIPT_TS = 1000; // receipt timestamp
 // build a wave-selfie op with a valid receipt signed by keyPair
 function selfie(keyPair, hopCount, caption, timestamp) {
   const peerId = b4a.toString(keyPair.publicKey, 'hex');
-  const receiptSig = signReceipt(keyPair, WAVE, hopCount, CHAIN_HASH, RECEIPT_TS);
+  const receiptSig = signReceipt(keyPair, {
+    waveId: WAVE,
+    hopCount,
+    prevChainHash: CHAIN_HASH,
+    timestamp: RECEIPT_TS
+  });
   return {
     type: 'wave-selfie',
     waveId: WAVE,

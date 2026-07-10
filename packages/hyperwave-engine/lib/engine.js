@@ -134,7 +134,7 @@ function createEngine({
       return; // busy / no wallet (unpaid path already announced)
     }
     try {
-      const { hash, proof } = await payFee(wave, payments, waveId, 'kickoff');
+      const { hash, proof } = await payFee({ wave, payments, waveId, reason: 'kickoff' });
       send({ type: 'burn-result', stage: 'confirming', hash, waveId, reason: 'kickoff' });
       if (await confirmBurn(payments, waveId, hash)) {
         send({
@@ -179,7 +179,7 @@ function createEngine({
       return;
     }
     try {
-      const { hash } = await payFee(wave, payments, waveId, 'join');
+      const { hash } = await payFee({ wave, payments, waveId, reason: 'join' });
       send({ type: 'burn-result', stage: 'burned', hash, amount: FEE_TRX, waveId, reason: 'join' });
     } catch (err) {
       send({ type: 'burn-result', stage: 'failed', error: err.message, waveId, reason: 'join' });
@@ -189,7 +189,8 @@ function createEngine({
   // Gallery tip: a real testnet TRX transfer to the selfie owner's wallet.
   async function handleTip({ to, amount }) {
     if (!payments) {
-      return send({ type: 'tip-result', error: 'wallet not ready' });
+      send({ type: 'tip-result', error: 'wallet not ready' });
+      return;
     }
     try {
       const { hash } = await payments.send(to, amount);
@@ -202,15 +203,18 @@ function createEngine({
   // Plain wallet transfer: send `amount` TRX to any address
   async function handleSend({ to, amount }) {
     if (!payments) {
-      return send({ type: 'send-result', error: 'wallet not ready', to });
+      send({ type: 'send-result', error: 'wallet not ready', to });
+      return;
     }
     const trx = Number(amount);
     if (!to || !(trx > 0)) {
-      return send({ type: 'send-result', error: 'invalid recipient/amount', to });
+      send({ type: 'send-result', error: 'invalid recipient/amount', to });
+      return;
     }
     const bal = await payments.balances().catch(() => null);
     if (bal && bal.trx < trx) {
-      return send({ type: 'send-result', error: `insufficient balance (${bal.trx} TRX)`, to });
+      send({ type: 'send-result', error: `insufficient balance (${bal.trx} TRX)`, to });
+      return;
     }
     try {
       const { hash } = await payments.send(to, trx);

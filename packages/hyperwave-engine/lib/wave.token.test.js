@@ -29,7 +29,7 @@ function stampHop(keyPair, peerId, waveId, prevToken) {
   const hopCount = prevToken.hopCount + 1;
   const prevChainHash = advanceChain(prevToken.prevChainHash, prevToken.senderReceiptSig);
   const timestamp = prevToken.timestamp + 50;
-  const senderReceiptSig = signReceipt(keyPair, waveId, hopCount, prevChainHash, timestamp);
+  const senderReceiptSig = signReceipt(keyPair, { waveId, hopCount, prevChainHash, timestamp });
   return {
     waveId,
     originator: prevToken.originator,
@@ -48,7 +48,12 @@ const token0 = {
   hopCount: 0,
   prevChainHash: ZERO,
   senderPeerId: ids[0],
-  senderReceiptSig: signReceipt(keyPairs[0], waveId, 0, ZERO, 1000),
+  senderReceiptSig: signReceipt(keyPairs[0], {
+    waveId,
+    hopCount: 0,
+    prevChainHash: ZERO,
+    timestamp: 1000
+  }),
   timestamp: 1000
 };
 const token1 = stampHop(keyPairs[1], ids[1], waveId, token0);
@@ -91,7 +96,8 @@ test('receipt cannot be attributed to a different peer', (t) => {
 });
 
 test('receiptHash is stable for identical inputs', (t) => {
-  t.ok(b4a.equals(receiptHash(waveId, 1, ZERO, 1000), receiptHash(waveId, 1, ZERO, 1000)));
+  const hopTuple = { waveId, hopCount: 1, prevChainHash: ZERO, timestamp: 1000 };
+  t.ok(b4a.equals(receiptHash(hopTuple), receiptHash({ ...hopTuple })));
 });
 
 // --- burn attestation (participation-fee proof) ----------------------------
@@ -131,26 +137,39 @@ test('burnAuthorizes gates gallery admission on a real, bound burn', (t) => {
 // --- gallery-key attestation -----------------------------------------------
 test('signGalleryKey/verifyGalleryKey binds the gallery key to the originator', (t) => {
   const key = 'a4da63edc0ffee';
-  const sig = signGalleryKey(keyPairs[0], waveId, key);
-  t.ok(verifyGalleryKey(ids[0], waveId, key, sig), 'the originator’s signed key verifies');
-  t.absent(verifyGalleryKey(ids[1], waveId, key, sig), 'a non-originator can’t vouch for the key');
-  t.absent(verifyGalleryKey(ids[0], waveId, 'deadbeef', sig), 'a swapped key is rejected');
-  t.absent(verifyGalleryKey(ids[0], 'other-wave', key, sig), 'not reusable for another wave');
+  const bound = { originatorId: ids[0], waveId, autobaseKey: key };
+  const sig = signGalleryKey(keyPairs[0], { waveId, autobaseKey: key });
+  t.ok(verifyGalleryKey(bound, sig), 'the originator’s signed key verifies');
+  t.absent(
+    verifyGalleryKey({ ...bound, originatorId: ids[1] }, sig),
+    'a non-originator can’t vouch for the key'
+  );
+  t.absent(
+    verifyGalleryKey({ ...bound, autobaseKey: 'deadbeef' }, sig),
+    'a swapped key is rejected'
+  );
+  t.absent(
+    verifyGalleryKey({ ...bound, waveId: 'other-wave' }, sig),
+    'not reusable for another wave'
+  );
 });
 
 // --- wave-end completion attestation ---------------------------------------
+const completion = { waveId, hops: 3, chainHash: 'abc123' };
+
 test('signWaveEnd/verifyWaveEnd authenticates a completion to the originator', (t) => {
-  const sig = signWaveEnd(keyPairs[0], waveId, 3, 'abc123');
-  t.ok(verifyWaveEnd(ids[0], waveId, 3, 'abc123', sig), 'valid completion verifies');
+  const sig = signWaveEnd(keyPairs[0], completion);
+  t.ok(verifyWaveEnd({ ...completion, originatorId: ids[0] }, sig), 'valid completion verifies');
 });
 
 test('wave-end attestation rejects forgery and tampering', (t) => {
-  const sig = signWaveEnd(keyPairs[0], waveId, 3, 'abc123');
+  const sig = signWaveEnd(keyPairs[0], completion);
+  const bound = { ...completion, originatorId: ids[0] };
   t.absent(
-    verifyWaveEnd(ids[1], waveId, 3, 'abc123', sig),
+    verifyWaveEnd({ ...bound, originatorId: ids[1] }, sig),
     'a non-originator can’t sign a completion'
   );
-  t.absent(verifyWaveEnd(ids[0], waveId, 9, 'abc123', sig), 'tampered hop count');
-  t.absent(verifyWaveEnd(ids[0], waveId, 3, 'deadbeef', sig), 'tampered chain hash');
-  t.absent(verifyWaveEnd(ids[0], 'other-wave', 3, 'abc123', sig), 'reused for another wave');
+  t.absent(verifyWaveEnd({ ...bound, hops: 9 }, sig), 'tampered hop count');
+  t.absent(verifyWaveEnd({ ...bound, chainHash: 'deadbeef' }, sig), 'tampered chain hash');
+  t.absent(verifyWaveEnd({ ...bound, waveId: 'other-wave' }, sig), 'reused for another wave');
 });

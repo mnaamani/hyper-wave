@@ -27,7 +27,12 @@ function selfie(keyPair, hopCount, caption) {
     hopCount,
     chainHash: CHAIN_HASH,
     receiptTs: RECEIPT_TS,
-    receiptSig: signReceipt(keyPair, WAVE, hopCount, CHAIN_HASH, RECEIPT_TS),
+    receiptSig: signReceipt(keyPair, {
+      waveId: WAVE,
+      hopCount,
+      prevChainHash: CHAIN_HASH,
+      timestamp: RECEIPT_TS
+    }),
     caption,
     timestamp: hopCount
   };
@@ -52,10 +57,12 @@ function until(pred, timeoutMs = 20000) {
         ok = await pred();
       } catch {}
       if (ok) {
-        return resolve(true);
+        resolve(true);
+        return;
       }
       if (Date.now() - started > timeoutMs) {
-        return resolve(false);
+        resolve(false);
+        return;
       }
       setTimeout(tick, 120);
     };

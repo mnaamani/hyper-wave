@@ -78,7 +78,7 @@ const wave = createWave({
 
 // Burn the participation fee (fees.js: memo + ring attestation), logging the result.
 async function burnFee(waveId, reason) {
-  const result = await payFee(wave, payments, waveId, reason);
+  const result = await payFee({ wave, payments, waveId, reason });
   console.log(`[${name}] ${reason.toUpperCase()}-BURNED ${FEE_TRX} TRX hash=`);
   return result;
 }

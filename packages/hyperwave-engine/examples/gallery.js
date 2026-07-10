@@ -24,7 +24,12 @@ function selfie(keyPair, hopCount, caption, timestamp) {
     hopCount,
     chainHash,
     receiptTs,
-    receiptSig: signReceipt(keyPair, waveId, hopCount, chainHash, receiptTs),
+    receiptSig: signReceipt(keyPair, {
+      waveId,
+      hopCount,
+      prevChainHash: chainHash,
+      timestamp: receiptTs
+    }),
     image: '<jpeg-data-url>',
     caption,
     timestamp

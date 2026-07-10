@@ -178,7 +178,8 @@ export function hideProgress() {
 function updateProgress() {
   const got = items.length;
   if (!active && got === 0) {
-    return hideProgress();
+    hideProgress();
+    return;
   }
   const total = Math.max(expected, got, 1);
   progressEl.classList.add('show');

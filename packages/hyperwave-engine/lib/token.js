@@ -40,51 +40,48 @@ const b4a = require('b4a');
 const ZERO_HASH = b4a.toString(b4a.alloc(32), 'hex'); // genesis accumulator
 
 /**
+ * The hop tuple a receipt signs, plus (for verification) the claimed signer.
+ * @typedef {Object} ReceiptFields
+ * @property {string} [peerId] - The claimed signer's ring peer id (hex; verification only).
+ * @property {string} waveId - The wave id.
+ * @property {number} hopCount - The hop index.
+ * @property {string} prevChainHash - The accumulator hash before this hop (hex).
+ * @property {number} timestamp - The hop timestamp (ms).
+ */
+
+/**
  * A receipt binds a peer to a specific hop: sign(H(waveId|hop|prevChainHash|ts)).
- * @param {string} waveId - The wave id.
- * @param {number} hopCount - The hop index.
- * @param {string} prevChainHash - The accumulator hash before this hop (hex).
- * @param {number} timestamp - The hop timestamp (ms).
+ * @param {ReceiptFields} fields - The hop tuple.
  * @returns {Buffer} The blake2b hash of the hop tuple.
  */
-function receiptHash(waveId, hopCount, prevChainHash, timestamp) {
+function receiptHash({ waveId, hopCount, prevChainHash, timestamp }) {
   return crypto.hash(b4a.from(`${waveId}|${hopCount}|${prevChainHash}|${timestamp}`));
 }
 
 /**
  * Sign a receipt over its hop tuple with the peer's ring key.
  * @param {KeyPair} keyPair - The signing ring keypair.
- * @param {string} waveId - The wave id.
- * @param {number} hopCount - The hop index.
- * @param {string} prevChainHash - The accumulator hash before this hop (hex).
- * @param {number} timestamp - The hop timestamp (ms).
+ * @param {ReceiptFields} fields - The hop tuple to sign.
  * @returns {string} The Ed25519 receipt signature (hex).
  */
-function signReceipt(keyPair, waveId, hopCount, prevChainHash, timestamp) {
-  return b4a.toString(
-    crypto.sign(receiptHash(waveId, hopCount, prevChainHash, timestamp), keyPair.secretKey),
-    'hex'
-  );
+function signReceipt(keyPair, fields) {
+  return b4a.toString(crypto.sign(receiptHash(fields), keyPair.secretKey), 'hex');
 }
 
 /**
- * Verify a receipt is a valid Ed25519 signature by `peerId` over its hop tuple.
- * This authenticates a gallery entry to a peer identity (no impersonation, no
- * unsigned spam). NOTE: it does NOT prove the peer actually held the token — a
+ * Verify a receipt is a valid Ed25519 signature by `fields.peerId` over its hop
+ * tuple. This authenticates a gallery entry to a peer identity (no impersonation,
+ * no unsigned spam). NOTE: it does NOT prove the peer actually held the token — a
  * peer can self-sign a receipt for a hop it never held. Proof of participation
  * (cross-checking against the real token chain) is the validator's job.
- * @param {string} peerIdHex - The claimed signer's ring peer id (hex).
- * @param {string} waveId - The wave id.
- * @param {number} hopCount - The hop index.
- * @param {string} chainHash - The accumulator hash before this hop (hex).
- * @param {number} timestamp - The hop timestamp (ms).
+ * @param {ReceiptFields} fields - The hop tuple (peerId is the claimed signer).
  * @param {string} receiptSigHex - The receipt signature to verify (hex).
  * @returns {boolean} True if the signature is valid for that peer + hop.
  */
-function verifyReceipt(peerIdHex, waveId, hopCount, chainHash, timestamp, receiptSigHex) {
+function verifyReceipt(fields, receiptSigHex) {
   try {
-    const hash = receiptHash(waveId, hopCount, chainHash, timestamp);
-    return crypto.verify(hash, b4a.from(receiptSigHex, 'hex'), b4a.from(peerIdHex, 'hex'));
+    const hash = receiptHash(fields);
+    return crypto.verify(hash, b4a.from(receiptSigHex, 'hex'), b4a.from(fields.peerId, 'hex'));
   } catch {
     return false;
   }
@@ -97,11 +94,13 @@ function verifyReceipt(peerIdHex, waveId, hopCount, chainHash, timestamp, receip
  */
 function verifyToken(token) {
   return verifyReceipt(
-    token.senderPeerId,
-    token.waveId,
-    token.hopCount,
-    token.prevChainHash,
-    token.timestamp,
+    {
+      peerId: token.senderPeerId,
+      waveId: token.waveId,
+      hopCount: token.hopCount,
+      prevChainHash: token.prevChainHash,
+      timestamp: token.timestamp
+    },
     token.senderReceiptSig
   );
 }
@@ -199,28 +198,26 @@ function galleryKeyHash(waveId, autobaseKey) {
 /**
  * Sign the gallery key binding with the originator's ring key.
  * @param {KeyPair} keyPair - The originator's signing ring keypair.
- * @param {string} waveId - The wave id.
- * @param {string} autobaseKey - The gallery Autobase key (hex).
+ * @param {{waveId: string, autobaseKey: string}} fields - The gallery-key tuple.
  * @returns {string} The Ed25519 gallery-key signature (hex).
  */
-function signGalleryKey(keyPair, waveId, autobaseKey) {
+function signGalleryKey(keyPair, { waveId, autobaseKey }) {
   return b4a.toString(crypto.sign(galleryKeyHash(waveId, autobaseKey), keyPair.secretKey), 'hex');
 }
 
 /**
- * Verify the gallery key is the one the wave's `originatorHex` published for `waveId`.
- * @param {string} originatorHex - The wave originator's ring peer id (hex).
- * @param {string} waveId - The wave id.
- * @param {string} autobaseKey - The gallery Autobase key to verify (hex).
+ * Verify the gallery key is the one the wave's `originatorId` published for `waveId`.
+ * @param {{originatorId: string, waveId: string, autobaseKey: string}} fields - The
+ *   gallery-key tuple (originatorId is the claimed signer, hex).
  * @param {string} sigHex - The gallery-key signature to verify (hex).
  * @returns {boolean} True if the originator signed this key for this wave.
  */
-function verifyGalleryKey(originatorHex, waveId, autobaseKey, sigHex) {
+function verifyGalleryKey({ originatorId, waveId, autobaseKey }, sigHex) {
   try {
     return crypto.verify(
       galleryKeyHash(waveId, autobaseKey),
       b4a.from(sigHex, 'hex'),
-      b4a.from(originatorHex, 'hex')
+      b4a.from(originatorId, 'hex')
     );
   } catch {
     return false;
@@ -246,31 +243,28 @@ function waveEndHash(waveId, hops, chainHash) {
 /**
  * Sign a wave completion with the originator's ring key.
  * @param {KeyPair} keyPair - The originator's signing ring keypair.
- * @param {string} waveId - The wave id.
- * @param {number} hops - The total number of hops the wave completed.
- * @param {string} chainHash - The final accumulator hash (hex).
+ * @param {{waveId: string, hops: number, chainHash: string}} fields - The
+ *   completion tuple.
  * @returns {string} The Ed25519 wave-end signature (hex).
  */
-function signWaveEnd(keyPair, waveId, hops, chainHash) {
+function signWaveEnd(keyPair, { waveId, hops, chainHash }) {
   return b4a.toString(crypto.sign(waveEndHash(waveId, hops, chainHash), keyPair.secretKey), 'hex');
 }
 
 /**
- * Verify a completion is validly signed by `originatorHex` over its
+ * Verify a completion is validly signed by `originatorId` over its
  * (waveId, hops, chainHash).
- * @param {string} originatorHex - The wave originator's ring peer id (hex).
- * @param {string} waveId - The wave id.
- * @param {number} hops - The total number of hops claimed.
- * @param {string} chainHash - The final accumulator hash (hex).
+ * @param {{originatorId: string, waveId: string, hops: number, chainHash: string}} fields -
+ *   The completion tuple (originatorId is the claimed signer, hex).
  * @param {string} sigHex - The wave-end signature to verify (hex).
  * @returns {boolean} True if the originator signed this completion.
  */
-function verifyWaveEnd(originatorHex, waveId, hops, chainHash, sigHex) {
+function verifyWaveEnd({ originatorId, waveId, hops, chainHash }, sigHex) {
   try {
     return crypto.verify(
       waveEndHash(waveId, hops, chainHash),
       b4a.from(sigHex, 'hex'),
-      b4a.from(originatorHex, 'hex')
+      b4a.from(originatorId, 'hex')
     );
   } catch {
     return false;

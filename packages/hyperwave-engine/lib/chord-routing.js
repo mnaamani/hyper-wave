@@ -91,7 +91,8 @@ function createChordRouting(ctx) {
     return new Promise((resolve) => {
       const start = closestPrecedingNode(myKnownIds(), me.id, targetNid) || mySuccessorId();
       if (!start || !senders.has(start)) {
-        return resolve(null); // nobody to ask
+        resolve(null); // nobody to ask
+        return;
       }
       const qid = b4a.toString(crypto.randomBytes(8), 'hex');
       const timer = setTimeout(() => {
@@ -121,7 +122,12 @@ function createChordRouting(ctx) {
     } catch {
       return;
     }
-    const step = findSuccessorStep(me.id, mySuccessorId(), myKnownIds(), target);
+    const step = findSuccessorStep({
+      me: me.id,
+      successor: mySuccessorId(),
+      known: myKnownIds(),
+      target
+    });
     if (step.done || (msg.hops || 0) >= LOOKUP_TTL) {
       trySend(fromId, {
         kind: 'find-succ-reply',

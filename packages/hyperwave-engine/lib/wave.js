@@ -461,13 +461,16 @@ function createWave({
       relayFlood(msg, fromId);
     }
     if (msg.kind === 'token') {
-      return processToken(msg);
+      processToken(msg);
+      return;
     }
     if (msg.kind === 'find-succ') {
-      return chord.handleFindSucc(msg, fromId);
+      chord.handleFindSucc(msg, fromId);
+      return;
     }
     if (msg.kind === 'find-succ-reply') {
-      return chord.handleFindSuccReply(msg);
+      chord.handleFindSuccReply(msg);
+      return;
     }
     if (msg.kind === 'wave-pos') {
       // only animate the ball for the wave we're racing (angle derived locally)
@@ -508,17 +511,22 @@ function createWave({
       }
       if (msg.phase === 'racing') {
         if (!wave || wave.id !== msg.waveId) {
-          enterLobby(msg.waveId, msg.by, false, 0, true);
+          enterLobby({ waveId: msg.waveId, by: msg.by, dur: 0, silent: true });
         }
         if (msg.paid) {
           wave.kickoffProof = msg.paid;
         }
         wave.paid = 'verified';
-        verifyAndOpenGallery(msg.waveId, msg.key, msg.keySig, msg.by);
+        verifyAndOpenGallery({
+          waveId: msg.waveId,
+          keyHex: msg.key,
+          keySig: msg.keySig,
+          originatorId: msg.by
+        });
         beginRace(msg.roster);
       } else {
         if (!wave || wave.id !== msg.waveId) {
-          enterLobby(msg.waveId, msg.by, false, msg.lobbyMsLeft);
+          enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMsLeft });
         }
         if (enforcePaid && msg.paid && !wave.kickoffProof) {
           wave.kickoffProof = msg.paid;
@@ -540,7 +548,7 @@ function createWave({
       if (!shouldAdopt(msg.waveId)) {
         return;
       }
-      enterLobby(msg.waveId, msg.by, false, msg.lobbyMs);
+      enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMs });
       if (enforcePaid && msg.paid) {
         wave.kickoffProof = msg.paid;
         verifyKickoff(msg.waveId, msg.paid);
@@ -562,12 +570,17 @@ function createWave({
       }
       if (msg.waveId && msg.key && shouldAdopt(msg.waveId)) {
         if (!wave || wave.id !== msg.waveId) {
-          enterLobby(msg.waveId, msg.by, false);
+          enterLobby({ waveId: msg.waveId, by: msg.by });
         }
         if (msg.paid) {
           wave.kickoffProof = msg.paid; // carry it so we can re-sync newcomers
         }
-        verifyAndOpenGallery(msg.waveId, msg.key, msg.keySig, msg.by);
+        verifyAndOpenGallery({
+          waveId: msg.waveId,
+          keyHex: msg.key,
+          keySig: msg.keySig,
+          originatorId: msg.by
+        });
         beginRace(msg.roster);
       }
       return;
@@ -584,14 +597,19 @@ function createWave({
       }
       const authentic = msg.stalled
         ? verifyReceipt(
-            msg.staller,
-            msg.waveId,
-            msg.hopCount,
-            msg.chainHash,
-            msg.receiptTs,
+            {
+              peerId: msg.staller,
+              waveId: msg.waveId,
+              hopCount: msg.hopCount,
+              prevChainHash: msg.chainHash,
+              timestamp: msg.receiptTs
+            },
             msg.receiptSig
           )
-        : verifyWaveEnd(msg.by, msg.waveId, msg.hops, msg.chainHash, msg.sig);
+        : verifyWaveEnd(
+            { originatorId: msg.by, waveId: msg.waveId, hops: msg.hops, chainHash: msg.chainHash },
+            msg.sig
+          );
       if (!authentic) {
         return;
       }
@@ -808,20 +826,23 @@ function createWave({
   // it to newcomers we sync. `originatorId` is the wave's originator as this message claims it;
   // it must match the originator we already adopted (no mid-wave originator swap).
   /**
-   * @param {string} waveId The wave whose gallery key is advertised.
-   * @param {string} keyHex Hex autobase key to open (unsigned/relayed — must be verified).
-   * @param {string} keySig Originator's signature over (waveId, keyHex).
-   * @param {string} originatorId Hex id of the wave's originator, as this message claims.
+   * @param {Object} opts The advertised gallery key and its provenance.
+   * @param {string} opts.waveId The wave whose gallery key is advertised.
+   * @param {string} opts.keyHex Hex autobase key to open (unsigned/relayed — must be verified).
+   * @param {string} opts.keySig Originator's signature over (waveId, keyHex).
+   * @param {string} opts.originatorId Hex id of the wave's originator, as this message claims.
    */
-  function verifyAndOpenGallery(waveId, keyHex, keySig, originatorId) {
+  function verifyAndOpenGallery({ waveId, keyHex, keySig, originatorId }) {
     if (!keyHex) {
       return;
     }
     if (wave && wave.id === waveId && wave.by !== originatorId) {
-      return log('gallery-key: originator mismatch for wave', shortId(waveId));
+      log('gallery-key: originator mismatch for wave', shortId(waveId));
+      return;
     }
-    if (!verifyGalleryKey(originatorId, waveId, keyHex, keySig)) {
-      return log('gallery-key: rejected unsigned/forged key for wave', shortId(waveId));
+    if (!verifyGalleryKey({ originatorId, waveId, autobaseKey: keyHex }, keySig)) {
+      log('gallery-key: rejected unsigned/forged key for wave', shortId(waveId));
+      return;
     }
     if (wave && wave.id === waveId) {
       wave.keySig = keySig;
@@ -864,11 +885,13 @@ function createWave({
     }
     if (
       !verifyReceipt(
-        msg.peerId,
-        msg.waveId,
-        msg.hopCount,
-        msg.chainHash,
-        msg.receiptTs,
+        {
+          peerId: msg.peerId,
+          waveId: msg.waveId,
+          hopCount: msg.hopCount,
+          prevChainHash: msg.chainHash,
+          timestamp: msg.receiptTs
+        },
         msg.receiptSig
       )
     ) {
@@ -928,7 +951,8 @@ function createWave({
   function requestAdmission(receipt) {
     return new Promise((resolve) => {
       if (base.writable) {
-        return resolve(true);
+        resolve(true);
+        return;
       }
       const req = {
         kind: 'add-writer',
@@ -944,10 +968,12 @@ function createWave({
       const started = Date.now();
       const tick = () => {
         if (base.writable) {
-          return resolve(true);
+          resolve(true);
+          return;
         }
         if (Date.now() - started > ADMIT_TIMEOUT_MS) {
-          return resolve(false);
+          resolve(false);
+          return;
         }
         floodGossip(req); // re-stamps req.mid each tick → floods anew across the partial mesh
         setTimeout(tick, ADMIT_RETRY_MS);
@@ -1063,10 +1089,12 @@ function createWave({
       const started = Date.now();
       function poll() {
         if (pred()) {
-          return resolve(true);
+          resolve(true);
+          return;
         }
         if (Date.now() - started > timeoutMs) {
-          return resolve(false);
+          resolve(false);
+          return;
         }
         setTimeout(poll, 200);
       }
@@ -1103,13 +1131,14 @@ function createWave({
    * Enter the lobby for `waveId` (announced by `by`; `mine` if I'm the initiator).
    * `silent` skips the wave-announce UI event (used when catching up straight into a
    * race, so no bogus lobby countdown flashes).
-   * @param {string} waveId The wave to enter a lobby for.
-   * @param {string} by Hex id of the initiator that announced it.
-   * @param {boolean} mine True if I'm the initiator.
-   * @param {number} [dur] Lobby duration in ms (defaults to lobbyMs).
-   * @param {boolean} [silent] Suppress the wave-announce UI event.
+   * @param {Object} opts The lobby to enter.
+   * @param {string} opts.waveId The wave to enter a lobby for.
+   * @param {string} opts.by Hex id of the initiator that announced it.
+   * @param {boolean} [opts.mine] True if I'm the initiator.
+   * @param {number} [opts.dur] Lobby duration in ms (defaults to lobbyMs).
+   * @param {boolean} [opts.silent] Suppress the wave-announce UI event.
    */
-  function enterLobby(waveId, by, mine, dur = lobbyMs, silent = false) {
+  function enterLobby({ waveId, by, mine = false, dur = lobbyMs, silent = false }) {
     if (wave && wave.id === waveId) {
       return;
     }
@@ -1261,13 +1290,14 @@ function createWave({
   /**
    * Record my hop's receipt when the token reaches me — the write-gate credential for
    * my staged selfie. Paired with stageSelfie() by tryPostSelfie().
-   * @param {string} waveId The current wave.
-   * @param {number} hopCount My hop position.
-   * @param {string} receiptSig My hop receipt signature.
-   * @param {string} chainHash Accumulator chain hash at my hop.
-   * @param {number} receiptTs My receipt timestamp.
+   * @param {Object} receipt My hop receipt.
+   * @param {string} receipt.waveId The current wave.
+   * @param {number} receipt.hopCount My hop position.
+   * @param {string} receipt.receiptSig My hop receipt signature.
+   * @param {string} receipt.chainHash Accumulator chain hash at my hop.
+   * @param {number} receipt.receiptTs My receipt timestamp.
    */
-  function recordMyReceipt(waveId, hopCount, receiptSig, chainHash, receiptTs) {
+  function recordMyReceipt({ waveId, hopCount, receiptSig, chainHash, receiptTs }) {
     if (!canSelfieNow()) {
       return;
     }
@@ -1308,14 +1338,16 @@ function createWave({
   /**
    * Emit a holding event; canSelfie tells the renderer this peer is a participant (its
    * staged selfie will post now). Everyone else just relays the ball.
-   * @param {string} waveId The current wave.
-   * @param {number} hopCount My hop position.
-   * @param {string} receiptSig My hop receipt signature.
-   * @param {string} chainHash Accumulator chain hash at my hop.
-   * @param {number} receiptTs My receipt timestamp.
+   * @param {Object} receipt My hop receipt (same shape as recordMyReceipt's).
+   * @param {string} receipt.waveId The current wave.
+   * @param {number} receipt.hopCount My hop position.
+   * @param {string} receipt.receiptSig My hop receipt signature.
+   * @param {string} receipt.chainHash Accumulator chain hash at my hop.
+   * @param {number} receipt.receiptTs My receipt timestamp.
    */
-  function emitHolding(waveId, hopCount, receiptSig, chainHash, receiptTs) {
-    recordMyReceipt(waveId, hopCount, receiptSig, chainHash, receiptTs);
+  function emitHolding(receipt) {
+    const { waveId, hopCount } = receipt;
+    recordMyReceipt(receipt);
     onEvent({
       event: 'holding',
       waveId,
@@ -1344,7 +1376,12 @@ function createWave({
    */
   function pickSuccessor(skipped) {
     const ring = liveRing([...peers.values()], Date.now(), PEER_STALE_MS);
-    return pickReachable(ring, me.angle, new Set(senders.keys()), skipped);
+    return pickReachable({
+      sortedRing: ring,
+      myAngle: me.angle,
+      reachable: new Set(senders.keys()),
+      skipped
+    });
   }
 
   /**
@@ -1406,16 +1443,22 @@ function createWave({
    * Build the next token this peer forwards, stamping hop `hopCount` with my receipt. The
    * gallery key travels with the token (the catch-up path for peers that missed wave-start),
    * carrying the originator's signature over it so a forwarder can't swap it (§ gallery-key).
-   * @param {string} waveId The racing wave.
-   * @param {string} originator Hex id of the wave's originator.
-   * @param {number} hopCount This token's hop position.
-   * @param {string} prevChainHash Accumulator chain hash entering this hop.
-   * @param {string} autobaseKeyHex Hex gallery key to carry along.
+   * @param {Object} opts The hop to stamp.
+   * @param {string} opts.waveId The racing wave.
+   * @param {string} opts.originator Hex id of the wave's originator.
+   * @param {number} opts.hopCount This token's hop position.
+   * @param {string} opts.prevChainHash Accumulator chain hash entering this hop.
+   * @param {string} opts.autobaseKeyHex Hex gallery key to carry along.
    * @returns {Object} The stamped token message.
    */
-  function stampToken(waveId, originator, hopCount, prevChainHash, autobaseKeyHex) {
+  function stampToken({ waveId, originator, hopCount, prevChainHash, autobaseKeyHex }) {
     const timestamp = Date.now();
-    const senderReceiptSig = signReceipt(swarm.keyPair, waveId, hopCount, prevChainHash, timestamp);
+    const senderReceiptSig = signReceipt(swarm.keyPair, {
+      waveId,
+      hopCount,
+      prevChainHash,
+      timestamp
+    });
     return {
       kind: 'token',
       waveId,
@@ -1437,13 +1480,13 @@ function createWave({
    * @param {Object} token The token stamped for my hop.
    */
   function holdAndForward(token) {
-    emitHolding(
-      token.waveId,
-      token.hopCount,
-      token.senderReceiptSig,
-      token.prevChainHash,
-      token.timestamp
-    );
+    emitHolding({
+      waveId: token.waveId,
+      hopCount: token.hopCount,
+      receiptSig: token.senderReceiptSig,
+      chainHash: token.prevChainHash,
+      receiptTs: token.timestamp
+    });
     announcePosition(token.waveId, token.hopCount);
     forwardToken(token);
   }
@@ -1483,7 +1526,11 @@ function createWave({
         hops: token.hopCount,
         chainHash: token.prevChainHash,
         by: me.id,
-        sig: signWaveEnd(swarm.keyPair, token.waveId, token.hopCount, token.prevChainHash)
+        sig: signWaveEnd(swarm.keyPair, {
+          waveId: token.waveId,
+          hops: token.hopCount,
+          chainHash: token.prevChainHash
+        })
       });
       finishWave(token.waveId, { hops: token.hopCount, chainHash: token.prevChainHash });
       return;
@@ -1493,21 +1540,26 @@ function createWave({
     // adopt into the race (may switch from a higher-id wave, or catch up if we
     // missed the announce/start) and learn this wave's gallery
     if (!wave || wave.id !== token.waveId) {
-      enterLobby(token.waveId, token.originator, false, 0, true);
+      enterLobby({ waveId: token.waveId, by: token.originator, dur: 0, silent: true });
     }
     if (wave.phase !== 'racing') {
       beginRace();
     }
-    verifyAndOpenGallery(token.waveId, token.autobaseKey, token.autobaseKeySig, token.originator);
+    verifyAndOpenGallery({
+      waveId: token.waveId,
+      keyHex: token.autobaseKey,
+      keySig: token.autobaseKeySig,
+      originatorId: token.originator
+    });
 
     const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig);
-    const next = stampToken(
-      token.waveId,
-      token.originator,
-      token.hopCount + 1,
-      newChainHash,
-      token.autobaseKey
-    );
+    const next = stampToken({
+      waveId: token.waveId,
+      originator: token.originator,
+      hopCount: token.hopCount + 1,
+      prevChainHash: newChainHash,
+      autobaseKeyHex: token.autobaseKey
+    });
     holdAndForward(next);
   }
 
@@ -1523,7 +1575,7 @@ function createWave({
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
     initiatedWaves.add(waveId); // I own this wave: I keep its gallery open (archivist)
-    enterLobby(waveId, me.id, true); // initiator auto-joins (marks its own lobby)
+    enterLobby({ waveId, by: me.id, mine: true }); // initiator auto-joins (marks its own lobby)
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the kick-off fee and
       // prove it (announcePaid). Fall back to idle if that never happens.
@@ -1637,7 +1689,7 @@ function createWave({
     await base.ready();
     // I'm the originator: sign (waveId, galleryKey) so peers can trust the key I publish
     // (it rides unsigned/relayed fields otherwise — § gallery-key attestation).
-    wave.keySig = signGalleryKey(swarm.keyPair, waveId, autobaseKey);
+    wave.keySig = signGalleryKey(swarm.keyPair, { waveId, autobaseKey });
 
     log(
       'starting wave',
@@ -1660,7 +1712,15 @@ function createWave({
     onEvent({ event: 'started', waveId, by: me.id });
 
     // the originator is hop 0 — hold (post staged selfie if joined) and forward
-    holdAndForward(stampToken(waveId, me.id, 0, ZERO_HASH, autobaseKey));
+    holdAndForward(
+      stampToken({
+        waveId,
+        originator: me.id,
+        hopCount: 0,
+        prevChainHash: ZERO_HASH,
+        autobaseKeyHex: autobaseKey
+      })
+    );
   }
 
   // --- connections -----------------------------------------------------------

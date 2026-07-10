@@ -158,18 +158,18 @@ test('closestPrecedingNode picks the highest known id below the target', (t) => 
 });
 
 test('findSuccessorStep resolves locally in (me, successor], else forwards', (t) => {
-  const known = [makeId(20), makeId(40), makeId(80)];
-  t.alike(findSuccessorStep(makeId(10), makeId(20), known, 15n), {
+  const at = { me: makeId(10), successor: makeId(20), known: [makeId(20), makeId(40), makeId(80)] };
+  t.alike(findSuccessorStep({ ...at, target: 15n }), {
     done: true,
     successor: makeId(20)
   });
   t.alike(
-    findSuccessorStep(makeId(10), makeId(20), known, 20n),
+    findSuccessorStep({ ...at, target: 20n }),
     { done: true, successor: makeId(20) },
     'inclusive'
   );
   t.alike(
-    findSuccessorStep(makeId(10), makeId(20), known, 50n),
+    findSuccessorStep({ ...at, target: 50n }),
     { done: false, next: makeId(40) },
     'jump to 40'
   );
@@ -208,7 +208,12 @@ function route(net, origin, target) {
   let hops = 0;
   while (hops <= 1000) {
     const node = net.get(at);
-    const step = findSuccessorStep(at, node.successor, node.known, target);
+    const step = findSuccessorStep({
+      me: at,
+      successor: node.successor,
+      known: node.known,
+      target
+    });
     if (step.done) {
       return { successor: step.successor, hops };
     }

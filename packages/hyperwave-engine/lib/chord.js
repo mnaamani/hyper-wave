@@ -269,13 +269,14 @@ function closestPrecedingNode(known, myId, target) {
  * Applied hop-to-hop (each node using its own `known`), this converges to the true
  * successor in O(log N) hops with a full finger table, or degrades to a correct linear
  * walk along successors if a node only knows its successor.
- * @param {string} me - my hex peer id.
- * @param {(string|null)} successor - my successor's hex id, or null if I have none.
- * @param {(string[]|Set<string>)} known - my finger + successor hex ids.
- * @param {bigint} target - the keyspace position whose successor we're locating.
+ * @param {Object} opts The lookup step inputs, over MY local knowledge.
+ * @param {string} opts.me - my hex peer id.
+ * @param {(string|null)} opts.successor - my successor's hex id, or null if I have none.
+ * @param {(string[]|Set<string>)} opts.known - my finger + successor hex ids.
+ * @param {bigint} opts.target - the keyspace position whose successor we're locating.
  * @returns {FindSuccessorStepResult} whether we're done (with the answer) or must forward to `next`.
  */
-function findSuccessorStep(me, successor, known, target) {
+function findSuccessorStep({ me, successor, known, target }) {
   const myNid = nodeIdOfHex(me);
   const succNid = successor !== null ? nodeIdOfHex(successor) : myNid;
   if (inHalfOpenInterval(target, myNid, succNid)) {

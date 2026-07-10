@@ -38,5 +38,5 @@ console.log('my successor:', successor ? successor.angle : null);
 // Healing: the next reachable seat clockwise that we haven't already skipped.
 const reachable = new Set(live.map((peer) => peer.id));
 const skipped = new Set([successor && successor.id]); // pretend the successor went silent
-const alternate = pickReachable(live, myAngle, reachable, skipped);
+const alternate = pickReachable({ sortedRing: live, myAngle, reachable, skipped });
 console.log('healed successor (skipping the first):', alternate ? alternate.angle : null);

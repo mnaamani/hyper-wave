@@ -25,13 +25,14 @@ function burnMemo(waveId, peerId) {
  * Burn the participation fee for `waveId` and sign the ring attestation. Returns
  * { hash, proof }; throws if the burn fails. `proof` is the kick-off gate credential for the
  * initiator (announcePaid); a joiner's burn is its own anti-spam cost and ignores `proof`.
- * @param {Object} wave - The createWave engine handle (provides `me.id` and `recordBurn`).
- * @param {Object} payments - The Payments object from createPayments (provides `burn`).
- * @param {string} waveId - The wave the fee is being burned for.
- * @param {string} reason - Fee reason, e.g. `'kickoff'` or `'join'`.
+ * @param {Object} opts The fee to burn.
+ * @param {Object} opts.wave - The createWave engine handle (provides `me.id` and `recordBurn`).
+ * @param {Object} opts.payments - The Payments object from createPayments (provides `burn`).
+ * @param {string} opts.waveId - The wave the fee is being burned for.
+ * @param {string} opts.reason - Fee reason, e.g. `'kickoff'` or `'join'`.
  * @returns {Promise<{hash: string, proof: Object}>} The burn tx hash and the signed burn proof.
  */
-async function payFee(wave, payments, waveId, reason) {
+async function payFee({ wave, payments, waveId, reason }) {
   const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id));
   // pass waveId so the attestation records even if the (instant) wave already ended — it's the
   // ticket for a late gallery admission into the persisted gallery (wave.js recordBurn).
