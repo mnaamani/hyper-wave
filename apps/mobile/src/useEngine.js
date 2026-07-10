@@ -1,5 +1,5 @@
 // useEngine — the mobile host for the shared engine. This is the RN counterpart of the desktop
-// renderer's worker bridge: it boots the Bare worklet (hyper-wave's worklet/app.js,
+// renderer's worker bridge: it boots the Bare worklet (hyperwave-engine's worklet/app.js,
 // bundled by bare-pack), speaks the SAME JSON message protocol over the IPC stream, and exposes
 // engine state + actions to React. The engine itself (wave race, gallery, WDK wallet) runs
 // unchanged inside the worklet — this file never touches Hyperswarm/Autobase/WDK directly.

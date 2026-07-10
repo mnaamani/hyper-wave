@@ -3,7 +3,7 @@
 // the desktop worker and mobile worklet both use. This example boots wallet-less, prints
 // its identity + any state events, then closes. Run:  bare examples/engine.js
 const fs = require('bare-fs');
-const { createEngine } = require('hyper-wave');
+const { createEngine } = require('hyperwave-engine');
 
 async function main() {
   const dir = '/tmp/hw-example-engine-' + Date.now();

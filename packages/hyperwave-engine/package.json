@@ -1,5 +1,5 @@
 {
-  "name": "hyper-wave",
+  "name": "hyperwave-engine",
   "version": "0.1.0",
   "description": "HyperWave engine: P2P stadium wave over Hyperswarm/Autobase with WDK payments, host-agnostic, runs under Bare.",
   "license": "Apache-2.0",

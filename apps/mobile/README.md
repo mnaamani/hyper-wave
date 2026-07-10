@@ -8,12 +8,12 @@ only the host (this Expo app) and the UI differ.
 ## How it fits together
 
 ```
-Expo RN app (this package)                 Bare worklet (hyper-wave)
+Expo RN app (this package)                 Bare worklet (hyperwave-engine)
   App.js  ── useEngine() ──► FramedStream ⇄ IPC ⇄ FramedStream ──► worklet/app.js ──► init
   (React UI)                 (JSON messages)                        (wave + gallery + wallet)
 ```
 
-- `bare-pack` bundles `../../packages/hyper-wave/worklet/app.js` (+ its whole
+- `bare-pack` bundles `../../packages/hyperwave-engine/worklet/app.js` (+ its whole
   Hyperswarm/Autobase/WDK require graph) into `bundles/app.bundle.mjs`.
 - `react-native-bare-kit`'s `Worklet` boots that bundle inside the app; `src/useEngine.js` speaks
   the exact same JSON protocol the desktop renderer uses (`start-wave`, `tip`, `state`,
@@ -68,7 +68,7 @@ to package those prebuilds into `ios/addons/*.xcframework`, which it then vendor
 snags break the built-in version: CocoaPods **skips `prepare_command` for local path pods** (how
 `node_modules` pods install), and that script scans from the **repo root**, which in an
 npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs `bare-link` from
-`apps/mobile` (which reaches the addons via `hyper-wave`) and writes into the hoisted
+`apps/mobile` (which reaches the addons via `hyperwave-engine`) and writes into the hoisted
 `react-native-bare-kit` — wired into `postinstall` (auto after every install) and `npm run ios`.
 
 ## What's left (none of which touch the engine)

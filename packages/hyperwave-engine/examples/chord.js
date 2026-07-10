@@ -4,7 +4,7 @@
 // Run:  bare examples/chord.js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const chord = require('hyper-wave/lib/chord');
+const chord = require('hyperwave-engine/lib/chord');
 
 const ids = Array.from({ length: 8 }, () => b4a.toString(crypto.keyPair().publicKey, 'hex'));
 const myId = ids[0];

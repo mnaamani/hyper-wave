@@ -125,11 +125,11 @@ module.exports = {
     // engines so pear-runtime's bare-semver doesn't choke on the freshly-installed tree.
     packageAfterCopy: async (_forgeConfig, buildPath) => {
       const childProcess = require('child_process');
-      const coreDir = path.resolve(__dirname, '..', '..', 'packages', 'hyper-wave');
+      const coreDir = path.resolve(__dirname, '..', '..', 'packages', 'hyperwave-engine');
       const shim = path.resolve(__dirname, '..', '..', 'scripts', 'fix-bare-engines.js');
       const pjPath = path.join(buildPath, 'package.json');
       const packageJson = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
-      packageJson.dependencies['hyper-wave'] = 'file:' + coreDir;
+      packageJson.dependencies['hyperwave-engine'] = 'file:' + coreDir;
       delete packageJson.devDependencies;
       fs.writeFileSync(pjPath, JSON.stringify(packageJson, null, 2));
       childProcess.execSync(

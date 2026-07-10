@@ -2,7 +2,7 @@
 
 Runnable, self-contained examples — one per module. Companion to
 [`../usage.md`](../usage.md) (the prose walkthrough). Each file requires the package by name
-(`hyper-wave/...`), exactly as a consumer would.
+(`hyperwave-engine/...`), exactly as a consumer would.
 
 Run any of them under **Bare**, from the package root:
 

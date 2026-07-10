@@ -1,4 +1,4 @@
-# hyper-wave — usage & examples
+# hyperwave-engine — usage & examples
 
 Worked examples for the HyperWave engine and its submodules. For _what_ the pieces are and how
 they interact, see [`docs/architecture.md`](../../docs/architecture.md) and
@@ -18,15 +18,15 @@ const {
   createPayments,
   parseBootstrap,
   loadOrCreateSwarmSeed
-} = require('hyper-wave');
-const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyper-wave'); // fees.js
+} = require('hyperwave-engine');
+const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine'); // fees.js
 
 // 2. The pure submodules are imported by subpath (not re-exported from the index):
-const ring = require('hyper-wave/lib/ring');
-const token = require('hyper-wave/lib/token');
-const chord = require('hyper-wave/lib/chord');
-const { createFlood } = require('hyper-wave/lib/flood');
-const gallery = require('hyper-wave/lib/gallery');
+const ring = require('hyperwave-engine/lib/ring');
+const token = require('hyperwave-engine/lib/token');
+const chord = require('hyperwave-engine/lib/chord');
+const { createFlood } = require('hyperwave-engine/lib/flood');
+const gallery = require('hyperwave-engine/lib/gallery');
 ```
 
 Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it headless](#2-drive-a-wave-headless-createwave) ·
@@ -43,7 +43,7 @@ it commands via `onMessage`. This is the entire surface a host (the desktop work
 worklet) needs.
 
 ```js
-const { createEngine } = require('hyper-wave');
+const { createEngine } = require('hyperwave-engine');
 
 const engine = createEngine({
   storageDir: '/tmp/hyperwave/a', // one dir per peer (the hyperwave/ store is wiped on startup)
@@ -92,7 +92,7 @@ a custom host), call `createWave` directly. It builds the Hyperswarm/Corestore t
 returns the wave controls.
 
 ```js
-const { createWave, parseBootstrap } = require('hyper-wave');
+const { createWave, parseBootstrap } = require('hyperwave-engine');
 
 const wave = createWave({
   storageDir: '/tmp/hw/a',
@@ -141,7 +141,7 @@ const {
   liveRing,
   nextClockwise,
   pickReachable
-} = require('hyper-wave/lib/ring');
+} = require('hyperwave-engine/lib/ring');
 
 // a seat angle is derived from the public key — never trusted from the wire
 const me = crypto.keyPair();
@@ -177,7 +177,7 @@ real. All ids are lowercase hex; keyspace positions are `BigInt` mod `2^64`.
 ```js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const chord = require('hyper-wave/lib/chord');
+const chord = require('hyperwave-engine/lib/chord');
 
 const ids = Array.from({ length: 8 }, () => b4a.toString(crypto.keyPair().publicKey, 'hex'));
 const myId = ids[0];
@@ -223,7 +223,7 @@ const {
   verifyReceipt,
   advanceChain,
   verifyToken
-} = require('hyper-wave/lib/token');
+} = require('hyperwave-engine/lib/token');
 
 const kp = crypto.keyPair();
 const peerId = b4a.toString(kp.publicKey, 'hex');
@@ -251,7 +251,7 @@ verifyToken(tokenMsg); // → true
 gallery write:
 
 ```js
-const { signBurn, verifyBurn, burnAuthorizes } = require('hyper-wave/lib/token');
+const { signBurn, verifyBurn, burnAuthorizes } = require('hyperwave-engine/lib/token');
 
 const fields = {
   waveId,
@@ -276,7 +276,7 @@ const {
   verifyGalleryKey,
   signWaveEnd,
   verifyWaveEnd
-} = require('hyper-wave/lib/token');
+} = require('hyperwave-engine/lib/token');
 
 const keySig = signGalleryKey(kp, waveId, /* autobaseKey */ 'ab12…');
 verifyGalleryKey(peerId, waveId, 'ab12…', keySig); // → true (peerId = the originator)
@@ -293,7 +293,7 @@ One rule turns a one-hop broadcast into an epidemic across a partial mesh: relay
 **first sight only**. Size-capped so the set can't grow unbounded.
 
 ```js
-const { createFlood } = require('hyper-wave/lib/flood');
+const { createFlood } = require('hyperwave-engine/lib/flood');
 
 const flood = createFlood({ cap: 4096 });
 
@@ -323,8 +323,8 @@ const Corestore = require('corestore');
 const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const { galleryConfig, readGallery, buildGallery } = require('hyper-wave/lib/gallery');
-const { signReceipt } = require('hyper-wave/lib/token');
+const { galleryConfig, readGallery, buildGallery } = require('hyperwave-engine/lib/gallery');
+const { signReceipt } = require('hyperwave-engine/lib/token');
 
 const store = new Corestore('/tmp/hw-gallery');
 const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig());
@@ -370,7 +370,7 @@ To admit another writer, append `{ type: 'add-writer', key: '<hex writer key>' }
 ESM-only. `fees.js` composes it into the wave (fee burns + the paid-wave gate).
 
 ```js
-const { createPayments } = require('hyper-wave');
+const { createPayments } = require('hyperwave-engine');
 
 const pay = await createPayments({ storageDir: '/tmp/hw/a' /*, seed: '<mnemonic>' */ });
 console.log(pay.address); // T… (derived offline from the seed at <storage>/wallet.seed)
@@ -386,7 +386,7 @@ pay.dispose();
 Wire it into a `createWave` instance and run the fee flow with `fees.js`:
 
 ```js
-const { createWave, FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyper-wave');
+const { createWave, FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine');
 
 const wave = createWave({ storageDir: '/tmp/hw/a', onState() {} });
 wireWallet(wave, pay); // sets the wallet address (tips) + the on-chain burn verifier (paid gate)
@@ -410,7 +410,7 @@ and returns `{ hash, proof }`; `confirmBurn` polls the chain until the burn is r
 ## 9. Seed & bootstrap helpers
 
 ```js
-const { parseBootstrap, loadOrCreateSwarmSeed } = require('hyper-wave');
+const { parseBootstrap, loadOrCreateSwarmSeed } = require('hyperwave-engine');
 
 // "host:port[,host:port…]" → Hyperswarm's bootstrap option (a local DHT); '' → null (public DHT)
 parseBootstrap('127.0.0.1:49737'); // → [{ host: '127.0.0.1', port: 49737 }]

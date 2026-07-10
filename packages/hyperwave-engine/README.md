@@ -1,4 +1,4 @@
-# hyper-wave
+# hyperwave-engine
 
 The HyperWave engine: a permissionless P2P "stadium wave" — peers on a Hyperswarm
 DHT ring relay a signed token clockwise, post selfies to a shared Autobase gallery,
@@ -6,7 +6,7 @@ and pay/tip with self-custodial WDK wallets. Host-agnostic;
 runs under [Bare](https://github.com/holepunchto/bare).
 
 ```js
-const { createEngine } = require('hyper-wave');
+const { createEngine } = require('hyperwave-engine');
 
 const engine = createEngine({
   storageDir: '/tmp/hyperwave/a',

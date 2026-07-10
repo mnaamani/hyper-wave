@@ -12,7 +12,7 @@ This document covers the **process/layer structure**. For the wire protocol and 
 machine (enough to build a compatible client), see [`protocol.md`](./protocol.md).
 
 The repo is an **npm-workspaces monorepo**: the reusable Bare engine lives in
-`packages/hyper-wave/` and boots unchanged under two hosts — the desktop Electron
+`packages/hyperwave-engine/` and boots unchanged under two hosts — the desktop Electron
 app (`apps/desktop/`) and an Expo + react-native-bare-kit mobile app (`apps/mobile/`). Each
 host is a ~20–40-line shim over the engine's host-agnostic entry, `lib/engine.js` `createEngine()`.
 
@@ -49,7 +49,7 @@ sandboxed renderer and the worker.
 
 The three-process split is **desktop-specific**. The engine itself is host-abstracted: on
 mobile the same `hyperwave` boots as a single Bare **worklet**
-(`packages/hyper-wave/worklet/app.js` under react-native-bare-kit, bundled by
+(`packages/hyperwave-engine/worklet/app.js` under react-native-bare-kit, bundled by
 `bare-pack`), driven by the React Native UI over the identical JSON IPC surface
 (`apps/mobile/src/useEngine.js`) — no Electron main, no separate updater.
 
@@ -138,7 +138,7 @@ it off):
 ## Module map
 
 ```
-packages/hyper-wave/   the reusable Bare engine (npm workspace)
+packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
   index.js           package entry: re-exports createEngine (engine), wave, pay, fees
   lib/
     engine.js        createEngine(): the host-agnostic engine — wires wave.js + pay.js + fees.js,

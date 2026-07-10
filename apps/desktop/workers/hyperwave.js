@@ -6,7 +6,7 @@
 const FramedStream = require('framed-stream');
 const goodbye = require('graceful-goodbye');
 const env = require('bare-env');
-const { createEngine } = require('hyper-wave');
+const { createEngine } = require('hyperwave-engine');
 
 const pipe = new FramedStream(Bare.IPC);
 

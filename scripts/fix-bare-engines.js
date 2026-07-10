@@ -26,7 +26,7 @@ const ROOTS = target
   : [
       path.join(ROOT, 'node_modules'),
       path.join(ROOT, 'apps', 'desktop', 'node_modules'),
-      path.join(ROOT, 'packages', 'hyper-wave', 'node_modules')
+      path.join(ROOT, 'packages', 'hyperwave-engine', 'node_modules')
     ];
 const SAFE = '>=0.0.0'; // always satisfied — removes the (advisory) constraint, stays parseable
 

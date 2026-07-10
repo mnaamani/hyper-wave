@@ -237,7 +237,7 @@ construction). `wave.js` is untouched.
 
 - **Pure unit tests (brittle):** `nodeId` from key; finger targets; `findSuccessor` over a
   synthetic node set; one `stabilize` step; successor-list failover. Put Chord math in a
-  pure module (`packages/hyper-wave/lib/chord.js`) so it's unit-testable without a swarm.
+  pure module (`packages/hyperwave-engine/lib/chord.js`) so it's unit-testable without a swarm.
 - **Partial-topology flood harness** (`flood.test.js`): drives the real per-node flood
   decision (`flood.js`) over synthetic graphs (line, ring, star, random partial mesh,
   disconnected) — Hyperswarm full-meshes small swarms, so this is how we prove **relay

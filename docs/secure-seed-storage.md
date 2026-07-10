@@ -168,5 +168,5 @@ would be worse than today — it would _imply_ security we don't have. Also gate
 ## 11. References
 
 - Electron `safeStorage`: https://www.electronjs.org/docs/latest/api/safe-storage
-- Mobile secure-storage seam: `apps/mobile/README.md`, `packages/hyper-wave/worklet/app.js`
+- Mobile secure-storage seam: `apps/mobile/README.md`, `packages/hyperwave-engine/worklet/app.js`
 - Seed persistence today: `loadOrCreateSwarmSeed` (`wave.js`), `createPayments` (`pay.js`)

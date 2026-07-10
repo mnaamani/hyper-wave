@@ -8,7 +8,7 @@ const {
   liveRing,
   nextClockwise,
   pickReachable
-} = require('hyper-wave/lib/ring');
+} = require('hyperwave-engine/lib/ring');
 
 // A seat angle is DERIVED from the public key — never trusted from the wire.
 const me = crypto.keyPair();
