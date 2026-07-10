@@ -12,8 +12,20 @@
     "test:e2e:local": "npm run test:e2e:local -w hyperwave-engine",
     "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-engine",
     "start": "npm start -w hyperwave-desktop --",
+    "make": "npm run make -w hyperwave-desktop",
     "lint": "prettier --check . && lunte packages apps/desktop scripts && eslint . && npm run lint:jsdoc -w hyperwave-engine",
     "format": "prettier --write . && lunte --fix packages apps/desktop scripts"
+  },
+  "overrides": {
+    "axios": "1.18.1",
+    "ethers": {
+      "ws": "8.21.0"
+    },
+    "tar": "7.5.19",
+    "tmp": "0.2.7",
+    "xcode": {
+      "uuid": "11.1.1"
+    }
   },
   "devDependencies": {
     "eslint": "^10.6.0",
