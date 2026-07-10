@@ -12,7 +12,7 @@ const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
 const { nodeIdOfHex, RING } = require('../lib/chord.js');
-const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('../lib/fees.js');
+const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('../lib/wallet.js');
 
 const name = Bare.argv[2] || 'peer';
 const storageDir = Bare.argv[3];
@@ -76,7 +76,7 @@ const wave = createWave({
   log: (...args) => console.log(`[]`, ...args)
 });
 
-// Burn the participation fee (fees.js: memo + ring attestation), logging the result.
+// Burn the participation fee (wallet.js: memo + ring attestation), logging the result.
 async function burnFee(waveId, reason) {
   const result = await payFee({ wave, payments, waveId, reason });
   console.log(`[${name}] ${reason.toUpperCase()}-BURNED ${FEE_TRX} TRX hash=`);
@@ -136,7 +136,7 @@ if (env.PROBE) {
 // env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
 // WALLET_SEND=<addr>:<amt> -> also do a one-off TRX transfer (funded wallets only).
 if (env.WALLET) {
-  const { createPayments } = require('../lib/pay.js');
+  const { createPayments } = require('../lib/wallet.js');
   createPayments({ storageDir, log: (...args) => console.log(`[] wallet`, ...args) })
     .then(async (pay) => {
       payments = pay;

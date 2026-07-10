@@ -28,7 +28,7 @@ flowchart TB
       R["renderer/app.js + lib/*<br/>ring canvas · lobby · webcam ·<br/>gallery · hud · country picker"]
     end
     subgraph Worker["Bare worker (per --storage)"]
-      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + pay.js + fees.js)<br/>discovery · Chord pinning · gossip · token race ·<br/>lifecycle · Autobase gallery · healing ·<br/>WDK wallet · fee burns · tips"]
+      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + wallet.js)<br/>discovery · Chord pinning · gossip · token race ·<br/>lifecycle · Autobase gallery · healing ·<br/>WDK wallet · fee burns · tips"]
     end
     subgraph Updater["Bare worker (OTA, template)"]
       U["workers/updater.js<br/>pear-runtime auto-update"]
@@ -53,12 +53,12 @@ mobile the same `hyperwave` boots as a single Bare **worklet**
 `bare-pack`), driven by the React Native UI over the identical JSON IPC surface
 (`apps/mobile/src/useEngine.js`) — no Electron main, no separate updater.
 
-| Layer                                            | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------------------ | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                                          |
-| **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                                   |
-| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `pay.js` + `fees.js`). WDK is ESM-only, so `pay.js` bridges via dynamic `import()`. |
-| **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                                 |
+| Layer                                            | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------ | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                                    |
+| **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                             |
+| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
+| **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                           |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
 
@@ -141,7 +141,7 @@ it off):
 packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
   index.js           package entry: re-exports createEngine (engine), wave, pay, fees
   lib/
-    engine.js        createEngine(): the host-agnostic engine — wires wave.js + pay.js + fees.js,
+    engine.js        createEngine(): the host-agnostic engine — wires wave.js + wallet.js,
                      owns the command dispatch (start/join/tip/send-trx/stage-selfie/
                      refresh-wallet/fetch-transactions) and the fee flow; both hosts are
                      thin shims over this
@@ -159,8 +159,8 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
     gallery.js       Autobase config + ordering (galleryConfig, buildGallery, readGallery)
     gallery-session.js GallerySession class: per-wave open/create/retain (archivist rule) +
                      the optimistic writer-admission flow (flooded add-writer)
-    fees.js          shared fee flow (burn memo, payFee, confirmBurn, wireWallet)
-    pay.js           WDK wallet (Tron Nile, native TRX): send, burn(+memo), verifyBurnTx,
+    wallet.js        WDK wallet (Tron Nile, native TRX) + shared fee flow (burn memo,
+                     payFee, confirmBurn, wireWallet): send, burn(+memo), verifyBurnTx,
                      transactions (on-chain history via TronGrid, both directions)
     *.test.js        brittle unit-test suites (aggregated by test.js)
   bin/               standalone dev CLIs (run under Bare)

@@ -5,7 +5,7 @@
 // findSuccessor), Flood (gossip dedup), SelfiePipeline (stage+receipt pairing), and
 // GallerySession (per-wave Autobase + writer admission). What remains here is the wave
 // lifecycle FSM, the token race + healing, and the gossip dispatch that binds them.
-// The payment layer (pay.js, WDK) is injected by the worker via setWallet(): wallet
+// The payment layer (wallet.js, WDK) is injected by the worker via setWallet(): wallet
 // address (for gallery tips) + the on-chain burn verifier (the paid-wave anti-spam gate).
 // Money model: burned fees (skin in the game) + gallery tips; there are no sponsor rewards.
 // Runs under Bare (the worker) or a Node harness. The Bare worker (hyperwave.js) bridges

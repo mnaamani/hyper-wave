@@ -14,7 +14,7 @@ HyperWave holds two long-lived secrets per instance:
 | **Wallet seed** | `<storage>/wallet.seed` | WDK Tron wallet — signs fee burns + tips (BIP39 mnemonic phrase)                  |
 | **Swarm seed**  | `<storage>/swarm.seed`  | Noise/DHT keypair — the ring seat + signs receipts/wave-end/gallery (32-byte hex) |
 
-Both are written by the **Bare worker** (`pay.js` and `wave.js` via `bare-fs`) in cleartext.
+Both are written by the **Bare worker** (`wallet.js` and `wave.js` via `bare-fs`) in cleartext.
 Restricting file permissions only stops _other OS users_. It does nothing against: theft of the
 disk / a backup, cloud-sync of the profile dir, or casual inspection — the seed is readable as-is.
 For a self-custodial wallet that's the wrong default even on testnet.
@@ -101,7 +101,7 @@ Flow:
 3. **`engine.js` passes `config.swarmSeed` through to `createWave({ swarmSeed })`** (today it only
    forwards `config.seed` → the wallet). One-line passthrough; the param already exists.
 4. **The engine no longer writes plaintext on desktop** — both seeds are injected, so
-   `loadOrCreateSwarmSeed` and `pay.js` take the injected branch and never touch disk. The file
+   `loadOrCreateSwarmSeed` and `wallet.js` take the injected branch and never touch disk. The file
    branch remains for hosts that pass no seed (dev/headless).
 
 ## 6. Bootstrapping (who generates the seed)
@@ -150,7 +150,7 @@ would be worse than today — it would _imply_ security we don't have. Also gate
   generated seed, please store it" message back to main (option A).
 - `engine.js` — forward `config.swarmSeed` to `createWave` (one line); optionally surface the
   first-run generated seeds so the host can persist them.
-- No `wave.js` / `pay.js` change — both already support injected, non-persisted seeds.
+- No `wave.js` / `wallet.js` change — both already support injected, non-persisted seeds.
 - Docs: fold the outcome into `architecture.md` (the worker init flow) and note it in
   `protocol.md` §1 once shipped.
 
@@ -169,4 +169,4 @@ would be worse than today — it would _imply_ security we don't have. Also gate
 
 - Electron `safeStorage`: https://www.electronjs.org/docs/latest/api/safe-storage
 - Mobile secure-storage seam: `apps/mobile/README.md`, `packages/hyperwave-engine/worklet/app.js`
-- Seed persistence today: `loadOrCreateSwarmSeed` (`wave.js`), `createPayments` (`pay.js`)
+- Seed persistence today: `loadOrCreateSwarmSeed` (`wave.js`), `createPayments` (`wallet.js`)

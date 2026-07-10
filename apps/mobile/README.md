@@ -81,7 +81,7 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 - **Wallet persistence + funding** — WDK works in the worklet (wallet is **on**), but the seed
   currently persists in the tmp dir (wiped per run → fresh unfunded wallet each launch). Inject
   the seed from `expo-secure-store` via the init `config.seed` (the engine already accepts it,
-  `lib/pay.js`) for a stable, secure wallet, then faucet-fund it to exercise burns/tips.
+  `lib/wallet.js`) for a stable, secure wallet, then faucet-fund it to exercise burns/tips.
   Note: a wallet-enabled phone runs **paid** waves (enforces the burn gate), so a cross-peer demo
   needs the other peers funded too — or set `wallet: false` in `App.js` for a no-wallet demo.
 - **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake

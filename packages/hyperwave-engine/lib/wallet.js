@@ -1,8 +1,11 @@
-// Payment domain (WDK layer). A self-custodial Tron wallet per instance — used for the
-// burned participation fees and gallery tips (no sponsor rewards). WDK is ESM-only, so this
-// CJS module bridges to it via dynamic import(); it does real Tron Nile-testnet transfers
-// (the spike/wdk de-risk confirmed this runs under Bare). No swarm here — the worker
-// (hyperwave.js) / wave.js wire it in, mirroring ring/token/gallery as its own module.
+// Wallet domain (WDK layer + fee flows). A self-custodial Tron wallet per instance — used for
+// the burned participation fees and gallery tips (no sponsor rewards) — plus the participation-fee
+// flows shared by the engine hosts (the GUI worker and the headless harness): one home for the
+// fee amount and the on-chain memo format, so a format drift between hosts can't silently break
+// verification. WDK is ESM-only, so this CJS module bridges to it via dynamic import(); it does
+// real Tron Nile-testnet transfers (the spike/wdk de-risk confirmed this runs under Bare). No
+// swarm here — the worker (hyperwave.js) / wave.js wire it in, mirroring ring/token/gallery as
+// its own module.
 //
 // MVP uses **native TRX** as the payment currency (not TRC-20 USDT): no token contract, and
 // a TRX transfer pays its own (tiny) fee from the same balance — so a wallet that received
@@ -27,12 +30,6 @@ const b4a = require('b4a');
  * @property {() => void} dispose - Release the underlying wallet manager.
  */
 
-/**
- * Convert whole TRX to sun (1 TRX = 1e6 sun).
- * @param {number} trx - Amount in whole TRX.
- * @returns {bigint} The amount in sun.
- */
-
 const NILE_PROVIDER = 'https://nile.trongrid.io';
 const SUN = 1_000_000; // 1 TRX = 1e6 sun
 // Tron's black hole (base58check of the all-zero EVM address, 41 + 20×00): no key exists,
@@ -41,6 +38,18 @@ const SUN = 1_000_000; // 1 TRX = 1e6 sun
 // real small transfer; Tron also burns tx fees at the protocol level.)
 const BURN_ADDRESS = 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb';
 
+/** @type {number} Kick-off/join fee in whole TRX, burned to the black hole (BURN_ADDRESS). */
+const FEE_TRX = 1;
+// On-chain read-back poll (confirmBurn): getTransaction reflects a broadcast tx within
+// seconds on Nile, but allow for lag. Total budget must stay under wave.js PAY_TIMEOUT_MS.
+const CONFIRM_ATTEMPTS = 12;
+const CONFIRM_INTERVAL_MS = 2500;
+
+/**
+ * Convert whole TRX to sun (1 TRX = 1e6 sun).
+ * @param {number} trx - Amount in whole TRX.
+ * @returns {bigint} The amount in sun.
+ */
 const toSun = (trx) => BigInt(Math.round(Number(trx) * SUN));
 /**
  * Convert sun to whole TRX (1 TRX = 1e6 sun).
@@ -212,4 +221,72 @@ async function createPayments({
   };
 }
 
-module.exports = { createPayments, toSun, fromSun };
+// ---------------------------------------------------------------------------
+// Fee flows — composed from the wallet above by the engine hosts (the GUI worker
+// and the headless harness). Hosts do their own reporting (IPC toast vs console).
+// ---------------------------------------------------------------------------
+
+/**
+ * The memo that provably ties a burn to its wave + payer (protocol.md §9.2).
+ * @param {string} waveId - The wave the burn is for.
+ * @param {string} peerId - Hex id of the paying peer.
+ * @returns {string} The on-chain memo string `hyperwave:<waveId>:<peerId>`.
+ */
+function burnMemo(waveId, peerId) {
+  return `hyperwave:${waveId}:${peerId}`;
+}
+
+/**
+ * Burn the participation fee for `waveId` and sign the ring attestation. Returns
+ * { hash, proof }; throws if the burn fails. `proof` is the kick-off gate credential for the
+ * initiator (announcePaid); a joiner's burn is its own anti-spam cost and ignores `proof`.
+ * @param {Object} opts The fee to burn.
+ * @param {Object} opts.wave - The createWave engine handle (provides `me.id` and `recordBurn`).
+ * @param {Object} opts.payments - The Payments object from createPayments (provides `burn`).
+ * @param {string} opts.waveId - The wave the fee is being burned for.
+ * @param {string} opts.reason - Fee reason, e.g. `'kickoff'` or `'join'`.
+ * @returns {Promise<{hash: string, proof: Object}>} The burn tx hash and the signed burn proof.
+ */
+async function payFee({ wave, payments, waveId, reason }) {
+  const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id));
+  // pass waveId so the attestation records even if the (instant) wave already ended — it's the
+  // ticket for a late gallery admission into the persisted gallery (wave.js recordBurn).
+  const proof = wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash, waveId });
+  return { hash, proof };
+}
+
+/**
+ * Wait (bounded) until the burn is readable on-chain, so peers' single verify check
+ * succeeds the moment the wave is announced. Resolves true when confirmed.
+ * @param {Object} payments - The Payments object from createPayments (provides `verifyBurnTx`).
+ * @param {string} waveId - The wave whose burn memo is expected on-chain.
+ * @param {string} hash - The burn tx hash to poll for.
+ * @returns {Promise<boolean>} True once the burn is confirmed on-chain, false if it never confirms.
+ */
+async function confirmBurn(payments, waveId, hash) {
+  for (let i = 0; i < CONFIRM_ATTEMPTS; i++) {
+    const result = await payments.verifyBurnTx(hash, {
+      waveId,
+      from: payments.address,
+      minTrx: FEE_TRX
+    });
+    if (result.ok) {
+      return true;
+    }
+    await new Promise((res) => setTimeout(res, CONFIRM_INTERVAL_MS));
+  }
+  return false;
+}
+
+/**
+ * Wire a ready wallet into the engine: my address (gallery tips / attestations) and the on-chain
+ * burn verifier (enables the paid-wave anti-spam gate).
+ * @param {Object} wave - The createWave engine handle (provides `setWallet`).
+ * @param {Object} payments - The Payments object from createPayments (address + `verifyBurnTx`).
+ * @returns {void}
+ */
+function wireWallet(wave, payments) {
+  wave.setWallet(payments.address, (txHash, expect) => payments.verifyBurnTx(txHash, expect));
+}
+
+module.exports = { createPayments, toSun, fromSun, FEE_TRX, payFee, confirmBurn, wireWallet };

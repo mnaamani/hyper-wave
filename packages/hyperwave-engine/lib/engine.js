@@ -1,14 +1,13 @@
 // The HyperWave engine, host-agnostic. Everything the desktop worker (workers/hyperwave.js) and
 // a mobile bare-kit worklet (worklet/app.js) share lives here: it wires the wave protocol
-// (wave.js) + the WDK wallet (pay.js) together and exposes a tiny message surface. The host
+// (wave.js) + the WDK wallet (wallet.js) together and exposes a tiny message surface. The host
 // supplies { storageDir, config, send } and feeds it decoded messages via onMessage() — there's
 // no Bare.argv / bare-env / IPC transport in here, so the same engine boots under Electron-spawned
 // Bare and a react-native-bare-kit worklet unchanged. `deps` lets tests inject fake factories
 // (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('./wave');
-const { createPayments } = require('./pay');
-const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees');
+const { createPayments, FEE_TRX, payFee, confirmBurn, wireWallet } = require('./wallet');
 
 /**
  * Host-supplied engine configuration (only these fields are read).
@@ -16,7 +15,7 @@ const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees');
  * @property {string} [bootstrap] - Bootstrap peer(s) for the swarm DHT (parsed by parseBootstrap).
  * @property {string} [matchId] - Match-specific swarm topic id (isolates rings).
  * @property {boolean} [wallet] - Set `false` to run wallet-less (no burns/paid-gate/tips).
- * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by pay.js).
+ * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by wallet.js).
  */
 
 /**
@@ -28,7 +27,7 @@ const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('./fees');
  */
 
 /**
- * The HyperWave engine, host-agnostic: wires the wave protocol (wave.js) + the WDK wallet (pay.js)
+ * The HyperWave engine, host-agnostic: wires the wave protocol (wave.js) + the WDK wallet (wallet.js)
  * together and exposes a tiny message surface. The host supplies { storageDir, config, send } and
  * feeds it decoded messages via onMessage(). `deps` lets tests inject fake factories.
  * @param {Object} options - Engine options.
@@ -105,7 +104,7 @@ function createEngine({
       });
   }
 
-  // Participation fee (fees.js), burned to the black hole. The `burn-result` message carries a
+  // Participation fee (wallet.js), burned to the black hole. The `burn-result` message carries a
   // `stage` so the UI never says "burned" prematurely:
   //   confirming — tx broadcast, awaiting on-chain confirmation (kick-off only)
   //   burned     — confirmed on-chain (kick-off) or broadcast (join, fire-and-forget)

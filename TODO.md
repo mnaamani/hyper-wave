@@ -8,7 +8,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 ### Core wave engine + UI
 
 - [x] Code structure: engine split into `ring.js` / `token.js` / `gallery.js` (+ later
-      `chord.js` / `flood.js` / `pay.js`) with the `wave.js` orchestrator
+      `chord.js` / `flood.js` / `wallet.js`) with the `wave.js` orchestrator
 - [x] Derive ring angle from identity (never trust gossiped angle)
 - [x] Token race with Ed25519 receipts + constant-size blake2b chain accumulator
 - [x] Wave lifecycle: idle → lobby → racing → idle; single active wave; lower-`waveId`
@@ -50,7 +50,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 
 ### Payment layer (WDK, Tron Nile testnet, native TRX) — burned fees + tips, no rewards
 
-- [x] Self-custodial wallet per instance (`pay.js`; seed persists at `<storage>/wallet.seed`);
+- [x] Self-custodial wallet per instance (`wallet.js`; seed persists at `<storage>/wallet.seed`);
       💰 chip in the renderer. WDK is ESM-only → CJS worker bridges via dynamic `import()`
 - [x] Gallery tipping: `wave-selfie` carries the poster's address; 💵 Tip → real transfer.
       **The only way to make money** — there are no sponsor rewards.
@@ -213,7 +213,7 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
       hot path (`wave-pos` is emitted every hop) — pair with the compact-encoding item (raw-byte
       sig) and per-connection rate limiting above. **Schema documented** in `docs/protocol.md`
       §5.0 (marked planned); implementation still to do.
-- [ ] **Harden `pay.send` to report failed transactions** (`pay.js`). The returned `hash` is the
+- [ ] **Harden `pay.send` to report failed transactions** (`wallet.js`). The returned `hash` is the
       txID computed client-side from the signed bytes (`sha256(raw_data)`), so `send` resolves
       `{ hash }` even when the broadcast is rejected or the tx later fails on-chain — e.g. sending
       from an **unfunded** wallet (`WALLET_SEND` via `wave.run.js`) prints `WALLET SENT ... hash=`
@@ -320,4 +320,4 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 ### Housekeeping
 
 - [ ] Surface `wave-unpaid` / `join-blocked` more visibly in the UI (currently status line)
-- [ ] Configurable fee/tip amounts (constants in `fees.js` / renderer)
+- [ ] Configurable fee/tip amounts (constants in `wallet.js` / renderer)

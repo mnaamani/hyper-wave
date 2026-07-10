@@ -19,7 +19,7 @@ const {
   parseBootstrap,
   loadOrCreateSwarmSeed
 } = require('hyperwave-engine');
-const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine'); // fees.js
+const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine'); // wallet.js
 
 // 2. The pure submodules are imported by subpath (not re-exported from the index):
 const ring = require('hyperwave-engine/lib/ring');
@@ -129,7 +129,7 @@ await wave.close();
 
 `createWave` returns: `{ me, startWave, join, setCountry, stageSelfie, setWallet, announcePaid,
 recordBurn, findSuccessor, close }`. The payment methods (`setWallet`/`announcePaid`/`recordBurn`)
-are wired by `fees.js` — see §8.
+are wired by `wallet.js` — see §8.
 
 ---
 
@@ -370,10 +370,10 @@ To admit another writer, append `{ type: 'add-writer', key: '<hex writer key>' }
 
 ---
 
-## 8. Payments — `fees.js` + `pay.js`
+## 8. Payments — `wallet.js`
 
 `createPayments` is the self-custodial WDK wallet (Tron Nile testnet). It's `async` because WDK is
-ESM-only. `fees.js` composes it into the wave (fee burns + the paid-wave gate).
+ESM-only. The same module composes it into the wave (fee burns + the paid-wave gate).
 
 ```js
 const { createPayments } = require('hyperwave-engine');
@@ -389,7 +389,7 @@ await pay.transactions(10); // → recent on-chain txs, both directions
 pay.dispose();
 ```
 
-Wire it into a `createWave` instance and run the fee flow with `fees.js`:
+Wire it into a `createWave` instance and run the fee flow:
 
 ```js
 const { createWave, FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine');

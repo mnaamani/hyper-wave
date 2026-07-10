@@ -10,7 +10,7 @@ import FramedStream from 'framed-stream';
 import b4a from 'b4a';
 import bundle from '../bundles/app.bundle.mjs'; // produced by `npm run bundle` (bare-pack)
 
-// Path the worklet's bare-fs writes to (Corestore + the wallet seed, see lib/pay.js). NOTE:
+// Path the worklet's bare-fs writes to (Corestore + the wallet seed, see lib/wallet.js). NOTE:
 // confirm the writable root for react-native-bare-kit's fs on device; production should inject
 // the seed from expo-secure-store via config.seed instead of persisting a wallet.seed file.
 const STORAGE_DIR = 'hyperwave';

@@ -26,7 +26,7 @@ async function main() {
   //   await pay.verifyBurnTx(hash, { waveId: 'w1', from: pay.address, minTrx: 1 }); // { ok, reason? }
   //   await pay.transactions(10);                             // recent txs, both directions
   //
-  // fees.js composes these into a wave (see examples/wave.js for a createWave instance):
+  // wallet.js also exports the fee flow composing these into a wave (see examples/wave.js for a createWave instance):
   //   const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine');
   //   wireWallet(wave, pay);                                  // address (tips) + burn verifier (paid gate)
   //   const { hash, proof } = await payFee({ wave, payments: pay, waveId, reason: 'kickoff' }); // burn FEE_TRX + sign attestation
