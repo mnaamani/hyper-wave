@@ -39,7 +39,7 @@ const MAX_CAPTION_BYTES = 512;
  * @returns {boolean} True if the op carries a valid receipt signed by its own peerId.
  */
 function selfieHasValidReceipt(op) {
-  return (
+  return !!(
     op.peerId &&
     op.receiptSig &&
     verifyReceipt(op.peerId, op.waveId, op.hopCount, op.chainHash, op.receiptTs, op.receiptSig)

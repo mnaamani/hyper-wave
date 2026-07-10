@@ -10,7 +10,7 @@
 
 /**
  * Create a flood dedup tracker: the "have I seen this id?" decision, size-capped.
- * @param {{cap?: number}} [options] - Options.
+ * @param {object} [options] - Options.
  * @param {number} [options.cap=4096] - Max ids to remember before wholesale clear.
  * @returns {{firstSight(mid: string): boolean, readonly size: number}} The tracker.
  */
