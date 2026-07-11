@@ -9,8 +9,16 @@ const test = require('brittle');
 const { Cluster, sleep, waitForAnyGallery } = require('./harness');
 
 // 8 is a good default: enough hops that the token really races a ring and gossip really floods
-// a small mesh, but light enough for a 2-core CI runner. Turn it down on a constrained box.
+// a small mesh, but light enough for a 2-core CI runner. Turn it down on a constrained box, or up
+// for a scale run (the manual e2e-public workflow dispatches this suite with a chosen count).
 const PEER_COUNT = Number(process.env.E2E_PEERS || 8);
+
+// Time windows scale with the peer count so a large-N dispatch isn't strangled by budgets sized
+// for 8: launch alone staggers 400ms per peer, the lap is one hop per peer, and convergence
+// replicates N selfies to N nodes. At the default 8 these come out a whisker above the historical
+// fixed values (90s wait / 150s test), so small runs behave as before.
+const WAIT_MS = 90000 + PEER_COUNT * 2000;
+const TEST_TIMEOUT_MS = 150000 + PEER_COUNT * 3000;
 
 // Launch PEER_COUNT equal peers, all auto-joining and auto-selfie-ing (no roles). p1 initiates: it kicks
 // off once it sees everyone (the PEER_COUNT-1 other peers), and — as the initiator — it archives its
@@ -34,7 +42,7 @@ async function launchWave(cluster, initEnv = {}) {
 
 test(
   `a ${PEER_COUNT}-peer wave converges the gallery on every node`,
-  { timeout: 150000 },
+  { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const cluster = await new Cluster({ lobbyMs: 8000 }).start();
     t.teardown(() => cluster.destroy());
@@ -48,7 +56,10 @@ test(
     // watch" — and on the pinned hyperdht the strict assertion passes. Keep it strict: it's the
     // sharpest detector for this class of regression.)
     for (const peer of peers) {
-      t.ok(await peer.waitForGallery(PEER_COUNT, 90000), `${peer.name} converged to ${PEER_COUNT}`);
+      t.ok(
+        await peer.waitForGallery(PEER_COUNT, WAIT_MS),
+        `${peer.name} converged to ${PEER_COUNT}`
+      );
     }
 
     // and the token actually completed the lap back to the originator (didn't stall)
@@ -58,7 +69,7 @@ test(
 
 test(
   `the wave heals when peers die mid-race (${PEER_COUNT} peers, kill 2)`,
-  { timeout: 150000 },
+  { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const cluster = await new Cluster({ lobbyMs: 8000 }).start();
     t.teardown(() => cluster.destroy());
@@ -66,7 +77,7 @@ test(
     const { peers } = await launchWave(cluster);
 
     // once the ball is moving, kill two mid-ring peers (not the initiator p1, its archivist)
-    await peers[0].waitForEvent('started', 90000);
+    await peers[0].waitForEvent('started', WAIT_MS);
     const survivors = peers.filter((_, i) => i !== 2 && i !== 4); // all live peers incl. p1
     peers[2].kill(); // p3
     peers[4].kill(); // p5
@@ -74,7 +85,7 @@ test(
     // the wave must still finish — the ring routes around the dead peers (self-healing). This is
     // the core of the test: the token completes its lap despite two mid-race deaths.
     t.ok(
-      await peers[1].waitForEvent('completed', 90000),
+      await peers[1].waitForEvent('completed', WAIT_MS),
       'wave completed despite 2 peers dying mid-race'
     );
     // The survivors' selfies then converge into the shared gallery. We check the survivor SET (not
@@ -86,7 +97,7 @@ test(
     // churn, not a convergence lag — so we tolerate one dropped selfie. Full coverage (every peer
     // posts + converges) is asserted churn-free by the first test.
     t.ok(
-      await waitForAnyGallery(survivors, PEER_COUNT - 3, 90000),
+      await waitForAnyGallery(survivors, PEER_COUNT - 3, WAIT_MS),
       `the healed wave still populated the gallery (≥ ${PEER_COUNT - 3} survivor selfies converged)`
     );
   }

@@ -1,0 +1,54 @@
+name: E2E scale run (public DHT, manual)
+
+# Manually-dispatched e2e over the PUBLIC Hyperswarm DHT with a configurable peer count — for
+# occasional scale runs beyond CI's default 8 (how does a 24- or 48-peer wave behave on the real
+# network?). Same suite as CI's e2e steps (convergence + healing), isolated by a random per-run
+# match topic; no wallets / no on-chain.
+#
+# Notes for large counts:
+#  - Every peer is its own Bare process on ONE runner: shared 2-core runners are the practical
+#    ceiling long before the protocol is (rough guide: ≤ 32 peers on ubuntu-latest; use a larger
+#    runner for more). The wave itself is O(N) hops, so time grows linearly.
+#  - The suite scales its internal time budgets with E2E_PEERS (see wave.local.e2e.js), and the
+#    healing test kills peers #3 and #5 — keep the count ≥ 6.
+#  - E2E_DUMP is enabled: on a failure, every peer's full log is uploaded as a run artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      peers:
+        description: 'Number of peers (>= 6; ~32 max on a shared 2-core runner)'
+        required: true
+        default: '16'
+        type: string
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json # single source of truth (volta.node / engines)
+
+      - name: Install the Bare runtime
+        run: npm install -g bare-runtime
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: End-to-end tests (public DHT, ${{ inputs.peers }} peers)
+        run: npm run test:e2e:local
+        env:
+          E2E_PUBLIC: 1
+          E2E_PEERS: ${{ inputs.peers }}
+          E2E_DUMP: /tmp/e2e-dump
+
+      - name: Upload per-peer logs (only exists on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: peer-logs-${{ inputs.peers }}-peers
+          path: /tmp/e2e-dump
+          if-no-files-found: ignore
