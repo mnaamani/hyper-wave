@@ -190,15 +190,26 @@ class Proc {
 // A cluster = one bootstrap DHT + a shared match topic + the peers launched onto it, all under
 // a throwaway temp dir. `await cluster.start()` before launching; `await cluster.destroy()` in
 // the test teardown.
+//
+// E2E_PUBLIC=1: skip the local testnet DHT and run the peers on the PUBLIC DHT instead (still
+// isolated — the match topic is random per cluster). A diagnostic knob: the local 3-node testnet
+// is its own scenario (fresh nodes, loopback firewall/holepunch quirks), and failures there don't
+// necessarily reproduce on the real network — the desktop app runs multi-instance on one machine
+// over the public DHT flawlessly. Public discovery on a cold topic takes ~20-35s, so expect
+// slower (but more production-faithful) runs.
 class Cluster {
   constructor({ lobbyMs = 5000 } = {}) {
     this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-e2e-'));
     this.match = 'e2e-' + Math.random().toString(16).slice(2, 10);
     this.lobbyMs = String(lobbyMs);
+    this.public = process.env.E2E_PUBLIC === '1';
     this.procs = [];
   }
 
   async start() {
+    if (this.public) {
+      return this; // public DHT: no local bootstrap to spin up
+    }
     this.boot = new Proc('boot', ['bin/dht-local.js'], {});
     this.procs.push(this.boot);
     const bootMatch = await this.boot.waitForLine(/BOOTSTRAP 127\.0\.0\.1:(\d+)/, 15000);
@@ -221,7 +232,8 @@ class Cluster {
       fs.writeFileSync(path.join(dir, 'wallet.seed'), seed.trim());
     }
     const proc = new Proc(name, ['bin/wave.run.js', name, dir], {
-      HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}`,
+      // public mode: omit HYPERWAVE_BOOTSTRAP so peers use the public DHT (random topic isolates us)
+      ...(this.public ? {} : { HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}` }),
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,
       ...env

@@ -29,21 +29,24 @@ jobs:
       - name: Unit tests (brittle, under Bare)
         run: npm test
 
-      # Real end-to-end: spawns a local DHT + N bare peers and drives full waves. No wallets /
-      # no on-chain, so it's deterministic and secret-free. (The paid-wave on-chain suite runs
-      # separately — it needs funded testnet wallets as secrets and is gated to manual/nightly.)
+      # Real end-to-end: N bare peers drive full waves over the PUBLIC Hyperswarm DHT, isolated by
+      # a random per-run match topic. No wallets / no on-chain, so it's secret-free. (The paid-wave
+      # on-chain suite runs separately — it needs funded testnet wallets and is gated to
+      # manual/nightly.)
       #
-      # NON-BLOCKING (continue-on-error) on purpose. This test needs N peers to DISCOVER each other
-      # over a real Hyperswarm DHT, which is UDP. A GitHub runner is a small, containerised box with
-      # constrained/lossy loopback UDP, so DHT discovery is flaky there — the peer count each node
-      # finds swings run to run (seen: peers=2..5 of 5, wildly variable), and when discovery falls
-      # short the wave never starts (150s timeout). That's an infrastructure limit, not a protocol
-      # bug: the same code discovers + converges on a healthy machine. So we run it for SIGNAL but
-      # don't fail the build on it — the network-free unit suite above is the real gate. It stays a
-      # blocking gate locally / on a self-hosted or beefier runner where UDP works; bump E2E_PEERS
-      # back toward 8 there. (5 is a gentler load for the shared runner when it does get to run.)
-      - name: Local end-to-end tests (informational; flaky DHT/UDP on shared runners)
+      # E2E_PUBLIC=1 (public DHT), NOT the local @hyperswarm/testnet bootstrap: the 3-node loopback
+      # testnet proved to be its own failure mode — flaky announce/lookup at startup and fragile
+      # (silently dead) peer connections — failing runs on machines where the SAME code over the
+      # public DHT passes fast and clean (8-peer convergence in ~22s, healing in ~37s). The public
+      # DHT exercises the production path; the testnet mode remains available locally (just unset
+      # E2E_PUBLIC) for offline work.
+      #
+      # Still NON-BLOCKING (continue-on-error) until public-DHT mode proves reliable on shared
+      # runners over a stretch of CI runs — it needs outbound UDP from the runner. The network-free
+      # unit suite above is the blocking gate. If this stays green, drop continue-on-error.
+      - name: End-to-end tests (public DHT; informational until proven on runners)
         continue-on-error: true
         run: npm run test:e2e:local
         env:
+          E2E_PUBLIC: 1
           E2E_PEERS: 5
