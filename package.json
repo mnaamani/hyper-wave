@@ -25,7 +25,8 @@
     "tmp": "0.2.7",
     "xcode": {
       "uuid": "11.1.1"
-    }
+    },
+    "hyperdht": "6.32.0"
   },
   "devDependencies": {
     "eslint": "^10.6.0",
