@@ -22,6 +22,49 @@ const BARE = process.env.BARE_BIN || 'bare'; // same runtime `npm test` uses
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Every spawned Proc, tracked so we can GUARANTEE cleanup even when a test times out or throws
+// before its teardown runs. brittle aborts a timed-out test without unwinding t.teardown, so
+// cluster.destroy() never fired and the detached peer processes were orphaned — they piled up across
+// reruns and stole CPU (badly skewing later runs). A synchronous process-exit hook is the backstop:
+// it kills every still-live process group on the way out. Normal teardown still runs first and clears
+// the registry, so this only ever mops up what a crash/timeout left behind.
+const LIVE_PROCS = new Set();
+let exitHooksInstalled = false;
+
+/** SIGKILL a detached child's whole process group (wrapper + native bare child); falls back to the pid. */
+function killProcGroup(proc) {
+  try {
+    process.kill(-proc.pid, 'SIGKILL'); // negative pid → the whole group
+  } catch {
+    try {
+      proc.kill('SIGKILL');
+    } catch {}
+  }
+}
+
+/** Kill every still-tracked process group. Synchronous (safe to call from a process 'exit' hook). */
+function killAllProcs() {
+  for (const entry of LIVE_PROCS) {
+    killProcGroup(entry.proc);
+  }
+  LIVE_PROCS.clear();
+}
+
+/** Install the process-exit backstop once: kill any surviving peers on normal exit or a signal. */
+function installExitHooks() {
+  if (exitHooksInstalled) {
+    return;
+  }
+  exitHooksInstalled = true;
+  process.on('exit', killAllProcs); // sync; fires on normal exit AND after a timed-out test aborts
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(signal, () => {
+      killAllProcs();
+      process.exit(1);
+    });
+  }
+}
+
 // One launched process (a peer or the bootstrap). Buffers stdout and exposes
 // promise-based waiters over its lines and parsed `TOKEN {json}` events.
 class Proc {
@@ -44,6 +87,8 @@ class Proc {
     this.proc.stdout.on('data', (chunk) => this.#ingest(chunk));
     this.proc.stderr.on('data', () => {}); // swallow (bare prints diagnostics here)
     this.proc.on('error', () => {});
+    installExitHooks(); // guarantee this process group is killed even if a test times out
+    LIVE_PROCS.add(this);
   }
 
   #ingest(chunk) {
@@ -121,14 +166,8 @@ class Proc {
   }
 
   kill() {
-    // negative pid → signal the whole process group (wrapper + native bare child)
-    try {
-      process.kill(-this.proc.pid, 'SIGKILL');
-    } catch {
-      try {
-        this.proc.kill('SIGKILL');
-      } catch {}
-    }
+    LIVE_PROCS.delete(this);
+    killProcGroup(this.proc); // negative pid → the whole group (wrapper + native bare child)
   }
 }
 
