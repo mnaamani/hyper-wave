@@ -59,6 +59,11 @@ const WAVE_TIMEOUT_MS = 90000;
 // treat the successor as dead: skip it and re-forward to the next live peer. The
 // `wave-pos` a peer broadcasts when it holds doubles as the ACK.
 const HEAL_TIMEOUT_MS = 3000;
+// Before skipping a silent successor as dead, re-send the token to it up to this many times (one
+// HEAL_TIMEOUT_MS apart). A live peer can miss a hop to a transient lost send (a Protomux frame
+// dropped while its channel is briefly mid-reap) or be slow to ACK under load; a couple of retries
+// recover it without dropping it from the wave. Only after all attempts go unheard do we heal past.
+const MAX_RESENDS = 2;
 // Successor-list length (scalable-topology.md §4.3): how many peers clockwise we
 // deliberately connect to for fault tolerance. Predecessor is pinned too.
 const K_SUCCESSORS = 3;
@@ -1033,7 +1038,7 @@ function createWave({
    * @param {Set<string>} [skipped] Successor ids already skipped this hop.
    * @param {Set<string>} [retried] Successor ids already re-sent to once this hop.
    */
-  function forwardToken(token, skipped = new Set(), retried = new Set()) {
+  function forwardToken(token, skipped = new Set(), resends = new Map()) {
     const succ = pickSuccessor(skipped);
     if (!succ) {
       // dead end (kicked off solo, or all successors gone) — end the wave now so every
@@ -1069,20 +1074,25 @@ function createWave({
     healPending = { waveId: token.waveId, hop: token.hopCount, succId: succ.id };
     healTimer = setTimeout(() => {
       healPending = null;
-      if (!retried.has(succ.id)) {
-        // First miss on a live, connected successor is usually a lost send on a briefly-bad channel
-        // (Protomux drops silently when a connection is mid-reap), not a dead peer — re-send to the
-        // SAME successor once before giving up, so a transient drop doesn't cost that peer its hop
-        // (and its selfie). Only skip if the re-send also goes unheard.
-        retried.add(succ.id);
-        log('heal: successor', shortId(succ.id), 'silent — re-sending once');
-        forwardToken(token, skipped, retried);
+      const sent = resends.get(succ.id) || 0;
+      if (sent < MAX_RESENDS) {
+        // A miss on a live, connected successor is usually a lost send on a briefly-bad channel
+        // (Protomux drops silently when a connection is mid-reap) or a slow ACK under load, not a
+        // dead peer — re-send to the SAME successor before giving up, so a transient drop doesn't
+        // cost that peer its hop (and its selfie). Only skip once every attempt goes unheard.
+        resends.set(succ.id, sent + 1);
+        log(
+          'heal: successor',
+          shortId(succ.id),
+          `silent — re-sending (${sent + 1}/${MAX_RESENDS})`
+        );
+        forwardToken(token, skipped, resends);
         return;
       }
       skipped.add(succ.id);
       log('healing: successor', shortId(succ.id), 'silent — skipping');
       onEvent({ event: 'healed', waveId: token.waveId, skipped: succ.id });
-      forwardToken(token, skipped, retried);
+      forwardToken(token, skipped, resends);
     }, HEAL_TIMEOUT_MS);
   }
 

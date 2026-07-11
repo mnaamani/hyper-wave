@@ -42,9 +42,25 @@ function killProcGroup(proc) {
   }
 }
 
-/** Kill every still-tracked process group. Synchronous (safe to call from a process 'exit' hook). */
+/**
+ * Kill every still-tracked process group. Synchronous (safe to call from a process 'exit' hook).
+ * If E2E_DUMP=<dir> is set, first write each peer's full stdout there — the harness normally only
+ * surfaces the timed-out peer's short tail, so this is how you get CI-level per-peer visibility into
+ * a failure (which peer got skipped, who healed, etc.) locally: `E2E_DUMP=/tmp/e2e npm run ...`.
+ */
 function killAllProcs() {
+  const dumpDir = process.env.E2E_DUMP;
+  if (dumpDir) {
+    try {
+      fs.mkdirSync(dumpDir, { recursive: true });
+    } catch {}
+  }
   for (const entry of LIVE_PROCS) {
+    if (dumpDir) {
+      try {
+        fs.writeFileSync(path.join(dumpDir, entry.name + '.log'), entry.out);
+      } catch {}
+    }
     killProcGroup(entry.proc);
   }
   LIVE_PROCS.clear();
