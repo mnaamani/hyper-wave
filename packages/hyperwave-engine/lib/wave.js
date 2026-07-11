@@ -194,6 +194,7 @@ function loadOrCreateSwarmSeed(storageDir, injectedSeed = null, log = () => {}) 
  * @property {string} [matchId] Match topic string (all peers on the same id share one ring).
  * @property {number} [lobbyMs] Lobby window length in ms (opt-in window before the race).
  * @property {number} [waveTimeoutMs] Max wave duration in ms before falling back to idle (scale with expected roster size).
+ * @property {number} [admitTimeoutMs] Max wait in ms for gallery writer admission to replicate back (scale with expected roster size).
  * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments).
  */
 
@@ -232,6 +233,9 @@ function createWave({
   // heal window, so a fixed 90s can expire mid-race at scale (seen at 56 peers under load: full
   // roster joined, race started, timed out at hop ~10). Hosts should scale this with expected N.
   waveTimeoutMs = WAVE_TIMEOUT_MS,
+  // How long a peer re-floods its gallery add-writer before giving up (see GallerySessionCtx —
+  // the admission round-trip grows with roster size; scale with expected N).
+  admitTimeoutMs = undefined,
   swarmSeed = null // hex seed for the swarm identity; distinct from the wallet seed (createPayments)
 }) {
   // No roles — every peer is equal. The one asymmetry is per-wave: the peer that INITIATES a
@@ -275,6 +279,7 @@ function createWave({
     enforcePaid: () => enforcePaid,
     walletAddress: () => walletAddress,
     burnProof: () => selfie.burnProof,
+    ...(admitTimeoutMs === undefined ? {} : { admitTimeoutMs }),
     log
   });
 

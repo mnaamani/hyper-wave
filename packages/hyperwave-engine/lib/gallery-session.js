@@ -71,6 +71,12 @@ function waitFor(pred, timeoutMs) {
  * @property {function(): boolean} enforcePaid - Is the paid-wave gate on (wallet present)?
  * @property {function(): (string|null)} walletAddress - My TRX address, for the tip field.
  * @property {function(): (Object|null)} burnProof - My signed fee-burn attestation (admission ticket).
+ * @property {number} [admitTimeoutMs] - How long a requester re-floods add-writer before giving
+ *   up. The default suits small waves; the admission round-trip (flood to the originator, the
+ *   add-writer op linearizing, then replicating back to the requester) grows with roster size and
+ *   load — at 128 peers on a loaded box, 82 of 109 admitted writers timed out before their
+ *   admission replicated back. Scale with expected N (the gallery is retained after the wave, so
+ *   a slow admission still converges — the budget just has to allow it).
  * @property {function(...*): void} log - Diagnostic logger.
  */
 
@@ -87,6 +93,7 @@ class GallerySession {
   #enforcePaid;
   #walletAddress;
   #burnProof;
+  #admitTimeoutMs; // how long a requester re-floods add-writer before giving up (scale with N)
   #log;
   #base = null; // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   #key = null; // hex bootstrap key of #base, shared via gossip + token
@@ -108,6 +115,7 @@ class GallerySession {
     enforcePaid,
     walletAddress,
     burnProof,
+    admitTimeoutMs = ADMIT_TIMEOUT_MS,
     log
   }) {
     this.#store = store;
@@ -118,6 +126,7 @@ class GallerySession {
     this.#enforcePaid = enforcePaid;
     this.#walletAddress = walletAddress;
     this.#burnProof = burnProof;
+    this.#admitTimeoutMs = admitTimeoutMs;
     this.#log = log;
   }
 
@@ -362,7 +371,7 @@ class GallerySession {
           resolve(true);
           return;
         }
-        if (Date.now() - started > ADMIT_TIMEOUT_MS) {
+        if (Date.now() - started > this.#admitTimeoutMs) {
           resolve(false);
           return;
         }
