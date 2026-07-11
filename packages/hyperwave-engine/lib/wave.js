@@ -1032,11 +1032,11 @@ function createWave({
   }
 
   /**
-   * Forward a token (already stamped with my receipt) to the next reachable peer,
-   * and watch for the wave to advance; if it doesn't, re-send once, then skip that peer.
+   * Forward a token (already stamped with my receipt) to the next reachable peer, and watch for the
+   * wave to advance; if it doesn't, re-send a few times, then skip that peer.
    * @param {Object} token The token to forward (already stamped for the next hop).
    * @param {Set<string>} [skipped] Successor ids already skipped this hop.
-   * @param {Set<string>} [retried] Successor ids already re-sent to once this hop.
+   * @param {Map<string, number>} [resends] Successor id -> how many times re-sent to this hop.
    */
   function forwardToken(token, skipped = new Set(), resends = new Map()) {
     const succ = pickSuccessor(skipped);
