@@ -11,10 +11,10 @@ const { createEngine } = require('hyperwave-engine');
 const engine = createEngine({
   storageDir: '/tmp/hyperwave/a',
   config: { matchId: 'hyperwave:my-match:v1' },
-  send: (msg) => console.log(msg) // engine → host events
+  notify: (msg) => console.log(msg) // engine → host events
 });
 
-engine.onMessage({ type: 'start-wave' }); // host → engine commands
+engine.exec({ type: 'start-wave' }); // host → engine commands
 ```
 
 See [`usage.md`](./usage.md) for the full API walkthrough and `examples/` for

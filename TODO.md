@@ -225,9 +225,9 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 - [ ] **Typed RPC seam between renderer/host and worker (`hyperschema` + `bare-rpc`).** The
       renderer↔worker IPC today is hand-rolled and one-directional in both halves: the host sends
-      **fire-and-forget commands** (`onMessage` in `engine.js`: `start-wave`, `join-wave`,
+      **fire-and-forget commands** (`exec` in `engine.js`: `start-wave`, `join-wave`,
       `stage-selfie`, `tip`, `refresh-wallet` — no reply), and the worker pushes a **stream of
-      untyped `type`-tagged events** back (`onEvent → send({type:'event', …})`, plus one-offs like
+      untyped `type`-tagged events** back (`onEvent → notify({type:'event', …})`, plus one-offs like
       `wallet`, `tip-result`, `burn-result`). Request/response is **faked by correlation** — e.g. a
       `tip` command is matched to a later `tip-result` event by its `to` field — which is fragile
       (no request id, races if two tips share a `to`), and there's no schema, so a typo'd field or a

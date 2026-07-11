@@ -10,28 +10,32 @@ const { createEngine } = require('hyperwave-engine');
 
 const pipe = new FramedStream(Bare.IPC);
 
-// Send a message Worker -> Host (Electron Renderer)
+// Worker -> Host message/event
 const send = (msg) => pipe.write(JSON.stringify(msg));
 
 const engine = createEngine({
   storageDir: Bare.argv[2],
   config: {
-    bootstrap: env.HYPERWAVE_BOOTSTRAP, // optional host:port -> local DHT (instant same-machine discovery)
-    matchId: env.HYPERWAVE_MATCH || undefined // isolate the ring
-    // lobby length is the engine's fixed 15s constant; the wallet is always on (fees/tips/paid-gate)
+    bootstrap: env.HYPERWAVE_BOOTSTRAP,
+    matchId: env.HYPERWAVE_MATCH || undefined
   },
-  send
+  notify: (msg) => {
+    // engine -> host: the engine raises messages, we frame them onto the IPC pipe
+    // console.log(msg)
+    send(msg);
+  }
 });
 
-// Renderer -> Worker commands.
+// Host -> Worker commands
 pipe.on('data', (data) => {
-  let msg;
+  let command;
   try {
-    msg = JSON.parse(data.toString());
-  } catch {
+    command = JSON.parse(data.toString());
+  } catch (err) {
+    console.log('Unable to parse command from renderer', err.toString());
     return;
   }
-  engine.onMessage(msg);
+  engine.exec(command);
 });
 
 goodbye(() => engine.close());

@@ -49,10 +49,10 @@ pipe.on('data', (data) => {
     engine = createEngine({
       storageDir: resolveStorage(msg.storageDir),
       config: msg.config || {},
-      send
+      notify: send // engine -> host: the engine raises messages, we frame them onto the IPC pipe
     });
   } else if (engine) {
-    engine.onMessage(msg);
+    engine.exec(msg);
   } else {
     // RN host did not yet send an init message, so whatever this message is, its too early to be sending.
     console.warn(`Dropped message of type ${msg.type}. Init message not yet received`);

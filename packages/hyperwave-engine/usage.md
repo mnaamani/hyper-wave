@@ -44,9 +44,9 @@ Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it 
 
 ## 1. Host the whole engine (`createEngine`)
 
-The host-agnostic entry. Give it a `storageDir`, an optional `config`, and a `send` callback; feed
-it commands via `onMessage`. This is the entire surface a host (the desktop worker / mobile
-worklet) needs.
+The host-agnostic entry. Think of it like a kernel: give it a `storageDir`, an optional `config`,
+and a `notify` callback (engine → host events); feed it commands via `exec` (host → engine, like a
+syscall). This is the entire surface a host (the desktop worker / mobile worklet) needs.
 
 ```js
 const { createEngine } = require('hyperwave-engine');
@@ -58,7 +58,7 @@ const engine = createEngine({
     bootstrap: '127.0.0.1:49737', // optional host:port → local DHT (instant same-machine discovery)
     wallet: true // default; false → wallet-less (receipt-only gallery, no fees/tips)
   },
-  send: (msg) => {
+  notify: (msg) => {
     // engine → host events, e.g. { type: 'state' | 'event' | 'gallery' | 'wallet' | 'burn-result' }
     if (msg.type === 'state') {
       console.log(
@@ -74,14 +74,14 @@ const engine = createEngine({
 });
 
 // host → engine commands:
-engine.onMessage({ type: 'set-country', country: 'BR' });
-engine.onMessage({ type: 'start-wave' }); // burns the kick-off fee, then announces + opens the lobby
-engine.onMessage({ type: 'join-wave' }); // opt into an announced wave (+ burns the join fee)
-engine.onMessage({ type: 'stage-selfie', selfie: { image: '<jpeg-data-url>', caption: 'hi' } });
-engine.onMessage({ type: 'tip', to: 'T...', amount: 5 }); // real testnet TRX to a selfie owner
-engine.onMessage({ type: 'send-trx', to: 'T...', amount: 10 });
-engine.onMessage({ type: 'fetch-transactions' }); // → { type:'transactions', list }
-engine.onMessage({ type: 'refresh-wallet' }); // → a fresh { type:'wallet', address, trx }
+engine.exec({ type: 'set-country', country: 'BR' });
+engine.exec({ type: 'start-wave' }); // burns the kick-off fee, then announces + opens the lobby
+engine.exec({ type: 'join-wave' }); // opt into an announced wave (+ burns the join fee)
+engine.exec({ type: 'stage-selfie', selfie: { image: '<jpeg-data-url>', caption: 'hi' } });
+engine.exec({ type: 'tip', to: 'T...', amount: 5 }); // real testnet TRX to a selfie owner
+engine.exec({ type: 'send-trx', to: 'T...', amount: 10 });
+engine.exec({ type: 'fetch-transactions' }); // → { type:'transactions', list }
+engine.exec({ type: 'refresh-wallet' }); // → a fresh { type:'wallet', address, trx }
 
 await engine.close();
 ```

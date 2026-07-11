@@ -1,7 +1,8 @@
 // The HyperWave engine, host-agnostic. Everything the desktop worker (workers/hyperwave.js) and
 // a mobile bare-kit worklet (worklet/app.js) share lives here: it wires the wave protocol
-// (wave.js) + the WDK wallet (wallet.js) together and exposes a tiny message surface. The host
-// supplies { storageDir, config, send } and feeds it decoded messages via onMessage() — there's
+// (wave.js) + the WDK wallet (wallet.js) together and exposes a tiny message surface. Think of it
+// like a kernel: the host (userspace) supplies { storageDir, config, notify } and feeds it decoded
+// commands via exec() (a syscall); the engine raises events back via notify() (a signal). There's
 // no Bare.argv / bare-env / IPC transport in here, so the same engine boots under Electron-spawned
 // Bare and a react-native-bare-kit worklet unchanged. `deps` lets tests inject fake factories
 // (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
@@ -22,26 +23,26 @@ const { createPayments, FEE_TRX, payFee, confirmBurn, wireWallet } = require('./
  * The engine handle returned by createEngine.
  * @typedef {Object} Engine
  * @property {Object} wave - The live createWave instance (the wave protocol).
- * @property {(msg: Object) => void} onMessage - Feed a decoded host->engine command message.
+ * @property {(command: Object) => void} exec - Feed a decoded host->engine command (a syscall).
  * @property {() => Promise<void>} close - Tear down timers, wallet, and the wave protocol.
  */
 
 /**
  * The HyperWave engine, host-agnostic: wires the wave protocol (wave.js) + the WDK wallet (wallet.js)
- * together and exposes a tiny message surface. The host supplies { storageDir, config, send } and
- * feeds it decoded messages via onMessage(). `deps` lets tests inject fake factories.
+ * together and exposes a tiny message surface. The host supplies { storageDir, config, notify } and
+ * feeds it decoded commands via exec(). `deps` lets tests inject fake factories.
  * @param {Object} options - Engine options.
  * @param {string} options.storageDir - Corestore/wallet storage directory for this instance.
  * @param {EngineConfig} [options.config] - Host-supplied engine configuration.
- * @param {(msg: Object) => void} options.send - Callback the engine calls to emit messages to the host.
+ * @param {(msg: Object) => void} options.notify - Callback the engine calls to raise messages to the host.
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
  * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests).
- * @returns {Engine} The engine handle (`wave`, `onMessage`, `close`).
+ * @returns {Engine} The engine handle (`wave`, `exec`, `close`).
  */
 function createEngine({
   storageDir,
   config = {},
-  send,
+  notify,
   log = (...args) => console.log('[hyperwave]', ...args),
   deps = {}
 }) {
@@ -59,9 +60,9 @@ function createEngine({
     storageDir,
     bootstrap: config.bootstrap ? parseBootstrap(config.bootstrap) : undefined,
     matchId: config.matchId,
-    onState: (state) => send({ type: 'state', ...state }),
-    onEvent: (event) => send({ type: 'event', ...event }),
-    onGallery: (items) => send({ type: 'gallery', items }),
+    onState: (state) => notify({ type: 'state', ...state }),
+    onEvent: (event) => notify({ type: 'event', ...event }),
+    onGallery: (items) => notify({ type: 'gallery', items }),
     log
   });
   log('engine up, me=', wave.me.id.slice(0, 8), 'angle=', wave.me.angle.toFixed(1));
@@ -82,7 +83,7 @@ function createEngine({
         // Echo the wallet next to its storage dir so "which dir → which wallet" is unambiguous.
         log('wallet', pay.address, 'in storage dir:', absStorageDir);
         pushBalance = async () =>
-          send({
+          notify({
             type: 'wallet',
             ...(await pay.balances().catch(() => ({ address: pay.address, trx: 0 })))
           });
@@ -100,7 +101,7 @@ function createEngine({
       })
       .catch((err) => {
         log('[wallet] init failed:', err.message);
-        send({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)
+        notify({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)
       });
   }
 
@@ -119,7 +120,7 @@ function createEngine({
     if (payments) {
       const bal = await payments.balances().catch(() => null);
       if (bal && bal.trx < FEE_TRX) {
-        send({
+        notify({
           type: 'burn-result',
           stage: 'failed',
           reason: 'kickoff',
@@ -134,9 +135,9 @@ function createEngine({
     }
     try {
       const { hash, proof } = await payFee({ wave, payments, waveId, reason: 'kickoff' });
-      send({ type: 'burn-result', stage: 'confirming', hash, waveId, reason: 'kickoff' });
+      notify({ type: 'burn-result', stage: 'confirming', hash, waveId, reason: 'kickoff' });
       if (await confirmBurn(payments, waveId, hash)) {
-        send({
+        notify({
           type: 'burn-result',
           stage: 'burned',
           hash,
@@ -147,10 +148,16 @@ function createEngine({
         wave.announcePaid(proof);
       } else {
         const error = 'burn not confirmed on-chain';
-        send({ type: 'burn-result', stage: 'failed', error, waveId, reason: 'kickoff' });
+        notify({ type: 'burn-result', stage: 'failed', error, waveId, reason: 'kickoff' });
       }
     } catch (err) {
-      send({ type: 'burn-result', stage: 'failed', error: err.message, waveId, reason: 'kickoff' });
+      notify({
+        type: 'burn-result',
+        stage: 'failed',
+        error: err.message,
+        waveId,
+        reason: 'kickoff'
+      });
     }
   }
 
@@ -164,7 +171,7 @@ function createEngine({
     if (payments) {
       const bal = await payments.balances().catch(() => null);
       if (bal && bal.trx < FEE_TRX) {
-        send({
+        notify({
           type: 'burn-result',
           stage: 'failed',
           reason: 'join',
@@ -179,48 +186,55 @@ function createEngine({
     }
     try {
       const { hash } = await payFee({ wave, payments, waveId, reason: 'join' });
-      send({ type: 'burn-result', stage: 'burned', hash, amount: FEE_TRX, waveId, reason: 'join' });
+      notify({
+        type: 'burn-result',
+        stage: 'burned',
+        hash,
+        amount: FEE_TRX,
+        waveId,
+        reason: 'join'
+      });
     } catch (err) {
-      send({ type: 'burn-result', stage: 'failed', error: err.message, waveId, reason: 'join' });
+      notify({ type: 'burn-result', stage: 'failed', error: err.message, waveId, reason: 'join' });
     }
   }
 
   // Gallery tip: a real testnet TRX transfer to the selfie owner's wallet.
   async function handleTip({ to, amount }) {
     if (!payments) {
-      send({ type: 'tip-result', error: 'wallet not ready' });
+      notify({ type: 'tip-result', error: 'wallet not ready' });
       return;
     }
     try {
       const { hash } = await payments.send(to, amount);
-      send({ type: 'tip-result', hash, to, amount });
+      notify({ type: 'tip-result', hash, to, amount });
     } catch (err) {
-      send({ type: 'tip-result', error: err.message, to });
+      notify({ type: 'tip-result', error: err.message, to });
     }
   }
 
   // Plain wallet transfer: send `amount` TRX to any address
   async function handleSend({ to, amount }) {
     if (!payments) {
-      send({ type: 'send-result', error: 'wallet not ready', to });
+      notify({ type: 'send-result', error: 'wallet not ready', to });
       return;
     }
     const trx = Number(amount);
     if (!to || !(trx > 0)) {
-      send({ type: 'send-result', error: 'invalid recipient/amount', to });
+      notify({ type: 'send-result', error: 'invalid recipient/amount', to });
       return;
     }
     const bal = await payments.balances().catch(() => null);
     if (bal && bal.trx < trx) {
-      send({ type: 'send-result', error: `insufficient balance (${bal.trx} TRX)`, to });
+      notify({ type: 'send-result', error: `insufficient balance (${bal.trx} TRX)`, to });
       return;
     }
     try {
       const { hash } = await payments.send(to, trx);
-      send({ type: 'send-result', hash, to, amount: trx });
+      notify({ type: 'send-result', hash, to, amount: trx });
       pushBalance?.();
     } catch (err) {
-      send({ type: 'send-result', error: err.message, to });
+      notify({ type: 'send-result', error: err.message, to });
     }
   }
 
@@ -228,29 +242,31 @@ function createEngine({
   // app never sees as events), not just what we initiated. Read-only; [] without a wallet.
   async function handleTransactions() {
     const list = payments ? await payments.transactions().catch(() => []) : [];
-    send({ type: 'transactions', list });
+    notify({ type: 'transactions', list });
   }
 
-  // Host -> engine commands (same message shapes the desktop renderer + the RN UI both speak).
-  function onMessage(msg) {
-    if (!msg || typeof msg !== 'object') {
+  // Host -> engine commands, like a syscall: userspace (the host) asks the kernel (this engine)
+  // to act; we dispatch on the command's `type`. Same message shapes the desktop renderer + the
+  // RN UI both speak. The reciprocal engine -> host channel is `notify` (kernel raising events).
+  function exec(command) {
+    if (!command || typeof command !== 'object') {
       return;
     }
-    if (msg.type === 'start-wave') {
+    if (command.type === 'start-wave') {
       handleStartWave();
-    } else if (msg.type === 'join-wave') {
+    } else if (command.type === 'join-wave') {
       handleJoin();
-    } else if (msg.type === 'set-country') {
-      wave.setCountry(msg.country);
-    } else if (msg.type === 'stage-selfie') {
-      wave.stageSelfie(msg.selfie);
-    } else if (msg.type === 'tip') {
-      handleTip(msg);
-    } else if (msg.type === 'send-trx') {
-      handleSend(msg);
-    } else if (msg.type === 'fetch-transactions') {
+    } else if (command.type === 'set-country') {
+      wave.setCountry(command.country);
+    } else if (command.type === 'stage-selfie') {
+      wave.stageSelfie(command.selfie);
+    } else if (command.type === 'tip') {
+      handleTip(command);
+    } else if (command.type === 'send-trx') {
+      handleSend(command);
+    } else if (command.type === 'fetch-transactions') {
       handleTransactions();
-    } else if (msg.type === 'refresh-wallet') {
+    } else if (command.type === 'refresh-wallet') {
       pushBalance?.(); // manual balance re-check (after funding)
     }
   }
@@ -266,7 +282,7 @@ function createEngine({
     await wave.close();
   }
 
-  return { wave, onMessage, close };
+  return { wave, exec, close };
 }
 
 module.exports = { createEngine };

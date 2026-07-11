@@ -1,5 +1,5 @@
 // The host-agnostic engine (engine.js): does it route host commands to the wave protocol and
-// forward engine events to `send`, in both the no-wallet and wallet-ready paths? Runs with
+// forward engine events to `notify`, in both the no-wallet and wallet-ready paths? Runs with
 // FAKE wave + payments factories (injected via `deps`), so no real swarm / no network — this
 // is exactly what the extraction bought: the engine is testable without a host. Runs under Bare:
 //   bare lib/engine.test.js   (or `npm test`)
@@ -33,13 +33,13 @@ function fakeWave() {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0)); // let the async wallet init settle
 
-test('the engine routes commands to the wave protocol and forwards its events to send', async (t) => {
+test('the engine routes commands to the wave protocol and forwards its events to notify', async (t) => {
   const sent = [];
   const wave = fakeWave();
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: { matchId: 'm', bootstrap: '' },
-    send: (msg) => sent.push(msg),
+    notify: (msg) => sent.push(msg),
     log: () => {},
     deps: {
       createWave: (opts) => {
@@ -53,7 +53,7 @@ test('the engine routes commands to the wave protocol and forwards its events to
   });
   t.teardown(() => engine.close());
 
-  // engine callbacks are wired through to send with the right envelope
+  // engine callbacks are wired through to notify with the right envelope
   wave.opts.onState({ me: wave.me, peers: [] });
   wave.opts.onEvent({ event: 'started', waveId: 'wave-1' });
   wave.opts.onGallery([{ caption: 'hi' }]);
@@ -65,9 +65,9 @@ test('the engine routes commands to the wave protocol and forwards its events to
   );
 
   // plain commands are dispatched to the engine
-  engine.onMessage({ type: 'set-country', country: 'JP' });
-  engine.onMessage({ type: 'stage-selfie', selfie: 'data:image/jpeg;base64,xxx' });
-  engine.onMessage({ type: 'start-wave' });
+  engine.exec({ type: 'set-country', country: 'JP' });
+  engine.exec({ type: 'stage-selfie', selfie: 'data:image/jpeg;base64,xxx' });
+  engine.exec({ type: 'start-wave' });
   t.alike(
     wave.calls,
     [['setCountry', 'JP'], ['stageSelfie', 'data:image/jpeg;base64,xxx'], 'startWave'],
@@ -76,7 +76,7 @@ test('the engine routes commands to the wave protocol and forwards its events to
 
   await flush();
   // with no wallet, a tip is refused rather than silently dropped
-  engine.onMessage({ type: 'tip', to: 'Trecipient', amount: 1 });
+  engine.exec({ type: 'tip', to: 'Trecipient', amount: 1 });
   await flush();
   t.ok(
     sent.find((msg) => msg.type === 'tip-result' && msg.error === 'wallet not ready'),
@@ -111,7 +111,7 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: {},
-    send: (msg) => sent.push(msg),
+    notify: (msg) => sent.push(msg),
     log: () => {},
     deps: {
       createWave: (opts) => {
@@ -135,7 +135,7 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
     'the wallet is wired into the wave protocol (setWallet)'
   );
 
-  engine.onMessage({ type: 'tip', to: 'Trecipient', amount: 2 });
+  engine.exec({ type: 'tip', to: 'Trecipient', amount: 2 });
   await flush();
   t.alike(tipped, [['Trecipient', 2]], 'tip forwarded to payments.send');
   t.ok(
@@ -143,7 +143,7 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
     'tip-result with the tx hash returned to the host'
   );
 
-  engine.onMessage({ type: 'send-trx', to: 'Tfriend', amount: 3 });
+  engine.exec({ type: 'send-trx', to: 'Tfriend', amount: 3 });
   await flush();
   t.alike(tipped.at(-1), ['Tfriend', 3], 'send-trx forwarded to payments.send');
   t.ok(
@@ -153,7 +153,7 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
     'send-result with the tx hash returned to the host'
   );
 
-  engine.onMessage({ type: 'fetch-transactions' });
+  engine.exec({ type: 'fetch-transactions' });
   await flush();
   const txMsg = sent.find((msg) => msg.type === 'transactions');
   t.ok(

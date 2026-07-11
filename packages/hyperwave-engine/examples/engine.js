@@ -1,5 +1,5 @@
-// engine.js — host the whole engine with createEngine(): storageDir + config + a `send`
-// callback for engine→host events, driven by onMessage() commands. This is the surface
+// engine.js — host the whole engine with createEngine(): storageDir + config + a `notify`
+// callback for engine→host events, driven by exec() commands. This is the surface
 // the desktop worker and mobile worklet both use. This example boots wallet-less, prints
 // its identity + any state events, then closes. Run:  bare examples/engine.js
 const fs = require('bare-fs');
@@ -14,7 +14,7 @@ async function main() {
       matchId: 'example-' + Date.now(), // isolate this run's ring
       wallet: false // wallet-less: no fees/tips, receipt-only gallery (keeps the example offline)
     },
-    send: (msg) => {
+    notify: (msg) => {
       if (msg.type === 'state') {
         console.log(
           'state: peers',
@@ -38,8 +38,8 @@ async function main() {
   );
 
   // Commands a host sends (no peers here, so start-wave just announces to an empty ring):
-  engine.onMessage({ type: 'set-country', country: 'BR' });
-  engine.onMessage({ type: 'start-wave' });
+  engine.exec({ type: 'set-country', country: 'BR' });
+  engine.exec({ type: 'start-wave' });
 
   // Let a state/event tick or two fire, then shut down cleanly.
   await new Promise((resolve) => setTimeout(resolve, 1500));
