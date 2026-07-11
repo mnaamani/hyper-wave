@@ -198,10 +198,11 @@ class Proc {
 // over the public DHT flawlessly. Public discovery on a cold topic takes ~20-35s, so expect
 // slower (but more production-faithful) runs.
 class Cluster {
-  constructor({ lobbyMs = 5000 } = {}) {
+  constructor({ lobbyMs = 5000, waveTimeoutMs = null } = {}) {
     this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-e2e-'));
     this.match = 'e2e-' + Math.random().toString(16).slice(2, 10);
     this.lobbyMs = String(lobbyMs);
+    this.waveTimeoutMs = waveTimeoutMs === null ? null : String(waveTimeoutMs);
     this.public = process.env.E2E_PUBLIC === '1';
     this.procs = [];
   }
@@ -236,6 +237,8 @@ class Cluster {
       ...(this.public ? {} : { HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}` }),
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,
+      // scale the max wave duration with the roster (the lap is one hop per peer)
+      ...(this.waveTimeoutMs === null ? {} : { HYPERWAVE_WAVE_TIMEOUT_MS: this.waveTimeoutMs }),
       ...env
     });
     this.procs.push(proc);

@@ -8,6 +8,7 @@
 //   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
 //   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted when the ball arrives, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
+//   env HYPERWAVE_WAVE_TIMEOUT_MS=<ms> -> max wave duration (scale up for large rosters)
 const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
@@ -51,6 +52,7 @@ const wave = createWave({
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
+  waveTimeoutMs: env.HYPERWAVE_WAVE_TIMEOUT_MS ? Number(env.HYPERWAVE_WAVE_TIMEOUT_MS) : undefined,
   onState: (state) => {
     console.log(
       `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)} ` +

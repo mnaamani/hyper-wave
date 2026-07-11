@@ -20,11 +20,28 @@ const PEER_COUNT = Number(process.env.E2E_PEERS || 8);
 const WAIT_MS = 90000 + PEER_COUNT * 2000;
 const TEST_TIMEOUT_MS = 150000 + PEER_COUNT * 3000;
 
-// Launch PEER_COUNT equal peers, all auto-joining and auto-selfie-ing (no roles). p1 initiates: it kicks
-// off once it sees everyone (the PEER_COUNT-1 other peers), and — as the initiator — it archives its
-// wave's gallery. `initEnv` passes extra env only to p1. Launches are staggered — the other half
-// of reliable DHT discovery (see harness.start's warm-up). Returns { peers } (peers[0] is the
-// initiator p1).
+// The initiator's start trigger, capped for scale. At small N the initiator waits to SEE the whole
+// roster in its live ring — the strictest start. But past Phase 4 the live ring is deliberately a
+// PARTIAL view at scale (gossip is neighbour-scoped pointers, not O(N) snapshots — no peer can
+// count the swarm; an 85-peer run plateaued at peers=80 and the old peers >= N-1 trigger starved
+// forever). The protocol never needed the count: the LOBBY gathers the roster — wave-announce
+// floods the partial mesh, joins flood back, and latecomers are caught up by wave-sync on connect.
+// So at scale the initiator just waits for a healthy chunk of the ring and announces; the lobby
+// (scaled below) does the rest.
+const START_TARGET = Math.min(PEER_COUNT - 1, 48);
+// Lobby length: joins have to flood back across the mesh from every peer, so give large rosters
+// more time to opt in. At the default 8 this is the historical 8s.
+const LOBBY_MS = 8000 + Math.max(0, PEER_COUNT - 8) * 100;
+// Max wave duration (engine waveTimeoutMs): the lap is one hop per peer and a silent successor
+// costs a heal window per skip, so the engine's fixed 90s default can expire mid-race at scale
+// (seen at 56 peers: full roster joined, race started, wave-idle "timeout" at hop ~10). Scale it
+// like WAIT_MS; the test's own budgets stay the binding constraint.
+const WAVE_TIMEOUT_MS = 90000 + PEER_COUNT * 2000;
+
+// Launch PEER_COUNT equal peers, all auto-joining and auto-selfie-ing (no roles). p1 initiates: it
+// kicks off once its ring reaches START_TARGET, and — as the initiator — it archives its wave's
+// gallery. `initEnv` passes extra env only to p1. Launches are staggered — the other half of
+// reliable DHT discovery (see harness.start's warm-up). Returns { peers } (peers[0] is p1).
 async function launchWave(cluster, initEnv = {}) {
   const peers = [];
   for (let i = 1; i <= PEER_COUNT; i++) {
@@ -32,7 +49,7 @@ async function launchWave(cluster, initEnv = {}) {
       cluster.launch('p' + i, {
         AUTOJOIN: '1',
         AUTOSELFIE: '1',
-        ...(i === 1 ? { START: String(PEER_COUNT - 1), ...initEnv } : {})
+        ...(i === 1 ? { START: String(START_TARGET), ...initEnv } : {})
       })
     );
     await sleep(400);
@@ -44,7 +61,10 @@ test(
   `a ${PEER_COUNT}-peer wave converges the gallery on every node`,
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const cluster = await new Cluster({ lobbyMs: 8000 }).start();
+    const cluster = await new Cluster({
+      lobbyMs: LOBBY_MS,
+      waveTimeoutMs: WAVE_TIMEOUT_MS
+    }).start();
     t.teardown(() => cluster.destroy());
 
     const { peers } = await launchWave(cluster);
@@ -71,7 +91,10 @@ test(
   `the wave heals when peers die mid-race (${PEER_COUNT} peers, kill 2)`,
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const cluster = await new Cluster({ lobbyMs: 8000 }).start();
+    const cluster = await new Cluster({
+      lobbyMs: LOBBY_MS,
+      waveTimeoutMs: WAVE_TIMEOUT_MS
+    }).start();
     t.teardown(() => cluster.destroy());
 
     const { peers } = await launchWave(cluster);
