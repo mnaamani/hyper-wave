@@ -103,6 +103,21 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 
 ## Backlog
 
+### Dependency watch
+
+- [ ] **Unpin hyperdht (root `package.json` overrides → `6.32.0`) once upstream fixes the
+      loopback/testnet regression.** hyperdht 6.33.0 reworked the LAN/relay connection lifecycle
+      (upstream PRs #251/#259/#266/#272) and broke the `@hyperswarm/testnet` local-DHT scenario the
+      e2e suite runs on: flaky announce/lookup (peers vary wildly per run), heavy connection churn,
+      and silently-dead pipes that drop token hops. Public-DHT behaviour is unaffected. Verified
+      A/B on one machine (6.33.0 local: FAIL; 6.32.0 local: PASS 2/2 twice, ~21s convergence;
+      6.33.0 public: PASS). To re-test a new release: remove the override, `npm install`, run
+      `npm run test:e2e:local` a few times (and consider reporting the regression upstream).
+      Related knobs added during the hunt: `E2E_PUBLIC=1` (run the suite over the public DHT),
+      `E2E_DUMP=<dir>` (write each peer's full log on a failed run); CI's e2e step still has a
+      temporary `continue-on-error` to drop after a few green runs; the convergence assertion was
+      relaxed to `>= PEER_COUNT - 1` mid-hunt and could be restored to strict.
+
 ### Propagation at extreme scale (Phase 5 — decision deferred)
 
 Serial token is O(N) in per-hop network round-trips — many seconds at N=10k. The designed alternative is the
