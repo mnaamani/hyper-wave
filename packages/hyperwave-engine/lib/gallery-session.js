@@ -216,14 +216,23 @@ class GallerySession {
   }
 
   /**
-   * Read the current gallery's ordered view and push it to the host (onGallery).
+   * Read the current gallery's ordered view and push it to the host (onGallery). Force the base to
+   * catch up first: `readGallery` reads `base.view` as-is, and the `update` event that triggers this
+   * can fire a beat before the last node linearizes — without the await the originator (or any peer)
+   * can settle one selfie short of the log with nothing to re-trigger the read. `update()` is a no-op
+   * when already current, so this is cheap on a settled gallery.
    * @returns {Promise<void>}
    */
   async #emitView() {
     if (!this.#base) {
       return;
     }
-    this.#onGallery(await readGallery(this.#base));
+    const base = this.#base;
+    await base.update().catch(() => {});
+    if (this.#base !== base) {
+      return; // moved on to another wave's gallery while updating
+    }
+    this.#onGallery(await readGallery(base));
   }
 
   // (Admitter side) Grant gallery write access — OPTIMISTIC admission. Only a current writer
@@ -244,6 +253,17 @@ class GallerySession {
    */
   admitWriter(msg) {
     if (!this.#base || !this.#base.writable || !msg.key || msg.waveId !== this.#waveId) {
+      return;
+    }
+    // Only the wave's ORIGINATOR admits (it retains this gallery). Optimistic *multi*-admitter
+    // admission let any writer admit — but a joiner admitted by a non-originator became writable and
+    // stopped re-flooding, so the originator never received its request and only learned it if that
+    // other writer's add-writer op replicated+linearized back (which lags/stalls, leaving the
+    // originator's roster incomplete — its view settles short). Funnelling every admission through
+    // the originator's own core keeps its writer set complete → its view (and, via replication of
+    // that core, everyone's) reaches the full roster. The request still FLOODS, so it relays across a
+    // sparse/churned mesh to the originator; non-originators just pass it on.
+    if (!this.#retained.has(msg.waveId)) {
       return;
     }
     if (this.#admittedKeys.has(msg.key)) {

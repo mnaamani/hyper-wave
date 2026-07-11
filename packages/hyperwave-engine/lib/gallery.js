@@ -96,7 +96,14 @@ function galleryConfig() {
         const op = node.value;
         if (op?.type === 'add-writer') {
           try {
-            await host.addWriter(b4a.from(op.key, 'hex'), { indexer: true });
+            // Add as a NON-indexer. Making every gallery writer an indexer means Autobase needs an
+            // indexer quorum to advance the indexed log — and in a churny mesh that quorum stalls,
+            // freezing indexing (seen as indexed ≪ length). A stalled index leaves later add-writer
+            // ops unprocessed, so `system` never learns the last writer(s) and their selfies never
+            // linearize — the originator (and others) settle short of the roster. Only the bootstrap
+            // writer (the wave initiator, who archives this gallery) indexes; every joiner is a plain
+            // writer whose entries still linearize under that single indexer. No quorum, no stall.
+            await host.addWriter(b4a.from(op.key, 'hex'), { indexer: false });
           } catch {}
           continue;
         }

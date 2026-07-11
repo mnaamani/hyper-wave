@@ -298,10 +298,15 @@ function createWave({
   const chord = new ChordRouting({ me, table, trySend, maintainNeighbours, log });
 
   // --- ring / peer table -----------------------------------------------------
-  /** Recompute the live ring and push `{ me, peers, successor }` to the host (onState). */
+  /** Recompute the live ring and push `{ me, peers, successor, connected }` to the host (onState). */
   function emit() {
     const ring = table.liveRing();
-    onState({ me, peers: ring, successor: nextClockwise(me.angle, ring) });
+    onState({
+      me,
+      peers: ring,
+      successor: nextClockwise(me.angle, ring),
+      connected: [...table.senderIds()].length
+    });
   }
 
   // Phase 1 (scalable-topology.md §4.2/§6): the peer keys Hyperswarm has DISCOVERED on
@@ -352,6 +357,16 @@ function createWave({
     ]);
     cand.delete(me.id);
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS);
+    // Never unpin a peer we already have a live channel to. leavePeer on a connected peer makes
+    // Hyperswarm reap the connection (the "full mesh stays as a fallback" the design assumes only
+    // holds if we don't tear it down) — and the connection set churns every time pinTargets shifts
+    // (fingers/successors move as the ring settles). That flapping is what broke the token walk:
+    // a forwarder would send to a peer that hasSender() still reported as live but whose channel had
+    // just been reaped, so the token was lost and that peer was skipped. Keeping live channels pinned
+    // holds the mesh stable; genuinely-closed peers drop out of senderIds via conn.on('close').
+    for (const id of table.senderIds()) {
+      targets.add(id);
+    }
     // The table diffs `pinned`; we mirror the diff into the swarm (side-effects here).
     const { added, removed } = table.updatePins(targets);
     for (const id of added) {
@@ -1013,11 +1028,12 @@ function createWave({
 
   /**
    * Forward a token (already stamped with my receipt) to the next reachable peer,
-   * and watch for the wave to advance; if it doesn't, skip that peer and retry.
+   * and watch for the wave to advance; if it doesn't, re-send once, then skip that peer.
    * @param {Object} token The token to forward (already stamped for the next hop).
    * @param {Set<string>} [skipped] Successor ids already skipped this hop.
+   * @param {Set<string>} [retried] Successor ids already re-sent to once this hop.
    */
-  function forwardToken(token, skipped = new Set()) {
+  function forwardToken(token, skipped = new Set(), retried = new Set()) {
     const succ = pickSuccessor(skipped);
     if (!succ) {
       // dead end (kicked off solo, or all successors gone) — end the wave now so every
@@ -1053,10 +1069,20 @@ function createWave({
     healPending = { waveId: token.waveId, hop: token.hopCount, succId: succ.id };
     healTimer = setTimeout(() => {
       healPending = null;
+      if (!retried.has(succ.id)) {
+        // First miss on a live, connected successor is usually a lost send on a briefly-bad channel
+        // (Protomux drops silently when a connection is mid-reap), not a dead peer — re-send to the
+        // SAME successor once before giving up, so a transient drop doesn't cost that peer its hop
+        // (and its selfie). Only skip if the re-send also goes unheard.
+        retried.add(succ.id);
+        log('heal: successor', shortId(succ.id), 'silent — re-sending once');
+        forwardToken(token, skipped, retried);
+        return;
+      }
       skipped.add(succ.id);
       log('healing: successor', shortId(succ.id), 'silent — skipping');
       onEvent({ event: 'healed', waveId: token.waveId, skipped: succ.id });
-      forwardToken(token, skipped);
+      forwardToken(token, skipped, retried);
     }, HEAL_TIMEOUT_MS);
   }
 

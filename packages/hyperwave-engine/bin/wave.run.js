@@ -37,10 +37,16 @@ const wave = createWave({
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
   onState: (state) => {
     console.log(
-      `[${name}] peers=${state.peers.length} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)} ` +
+      `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)} ` +
         `succ=${state.successor ? state.successor.id.slice(0, 8) + '@' + state.successor.angle.toFixed(1) : 'none'}`
     );
-    if (env.START && !started && state.peers.length >= Number(env.START)) {
+    // Kick off once we're CONNECTED to START peers — not merely once we've DISCOVERED them.
+    // Discovery (a DHT/gossip sighting) races ahead of the Protomux channels the token forwards
+    // over; kicking off on discovery let the token race a half-wired mesh, form a sub-cycle that
+    // excluded the originator, and run away (never completing) while CPU-starving the connection
+    // setup that would have finished the ring. Gating on `connected` waits for the mesh to wire up
+    // first (and the connection-stability fix in wave.js keeps it wired), so the lap is complete.
+    if (env.START && !started && state.connected >= Number(env.START)) {
       // With WALLET=1, wait for the wallet before kicking off — else startWave runs with the
       // paid-gate still off and announces an UNPAID wave (races wallet init vs discovery).
       if (env.WALLET && !payments) {
