@@ -112,11 +112,11 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       and silently-dead pipes that drop token hops. Public-DHT behaviour is unaffected. Verified
       A/B on one machine (6.33.0 local: FAIL; 6.32.0 local: PASS 2/2 twice, ~21s convergence;
       6.33.0 public: PASS). To re-test a new release: remove the override, `npm install`, run
-      `npm run test:e2e:local` a few times (and consider reporting the regression upstream).
-      Related knobs added during the hunt: `E2E_PUBLIC=1` (run the suite over the public DHT),
-      `E2E_DUMP=<dir>` (write each peer's full log on a failed run); CI's e2e step still has a
-      temporary `continue-on-error` to drop after a few green runs; the convergence assertion was
-      relaxed to `>= PEER_COUNT - 1` mid-hunt and could be restored to strict.
+      `npm run test:e2e:local` a few times. Related knobs added during the hunt: `E2E_PUBLIC=1`
+      (run the suite over the public DHT — CI now runs BOTH modes so a local-only failure points
+      at testnet/loopback networking and a both-red failure points at the protocol),
+      `E2E_DUMP=<dir>` (write each peer's full log on a failed run). CI's two e2e steps still
+      carry a temporary `continue-on-error` — drop it after a few green runs.
 
 ### Propagation at extreme scale (Phase 5 — decision deferred)
 

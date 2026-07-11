@@ -29,22 +29,31 @@ jobs:
       - name: Unit tests (brittle, under Bare)
         run: npm test
 
-      # Real end-to-end: spawns a local DHT + N bare peers and drives full waves. No wallets /
-      # no on-chain, so it's deterministic, offline, and secret-free. (The paid-wave on-chain
-      # suite runs separately — it needs funded testnet wallets and is gated to manual/nightly.)
+      # Real end-to-end, run TWICE — once per network scenario — so a regression in either layer
+      # is caught and localized in one CI run. No wallets / no on-chain in either mode (the
+      # paid-wave on-chain suite runs separately: funded-wallet secrets, gated to manual/nightly).
       #
-      # This suite ran green here for its whole history, then went flaky/red in July 2026 — that
-      # was NOT the protocol: hyperdht 6.33.0 (a silent transitive bump) regresses the local
-      # @hyperswarm/testnet loopback scenario (flaky announce/lookup, silently-dying connections).
-      # hyperdht is pinned to 6.32.0 via root package.json overrides, which restores the suite
-      # (verified A/B: 6.33.0 fails, 6.32.0 passes 8-peer convergence in ~21s). If this ever goes
-      # flaky again, check that pin first. E2E_PUBLIC=1 runs the same suite over the public DHT
-      # (production-faithful, needs outbound UDP) — a useful cross-check.
+      #  1. Local DHT (@hyperswarm/testnet): offline, deterministic, exercises the loopback path.
+      #  2. Public DHT (E2E_PUBLIC=1): the production path — real discovery, NAT/holepunch code,
+      #     isolated by a random per-run match topic; needs outbound UDP from the runner.
       #
-      # continue-on-error is a temporary guard from the regression hunt: drop it (making this a
-      # blocking gate again) after a few green runs on the pinned hyperdht.
-      - name: Local end-to-end tests
+      # Comparing the two localizes a failure instantly: local-only red = testnet/loopback
+      # networking (July 2026: hyperdht 6.33.0 silently regressed exactly that — flaky
+      # announce/lookup + silently-dying connections; pinned to 6.32.0 in root package.json
+      # overrides, see TODO.md "Dependency watch" and issue.md); public-only red = runner
+      # UDP/internet or real-DHT trouble; both red = suspect the protocol itself.
+      #
+      # continue-on-error is a temporary guard from the regression hunt: drop it from both steps
+      # (making them blocking gates again) after a few green runs on the pinned hyperdht.
+      - name: End-to-end tests (local DHT)
         continue-on-error: true
         run: npm run test:e2e:local
         env:
+          E2E_PEERS: 8
+
+      - name: End-to-end tests (public DHT)
+        continue-on-error: true
+        run: npm run test:e2e:local
+        env:
+          E2E_PUBLIC: 1
           E2E_PEERS: 8

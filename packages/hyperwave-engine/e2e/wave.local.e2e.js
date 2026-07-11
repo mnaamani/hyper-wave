@@ -41,18 +41,14 @@ test(
 
     const { peers } = await launchWave(cluster);
 
-    // Every participant — including the initiator p1, which retains the gallery — converges to the
-    // SAME gallery, to within one selfie of the full roster. We assert >= PEER_COUNT - 1, not the
-    // full PEER_COUNT, for the same reason the healing test tolerates a drop: the token is a
-    // best-effort relay, and occasionally one live peer's immediate-successor channel isn't up at
-    // the instant the ball reaches its predecessor, so it's routed around and never holds the token
-    // (verified: it joins + sees the ball but logs no receipt, so it never posts). That's a token-
-    // traversal precision limit on a churny mesh, not a convergence bug — what this test guards is
-    // that the gallery genuinely CONVERGES (every node agrees, no split view, no stall), which it
-    // does. The whole roster posting every single run is not something a P2P relay can guarantee.
-    const target = PEER_COUNT - 1;
+    // Every participant — including the initiator p1, which retains the gallery — reaches the FULL
+    // roster: churn-free, every peer posts and every node converges on all PEER_COUNT selfies.
+    // (This was briefly relaxed to PEER_COUNT - 1 during the July 2026 regression hunt; the actual
+    // culprit was hyperdht 6.33.0 breaking the local-testnet networking — see TODO.md "Dependency
+    // watch" — and on the pinned hyperdht the strict assertion passes. Keep it strict: it's the
+    // sharpest detector for this class of regression.)
     for (const peer of peers) {
-      t.ok(await peer.waitForGallery(target, 90000), `${peer.name} converged to >= ${target}`);
+      t.ok(await peer.waitForGallery(PEER_COUNT, 90000), `${peer.name} converged to ${PEER_COUNT}`);
     }
 
     // and the token actually completed the lap back to the originator (didn't stall)
