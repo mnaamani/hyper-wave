@@ -32,12 +32,20 @@ let started = false;
 let settleTimer = null; // armed when connected to START peers; fires kickoff once it holds SETTLE_MS
 let payments = null; // set by the WALLET=1 block below (if enabled)
 
-// Hold full connectivity this long before kicking off. `connected >= START` means *I* (the
-// initiator) finished meshing, but the other peers' immediate-successor channels may still be
-// forming — racing the instant I hit full let the token silently route around a peer whose
-// predecessor wasn't wired yet, dropping it from the wave (seen on a constrained runner: initiator
-// fully connected, yet 2 of 5 peers never posted). A brief settle lets the whole mesh finish wiring.
+// Hold the kickoff gate this long before firing. Reaching the gate means *I* (the initiator)
+// finished meshing, but the other peers' immediate-successor channels may still be forming —
+// racing the instant I hit it let the token silently route around a peer whose predecessor wasn't
+// wired yet, dropping it from the wave (seen on a constrained runner: initiator fully connected,
+// yet 2 of 5 peers never posted). A brief settle lets the rest of the ring finish wiring.
 const SETTLE_MS = 4000;
+// Connectivity floor for the kickoff gate. At small N a full mesh forms naturally and we wait for
+// all of it — the strictest start condition. But a full mesh is IMPOSSIBLE at scale: Hyperswarm
+// caps connections at maxPeers=64 by default (a 128-peer run plateaus around connected=58), and
+// the Chord design (scalable-topology.md) never needed one — each peer only pins its K successors
+// + predecessor + fingers (~11 connections at N=128). So require full connectivity only up to
+// this floor; past it, `peers >= START` (the whole roster DISCOVERED) plus a well-connected
+// initiator is the start condition, and the pinned ring edges carry the lap.
+const CONNECTED_FLOOR = 16;
 const wave = createWave({
   storageDir,
   bootstrap,
@@ -48,17 +56,22 @@ const wave = createWave({
       `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)} ` +
         `succ=${state.successor ? state.successor.id.slice(0, 8) + '@' + state.successor.angle.toFixed(1) : 'none'}`
     );
-    // Kick off once we're CONNECTED to START peers (not merely once we've DISCOVERED them) AND that
-    // has held for SETTLE_MS. Discovery races ahead of the Protomux channels the token forwards over;
-    // racing a half-wired mesh let the token silently route around not-yet-connected peers (dropping
-    // them) or form a runaway sub-cycle. Gating on stable `connected` — kept wired by the connection-
-    // stability fix in wave.js — lets the whole mesh finish before the lap, so it reaches everyone.
+    // Kick off once the whole roster is DISCOVERED and we're CONNECTED to min(START,
+    // CONNECTED_FLOOR) of them, held for SETTLE_MS. At small N that means the full mesh (the
+    // strictest condition — discovery alone races ahead of the Protomux channels the token
+    // forwards over, and racing a half-wired mesh dropped peers / formed runaway sub-cycles); at
+    // large N a full mesh can't exist (Hyperswarm maxPeers, see CONNECTED_FLOOR) and the pinned
+    // Chord ring edges are what carry the lap.
     if (!env.START || started) {
       return;
     }
     // With WALLET=1, wait for the wallet before arming — else startWave runs with the paid-gate
     // still off and announces an UNPAID wave (races wallet init vs discovery).
-    const ready = state.connected >= Number(env.START) && !(env.WALLET && !payments);
+    const startTarget = Number(env.START);
+    const ready =
+      state.peers.length >= startTarget &&
+      state.connected >= Math.min(startTarget, CONNECTED_FLOOR) &&
+      !(env.WALLET && !payments);
     if (ready && settleTimer === null) {
       settleTimer = setTimeout(() => {
         started = true;

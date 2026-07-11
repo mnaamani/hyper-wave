@@ -7,8 +7,13 @@ name: E2E scale run (public DHT, manual)
 #
 # Notes for large counts:
 #  - Every peer is its own Bare process on ONE runner: shared 2-core runners are the practical
-#    ceiling long before the protocol is (rough guide: ≤ 32 peers on ubuntu-latest; use a larger
-#    runner for more). The wave itself is O(N) hops, so time grows linearly.
+#    ceiling long before the protocol is (rough guide: ≤ 32 peers on ubuntu-latest — a 128-peer
+#    attempt saturated the box, with discovery still incomplete after 9 minutes; use a larger
+#    self-hosted runner for triple digits). The wave itself is O(N) hops, so time grows linearly.
+#  - Above ~64 peers a full mesh is impossible anyway (Hyperswarm caps connections at maxPeers=64
+#    by default) — that's fine by design: the Chord ring only pins K successors + predecessor +
+#    fingers per peer, and the kickoff gate requires full connectivity only up to a floor
+#    (CONNECTED_FLOOR in bin/wave.run.js) plus full roster discovery.
 #  - The suite scales its internal time budgets with E2E_PEERS (see wave.local.e2e.js), and the
 #    healing test kills peers #3 and #5 — keep the count ≥ 6.
 #  - E2E_DUMP is enabled: on a failure, every peer's full log is uploaded as a run artifact.
