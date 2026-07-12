@@ -15,28 +15,35 @@ middle:
 - Each person automatically gets a fixed **seat** on a giant circle. The seat isn't
   chosen — it's derived from their cryptographic identity, so nobody can pick a seat,
   fake one, or sit twice.
-- Someone kicks off a wave, and a **football ⚽ races around the circle**, hopping from
-  peer to peer, seat by seat — visible rolling around the ring on every screen at once.
-- As the ball passes each participant, their **selfie** (taken moments earlier, while
-  waiting in the lobby) pops into a shared gallery that everyone sees fill up in seat
-  order, like the crowd standing up one by one.
+- Someone kicks off a wave, which opens a short **lobby**: others pay the small fee, opt
+  in, and frame their selfie while a countdown runs. Opting in doubles as asking for your
+  seat in the wave's shared gallery — one step, no separate sign-up.
+- When the lobby closes, the starter admits everyone who joined and broadcasts a single
+  **start time**. Then the wave itself happens the way a real stadium wave does: nobody
+  passes anything — **every phone and laptop fires its own moment** as the wave sweeps
+  past its position on the circle. A football ⚽ rolls around the ring on every screen at
+  once, perfectly in sync, because everyone computed the same choreography.
+- As the wave reaches each participant, their **selfie** (taken moments earlier, in the
+  lobby) pops into a shared gallery that everyone sees fill up in seat order, like the
+  crowd standing up one by one.
 
-When the ball makes it all the way around, the wave is complete: a lap of the world,
-carried entirely by the participants themselves.
+When the sweep completes its lap, the wave is over — everywhere at once, a few seconds
+after it started, whether ten people joined or ten thousand. It's choreography, not a
+passed object: a lap of the world carried entirely by the participants themselves.
 
 ## Why it can't be faked
 
-Every hop of the ball is **signed** by the peer that held it, and each signature is folded
-into a small running fingerprint that travels with the ball (it stays tiny no matter how
-many people take part). So a finished wave comes with proof of exactly who carried it and
-in what order — no referee needed.
+Every gallery entry is **signed**: to take a seat in a wave's gallery, a player signs a
+statement binding their identity to that exact wave and that exact seat, and every copy of
+the app independently checks the signature before showing the entry. Nobody can post as
+someone else, steal someone's seat, or post twice — what you see in the gallery is what
+actually happened, no referee needed.
 
-The selfie gallery has the same property: an entry is only accepted if it's signed by a
-peer who really held the ball in that wave. What you see in the gallery is what actually
-happened.
+The wave itself needs no trust at all: everyone derives the same schedule from the same
+announced roster and start time, so there's nothing in flight to intercept or forge.
 
-If someone's computer dies mid-wave, the ball doesn't get stuck — it simply skips to the
-next live seat. The wave **heals itself**.
+If someone's computer dies mid-wave, nothing gets stuck — their moment simply passes by,
+like an empty seat in a stadium wave, and the wave rolls on without missing a beat.
 
 ## The money (real, but testnet)
 
@@ -75,9 +82,9 @@ A desktop app (mobile version running the very same engine still under developme
 - A **Kick off the wave** button. Pressing it pays the fee, then opens a short lobby
   where others can pay and opt in.
 - During the lobby, your webcam frames your selfie with a countdown — the photo is taken
-  _before_ the race, so the ball never has to wait for a human.
-- The ⚽ rolls around the ring on everyone's screen; selfies pop into the centre as it
-  passes each player; a 💵 button under each selfie sends a real tip.
+  _before_ the wave runs, so the wave never has to wait for a human.
+- The ⚽ rolls around the ring on everyone's screen; selfies pop into the centre as the
+  wave passes each player; a 💵 button under each selfie sends a real tip.
 - A 💰 chip shows your wallet balance the whole time.
 
 ## Why peer-to-peer matters here
@@ -85,8 +92,8 @@ A desktop app (mobile version running the very same engine still under developme
 The wave is a _crowd_ moment — it belongs to the crowd. Here that's literal: discovery,
 messaging, the shared gallery, and the payments all happen directly between
 participants (Hyperswarm for networking, Autobase for the shared gallery, WDK for
-wallets). Kill any single machine and the wave routes around it. There is no backend to
-shut down, throttle, or monetise the crowd through.
+wallets). Kill any single machine and the wave carries on without it. There is no backend
+to shut down, throttle, or monetise the crowd through.
 
 The design also scales past a small friendly group: peers organise themselves so each one
 only keeps connections to a handful of well-chosen neighbours around the circle (rather
@@ -97,9 +104,10 @@ very large rings.
 
 - **Testnet only.** The money is real in mechanism but test-value by design — no legal or
   regulatory work has been done to handle real funds.
-- **The wave is as fast as its slowest hop.** A ball that visits every seat in turn takes
-  time proportional to the crowd; a truly instant "whole planet at once" wave would use a
-  timed sweep instead of a relayed ball. That's a designed-for future step, not built.
+- **Miss the lobby, watch the wave.** Everyone who wants a seat has to opt in during the
+  short lobby window; a latecomer still sees the whole wave and the gallery, but can't add
+  a selfie to that wave. (In exchange, the wave itself never stalls and takes a fixed few
+  seconds no matter how big the crowd — there's no relayed ball to get stuck or heal.)
 - **Galleries are ephemeral.** Each run starts fresh; a wave's gallery lives as long as
   its starter stays online. A "past waves" archive is a possible future feature.
 

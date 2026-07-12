@@ -1,7 +1,8 @@
 # HyperWave — Architecture
 
 HyperWave is a peer-to-peer "global stadium wave": peers join a match swarm, a ⚽
-token races around a ring of participants, each participant takes a selfie into a
+sweeps around a ring of participants (each peer fires its own moment on a shared,
+deterministic schedule), each participant takes a selfie into a
 shared gallery, their supported-country flag rides along — and real (testnet) money
 flows through it: participation fees are **burned** on-chain (anti-spam, no beneficiary),
 and viewers **tip** selfies directly. No sponsor rewards. No servers — discovery,
@@ -28,7 +29,7 @@ flowchart TB
       R["renderer/app.js + lib/*<br/>ring canvas · lobby · webcam ·<br/>gallery · hud · country picker"]
     end
     subgraph Worker["Bare worker (per --storage)"]
-      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + wallet.js)<br/>discovery · Chord pinning · gossip · token race ·<br/>lifecycle · Autobase gallery · healing ·<br/>WDK wallet · fee burns · tips"]
+      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + wallet.js)<br/>discovery · Chord pinning · gossip · the sweep ·<br/>lifecycle · Autobase gallery ·<br/>WDK wallet · fee burns · tips"]
     end
     subgraph Updater["Bare worker (OTA, template)"]
       U["workers/updater.js<br/>pear-runtime auto-update"]
@@ -53,12 +54,12 @@ mobile the same `hyperwave` boots as a single Bare **worklet**
 `bare-pack`), driven by the React Native UI over the identical JSON IPC surface
 (`apps/mobile/src/useEngine.js`) — no Electron main, no separate updater.
 
-| Layer                                            | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------------------------------ | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                                    |
-| **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                             |
-| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, Chord topology, gossip, token race, receipts, lifecycle, Autobase gallery, healing, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
-| **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                           |
+| Layer                                            | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------ | ------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                                            |
+| **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                                     |
+| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, Chord topology, gossip, the deterministic sweep, attestations, lifecycle, Autobase gallery, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
+| **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                                   |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
 
@@ -72,7 +73,7 @@ renderer  ──(commands)──▶  worker
   { type: 'start-wave' }                              // burn kick-off fee → announce + lobby
   { type: 'join-wave' }                               // verify wave paid → opt in + burn join fee
   { type: 'set-country', country }
-  { type: 'stage-selfie', selfie: { image, caption } }  // lobby-captured; posts when the ball arrives
+  { type: 'stage-selfie', selfie: { image, caption } }  // lobby-captured; posts at my sweep slot
   { type: 'tip', to, amount }                         // real TRX to a selfie owner
   { type: 'send-trx', to, amount }                    // plain transfer to any address (wallet Send form)
   { type: 'refresh-wallet' }                          // manual balance re-check (after funding)
@@ -99,9 +100,9 @@ unhandled rejection, since mobile has no console.)
 ## Design principle: where does logic live?
 
 - **Protocol & authoritative state → worker.** Anything that defines correctness on the
-  wire (discovery, the ring, the token/receipt chain, lobby/roster, the gallery + its
-  write-gate, healing) lives in the worker. Guards are _enforced_ here: e.g. "one wave at
-  a time" is enforced by `wave.js`, not by hiding a button.
+  wire (discovery, the ring, the sweep schedule, lobby/roster, the attestations, the
+  gallery + its write-gate) lives in the worker. Guards are _enforced_ here: e.g. "one
+  wave at a time" is enforced by `wave.js`, not by hiding a button.
 - **Presentation, user input, device APIs → renderer.** Canvas drawing, countdown
   animations, the webcam (`getUserMedia` — Chromium only), the gallery slideshow, and
   the flag rendering (`flagOf`) live in the renderer. The renderer holds only _derived_
@@ -114,11 +115,12 @@ The worker computes ring **angles** (from peer public keys) and the **successor*
 sends them in `state`; the renderer consumes them for drawing and never recomputes them —
 so there's no duplicated protocol logic across the seam.
 
-> **Implemented behind the seam:** the wave only ever asks "who is my successor?", so the
-> connection layer was swapped without touching the wave engine. The ring now **drives
-> connections** — Chord over Hyperswarm ([`scalable-topology.md`](./scalable-topology.md),
-> phases 1–4 + distributed `findSuccessor` routing + gossip flooding), with the Chord math
-> pure in `lib/chord.js`.
+> **Implemented behind the seam:** the ring **drives connections** — Chord over Hyperswarm
+> ([`scalable-topology.md`](./scalable-topology.md), phases 1–4 + gossip flooding + a
+> constant far-finger pin budget), with the Chord math pure in `lib/chord.js`. The wave
+> itself no longer routes anything to a successor: the sweep (`lib/sweep.js`) derives every
+> peer's slot from the flooded roster, so the topology's job is a connected flood graph +
+> gallery replication.
 
 ## No roles — every peer is equal
 
@@ -146,19 +148,25 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
                      refresh-wallet/fetch-transactions) and the fee flow; both hosts are
                      thin shims over this
     wave.js          orchestrator (composition root): transport + gossip dispatch + wave
-                     lifecycle + token race/healing; composes the stateful classes below
-    ring.js          pure ring geometry (angleOf, liveRing, nextClockwise, pickReachable)
-    chord.js         pure Chord math (nodeId, successors, fingers, findSuccessorStep, stabilizeStep)
-    chord-routing.js ChordRouting class: distributed findSuccessor RPC + join placement + repair
-    flood.js         Flood class: gossip-flood dedup (firstSight) for relayed lifecycle messages
+                     lifecycle + the deterministic sweep; composes the stateful classes below
+    ring.js          pure ring geometry (angleOf, angleOfId, liveRing, nextClockwise)
+    sweep.js         pure sweep slot math (sweepSchedule, mySlot): the identical angle-ordered
+                     schedule every peer derives from the flooded (roster, t0, lapMs)
+    chord.js         pure Chord pointer math (nodeId, successors, predecessor, fingers,
+                     farFingers, pinTargets, stabilizeStep)
+    flood.js         Flood class: gossip-flood dedup (firstSight, oldest-first eviction) for
+                     relayed lifecycle messages
     peer-table.js    PeerTable class: seats/channels/pins/churn-cooldowns (angle always derived
                      from the id; disconnects are authoritative + cooled down)
-    selfie.js        SelfiePipeline class: pairs the staged lobby selfie with my hop receipt,
+    selfie.js        SelfiePipeline class: pairs the staged lobby selfie with my sweep slot,
                      posts exactly once per wave, owns the burn-ticket lifetime
-    token.js         pure token crypto (receipts, chain accumulator, burn + wave-end attestations)
-    gallery.js       Autobase config + ordering (galleryConfig, buildGallery, readGallery)
+    attest.js        pure attestation crypto (burn, gallery-key, and join attestations:
+                     signBurn/burnAuthorizes, signGalleryKey, signJoin/verifyJoin)
+    gallery.js       Autobase config + ordering (galleryConfig, buildGallery, readGallery);
+                     apply()'s write-gate verifies the entry's join attestation
     gallery-session.js GallerySession class: per-wave open/create/retain (archivist rule) +
-                     the optimistic writer-admission flow (flooded add-writer)
+                     batch writer admission at lobby close (admitRoster) + the
+                     writable-wait postSelfie
     wallet.js        WDK wallet (Tron Nile, native TRX) + shared fee flow (burn memo,
                      payFee, confirmBurn, wireWallet): send, burn(+memo), verifyBurnTx,
                      transactions (on-chain history via TronGrid, both directions)
