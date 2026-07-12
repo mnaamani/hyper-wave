@@ -12,10 +12,9 @@ async function main() {
   console.log(`BOOTSTRAP ${host}:${port}`);
   Bare.on('teardown', () => testnet.destroy());
   // Hold the event loop open (self-rescheduling timeout; CLAUDE.md Code Style: no setInterval).
-  function keepAlive() {
+  (function keepAlive() {
     setTimeout(keepAlive, 1 << 30);
-  }
-  keepAlive();
+  })();
 }
 
 main().catch((err) => {

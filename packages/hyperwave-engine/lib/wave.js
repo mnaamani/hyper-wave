@@ -270,6 +270,7 @@ function createWave({
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
   const swarm = new Hyperswarm({
     keyPair: swarmKeyPair,
+    maxPeers: 64,
     ...(bootstrap ? { bootstrap } : {})
   });
 

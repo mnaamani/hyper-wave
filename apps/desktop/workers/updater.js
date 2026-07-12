@@ -19,7 +19,9 @@ const updaterConfig = {
 const store = new Corestore(
   path.join(updaterConfig.dir, 'pear-runtime/corestore')
 );
-const swarm = new Hyperswarm();
+const swarm = new Hyperswarm({
+  maxPeers: 32,
+});
 const pear = new PearRuntime({ ...updaterConfig, swarm, store });
 
 pear.updater.on('error', console.error);

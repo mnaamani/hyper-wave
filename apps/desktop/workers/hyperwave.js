@@ -10,7 +10,7 @@ const { createEngine } = require('hyperwave-engine');
 
 const pipe = new FramedStream(Bare.IPC);
 
-// Worker -> Host message/event
+// Worker -> Host message
 const send = (msg) => pipe.write(JSON.stringify(msg));
 
 const engine = createEngine({
@@ -21,7 +21,6 @@ const engine = createEngine({
   },
   notify: (msg) => {
     // engine -> host: the engine raises messages, we frame them onto the IPC pipe
-    // console.log(msg)
     send(msg);
   }
 });
