@@ -317,6 +317,22 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Remaining hardening (scalable-topology §8)
 
+- [ ] **Capped far-finger set (constant pin budget).** Replace the full O(log N)
+      finger table in `pinTargets` (`chord.js`) with only the 2–3 _farthest_
+      fingers (~half-ring, ~quarter-ring, ~eighth) → constant pins:
+      successor-list (k=3) + predecessor + 2–3 long edges ≈ 7. The token only
+      ever hops to the successor; fingers exist for the control plane, and the
+      far ones do that work — small-world long edges keep the flood diameter
+      near-logarithmic and `find-succ` sub-linear, while the near fingers
+      mostly duplicate the successor-list. Add the cap as a named constant
+      beside `K_SUCCESSORS` (`wave.js`). Validate reach/diameter with the
+      `flood` harness at target N before switching. Related caveats: the
+      "never unpin a live channel" rule in `maintainNeighbours` folds all of
+      `senderIds()` back into the pin set, so pins still ratchet toward every
+      live connection — a truly bounded neighbour count needs hysteresis
+      there, not just fewer fingers; and Hyperswarm explicit pins bypass
+      `maxPeers` while shrinking the topic-dial budget (÷4 at ≥4 explicit
+      peers), so a low `maxPeers` makes the pinned graph ≈ the whole topology.
 - [ ] Validate Chord convergence under real large-N churn (can't force a partial mesh
       locally; needs a real >mesh-limit deployment)
 - [ ] Clean seam switch: forward via `successor-list[0]` instead of full-ring

@@ -87,6 +87,19 @@ Maintain, per node:
 `swarm.joinPeer()` the successor(s), predecessor, and fingers → **O(log N) connections**.
 Stop depending on Hyperswarm's incidental meshing for the ring.
 
+**Planned refinement — capped far-finger set (constant pins).** The token only ever
+hops to the successor; fingers serve the _control plane_ (flood diameter §4.6,
+`find-succ` routing §4.5). The near fingers mostly collapse into the successor-list,
+so the plan is to pin only the 2–3 **farthest** fingers (~half-ring, ~quarter-ring,
+~eighth-ring edges) instead of all O(log N) distinct ones: a constant pin budget
+(successor-list k=3 + predecessor + 2–3 long edges ≈ 7) that keeps the flood
+diameter near-logarithmic (small-world long edges) and `find-succ` sub-linear.
+Pure ring-only pinning (no fingers) was considered and rejected: flood diameter
+degrades to O(N/k) hops, a contiguous run of k+1 failures cuts the flood graph,
+and `find-succ` degenerates to an O(N) walk — reintroducing exactly the fragility
+the fingers exist to remove. Validate reach/diameter with the `flood` harness at
+target N before switching (tracked in `TODO.md` + §8).
+
 ### 4.4 Stabilization (Chord)
 
 - **stabilize** (periodic): ask successor for its predecessor `x`; if `x` is between me and
@@ -287,7 +300,16 @@ Secondary / masked-for-now:
   true successor is pinned+connected, an implicit coupling unverified at partial-neighbourhood
   scale.
 - `swarm.joinPeer` behaviour when pinning O(log N) fingers near Hyperswarm's connection limit,
-  under churn — verified semantics + N=4 only.
+  under churn — verified semantics + N=4 only. Source-verified (hyperswarm 4.17.0):
+  `maxPeers` gates only outgoing topic-driven dials (never closes anything, never blocks
+  inbound), explicit `joinPeer` targets bypass it entirely, and holding ≥4 explicit pins
+  shrinks the topic-dial budget to `maxPeers / 4` — so a low `maxPeers` makes the pinned
+  graph effectively the whole topology.
+- **Capped far-finger set** (planned, §4.3): pin only the 2–3 farthest fingers for a
+  constant pin budget (~7) instead of the full O(log N) table. Prereqs: `flood`-harness
+  reach/diameter validation at target N; note the `maintainNeighbours` "never unpin a
+  live channel" rule still folds every live connection back into the pin set, so a truly
+  bounded neighbour count also needs unpin hysteresis there.
 - No explicit periodic `checkPredecessor` (conn-close covers it today).
 - Complexity: Chord is real code — keep it isolated and pure behind the successor seam so a
   bug can't destabilize the wave logic.
