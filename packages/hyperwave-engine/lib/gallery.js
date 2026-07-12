@@ -3,7 +3,7 @@
 // orchestrator in wave.js owns the live base instance. Unit-tested in
 // wave.gallery.test.js and wave.autobase.test.js.
 const b4a = require('b4a');
-const { verifyReceipt, burnAuthorizes } = require('./token');
+const { verifyJoin, burnAuthorizes } = require('./token');
 
 /**
  * A `wave-selfie` op (the shape appended to the Autobase log and read back into the gallery).
@@ -12,9 +12,8 @@ const { verifyReceipt, burnAuthorizes } = require('./token');
  * @property {string} waveId - The wave this selfie belongs to.
  * @property {string} peerId - Hex id of the peer that posted the selfie.
  * @property {number} hopCount - The peer's hop index in the token lap (gallery ordering key).
- * @property {string} chainHash - Rolling receipt-chain hash at this hop (hex).
- * @property {number} receiptTs - Timestamp (ms) the receipt was signed.
- * @property {string} receiptSig - Ed25519 receipt signature (hex) binding the op to `peerId`.
+ * @property {string} writerKey - The poster's gallery writer core key (hex).
+ * @property {string} joinSig - Ed25519 join-attestation signature (hex) binding the op to `peerId`.
  * @property {string} image - Inline selfie image as a JPEG data URL.
  * @property {string} caption - Short caption text.
  * @property {number} timestamp - Wall-clock time (ms) the entry was created.
@@ -31,26 +30,21 @@ const MAX_IMAGE_BYTES = 256 * 1024; // ~256 KB data-URL string (≈190 KB image 
 const MAX_CAPTION_BYTES = 512;
 
 /**
- * A selfie is admitted to the gallery only if it carries a receipt validly signed
- * by its own peerId for its hop — the anti-spam gate ("no receipt = no write").
- * Runs in apply() so every peer enforces it identically. (Authenticity, not proof
- * of token-holding — see verifyReceipt.)
+ * A selfie is admitted to the gallery only if it carries a join attestation
+ * validly signed by its own peerId for this wave + writer core — the anti-spam
+ * gate ("no signed join = no write"). Runs in apply() so every peer enforces
+ * it identically. (Authenticity, not uniqueness — see verifyJoin.)
  * @param {SelfieOp} op - The candidate selfie op.
- * @returns {boolean} True if the op carries a valid receipt signed by its own peerId.
+ * @returns {boolean} True if the op carries a valid join signed by its own peerId.
  */
-function selfieHasValidReceipt(op) {
+function selfieHasValidJoin(op) {
   return !!(
     op.peerId &&
-    op.receiptSig &&
-    verifyReceipt(
-      {
-        peerId: op.peerId,
-        waveId: op.waveId,
-        hopCount: op.hopCount,
-        prevChainHash: op.chainHash,
-        timestamp: op.receiptTs
-      },
-      op.receiptSig
+    op.writerKey &&
+    op.joinSig &&
+    verifyJoin(
+      { waveId: op.waveId, peerId: op.peerId, writerKey: op.writerKey },
+      op.joinSig
     )
   );
 }
@@ -75,7 +69,7 @@ function tipAddressIsBackedByBurn(op) {
 
 /**
  * Autobase config shared by the engine and tests so apply/view is exercised identically.
- * apply() admits writers and appends receipt-valid wave-selfie ops into one ordered view,
+ * apply() admits writers and appends join-attested wave-selfie ops into one ordered view,
  * enforcing two rules deterministically on every peer:
  *   - one entry per peer per wave (first write wins) — bounds the log so a paid seat can't be
  *     used to append unbounded entries (only the display was deduped before);
@@ -107,7 +101,7 @@ function galleryConfig() {
           } catch {}
           continue;
         }
-        if (op?.type !== 'wave-selfie' || !selfieHasValidReceipt(op)) {
+        if (op?.type !== 'wave-selfie' || !selfieHasValidJoin(op)) {
           continue;
         }
         // size cap (optimistic admission → bound each seat's write); drop oversized entries

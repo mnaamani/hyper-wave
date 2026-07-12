@@ -260,6 +260,60 @@ function verifyGalleryKey({ originatorId, waveId, autobaseKey }, sigHex) {
   }
 }
 
+// --- join attestation --------------------------------------------------------
+// A peer's signed opt-in to a wave, binding its identity to the gallery writer
+// core it wants admitted. Carried on `wave-join` (the join IS the admission
+// request — the initiator batch-admits the roster at lobby close) and on every
+// gallery entry (apply()'s write-gate: no valid join attestation = no write).
+// Covering the writerKey matters: without it, a relay could swap in its own
+// writer key under someone else's peerId and steal that peer's one gallery seat.
+/**
+ * Hash the (waveId, peerId, writerKey) tuple a join attestation signs.
+ * @param {string} waveId - The wave id.
+ * @param {string} peerId - The joining peer's ring id (hex).
+ * @param {string} writerKey - The peer's gallery writer core key (hex).
+ * @returns {Buffer} The blake2b hash of the join tuple.
+ */
+function joinHash(waveId, peerId, writerKey) {
+  return crypto.hash(b4a.from(`join|${waveId}|${peerId}|${writerKey}`));
+}
+
+/**
+ * Sign a join attestation with the peer's ring key.
+ * @param {KeyPair} keyPair - The joining peer's signing ring keypair.
+ * @param {{waveId: string, writerKey: string}} fields - The join tuple (the
+ *   peerId is the keypair's own public key).
+ * @returns {string} The Ed25519 join signature (hex).
+ */
+function signJoin(keyPair, { waveId, writerKey }) {
+  const peerId = b4a.toString(keyPair.publicKey, 'hex');
+  return b4a.toString(
+    crypto.sign(joinHash(waveId, peerId, writerKey), keyPair.secretKey),
+    'hex'
+  );
+}
+
+/**
+ * Verify a join attestation is validly signed by `peerId` over
+ * (waveId, peerId, writerKey). Like verifyReceipt this is authenticity, not
+ * uniqueness — one-entry-per-peer and the byte caps bound what a seat can do.
+ * @param {{waveId: string, peerId: string, writerKey: string}} fields - The
+ *   join tuple (peerId is the claimed signer, hex).
+ * @param {string} sigHex - The join signature to verify (hex).
+ * @returns {boolean} True if `peerId` signed this join.
+ */
+function verifyJoin({ waveId, peerId, writerKey }, sigHex) {
+  try {
+    return crypto.verify(
+      joinHash(waveId, peerId, writerKey),
+      b4a.from(sigHex, 'hex'),
+      b4a.from(peerId, 'hex')
+    );
+  } catch {
+    return false;
+  }
+}
+
 // --- wave-end completion attestation ---------------------------------------
 // A completed wave is announced by its ORIGINATOR flooding a `wave-end`. Because a flood
 // message can be forged by any peer, the originator signs the completion with its ring key
@@ -323,6 +377,8 @@ module.exports = {
   burnAuthorizes,
   signGalleryKey,
   verifyGalleryKey,
+  signJoin,
+  verifyJoin,
   signWaveEnd,
   verifyWaveEnd
 };

@@ -12,27 +12,21 @@ const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const { galleryConfig, readGallery } = require('./gallery');
-const { signReceipt } = require('./token');
+const { signJoin } = require('./token');
 
 const WAVE = 'w';
-const CHAIN_HASH = b4a.toString(b4a.alloc(32), 'hex');
-const RECEIPT_TS = 1000;
 
-// a wave-selfie op with a valid receipt signed by keyPair (apply() drops invalid ones)
-function selfie(keyPair, hopCount, caption) {
+// a wave-selfie op with a valid join attestation signed by keyPair over the writer core
+// it posts from (apply() drops invalid ones)
+function selfie({ keyPair, base, hopCount, caption }) {
+  const writerKey = b4a.toString(base.local.key, 'hex');
   return {
     type: 'wave-selfie',
     waveId: WAVE,
     peerId: b4a.toString(keyPair.publicKey, 'hex'),
     hopCount,
-    chainHash: CHAIN_HASH,
-    receiptTs: RECEIPT_TS,
-    receiptSig: signReceipt(keyPair, {
-      waveId: WAVE,
-      hopCount,
-      prevChainHash: CHAIN_HASH,
-      timestamp: RECEIPT_TS
-    }),
+    writerKey,
+    joinSig: signJoin(keyPair, { waveId: WAVE, writerKey }),
     caption,
     timestamp: hopCount
   };
@@ -153,9 +147,15 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
   );
 
   // each peer writes one selfie into its own input core
-  await baseA.append(selfie(keyPairA, 0, 'A'));
-  await baseB.append(selfie(keyPairB, 1, 'B'));
-  await baseC.append(selfie(keyPairC, 2, 'C'));
+  await baseA.append(
+    selfie({ keyPair: keyPairA, base: baseA, hopCount: 0, caption: 'A' })
+  );
+  await baseB.append(
+    selfie({ keyPair: keyPairB, base: baseB, hopCount: 1, caption: 'B' })
+  );
+  await baseC.append(
+    selfie({ keyPair: keyPairC, base: baseC, hopCount: 2, caption: 'C' })
+  );
 
   // C must converge to all three — crucially A's, which reaches C only by forwarding
   // through B (A and C share no direct connection).
@@ -221,7 +221,14 @@ test('the initiator retains its gallery and serves a latecomer', async (t) => {
     }
   });
 
-  await baseA.append(selfie(crypto.keyPair(), 0, 'A'));
+  await baseA.append(
+    selfie({
+      keyPair: crypto.keyPair(),
+      base: baseA,
+      hopCount: 0,
+      caption: 'A'
+    })
+  );
 
   // a latecomer shows up AFTER the post and connects only to the retained initiator
   baseC = new Autobase(

@@ -5,27 +5,27 @@
 //     each fresh run — starts empty instead of accumulating old selfies;
 //   - moving on closes the previous wave's gallery UNLESS I initiated it (retain());
 //     a retained gallery stays open + syncing so it survives for latecomers;
-//   - admission is OPTIMISTIC (§8.2): the admitter checks the hop-receipt signature and
-//     the burn attestation SIGNATURE only — no on-chain call on the write path; the burn
-//     is verified where it pays off (tippers/auditors via the entry's burnTx);
-//   - the requester FLOODS add-writer with a fresh flood id every retry so it reliably
-//     reaches a current writer even across a sparse/churned mesh.
-// Pure gallery/admission logic — swarm transport arrives via ctx (floodGossip), payments
-// via accessors (enforcePaid/walletAddress/burnProof read live wave.js state).
+//   - admission is BATCHED at lobby close (§8.2): each wave-join carries the joiner's
+//     writer key + signed join attestation (+ burn attestation when paid); the wave's
+//     ORIGINATOR validates the collected credentials and appends every add-writer op in
+//     one batch (admitRoster) before wave-start — signature checks only, no on-chain
+//     call on the write path; the burn is verified where it pays off (tippers/auditors
+//     via the entry's burnTx). A joiner becomes writable when the originator's core
+//     (which everyone replicates anyway — it's the Autobase bootstrap) syncs back.
+// Pure gallery/admission logic — payments arrive via accessors
+// (enforcePaid/walletAddress/burnProof/joinProof read live wave.js state).
 const Autobase = require('autobase');
 const b4a = require('b4a');
 const { galleryConfig, readGallery } = require('./gallery');
-const { verifyReceipt, burnAuthorizes } = require('./token');
+const { verifyJoin, burnAuthorizes } = require('./token');
 
-// Gallery-writer admission (§8.2). The requester re-floods its add-writer every
-// ADMIT_RETRY_MS (a single one-hop broadcast can race connection setup) until admitted or
-// ADMIT_TIMEOUT_MS — generous because in a fast few-peer wave the race finishes first (the
-// admitter's check itself is a cheap local signature check — burnAuthorizes, no on-chain
-// call); the gallery persists after the wave, so a late admission still lands. BURN_WAIT_MS:
-// how long to wait for my own join burn to be recorded before requesting admission.
+// How long postSelfie waits for MY batch admission to replicate back (originator core →
+// me) before giving up. One small-core sync, not an RPC round-trip — but it can lag on a
+// loaded mesh; the gallery persists after the wave, so a slow admission still converges.
 const ADMIT_TIMEOUT_MS = 25000;
-const ADMIT_RETRY_MS = 3000;
-const BURN_WAIT_MS = 10000;
+// How long credentials() waits for the wave's gallery to be opened by the announce/sync
+// handler — covers a host that calls join() synchronously on the announce event.
+const CREDENTIALS_WAIT_MS = 5000;
 
 /**
  * Shorten a hex id for logs.
@@ -65,18 +65,16 @@ function waitFor(pred, timeoutMs) {
  * @typedef {Object} GallerySessionCtx
  * @property {Object} store - The Corestore all galleries namespace from.
  * @property {{id: string, country: (string|null)}} me - My identity (country read at post time).
- * @property {function(Object): void} floodGossip - Originate a flooded control message (add-writer).
  * @property {function(Object[]): void} onGallery - Push the ordered gallery view to the host.
  * @property {function(Object): void} onEvent - Push a lifecycle/error event to the host.
  * @property {function(): boolean} enforcePaid - Is the paid-wave gate on (wallet present)?
  * @property {function(): (string|null)} walletAddress - My TRX address, for the tip field.
- * @property {function(): (Object|null)} burnProof - My signed fee-burn attestation (admission ticket).
- * @property {number} [admitTimeoutMs] - How long a requester re-floods add-writer before giving
- *   up. The default suits small waves; the admission round-trip (flood to the originator, the
- *   add-writer op linearizing, then replicating back to the requester) grows with roster size and
- *   load — at 128 peers on a loaded box, 82 of 109 admitted writers timed out before their
- *   admission replicated back. Scale with expected N (the gallery is retained after the wave, so
- *   a slow admission still converges — the budget just has to allow it).
+ * @property {function(): (Object|null)} burnProof - My signed fee-burn attestation.
+ * @property {function(): (string|null)} joinProof - My signed join attestation for the
+ *   current wave (token.js signJoin over waveId|peerId|writerKey) — every gallery entry
+ *   carries it (apply()'s write-gate).
+ * @property {number} [admitTimeoutMs] - How long postSelfie waits for my batch admission
+ *   to replicate back before giving up (one small-core sync from the originator).
  * @property {function(...*): void} log - Diagnostic logger.
  */
 
@@ -87,45 +85,44 @@ function waitFor(pred, timeoutMs) {
 class GallerySession {
   #store;
   #me;
-  #floodGossip;
   #onGallery;
   #onEvent;
   #enforcePaid;
   #walletAddress;
   #burnProof;
-  #admitTimeoutMs; // how long a requester re-floods add-writer before giving up (scale with N)
+  #joinProof;
+  #admitTimeoutMs; // how long postSelfie waits for my admission to replicate back
   #log;
   #base = null; // the CURRENT wave's gallery Autobase (created by originator, opened by others)
   #key = null; // hex bootstrap key of #base, shared via gossip + token
   #waveId = null; // which wave #base belongs to (galleries are per-wave)
   #galleries = new Map(); // waveId -> Autobase (every gallery I currently hold open)
   #retained = new Set(); // waveIds I initiated — I keep their galleries open (archivist)
-  #admittedKeys = new Set(); // (admitter) writer core keys I've already admitted this wave
-  #admissionPromise = null; // in-flight add-writer request (dedup concurrent callers)
+  #admittedKeys = new Set(); // (originator) writer core keys I've already admitted this wave
 
   /**
-   * @param {GallerySessionCtx} ctx - Transport + host callbacks + live accessors.
+   * @param {GallerySessionCtx} ctx - Host callbacks + live accessors.
    */
   constructor({
     store,
     me,
-    floodGossip,
     onGallery,
     onEvent,
     enforcePaid,
     walletAddress,
     burnProof,
+    joinProof,
     admitTimeoutMs = ADMIT_TIMEOUT_MS,
     log
   }) {
     this.#store = store;
     this.#me = me;
-    this.#floodGossip = floodGossip;
     this.#onGallery = onGallery;
     this.#onEvent = onEvent;
     this.#enforcePaid = enforcePaid;
     this.#walletAddress = walletAddress;
     this.#burnProof = burnProof;
+    this.#joinProof = joinProof;
     this.#admitTimeoutMs = admitTimeoutMs;
     this.#log = log;
   }
@@ -145,6 +142,42 @@ class GallerySession {
    */
   get waveId() {
     return this.#waveId;
+  }
+
+  /**
+   * My gallery writer core key for the current wave (hex), or null before the
+   * base is ready. This is the key a join attestation signs and admitRoster admits.
+   * @returns {(string|null)} My local writer key (hex).
+   */
+  get writerKey() {
+    if (!this.#base || !this.#base.local) {
+      return null;
+    }
+    return b4a.toString(this.#base.local.key, 'hex');
+  }
+
+  /**
+   * Wait for `waveId`'s gallery to be ready and return my writer key for it —
+   * the credential a wave-join carries. A host can call join() on the very
+   * announce event that carries the gallery key, BEFORE the handler has opened
+   * the gallery — so tolerate that ordering by waiting briefly for the gallery
+   * to appear. Null if it never does (or the wave is superseded while waiting).
+   * @param {string} waveId - The wave whose gallery writer key to resolve.
+   * @returns {Promise<string|null>} My writer core key (hex), or null.
+   */
+  async credentials(waveId) {
+    if (!this.#galleries.has(waveId)) {
+      await waitFor(() => this.#galleries.has(waveId), CREDENTIALS_WAIT_MS);
+    }
+    const base = this.#galleries.get(waveId);
+    if (!base) {
+      return null;
+    }
+    await base.ready();
+    if (this.#galleries.get(waveId) !== base) {
+      return null; // superseded while waiting
+    }
+    return b4a.toString(base.local.key, 'hex');
   }
 
   /**
@@ -244,209 +277,102 @@ class GallerySession {
     this.#onGallery(await readGallery(base));
   }
 
-  // (Admitter side) Grant gallery write access — OPTIMISTIC admission. Only a current writer
-  // (the originator, or an already-admitted writer) admits, and only if the requester presents:
-  //   1. a valid hop receipt for the current wave (authenticity: the receipt signature binds
-  //      the request to peerId, so it stays sound even when flooded through relays), and
-  //   2. a fee-burn attestation SIGNED for that peerId + wave (burnAuthorizes) — carrying the
-  //      txHash + tip address, but NOT verified on-chain here.
-  // We deliberately do *not* verify the burn on-chain at admission: that's O(N) REST calls
-  // concentrated on the admitter and doesn't scale. Instead the burn is verified only when it
-  // pays off — by tippers/auditors via the entry's `burnTx`. Spam is bounded locally: one entry
-  // per peer + a byte-size cap on the image (gallery.js apply). So a fake-burn entry is cheap to
-  // make but is worthless to tip and is publicly detectable. Fully local + synchronous.
+  // (Originator side) Batch admission at lobby close. Each collected wave-join
+  // credential is admitted only if:
+  //   1. its join attestation verifies (the signature binds peerId to THIS wave and THAT
+  //      writer key, so a relayed/flooded join stays sound and nobody can substitute
+  //      their own writer key under someone else's peerId), and
+  //   2. when enforcing, its fee-burn attestation SIGNATURE verifies (burnAuthorizes) —
+  //      NOT verified on-chain here: that would be O(N) REST calls concentrated on the
+  //      originator. The burn is verified where it pays off — tippers/auditors via the
+  //      entry's burnTx.
+  // Spam is bounded locally: one entry per peer + a byte-size cap (gallery.js apply).
+  // Only the wave's ORIGINATOR admits (it retains this gallery and is the Autobase
+  // bootstrap): funnelling every admission through its own core keeps its writer set
+  // complete, and a joiner becomes writable via the same core sync it needs anyway.
   /**
-   * @param {Object} msg - An `add-writer` request (carries the requester's writer key, hop
-   *   receipt, and — when enforcing — its signed burn attestation).
-   * @returns {void}
+   * @param {Array<{peerId: string, writerKey: string, joinSig: string, burn?: Object}>}
+   *   creds The join credentials collected from the lobby's wave-joins.
+   * @returns {Promise<number>} How many writers were admitted.
    */
-  admitWriter(msg) {
-    if (
-      !this.#base ||
-      !this.#base.writable ||
-      !msg.key ||
-      msg.waveId !== this.#waveId
-    ) {
-      return;
+  async admitRoster(creds) {
+    if (!this.#base || !this.#base.writable) {
+      return 0;
     }
-    // Only the wave's ORIGINATOR admits (it retains this gallery). Optimistic *multi*-admitter
-    // admission let any writer admit — but a joiner admitted by a non-originator became writable and
-    // stopped re-flooding, so the originator never received its request and only learned it if that
-    // other writer's add-writer op replicated+linearized back (which lags/stalls, leaving the
-    // originator's roster incomplete — its view settles short). Funnelling every admission through
-    // the originator's own core keeps its writer set complete → its view (and, via replication of
-    // that core, everyone's) reaches the full roster. The request still FLOODS, so it relays across a
-    // sparse/churned mesh to the originator; non-originators just pass it on.
-    if (!this.#retained.has(msg.waveId)) {
-      return;
+    if (!this.#retained.has(this.#waveId)) {
+      return 0;
     }
-    if (this.#admittedKeys.has(msg.key)) {
-      return;
-    }
-    if (
-      !verifyReceipt(
-        {
-          peerId: msg.peerId,
-          waveId: msg.waveId,
-          hopCount: msg.hopCount,
-          prevChainHash: msg.chainHash,
-          timestamp: msg.receiptTs
-        },
-        msg.receiptSig
-      )
-    ) {
-      return;
-    }
-    if (
-      this.#enforcePaid() &&
-      !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)
-    ) {
-      return; // needs a signed burn attestation
-    }
-    this.#admittedKeys.add(msg.key);
-    this.#base.append({ type: 'add-writer', key: msg.key });
-    this.#log('admitted gallery writer', shortId(msg.peerId));
-  }
-
-  // Become an admitted gallery writer: flood an add-writer request presenting (a) my hop
-  // receipt for this wave and (b) my fee-burn attestation — admission is OPTIMISTIC: the
-  // admitter checks only the attestation signature (burnAuthorizes), no on-chain call; the
-  // burn is verified later where it pays off (tippers/auditors via burnTx). Then
-  // wait until writable. `#admissionPromise` dedups concurrent callers into one in-flight
-  // request. (The originator is already a writer and never comes here — it paid its
-  // kick-off burn.)
-  /**
-   * @param {{waveId: string, hopCount: number, chainHash: string, receiptTs: number, receiptSig: string}} receipt
-   *   My hop receipt, presented as the admission credential.
-   * @returns {Promise<boolean>} True once this peer's gallery core is writable, false on timeout.
-   */
-  #ensureWriter(receipt) {
-    if (!this.#base) {
-      return Promise.resolve(false);
-    }
-    if (this.#base.writable) {
-      return Promise.resolve(true);
-    }
-    if (this.#admissionPromise) {
-      return this.#admissionPromise;
-    }
-    this.#admissionPromise = this.#base
-      .ready()
-      // when enforcing, my burn attestation is my admission ticket; wait for the burn tx to be
-      // recorded (join burns are fire-and-forget from the lobby) before requesting admission
-      .then(() =>
-        this.#enforcePaid() && !this.#burnProof()
-          ? waitFor(() => !!this.#burnProof(), BURN_WAIT_MS)
-          : true
-      )
-      .then(() => this.#requestAdmission(receipt));
-    this.#admissionPromise.finally(() => {
-      this.#admissionPromise = null;
-    });
-    return this.#admissionPromise;
-  }
-
-  // Flood add-writer and wait until admitted, re-flooding every ADMIT_RETRY_MS (each retry gets
-  // a fresh flood id via floodGossip, so it re-blankets the mesh rather than being deduped away
-  // — the reach a churny post-heal topology needs). The burn (my admission ticket) is pinned
-  // into the request now, so a later reset can't blank it mid-wait. Resolves true once
-  // writable, false on timeout.
-  /**
-   * @param {{waveId: string, hopCount: number, chainHash: string, receiptTs: number, receiptSig: string}} receipt
-   *   My hop receipt, carried in the add-writer request.
-   * @returns {Promise<boolean>} True once writable, false on ADMIT_TIMEOUT_MS timeout.
-   */
-  #requestAdmission(receipt) {
-    return new Promise((resolve) => {
-      if (this.#base.writable) {
-        resolve(true);
-        return;
+    let admitted = 0;
+    for (const cred of creds) {
+      if (!cred || !cred.writerKey || !cred.peerId) {
+        continue;
       }
-      const req = {
-        kind: 'add-writer',
-        key: b4a.toString(this.#base.local.key, 'hex'),
-        peerId: this.#me.id,
-        waveId: receipt.waveId,
-        hopCount: receipt.hopCount,
-        chainHash: receipt.chainHash,
-        receiptTs: receipt.receiptTs,
-        receiptSig: receipt.receiptSig,
-        burn: this.#burnProof() || undefined
+      if (this.#admittedKeys.has(cred.writerKey)) {
+        continue;
+      }
+      const fields = {
+        waveId: this.#waveId,
+        peerId: cred.peerId,
+        writerKey: cred.writerKey
       };
-      const started = Date.now();
-      const tick = () => {
-        if (this.#base.writable) {
-          resolve(true);
-          return;
-        }
-        if (Date.now() - started > this.#admitTimeoutMs) {
-          resolve(false);
-          return;
-        }
-        this.#floodGossip(req); // re-stamps req.mid each tick → floods anew across the mesh
-        setTimeout(tick, ADMIT_RETRY_MS);
-      };
-      tick();
-    });
+      if (!verifyJoin(fields, cred.joinSig)) {
+        continue;
+      }
+      if (
+        this.#enforcePaid() &&
+        !burnAuthorizes(cred.burn, cred.peerId, this.#waveId)
+      ) {
+        continue; // needs a signed burn attestation
+      }
+      this.#admittedKeys.add(cred.writerKey);
+      await this.#base.append({ type: 'add-writer', key: cred.writerKey });
+      admitted++;
+      this.#log('admitted gallery writer', shortId(cred.peerId));
+    }
+    return admitted;
   }
 
   /**
-   * Post my selfie to the gallery (admission first, then append).
-   * @param {Object} entry - The staged selfie + my hop receipt.
+   * Post my selfie to the gallery. Admission already happened in batch at lobby close
+   * (admitRoster on the originator); here we only wait for that admission to replicate
+   * back (the originator's core sync makes this base writable), then append.
+   * @param {Object} entry - The staged selfie.
    * @param {string} entry.waveId - Wave this selfie belongs to.
-   * @param {number} entry.hopCount - My hop position.
-   * @param {string} entry.receiptSig - My hop receipt signature (the write-gate credential).
-   * @param {string} entry.chainHash - Accumulator chain hash at my hop.
-   * @param {number} entry.receiptTs - My receipt timestamp.
+   * @param {number} entry.hopCount - My hop position (gallery ordering key).
    * @param {string} [entry.caption] - Optional caption.
    * @param {string} [entry.image] - Inline JPEG data URL.
    * @returns {Promise<void>}
    */
-  async postSelfie({
-    waveId,
-    hopCount,
-    receiptSig,
-    chainHash,
-    receiptTs,
-    caption,
-    image
-  }) {
-    if (!this.#base) {
+  async postSelfie({ waveId, hopCount, caption, image }) {
+    const base = this.#galleries.get(waveId);
+    if (!base) {
       this.#onEvent({ event: 'gallery-error', reason: 'no-gallery-yet' });
       return;
     }
-    // Capture the proof NOW, before the admission await: in a fast (few-peer) wave the race
-    // can complete during #ensureWriter, and a new wave's enterLobby→clearBurnProof could drop
-    // it before the append — losing our own tip address. (The staged image/receipt are already
-    // captured as args.)
+    // Capture the proofs NOW, before the writable await: in a fast (few-peer) wave the
+    // race can complete during the wait, and a new wave's enterLobby→clearBurnProof could
+    // drop them before the append — losing our own tip address / write credential.
     const burnProof = this.#burnProof();
-    if (
-      !(await this.#ensureWriter({
-        waveId,
-        hopCount,
-        chainHash,
-        receiptTs,
-        receiptSig
-      }))
-    ) {
-      // distinguish the two failure modes so the UI can tell the user what actually went wrong:
-      // no burn ticket at all (fee never paid/confirmed) vs. a valid ticket that timed out being
-      // admitted (network/mesh). enforcePaid off (headless) → always the timeout case.
+    const joinSig = this.#joinProof();
+    await base.ready();
+    if (!(await waitFor(() => base.writable, this.#admitTimeoutMs))) {
+      // distinguish the two failure modes so the UI can tell the user what actually went
+      // wrong: no burn ticket at all (fee never paid/confirmed → never admitted) vs. an
+      // admission that hasn't replicated back in time (network/mesh). enforcePaid off
+      // (headless) → always the timeout case.
       const reason =
-        this.#enforcePaid() && !this.#burnProof()
-          ? 'fee-unpaid'
-          : 'admit-timeout';
+        this.#enforcePaid() && !burnProof ? 'fee-unpaid' : 'admit-timeout';
       this.#onEvent({ event: 'gallery-error', reason });
       return;
     }
-    await this.#base.append({
+    await base.append({
       type: 'wave-selfie',
       waveId,
       peerId: this.#me.id,
       hopCount,
-      receiptSig,
-      chainHash,
-      receiptTs,
+      // my join attestation + the writer key it signs — apply()'s write-gate credential
+      writerKey: b4a.toString(base.local.key, 'hex'),
+      joinSig,
       country: this.#me.country || '',
       caption: caption || '',
       image: image || '',
@@ -462,12 +388,11 @@ class GallerySession {
   }
 
   /**
-   * Clear the per-wave admission state (in-flight request + admitted-writer dedup) when a
-   * wave ends or a new one begins.
+   * Clear the per-wave admission state (admitted-writer dedup) when a wave ends or a
+   * new one begins.
    * @returns {void}
    */
   resetAdmission() {
-    this.#admissionPromise = null;
     this.#admittedKeys.clear();
   }
 

@@ -41,6 +41,7 @@ const {
   verifyBurn,
   signGalleryKey,
   verifyGalleryKey,
+  signJoin,
   signWaveEnd,
   verifyWaveEnd
 } = require('./token');
@@ -76,17 +77,14 @@ const K_SUCCESSORS = 3;
 // neighbours). At scale Hyperswarm is only a partial random mesh, so these are
 // flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1). The chatty
 // `wave-pos` is deliberately NOT relayed (its heal-ACK only needs the predecessor).
-// add-writer floods too: a gallery seat is granted only by a current writer, so on a sparse
-// (Chord) mesh — especially after peers die and churn connections — a requester may not be
-// directly connected to any writer. Relaying lets the request reach one several hops away.
-// Authenticity is the carried receipt signature (gallery-session.js admitWriter →
-// verifyReceipt), not the hop.
+// wave-join floods because it doubles as the gallery-admission request (writer key +
+// join attestation + burn ride it to the initiator, which batch-admits at lobby close);
+// authenticity is the carried join signature (token.js verifyJoin), not the hop.
 const RELAYED_KINDS = new Set([
   'wave-announce',
   'wave-join',
   'wave-start',
-  'wave-end',
-  'add-writer'
+  'wave-end'
 ]);
 // Identity binding: for a message that describes its OWN sender, the claimed id must equal
 // the Noise-authenticated connection id it arrived on (`fromId`). Hyperswarm authenticates
@@ -100,9 +98,9 @@ const SELF_ID_FIELD = {
   pointers: 'id', // the heartbeat sender
   'wave-pos': 'holder', // whoever currently holds the ball (broadcast by the holder)
   token: 'senderPeerId' // the immediate forwarder (re-stamped every hop)
-  // NB: add-writer is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its `peerId`
-  // is a third party; it's authenticated by its carried receipt signature (gallery-session.js
-  // admitWriter), not the connection. Binding it to `fromId` would make every relay drop it.
+  // NB: wave-join is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its `peerId`
+  // is a third party; its admission credential is authenticated by the carried join
+  // signature (token.js verifyJoin), not the connection.
 };
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
@@ -111,8 +109,8 @@ const GOSSIP_SEEN_CAP = 4096;
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000;
-// (Gallery-writer admission timing — ADMIT_TIMEOUT_MS/ADMIT_RETRY_MS/BURN_WAIT_MS — lives
-// with the admission flow in gallery-session.js.)
+// (Gallery-writer admission timing — ADMIT_TIMEOUT_MS — lives with the batch-admission
+// flow in gallery-session.js.)
 
 /**
  * Short 8-char prefix of a hex id, for readable logs.
@@ -245,8 +243,8 @@ function createWave({
   // heal window, so a fixed 90s can expire mid-race at scale (seen at 56 peers under load: full
   // roster joined, race started, timed out at hop ~10). Hosts should scale this with expected N.
   waveTimeoutMs = WAVE_TIMEOUT_MS,
-  // How long a peer re-floods its gallery add-writer before giving up (see GallerySessionCtx —
-  // the admission round-trip grows with roster size; scale with expected N).
+  // How long postSelfie waits for this peer's batch admission (an add-writer op in the
+  // originator's core, appended at lobby close) to replicate back before giving up.
   admitTimeoutMs = undefined,
   swarmSeed = null // hex seed for the swarm identity; distinct from the wallet seed (createPayments)
 }) {
@@ -290,17 +288,17 @@ function createWave({
   const flood = new Flood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
 
   // Per-wave gallery session (gallery-session.js): the current Autobase, the galleries I
-  // retain as an initiator, and the optimistic writer-admission flow. `floodGossip` is a
-  // function declaration below (hoisted); the accessors read live wave.js state.
+  // retain as an initiator, and the batch writer-admission flow (admitRoster at lobby
+  // close). The accessors read live wave.js state.
   const session = new GallerySession({
     store,
     me,
-    floodGossip,
     onGallery,
     onEvent,
     enforcePaid: () => enforcePaid,
     walletAddress: () => walletAddress,
     burnProof: () => selfie.burnProof,
+    joinProof: () => (wave ? wave.joinSig : null),
     ...(admitTimeoutMs === undefined ? {} : { admitTimeoutMs }),
     log
   });
@@ -555,6 +553,14 @@ function createWave({
           wave.kickoffProof = msg.paid;
           verifyKickoff(msg.waveId, msg.paid);
         }
+        // a mid-lobby newcomer needs the gallery open before it joins, so its wave-join
+        // can carry its writer key + join attestation (batch admission at lobby close)
+        verifyAndOpenGallery({
+          waveId: msg.waveId,
+          keyHex: msg.key,
+          keySig: msg.keySig,
+          originatorId: msg.by
+        });
         for (const id of msg.roster || []) {
           wave.roster.add(id);
         }
@@ -576,11 +582,31 @@ function createWave({
         wave.kickoffProof = msg.paid;
         verifyKickoff(msg.waveId, msg.paid);
       }
+      // open the wave's gallery NOW (key verified against the originator's signature) so
+      // joining can put my writer key + join attestation on my wave-join (the admission
+      // credential the initiator batch-admits at lobby close)
+      verifyAndOpenGallery({
+        waveId: msg.waveId,
+        keyHex: msg.key,
+        keySig: msg.keySig,
+        originatorId: msg.by
+      });
       return;
     }
     if (msg.kind === 'wave-join') {
       if (wave && msg.waveId === wave.id && msg.peerId) {
         wave.roster.add(msg.peerId);
+        // (initiator) collect the joiner's admission credential for the lobby-close
+        // batch (admitRoster). Upsert: a joiner re-floods its join once its burn
+        // confirms, so a later credential with a burn replaces an earlier bare one.
+        if (wave.by === me.id && msg.writerKey && msg.joinSig) {
+          wave.joinCreds.set(msg.peerId, {
+            peerId: msg.peerId,
+            writerKey: msg.writerKey,
+            joinSig: msg.joinSig,
+            burn: msg.burn || undefined
+          });
+        }
         onEvent({ event: 'roster', waveId: wave.id, count: wave.roster.size });
       }
       return;
@@ -647,10 +673,6 @@ function createWave({
         chainHash: msg.chainHash,
         byId: msg.by
       });
-      return;
-    }
-    if (msg.kind === 'add-writer') {
-      session.admitWriter(msg);
       return;
     }
     if (msg.kind !== 'pointers') {
@@ -851,6 +873,18 @@ function createWave({
     };
     const proof = { ...fields, sig: signBurn(swarm.keyPair, fields) };
     selfie.setBurnProof(proof);
+    // My join fee just confirmed while the lobby is still open: re-flood my wave-join so
+    // the burn attestation reaches the initiator before it batch-admits at lobby close
+    // (the join credential upserts on the initiator — see the wave-join handler).
+    if (
+      reason === 'join' &&
+      wave &&
+      wave.id === wid &&
+      wave.joined &&
+      wave.phase === 'lobby'
+    ) {
+      floodJoin(wid);
+    }
     return proof;
   }
 
@@ -917,7 +951,9 @@ function createWave({
       joined: !!mine,
       paid: enforcePaid ? 'pending' : 'verified',
       kickoffProof: null,
-      keySig: null // originator's signature over (waveId, galleryKey); set when we learn the key
+      keySig: null, // originator's signature over (waveId, galleryKey); set when we learn the key
+      joinSig: null, // MY join attestation (token.js signJoin) — every gallery entry carries it
+      joinCreds: new Map() // (initiator) peerId -> {peerId, writerKey, joinSig, burn} from wave-joins
     };
     if (mine) {
       wave.roster.add(me.id);
@@ -957,13 +993,41 @@ function createWave({
     }
     wave.joined = true;
     wave.roster.add(me.id);
-    floodGossip({
-      kind: 'wave-join',
-      waveId: wave.id,
-      peerId: me.id
-    });
+    floodJoin(wave.id);
     onEvent({ event: 'joined', waveId: wave.id, count: wave.roster.size });
     return wave.id;
+  }
+
+  /**
+   * Flood my wave-join, carrying my gallery-admission credential: my writer key for this
+   * wave's gallery + my join attestation over it (and my burn attestation once the join
+   * fee confirms — recordBurn re-floods the join to attach it). The join IS the admission
+   * request: the initiator collects these and batch-admits the roster at lobby close.
+   * The writer key needs the gallery Autobase (opened when the announce/ sync carried the
+   * key) to be ready, so the flood happens async; a credential-less join still floods as
+   * a roster opt-in if the gallery isn't held (that peer just can't post).
+   * @param {string} waveId The wave being joined (guards against the wave moving on).
+   */
+  function floodJoin(waveId) {
+    session
+      .credentials(waveId)
+      .then((writerKey) => {
+        if (!wave || wave.id !== waveId || !wave.joined) {
+          return; // wave moved on while the gallery was getting ready
+        }
+        if (writerKey && !wave.joinSig) {
+          wave.joinSig = signJoin(swarm.keyPair, { waveId, writerKey });
+        }
+        floodGossip({
+          kind: 'wave-join',
+          waveId,
+          peerId: me.id,
+          writerKey: writerKey || undefined,
+          joinSig: (writerKey && wave.joinSig) || undefined,
+          burn: selfie.burnProof || undefined
+        });
+      })
+      .catch(() => {});
   }
 
   /**
@@ -1340,24 +1404,42 @@ function createWave({
       lobbyTimer = setTimeout(() => goIdle('unpaid'), PAY_TIMEOUT_MS);
       onEvent({ event: 'paying', waveId });
     } else {
-      doAnnounce(waveId, null); // legacy/no-wallet path: announce immediately, unpaid
+      // legacy/no-wallet path: announce immediately, unpaid
+      doAnnounce(waveId, null).catch(() => {});
     }
     return waveId;
   }
 
   /**
-   * Flood the wave-announce (carrying the kick-off `paid` proof when present) and start the
-   * lobby→race timer. Shared by the paid and unpaid initiator paths.
+   * Create + sign this wave's gallery, then flood the wave-announce (carrying the gallery
+   * key + the kick-off `paid` proof when present) and start the lobby→race timer. The
+   * gallery is created BEFORE the announce so joiners can open it during the lobby and
+   * put their writer key + join attestation on their wave-join (the admission credential
+   * the initiator batch-admits at lobby close). Shared by the paid and unpaid paths.
    * @param {string} waveId The wave being announced.
    * @param {Object|null} paidProof The signed kick-off burn proof, or null (unpaid path).
+   * @returns {Promise<void>}
    */
-  function doAnnounce(waveId, paidProof) {
+  async function doAnnounce(waveId, paidProof) {
+    const gallery = session.open(waveId, null);
+    await gallery.ready();
+    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
+      return; // superseded while the gallery was getting ready
+    }
+    // I'm the originator: sign (waveId, galleryKey) so peers can trust the key I publish
+    // (it rides unsigned/relayed fields otherwise — § gallery-key attestation).
+    wave.keySig = signGalleryKey(swarm.keyPair, {
+      waveId,
+      autobaseKey: session.key
+    });
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '');
     floodGossip({
       kind: 'wave-announce',
       waveId,
       by: me.id,
       lobbyMs,
+      key: session.key,
+      keySig: wave.keySig,
       paid: paidProof || undefined
     });
     clearTimeout(lobbyTimer);
@@ -1378,7 +1460,7 @@ function createWave({
     }
     wave.kickoffProof = proof;
     wave.paid = 'verified';
-    doAnnounce(wave.id, proof);
+    doAnnounce(wave.id, proof).catch(() => {});
     onEvent({ event: 'wave-verified', waveId: wave.id, mine: true });
   }
 
@@ -1432,8 +1514,9 @@ function createWave({
   }
 
   /**
-   * Lobby closed: create + sign this wave's gallery, flood wave-start with the roster,
-   * begin the race, and kick the token off from hop 0 (the originator).
+   * Lobby closed: batch-admit the roster's collected join credentials into the gallery,
+   * sign my own join attestation (the originator posts too), flood wave-start with the
+   * roster, begin the race, and kick the token off from hop 0 (the originator).
    * @param {string} waveId The wave to finalize and start.
    * @returns {Promise<void>}
    */
@@ -1441,14 +1524,24 @@ function createWave({
     if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
       return;
     }
-    const gallery = session.open(waveId, null); // create this wave's gallery, wait for its key
+    const gallery = session.open(waveId, null); // created at announce; reused here
     await gallery.ready();
-    // I'm the originator: sign (waveId, galleryKey) so peers can trust the key I publish
-    // (it rides unsigned/relayed fields otherwise — § gallery-key attestation).
-    wave.keySig = signGalleryKey(swarm.keyPair, {
-      waveId,
-      autobaseKey: session.key
-    });
+    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
+      return;
+    }
+    // my own write credential (the originator is the bootstrap writer — no admission
+    // needed — but apply()'s write-gate wants a join attestation on every entry)
+    if (!wave.joinSig && session.writerKey) {
+      wave.joinSig = signJoin(swarm.keyPair, {
+        waveId,
+        writerKey: session.writerKey
+      });
+    }
+    // batch admission (§8.2): every valid credential collected from the lobby's
+    // wave-joins becomes an add-writer op in MY core, so a joiner's admission arrives
+    // with the same core sync it needs to open the gallery at all.
+    const admitted = await session.admitRoster([...wave.joinCreds.values()]);
+    log('admitted', admitted, 'of', wave.joinCreds.size, 'join credentials');
 
     log(
       'starting wave',

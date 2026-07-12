@@ -1,7 +1,7 @@
-// In-process test of the gallery Autobase code path + the receipt write-gate. Runs
-// under Bare:  bare workers/lib/wave.autobase.test.js   (or `npm test`)
+// In-process test of the gallery Autobase code path + the join-attestation write-gate.
+// Runs under Bare:  bare lib/wave.autobase.test.js   (or `npm test`)
 // Exercises the real galleryConfig() apply/open + readGallery: create base, admit a
-// writer, append wave-selfie ops (only receipt-valid ones survive), read them back
+// writer, append wave-selfie ops (only join-attested ones survive), read them back
 // ordered. Multi-writer *replication* across processes is covered by spike/multiwriter.
 const test = require('brittle');
 const fs = require('bare-fs');
@@ -10,29 +10,23 @@ const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const { galleryConfig, readGallery } = require('./gallery');
-const { signReceipt, signBurn } = require('./token');
+const { signJoin, signBurn } = require('./token');
 
 const WAVE = 'w';
-const CHAIN_HASH = b4a.toString(b4a.alloc(32), 'hex'); // some chain hash value
-const RECEIPT_TS = 1000; // receipt timestamp
+// any writer core key works for the attestation — apply() checks the signature binding,
+// not core ownership (one-entry-per-peer + byte caps bound what a seat can do)
+const WRITER_KEY = b4a.toString(crypto.keyPair().publicKey, 'hex');
 
-// build a wave-selfie op with a valid receipt signed by keyPair
+// build a wave-selfie op with a valid join attestation signed by keyPair
 function selfie(keyPair, hopCount, caption, timestamp) {
   const peerId = b4a.toString(keyPair.publicKey, 'hex');
-  const receiptSig = signReceipt(keyPair, {
-    waveId: WAVE,
-    hopCount,
-    prevChainHash: CHAIN_HASH,
-    timestamp: RECEIPT_TS
-  });
   return {
     type: 'wave-selfie',
     waveId: WAVE,
     peerId,
     hopCount,
-    chainHash: CHAIN_HASH,
-    receiptTs: RECEIPT_TS,
-    receiptSig,
+    writerKey: WRITER_KEY,
+    joinSig: signJoin(keyPair, { waveId: WAVE, writerKey: WRITER_KEY }),
     caption,
     timestamp
   };
@@ -69,14 +63,14 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
     'ordered by hop; one entry per peer — peer1’s second post is dropped at write (#3)'
   );
 
-  // receipt gate: a selfie with a bad signature is dropped by apply()
+  // join gate: a selfie with a bad signature is dropped by apply()
   const forged = selfie(peer1, 2, 'forged', 300);
-  forged.receiptSig = forged.receiptSig.replace(/^../, '00');
+  forged.joinSig = forged.joinSig.replace(/^../, '00');
   await base.append(forged);
   await base.update();
-  t.is((await readGallery(base)).length, 2, 'invalid receipt dropped');
+  t.is((await readGallery(base)).length, 2, 'invalid join attestation dropped');
 
-  // receipt gate: impersonation (peerId != signer) is dropped
+  // join gate: impersonation (peerId != signer) is dropped
   const impersonated = selfie(peer1, 3, 'impostor', 400);
   impersonated.peerId = b4a.toString(peer2.publicKey, 'hex'); // claim to be peer2
   await base.append(impersonated);
