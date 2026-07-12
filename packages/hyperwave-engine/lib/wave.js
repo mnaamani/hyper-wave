@@ -1,10 +1,11 @@
 // HyperWave orchestrator — the composition root. Wires the transport (Hyperswarm +
 // Protomux gossip) to the pure domains — ring geometry (ring.js), Chord topology
-// (chord.js), token crypto (token.js), gallery ordering (gallery.js) — and composes the
+// (chord.js), attestation crypto (attest.js), gallery ordering (gallery.js), sweep slot
+// math (sweep.js) — and composes the
 // stateful machines: PeerTable (seats/channels/pins), ChordRouting (distributed
-// findSuccessor), Flood (gossip dedup), SelfiePipeline (stage+receipt pairing), and
+// findSuccessor), Flood (gossip dedup), SelfiePipeline (stage+slot pairing), and
 // GallerySession (per-wave Autobase + writer admission). What remains here is the wave
-// lifecycle FSM, the token race + healing, and the gossip dispatch that binds them.
+// lifecycle FSM, the deterministic sweep, and the gossip dispatch that binds them.
 // The payment layer (wallet.js, WDK) is injected by the worker via setWallet(): wallet
 // address (for gallery tips) + the on-chain burn verifier (the paid-wave anti-spam gate).
 // Money model: burned fees (skin in the game) + gallery tips; there are no sponsor rewards.
@@ -19,7 +20,8 @@ const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const fs = require('bare-fs');
 
-const { angleOf, angleOfId, nextClockwise, pickReachable } = require('./ring');
+const { angleOf, angleOfId, nextClockwise } = require('./ring');
+const { sweepSchedule, mySlot } = require('./sweep');
 const {
   pinTargets,
   successors,
@@ -32,60 +34,41 @@ const { GallerySession } = require('./gallery-session');
 const { PeerTable } = require('./peer-table');
 const { SelfiePipeline } = require('./selfie');
 const {
-  ZERO_HASH,
-  signReceipt,
-  verifyReceipt,
-  verifyToken,
-  advanceChain,
   signBurn,
   verifyBurn,
   signGalleryKey,
   verifyGalleryKey,
-  signJoin,
-  signWaveEnd,
-  verifyWaveEnd
-} = require('./token');
+  signJoin
+} = require('./attest');
 
 const MATCH = 'hyperwave:demo-match:v1';
 const HEARTBEAT_MS = 2000; // pointers-heartbeat cadence (liveness + Chord pointer exchange)
 const RINGUPDATE_MS = 4000; // re-pin + gallery-pull maintenance cadence
 const PEER_STALE_MS = 12000; // a peer whose last heartbeat is older than this is stale (dropped)
-const MAX_HOPS = 5000; // safety cap against runaway tokens
-// The token races at network speed — there is no per-hop dwell. Visual pacing is a pure
-// renderer concern (the host replays the completed, hopCount-ordered gallery as a fixed-duration
-// sweep — see docs/protocol.md §6). The selfie is captured up-front in the lobby (not during the
-// race), so nothing on the hot path ever has to cover a human.
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
-// (get ready / choose to selfie) before the token starts racing.
+// (get ready / choose to selfie) before the sweep starts.
 const LOBBY_MS = 15000;
-// A wave is a single, one-at-a-time event. If it doesn't complete within this
-// window (peer dropped, stall), peers fall back to idle so a new wave can start.
-const WAVE_TIMEOUT_MS = 90000;
-// After forwarding, if the wave doesn't advance past my hop within this window,
-// treat the successor as dead: skip it and re-forward to the next live peer. The
-// `wave-pos` a peer broadcasts when it holds doubles as the ACK.
-const HEAL_TIMEOUT_MS = 3000;
-// Before skipping a silent successor as dead, re-send the token to it up to this many times (one
-// HEAL_TIMEOUT_MS apart). A live peer can miss a hop to a transient lost send (a Protomux frame
-// dropped while its channel is briefly mid-reap) or be slow to ACK under load; a couple of retries
-// recover it without dropping it from the wave. Only after all attempts go unheard do we heal past.
-const MAX_RESENDS = 2;
+// The sweep (scalable-topology.md §3B): the initiator's wave-start carries `t0` (epoch
+// ms, a short lead so the flooded start reaches everyone before the first slot fires)
+// and `lapMs`; every roster peer self-triggers at its own angle-ordered slot. Wall-clock
+// is a CHOSEN constant regardless of N — no token, no per-hop round-trips, no healing
+// (a dead peer's slot simply passes). Receivers clamp lapMs/t0 so a hostile start can't
+// wedge a wave open.
+const SWEEP_LEAD_MS = 3000;
+const SLOT_MS = 400; // per-roster-member slot spacing target
+const MIN_LAP_MS = 4000;
+const MAX_LAP_MS = 60000;
+const END_GRACE_MS = 2000; // after the last slot, before every peer returns to idle
 // Successor-list length (scalable-topology.md §4.3): how many peers clockwise we
 // deliberately connect to for fault tolerance. Predecessor is pinned too.
 const K_SUCCESSORS = 3;
 // Wave lifecycle control messages that must reach *every* peer (not just direct
 // neighbours). At scale Hyperswarm is only a partial random mesh, so these are
-// flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1). The chatty
-// `wave-pos` is deliberately NOT relayed (its heal-ACK only needs the predecessor).
+// flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1).
 // wave-join floods because it doubles as the gallery-admission request (writer key +
 // join attestation + burn ride it to the initiator, which batch-admits at lobby close);
-// authenticity is the carried join signature (token.js verifyJoin), not the hop.
-const RELAYED_KINDS = new Set([
-  'wave-announce',
-  'wave-join',
-  'wave-start',
-  'wave-end'
-]);
+// authenticity is the carried join signature (attest.js verifyJoin), not the hop.
+const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start']);
 // Identity binding: for a message that describes its OWN sender, the claimed id must equal
 // the Noise-authenticated connection id it arrived on (`fromId`). Hyperswarm authenticates
 // *who* we're talking to; without this the app would still believe whatever a modified
@@ -95,12 +78,10 @@ const RELAYED_KINDS = new Set([
 // so their `by`/`peerId` is a third party at relay hops — those are authenticated by their
 // carried signatures (kick-off burn-proof, receipts) instead, not by the connection.
 const SELF_ID_FIELD = {
-  pointers: 'id', // the heartbeat sender
-  'wave-pos': 'holder', // whoever currently holds the ball (broadcast by the holder)
-  token: 'senderPeerId' // the immediate forwarder (re-stamped every hop)
+  pointers: 'id' // the heartbeat sender
   // NB: wave-join is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its `peerId`
   // is a third party; its admission credential is authenticated by the carried join
-  // signature (token.js verifyJoin), not the connection.
+  // signature (attest.js verifyJoin), not the connection.
 };
 // Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
 // straggling duplicate might then re-flood once, which is harmless and very rare.
@@ -197,13 +178,12 @@ function loadOrCreateSwarmSeed(
  * @typedef {Object} CreateWaveOptions
  * @property {string} storageDir Instance storage dir (per-run hyperwave store + persisted swarm.seed).
  * @property {(state: Object) => void} onState Called with `{ me, peers, successor }` whenever the ring changes.
- * @property {(event: Object) => void} [onEvent] Lifecycle/UI event sink (wave-announce, holding, forwarded, completed…).
+ * @property {(event: Object) => void} [onEvent] Lifecycle/UI event sink (wave-announce, holding, position, completed…).
  * @property {(items: Object[]) => void} [onGallery] Called with the ordered gallery entries whenever it updates.
  * @property {(...args: any[]) => void} [log] Logger.
  * @property {Array<{host: string, port: number}>|null} [bootstrap] Local-DHT bootstrap nodes, or null for the public DHT.
  * @property {string} [matchId] Match topic string (all peers on the same id share one ring).
  * @property {number} [lobbyMs] Lobby window length in ms (opt-in window before the race).
- * @property {number} [waveTimeoutMs] Max wave duration in ms before falling back to idle (scale with expected roster size).
  * @property {number} [admitTimeoutMs] Max wait in ms for gallery writer admission to replicate back (scale with expected roster size).
  * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments).
  */
@@ -224,7 +204,7 @@ function loadOrCreateSwarmSeed(
 
 /**
  * Create the HyperWave orchestrator: joins the match swarm, maintains the ring/Chord
- * topology, runs the wave lifecycle (lobby → token race → gallery), and exposes the
+ * topology, runs the wave lifecycle (lobby → sweep → gallery), and exposes the
  * command surface the host (worker/harness) drives.
  * @param {CreateWaveOptions} options
  * @returns {WaveHandle} The command + identity surface for this peer.
@@ -238,11 +218,6 @@ function createWave({
   bootstrap = null,
   matchId = MATCH,
   lobbyMs = LOBBY_MS,
-  // How long a wave may run before peers fall back to idle. The default suits small rings; a
-  // large roster needs more — the lap is one hop per peer, and every silent successor costs a
-  // heal window, so a fixed 90s can expire mid-race at scale (seen at 56 peers under load: full
-  // roster joined, race started, timed out at hop ~10). Hosts should scale this with expected N.
-  waveTimeoutMs = WAVE_TIMEOUT_MS,
   // How long postSelfie waits for this peer's batch admission (an add-writer op in the
   // originator's core, appended at lobby close) to replicate back before giving up.
   admitTimeoutMs = undefined,
@@ -283,7 +258,6 @@ function createWave({
   let verifyBurnOnChain = null; // on-chain burn check (set once the wallet is up, via setWallet)
   // Live peer bookkeeping (peer-table.js): seats, direct channels, pins, churn cooldowns.
   const table = new PeerTable({ meId: me.id, staleMs: PEER_STALE_MS });
-  const seen = new Set(); // waveId|hopCount already processed (drop dupes/loops); cleared per wave
   const endedWaves = new Set(); // waves that finished — never re-adopt (prevents revival)
   const flood = new Flood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
 
@@ -310,18 +284,17 @@ function createWave({
   //   wave = { id, phase: 'lobby'|'racing', by, roster: Set<id>, joined: bool } | null
   let wave = null;
   let lobbyEndsAt = 0; // ~when the lobby closes (for syncing a late joiner's countdown)
-  let lobbyTimer = null; // fires the race (initiator) or a fallback to idle (others)
-  let waveTimer = null; // racing timeout
-  let healTimer = null; // watches my forward; fires if the wave doesn't advance
-  let healPending = null; // { waveId, hop } I'm currently watching
+  let lobbyTimer = null; // fires the sweep (initiator) or a fallback to idle (others)
+  let waveTimer = null; // the deterministic end of the sweep (t0 + lapMs + grace)
+  let sweepTimers = []; // my-slot + ball-position timers for the running sweep
   let tHeartbeat = null; // heartbeat timer (self-rescheduling, see the timers section)
   let tRing = null; // ring-maintenance timer
   let tRepair = null; // Chord successor-repair timer
 
   // Selfie is captured up-front during the lobby (renderer stages it into the pipeline),
-  // then posted to the gallery when the token actually reaches me — signed with my hop's
-  // receipt. The pipeline (selfie.js) owns the pairing/once-per-wave/burn-ticket invariants;
-  // `canSelfieNow`/`postSelfie` are function declarations below (hoisted), safe to pass here.
+  // then posted to the gallery when my sweep slot fires. The pipeline (selfie.js) owns
+  // the pairing/once-per-wave/burn-ticket invariants; `canSelfieNow`/`postSelfie` are
+  // function declarations below (hoisted), safe to pass here.
   const selfie = new SelfiePipeline({
     canSelfie: () => canSelfieNow(),
     currentWaveId: () => (wave ? wave.id : null),
@@ -481,41 +454,12 @@ function createWave({
       }
       relayFlood(msg, fromId);
     }
-    if (msg.kind === 'token') {
-      processToken(msg);
-      return;
-    }
     if (msg.kind === 'find-succ') {
       chord.handleFindSucc(msg, fromId);
       return;
     }
     if (msg.kind === 'find-succ-reply') {
       chord.handleFindSuccReply(msg);
-      return;
-    }
-    if (msg.kind === 'wave-pos') {
-      // only animate the ball for the wave we're racing (angle derived locally)
-      if (wave && wave.phase === 'racing' && msg.waveId === wave.id) {
-        // Heal-ACK: my forward is only ACKed when the peer I actually forwarded to holds the
-        // ball (msg.holder is connection-bound to the real sender). Requiring the *successor*
-        // id — not just any hopCount past mine — stops a hostile peer from broadcasting a
-        // bogus wave-pos to suppress healing while my real successor is dead.
-        if (
-          healPending &&
-          msg.waveId === healPending.waveId &&
-          msg.holder === healPending.succId &&
-          msg.hopCount > healPending.hop
-        ) {
-          clearHeal();
-        }
-        onEvent({
-          event: 'position',
-          waveId: msg.waveId,
-          holder: msg.holder,
-          angle: angleOfId(msg.holder),
-          hopCount: msg.hopCount
-        });
-      }
       return;
     }
     if (msg.kind === 'wave-sync') {
@@ -544,7 +488,7 @@ function createWave({
           keySig: msg.keySig,
           originatorId: msg.by
         });
-        beginRace(msg.roster);
+        beginSweep({ rosterIds: msg.roster, t0: msg.t0, lapMs: msg.lapMs });
       } else {
         if (!wave || wave.id !== msg.waveId) {
           enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMsLeft });
@@ -630,49 +574,8 @@ function createWave({
           keySig: msg.keySig,
           originatorId: msg.by
         });
-        beginRace(msg.roster);
+        beginSweep({ rosterIds: msg.roster, t0: msg.t0, lapMs: msg.lapMs });
       }
-      return;
-    }
-    if (msg.kind === 'wave-end') {
-      // The originator ended it (completed) or a real participant hit a dead end (stalled) —
-      // everyone finishes together instead of each waiting out the timeout. wave-end is
-      // flooded (forgeable by any relay), so it's only honoured with proof it's genuine:
-      //  - completion: an Ed25519 signature by the originator over (waveId, hops, chainHash);
-      //  - stall: the staller's own hop receipt, proving it was an admitted participant.
-      // An outside attacker holding neither can no longer force-terminate a live wave.
-      if (!wave || msg.waveId !== wave.id) {
-        return;
-      }
-      const authentic = msg.stalled
-        ? verifyReceipt(
-            {
-              peerId: msg.staller,
-              waveId: msg.waveId,
-              hopCount: msg.hopCount,
-              prevChainHash: msg.chainHash,
-              timestamp: msg.receiptTs
-            },
-            msg.receiptSig
-          )
-        : verifyWaveEnd(
-            {
-              originatorId: msg.by,
-              waveId: msg.waveId,
-              hops: msg.hops,
-              chainHash: msg.chainHash
-            },
-            msg.sig
-          );
-      if (!authentic) {
-        return;
-      }
-      finishWave(msg.waveId, {
-        stalled: msg.stalled,
-        hops: msg.hops,
-        chainHash: msg.chainHash,
-        byId: msg.by
-      });
       return;
     }
     if (msg.kind !== 'pointers') {
@@ -906,11 +809,14 @@ function createWave({
     return waveId < wave.id;
   }
 
-  /** Clear the lobby/race/heal timers (wave is ending or being superseded). */
+  /** Clear the lobby/sweep timers (wave is ending or being superseded). */
   function teardown() {
     clearTimeout(lobbyTimer);
     clearTimeout(waveTimer);
-    clearHeal();
+    for (const timer of sweepTimers) {
+      clearTimeout(timer);
+    }
+    sweepTimers = [];
   }
 
   /**
@@ -952,7 +858,7 @@ function createWave({
       paid: enforcePaid ? 'pending' : 'verified',
       kickoffProof: null,
       keySig: null, // originator's signature over (waveId, galleryKey); set when we learn the key
-      joinSig: null, // MY join attestation (token.js signJoin) — every gallery entry carries it
+      joinSig: null, // MY join attestation (attest.js signJoin) — every gallery entry carries it
       joinCreds: new Map() // (initiator) peerId -> {peerId, writerKey, joinSig, burn} from wave-joins
     };
     if (mine) {
@@ -1031,28 +937,107 @@ function createWave({
   }
 
   /**
-   * Transition the current wave from lobby to racing.
-   * @param {string[]} [rosterIds] Roster ids to merge in (carried on wave-start / sync).
+   * Transition the current wave from lobby to the racing sweep: derive the schedule
+   * from the CANONICAL roster (the ids flooded on wave-start — every peer must compute
+   * the identical schedule), arm my slot + the ball ticker + the deterministic end.
+   * Receiver-side clamps stop a hostile start from wedging a wave open.
+   * @param {Object} opts The sweep parameters (from wave-start / wave-sync / my own start).
+   * @param {string[]} opts.rosterIds The canonical roster ids.
+   * @param {number} opts.t0 Epoch ms the sweep starts.
+   * @param {number} opts.lapMs Duration of the full lap.
    */
-  function beginRace(rosterIds) {
-    if (!wave) {
+  function beginSweep({ rosterIds, t0, lapMs }) {
+    if (!wave || wave.phase === 'racing') {
       return;
     }
-    wave.phase = 'racing';
-    if (rosterIds) {
-      for (const id of rosterIds) {
-        wave.roster.add(id);
-      }
+    if (!Number.isFinite(t0) || !Number.isFinite(lapMs) || lapMs <= 0) {
+      return;
     }
+    if (t0 - Date.now() > MAX_LAP_MS) {
+      return; // a start scheduled absurdly far out is bogus — ignore it
+    }
+    const ids =
+      rosterIds && rosterIds.length ? [...rosterIds] : [...wave.roster];
+    const cappedLapMs = Math.min(lapMs, MAX_LAP_MS);
+    wave.phase = 'racing';
+    wave.t0 = t0;
+    wave.lapMs = cappedLapMs;
+    for (const id of ids) {
+      wave.roster.add(id);
+    }
+    const schedule = sweepSchedule({ rosterIds: ids, t0, lapMs: cappedLapMs });
     clearTimeout(lobbyTimer);
+    armSweepTimers(schedule);
+    // the deterministic end: EVERY peer observes t0 + lap + grace locally — there is
+    // no wave-end message (nothing to trust, nothing to lose in the mesh)
     clearTimeout(waveTimer);
-    waveTimer = setTimeout(() => goIdle('timeout'), waveTimeoutMs);
+    const waveId = wave.id;
+    waveTimer = setTimeout(
+      () => finishWave(waveId, { hops: schedule.length }),
+      Math.max(0, t0 + cappedLapMs + END_GRACE_MS - Date.now())
+    );
     onEvent({
       event: 'wave-active',
       waveId: wave.id,
       joined: wave.joined,
       count: wave.roster.size
     });
+  }
+
+  /**
+   * Arm the running sweep's timers: my own slot (records it into the selfie pipeline —
+   * pairing with the staged lobby frame posts the gallery entry — and tells the renderer
+   * I'm holding) and the ball ticker (every screen walks the schedule locally and emits
+   * `position` events — there is no wave-pos gossip; already-past slots flush at once so
+   * a mid-race joiner catches up).
+   * @param {import('./sweep').SweepSlot[]} schedule The derived sweep schedule.
+   */
+  function armSweepTimers(schedule) {
+    const waveId = wave.id;
+    const mine = mySlot(schedule, me.id);
+    if (mine && wave.joined) {
+      const slotTimer = setTimeout(
+        () => {
+          if (!wave || wave.id !== waveId) {
+            return;
+          }
+          selfie.recordSlot({ waveId, hopCount: mine.rank });
+          onEvent({
+            event: 'holding',
+            waveId,
+            hopCount: mine.rank,
+            holder: me.id,
+            angle: me.angle,
+            canSelfie: canSelfieNow()
+          });
+        },
+        Math.max(0, mine.at - Date.now())
+      );
+      sweepTimers.push(slotTimer);
+    }
+    let index = 0;
+    const tick = () => {
+      if (!wave || wave.id !== waveId) {
+        return;
+      }
+      const now = Date.now();
+      while (index < schedule.length && schedule[index].at <= now) {
+        const slot = schedule[index];
+        onEvent({
+          event: 'position',
+          waveId,
+          holder: slot.id,
+          angle: slot.angle,
+          hopCount: slot.rank
+        });
+        index++;
+      }
+      if (index >= schedule.length) {
+        return;
+      }
+      sweepTimers.push(setTimeout(tick, Math.max(0, schedule[index].at - now)));
+    };
+    tick();
   }
 
   /**
@@ -1066,38 +1051,30 @@ function createWave({
     const waveId = wave.id;
     endedWaves.add(waveId);
     wave = null;
-    resetSelfie(); // drop any staged selfie / receipt for the next wave
-    seen.clear(); // only needed within the active wave; bound its growth
+    resetSelfie(); // drop any staged selfie / slot for the next wave
     teardown();
     onEvent({ event: 'wave-idle', waveId, reason });
   }
 
   /**
-   * Finish the current wave: emit the outcome to the UI and return to idle. Shared by
-   * the originator (local completion), a dead-end stall, and receiving a `wave-end`.
+   * Finish the current wave: emit the outcome to the UI and return to idle. Fired by
+   * every peer's own deterministic end timer (t0 + lapMs + grace) — completion needs no
+   * message and no trust.
    * @param {string} waveId The wave that finished.
    * @param {Object} [outcome]
-   * @param {boolean} [outcome.stalled] True if it dead-ended rather than completing a lap.
-   * @param {number} [outcome.hops] Total hops the token travelled.
-   * @param {string} [outcome.chainHash] Final accumulator chain hash.
-   * @param {string} [outcome.byId] Hex id whose angle to feature (defaults to me).
+   * @param {number} [outcome.hops] How many roster slots the sweep covered.
    */
-  function finishWave(
-    waveId,
-    { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}
-  ) {
-    if (stalled) {
-      onEvent({ event: 'stalled', waveId, reason: 'no successor' });
-    } else {
-      onEvent({
-        event: 'completed',
-        waveId,
-        hops,
-        chainHash,
-        angle: angleOfId(byId)
-      });
+  function finishWave(waveId, { hops = 0 } = {}) {
+    if (!wave || wave.id !== waveId) {
+      return;
     }
-    goIdle(stalled ? 'stalled' : 'ended');
+    onEvent({
+      event: 'completed',
+      waveId,
+      hops,
+      angle: angleOfId(wave.by)
+    });
+    goIdle('ended');
   }
 
   /**
@@ -1109,7 +1086,7 @@ function createWave({
 
   /**
    * Clear this wave's selfie-pipeline + admission state (but NOT the burn ticket — the
-   * pipeline keeps it for a late admission; see selfie.js).
+   * pipeline keeps it as the entry's tip-address binding; see selfie.js).
    */
   function resetSelfie() {
     selfie.reset();
@@ -1117,275 +1094,8 @@ function createWave({
   }
 
   /**
-   * Emit a holding event; canSelfie tells the renderer this peer is a participant (its
-   * staged selfie will post now). Everyone else just relays the ball.
-   * @param {import('./selfie').SelfieReceipt} receipt My hop receipt.
-   */
-  function emitHolding(receipt) {
-    const { waveId, hopCount } = receipt;
-    selfie.recordReceipt(receipt);
-    onEvent({
-      event: 'holding',
-      waveId,
-      hopCount,
-      holder: me.id,
-      angle: me.angle,
-      canSelfie: canSelfieNow()
-    });
-  }
-
-  // --- token race ------------------------------------------------------------
-
-  /**
-   * Tell every peer the ball is at me now, so all windows animate it here.
-   * @param {string} waveId The racing wave.
-   * @param {number} hopCount My hop position.
-   */
-  function announcePosition(waveId, hopCount) {
-    broadcast({ kind: 'wave-pos', waveId, holder: me.id, hopCount });
-  }
-
-  /**
-   * Next reachable peer clockwise from me (directly connected, not already skipped).
-   * @param {Set<string>} skipped Ids already skipped this forward (dead successors).
-   * @returns {{id: string, angle: number}|null} The chosen successor seat, or null at a dead end.
-   */
-  function pickSuccessor(skipped) {
-    return pickReachable({
-      sortedRing: table.liveRing(),
-      myAngle: me.angle,
-      reachable: new Set(table.senderIds()),
-      skipped
-    });
-  }
-
-  /**
-   * Forward a token (already stamped with my receipt) to the next reachable peer, and watch for the
-   * wave to advance; if it doesn't, re-send a few times, then skip that peer.
-   * @param {Object} token The token to forward (already stamped for the next hop).
-   * @param {Set<string>} [skipped] Successor ids already skipped this hop.
-   * @param {Map<string, number>} [resends] Successor id -> how many times re-sent to this hop.
-   */
-  function forwardToken(token, skipped = new Set(), resends = new Map()) {
-    const succ = pickSuccessor(skipped);
-    if (!succ) {
-      // dead end (kicked off solo, or all successors gone) — end the wave now so every
-      // peer returns to idle instead of waiting out the timeout
-      clearHeal();
-      onEvent({
-        event: 'stalled',
-        waveId: token.waveId,
-        reason: skipped.size ? 'no-reachable-successor' : 'no successor'
-      });
-      // Carry my hop receipt so peers can tell a genuine dead-end (from an admitted
-      // participant) from a forged stall (an outsider trying to kill the wave).
-      floodGossip({
-        kind: 'wave-end',
-        waveId: token.waveId,
-        by: token.originator,
-        stalled: true,
-        staller: me.id,
-        hopCount: token.hopCount,
-        chainHash: token.prevChainHash,
-        receiptTs: token.timestamp,
-        receiptSig: token.senderReceiptSig
-      });
-      goIdle('stalled');
-      return;
-    }
-    table.send(succ.id)(JSON.stringify(token));
-    onEvent({
-      event: 'forwarded',
-      waveId: token.waveId,
-      hopCount: token.hopCount,
-      to: succ.id
-    });
-
-    // heal: expect the peer I forwarded to (succ) to hold the ball soon; its wave-pos is the
-    // ACK. Record succ.id so only *its* position clears the watch (see the wave-pos handler).
-    clearTimeout(healTimer);
-    healPending = {
-      waveId: token.waveId,
-      hop: token.hopCount,
-      succId: succ.id
-    };
-    healTimer = setTimeout(() => {
-      healPending = null;
-      const sent = resends.get(succ.id) || 0;
-      if (sent < MAX_RESENDS) {
-        // A miss on a live, connected successor is usually a lost send on a briefly-bad channel
-        // (Protomux drops silently when a connection is mid-reap) or a slow ACK under load, not a
-        // dead peer — re-send to the SAME successor before giving up, so a transient drop doesn't
-        // cost that peer its hop (and its selfie). Only skip once every attempt goes unheard.
-        resends.set(succ.id, sent + 1);
-        log(
-          'heal: successor',
-          shortId(succ.id),
-          `silent — re-sending (${sent + 1}/${MAX_RESENDS})`
-        );
-        forwardToken(token, skipped, resends);
-        return;
-      }
-      skipped.add(succ.id);
-      log('healing: successor', shortId(succ.id), 'silent — skipping');
-      onEvent({ event: 'healed', waveId: token.waveId, skipped: succ.id });
-      forwardToken(token, skipped, resends);
-    }, HEAL_TIMEOUT_MS);
-  }
-
-  /** Cancel the heal watch (my forward was ACKed, or the wave ended). */
-  function clearHeal() {
-    clearTimeout(healTimer);
-    healPending = null;
-  }
-
-  /**
-   * Build the next token this peer forwards, stamping hop `hopCount` with my receipt. The
-   * gallery key travels with the token (the catch-up path for peers that missed wave-start),
-   * carrying the originator's signature over it so a forwarder can't swap it (§ gallery-key).
-   * @param {Object} opts The hop to stamp.
-   * @param {string} opts.waveId The racing wave.
-   * @param {string} opts.originator Hex id of the wave's originator.
-   * @param {number} opts.hopCount This token's hop position.
-   * @param {string} opts.prevChainHash Accumulator chain hash entering this hop.
-   * @param {string} opts.autobaseKeyHex Hex gallery key to carry along.
-   * @returns {Object} The stamped token message.
-   */
-  function stampToken({
-    waveId,
-    originator,
-    hopCount,
-    prevChainHash,
-    autobaseKeyHex
-  }) {
-    const timestamp = Date.now();
-    const senderReceiptSig = signReceipt(swarm.keyPair, {
-      waveId,
-      hopCount,
-      prevChainHash,
-      timestamp
-    });
-    return {
-      kind: 'token',
-      waveId,
-      originator,
-      hopCount,
-      prevChainHash,
-      senderPeerId: me.id,
-      senderReceiptSig,
-      timestamp,
-      autobaseKey: autobaseKeyHex,
-      autobaseKeySig: wave ? wave.keySig : null
-    };
-  }
-
-  /**
-   * I now hold this token: post my lobby selfie (if opted in — emitHolding records my
-   * receipt, which pairs with the staged image), tell everyone the ball is at me, and
-   * forward to my successor (at network speed — no dwell).
-   * @param {Object} token The token stamped for my hop.
-   */
-  function holdAndForward(token) {
-    emitHolding({
-      waveId: token.waveId,
-      hopCount: token.hopCount,
-      receiptSig: token.senderReceiptSig,
-      chainHash: token.prevChainHash,
-      receiptTs: token.timestamp
-    });
-    announcePosition(token.waveId, token.hopCount);
-    forwardToken(token);
-  }
-
-  /**
-   * Handle an inbound token: cheap-reject, verify the receipt, complete the lap (if it
-   * returned to me as originator) or adopt/advance the wave and forward the next hop.
-   * @param {Object} token The received token message.
-   */
-  function processToken(token) {
-    // Cheap rejects BEFORE the Ed25519 verify, to blunt a token-flood CPU DoS: drop a
-    // competing/losing wave (single active wave at a time), and drop already-seen or
-    // over-cap hops. Identity binding already guaranteed senderPeerId === the connection.
-    if (!shouldAdopt(token.waveId)) {
-      return;
-    }
-    const key = token.waveId + '|' + token.hopCount;
-    // Completion only counts for a wave I'm actually running (else a token with
-    // originator=me for a wave I never started could forge a completion).
-    const isCompletion =
-      wave &&
-      wave.id === token.waveId &&
-      token.originator === me.id &&
-      token.hopCount > 0;
-    if (!isCompletion && (seen.has(key) || token.hopCount > MAX_HOPS)) {
-      return;
-    }
-
-    if (!verifyToken(token)) {
-      log('token: bad receipt from', shortId(token.senderPeerId || ''));
-      return;
-    }
-
-    // Completion: the token has returned to its originator. Tell everyone (signed so the
-    // flooded wave-end can't be forged), then finish.
-    if (isCompletion) {
-      floodGossip({
-        kind: 'wave-end',
-        waveId: token.waveId,
-        hops: token.hopCount,
-        chainHash: token.prevChainHash,
-        by: me.id,
-        sig: signWaveEnd(swarm.keyPair, {
-          waveId: token.waveId,
-          hops: token.hopCount,
-          chainHash: token.prevChainHash
-        })
-      });
-      finishWave(token.waveId, {
-        hops: token.hopCount,
-        chainHash: token.prevChainHash
-      });
-      return;
-    }
-    seen.add(key);
-
-    // adopt into the race (may switch from a higher-id wave, or catch up if we
-    // missed the announce/start) and learn this wave's gallery
-    if (!wave || wave.id !== token.waveId) {
-      enterLobby({
-        waveId: token.waveId,
-        by: token.originator,
-        dur: 0,
-        silent: true
-      });
-    }
-    if (wave.phase !== 'racing') {
-      beginRace();
-    }
-    verifyAndOpenGallery({
-      waveId: token.waveId,
-      keyHex: token.autobaseKey,
-      keySig: token.autobaseKeySig,
-      originatorId: token.originator
-    });
-
-    const newChainHash = advanceChain(
-      token.prevChainHash,
-      token.senderReceiptSig
-    );
-    const next = stampToken({
-      waveId: token.waveId,
-      originator: token.originator,
-      hopCount: token.hopCount + 1,
-      prevChainHash: newChainHash,
-      autobaseKeyHex: token.autobaseKey
-    });
-    holdAndForward(next);
-  }
-
-  /**
    * Announce a new wave and open the lobby (any peer can start when idle). After the
-   * lobby window the initiator finalizes the roster and the token starts racing.
+   * lobby window the initiator batch-admits + finalizes the roster and the sweep runs.
    * @returns {string|null} The new waveId, or null if a wave is already engaged.
    */
   function startWave() {
@@ -1551,28 +1261,27 @@ function createWave({
       'gallery',
       shortId(session.key)
     );
+    // the sweep parameters: a short lead so the flooded start reaches everyone before
+    // the first slot, and a lap scaled to the roster (clamped — see the constants)
+    const t0 = Date.now() + SWEEP_LEAD_MS;
+    const lapMs = Math.max(
+      MIN_LAP_MS,
+      Math.min(MAX_LAP_MS, wave.roster.size * SLOT_MS)
+    );
+    const rosterIds = [...wave.roster];
     floodGossip({
       kind: 'wave-start',
       waveId,
       by: me.id,
-      roster: [...wave.roster],
+      roster: rosterIds,
+      t0,
+      lapMs,
       key: session.key,
       keySig: wave.keySig,
       paid: wave.kickoffProof || undefined // so peers adopting via start can re-sync newcomers
     });
-    beginRace();
     onEvent({ event: 'started', waveId, by: me.id });
-
-    // the originator is hop 0 — hold (post staged selfie if joined) and forward
-    holdAndForward(
-      stampToken({
-        waveId,
-        originator: me.id,
-        hopCount: 0,
-        prevChainHash: ZERO_HASH,
-        autobaseKeyHex: session.key
-      })
-    );
+    beginSweep({ rosterIds, t0, lapMs });
   }
 
   // --- connections -----------------------------------------------------------
@@ -1616,6 +1325,8 @@ function createWave({
           phase: wave.phase,
           by: wave.by,
           roster: [...wave.roster],
+          t0: wave.t0 || undefined, // sweep timing, so a mid-race newcomer animates + ends right
+          lapMs: wave.lapMs || undefined,
           key: session.key,
           keySig: wave.keySig || undefined, // originator's signed gallery key (§ gallery-key)
           paid: wave.kickoffProof || undefined, // so a mid-lobby newcomer can verify + join
@@ -1722,7 +1433,9 @@ function createWave({
       clearTimeout(tRepair);
       clearTimeout(lobbyTimer);
       clearTimeout(waveTimer);
-      clearTimeout(healTimer);
+      for (const timer of sweepTimers) {
+        clearTimeout(timer);
+      }
       chord.close();
       await swarm.destroy();
       await session.close();

@@ -62,26 +62,4 @@ function nextClockwise(myAngle, sortedRing) {
   return sortedRing[0];
 }
 
-/**
- * Healing: the next peer clockwise that is directly reachable and not already
- * skipped. Walks the ring from just after me, wrapping around. Returns null if
- * none qualifies.
- * @param {Object} opts The heal-walk inputs.
- * @param {RingPeer[]} opts.sortedRing - Live peers already sorted clockwise by angle.
- * @param {number} opts.myAngle - My own seat angle in degrees.
- * @param {Set<string>} opts.reachable - Ids of peers directly reachable from me.
- * @param {Set<string>} opts.skipped - Ids of peers already skipped this heal round.
- * @returns {RingPeer | null} The next reachable, non-skipped peer, or null.
- */
-function pickReachable({ sortedRing, myAngle, reachable, skipped }) {
-  const after = sortedRing.filter((peer) => peer.angle > myAngle);
-  const before = sortedRing.filter((peer) => peer.angle <= myAngle);
-  for (const peer of [...after, ...before]) {
-    if (!skipped.has(peer.id) && reachable.has(peer.id)) {
-      return peer;
-    }
-  }
-  return null;
-}
-
-module.exports = { angleOf, angleOfId, liveRing, nextClockwise, pickReachable };
+module.exports = { angleOf, angleOfId, liveRing, nextClockwise };

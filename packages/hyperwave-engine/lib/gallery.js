@@ -3,7 +3,7 @@
 // orchestrator in wave.js owns the live base instance. Unit-tested in
 // wave.gallery.test.js and wave.autobase.test.js.
 const b4a = require('b4a');
-const { verifyJoin, burnAuthorizes } = require('./token');
+const { verifyJoin, burnAuthorizes } = require('./attest');
 
 /**
  * A `wave-selfie` op (the shape appended to the Autobase log and read back into the gallery).

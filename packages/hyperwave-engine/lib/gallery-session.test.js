@@ -9,7 +9,7 @@ const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const fs = require('bare-fs');
 const { GallerySession } = require('./gallery-session');
-const { signJoin } = require('./token');
+const { signJoin } = require('./attest');
 
 // A session over a throwaway store, with capturable host callbacks. Payments off
 // (enforcePaid false) — the paid-gate signature checks are covered by wave.token/autobase.

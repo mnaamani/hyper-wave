@@ -10,7 +10,7 @@ const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const { galleryConfig, readGallery } = require('./gallery');
-const { signJoin, signBurn } = require('./token');
+const { signJoin, signBurn } = require('./attest');
 
 const WAVE = 'w';
 // any writer core key works for the attestation — apply() checks the signature binding,

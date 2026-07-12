@@ -1,6 +1,7 @@
-// Pure token crypto for the wave race. Ed25519 receipts + a constant-size blake2b
-// chain accumulator (docs/protocol.md §2.3 — NOT a growing hops[] array). No state,
-// no I/O — unit-tested in wave.token.test.js.
+// Pure attestation crypto for the wave protocol: Ed25519 signatures binding a peer's
+// ring identity to its fee burn (the paid-wave gate + tip-address binding), the
+// originator's gallery key (so a relay can't swap it), and its wave join (the gallery
+// write/admission credential). No state, no I/O — unit-tested in attest.test.js.
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 
@@ -25,112 +26,6 @@ const b4a = require('b4a');
  * A signed burn attestation: the burn fields plus the ring-key signature.
  * @typedef {BurnFields & {sig: string}} BurnProof
  */
-
-/**
- * The token message that races between peers (unicast to each successor).
- * @typedef {Object} Token
- * @property {string} senderPeerId - Ring peer id (hex) of the forwarding peer.
- * @property {string} waveId - The wave this token belongs to.
- * @property {number} hopCount - Hop index of this forward.
- * @property {string} prevChainHash - The rolling accumulator hash before this hop.
- * @property {number} timestamp - When the sender stamped the token (ms).
- * @property {string} senderReceiptSig - The sender's Ed25519 receipt signature (hex).
- */
-
-const ZERO_HASH = b4a.toString(b4a.alloc(32), 'hex'); // genesis accumulator
-
-/**
- * The hop tuple a receipt signs, plus (for verification) the claimed signer.
- * @typedef {Object} ReceiptFields
- * @property {string} [peerId] - The claimed signer's ring peer id (hex; verification only).
- * @property {string} waveId - The wave id.
- * @property {number} hopCount - The hop index.
- * @property {string} prevChainHash - The accumulator hash before this hop (hex).
- * @property {number} timestamp - The hop timestamp (ms).
- */
-
-/**
- * A receipt binds a peer to a specific hop: sign(H(waveId|hop|prevChainHash|ts)).
- * @param {ReceiptFields} fields - The hop tuple.
- * @returns {Buffer} The blake2b hash of the hop tuple.
- */
-function receiptHash({ waveId, hopCount, prevChainHash, timestamp }) {
-  return crypto.hash(
-    b4a.from(`${waveId}|${hopCount}|${prevChainHash}|${timestamp}`)
-  );
-}
-
-/**
- * Sign a receipt over its hop tuple with the peer's ring key.
- * @param {KeyPair} keyPair - The signing ring keypair.
- * @param {ReceiptFields} fields - The hop tuple to sign.
- * @returns {string} The Ed25519 receipt signature (hex).
- */
-function signReceipt(keyPair, fields) {
-  return b4a.toString(
-    crypto.sign(receiptHash(fields), keyPair.secretKey),
-    'hex'
-  );
-}
-
-/**
- * Verify a receipt is a valid Ed25519 signature by `fields.peerId` over its hop
- * tuple. This authenticates a gallery entry to a peer identity (no impersonation,
- * no unsigned spam). NOTE: it does NOT prove the peer actually held the token — a
- * peer can self-sign a receipt for a hop it never held. Proof of participation
- * (cross-checking against the real token chain) is the validator's job.
- * @param {ReceiptFields} fields - The hop tuple (peerId is the claimed signer).
- * @param {string} receiptSigHex - The receipt signature to verify (hex).
- * @returns {boolean} True if the signature is valid for that peer + hop.
- */
-function verifyReceipt(fields, receiptSigHex) {
-  try {
-    const hash = receiptHash(fields);
-    return crypto.verify(
-      hash,
-      b4a.from(receiptSigHex, 'hex'),
-      b4a.from(fields.peerId, 'hex')
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Verify the receipt the *sender* stamped on the token they forwarded.
- * @param {Token} token - The received token message.
- * @returns {boolean} True if the sender's stamped receipt is valid.
- */
-function verifyToken(token) {
-  return verifyReceipt(
-    {
-      peerId: token.senderPeerId,
-      waveId: token.waveId,
-      hopCount: token.hopCount,
-      prevChainHash: token.prevChainHash,
-      timestamp: token.timestamp
-    },
-    token.senderReceiptSig
-  );
-}
-
-/**
- * Constant-size rolling accumulator: newHash = blake2b(prevHash || receiptSig).
- * @param {string} prevChainHash - The accumulator hash before this hop (hex).
- * @param {string} receiptSigHex - This hop's receipt signature (hex).
- * @returns {string} The advanced accumulator hash (hex).
- */
-function advanceChain(prevChainHash, receiptSigHex) {
-  return b4a.toString(
-    crypto.hash(
-      b4a.concat([
-        b4a.from(prevChainHash, 'hex'),
-        b4a.from(receiptSigHex, 'hex')
-      ])
-    ),
-    'hex'
-  );
-}
 
 // --- burn attestation ------------------------------------------------------
 // Bridges the peer's RING identity (Ed25519) to its on-chain burn: the peer signs, with
@@ -295,7 +190,7 @@ function signJoin(keyPair, { waveId, writerKey }) {
 
 /**
  * Verify a join attestation is validly signed by `peerId` over
- * (waveId, peerId, writerKey). Like verifyReceipt this is authenticity, not
+ * (waveId, peerId, writerKey). This is authenticity, not
  * uniqueness — one-entry-per-peer and the byte caps bound what a seat can do.
  * @param {{waveId: string, peerId: string, writerKey: string}} fields - The
  *   join tuple (peerId is the claimed signer, hex).
@@ -314,63 +209,7 @@ function verifyJoin({ waveId, peerId, writerKey }, sigHex) {
   }
 }
 
-// --- wave-end completion attestation ---------------------------------------
-// A completed wave is announced by its ORIGINATOR flooding a `wave-end`. Because a flood
-// message can be forged by any peer, the originator signs the completion with its ring key
-// so receivers can't be tricked into ending a wave that didn't really finish. Binds
-// (waveId, hops, chainHash) to the originator identity.
-/**
- * Hash the (waveId, hops, chainHash) completion the originator signs.
- * @param {string} waveId - The wave id.
- * @param {number} hops - The total number of hops the wave completed.
- * @param {string} chainHash - The final accumulator hash (hex).
- * @returns {Buffer} The blake2b hash of the wave-end tuple.
- */
-function waveEndHash(waveId, hops, chainHash) {
-  return crypto.hash(b4a.from(`wave-end|${waveId}|${hops}|${chainHash}`));
-}
-
-/**
- * Sign a wave completion with the originator's ring key.
- * @param {KeyPair} keyPair - The originator's signing ring keypair.
- * @param {{waveId: string, hops: number, chainHash: string}} fields - The
- *   completion tuple.
- * @returns {string} The Ed25519 wave-end signature (hex).
- */
-function signWaveEnd(keyPair, { waveId, hops, chainHash }) {
-  return b4a.toString(
-    crypto.sign(waveEndHash(waveId, hops, chainHash), keyPair.secretKey),
-    'hex'
-  );
-}
-
-/**
- * Verify a completion is validly signed by `originatorId` over its
- * (waveId, hops, chainHash).
- * @param {{originatorId: string, waveId: string, hops: number, chainHash: string}} fields -
- *   The completion tuple (originatorId is the claimed signer, hex).
- * @param {string} sigHex - The wave-end signature to verify (hex).
- * @returns {boolean} True if the originator signed this completion.
- */
-function verifyWaveEnd({ originatorId, waveId, hops, chainHash }, sigHex) {
-  try {
-    return crypto.verify(
-      waveEndHash(waveId, hops, chainHash),
-      b4a.from(sigHex, 'hex'),
-      b4a.from(originatorId, 'hex')
-    );
-  } catch {
-    return false;
-  }
-}
-
 module.exports = {
-  ZERO_HASH,
-  receiptHash,
-  signReceipt,
-  verifyReceipt,
-  verifyToken,
-  advanceChain,
   burnHash,
   signBurn,
   verifyBurn,
@@ -378,7 +217,5 @@ module.exports = {
   signGalleryKey,
   verifyGalleryKey,
   signJoin,
-  verifyJoin,
-  signWaveEnd,
-  verifyWaveEnd
+  verifyJoin
 };

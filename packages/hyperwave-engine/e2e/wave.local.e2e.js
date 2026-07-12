@@ -8,15 +8,16 @@
 const test = require('brittle');
 const { Cluster, sleep, waitForAnyGallery } = require('./harness');
 
-// 8 is a good default: enough hops that the token really races a ring and gossip really floods
+// 8 is a good default: enough peers that the sweep really covers a ring and gossip really floods
 // a small mesh, but light enough for a 2-core CI runner. Turn it down on a constrained box, or up
 // for a scale run (the manual e2e-public workflow dispatches this suite with a chosen count).
 const PEER_COUNT = Number(process.env.E2E_PEERS || 8);
 
 // Time windows scale with the peer count so a large-N dispatch isn't strangled by budgets sized
-// for 8: launch alone staggers 400ms per peer, the lap is one hop per peer, and convergence
-// replicates N selfies to N nodes. At the default 8 these come out a whisker above the historical
-// fixed values (90s wait / 150s test), so small runs behave as before.
+// for 8: launch alone staggers 400ms per peer, and convergence replicates N selfies to N nodes.
+// (The sweep itself is a chosen constant — lapMs is clamped in the engine — so the wave's own
+// duration no longer scales with N.) At the default 8 these come out a whisker above the
+// historical fixed values (90s wait / 150s test), so small runs behave as before.
 const WAIT_MS = 90000 + PEER_COUNT * 2000;
 const TEST_TIMEOUT_MS = 150000 + PEER_COUNT * 3000;
 
@@ -32,15 +33,9 @@ const START_TARGET = Math.min(PEER_COUNT - 1, 48);
 // Lobby length: joins have to flood back across the mesh from every peer, so give large rosters
 // more time to opt in. At the default 8 this is the historical 8s.
 const LOBBY_MS = 8000 + Math.max(0, PEER_COUNT - 8) * 100;
-// Max wave duration (engine waveTimeoutMs): the lap is one hop per peer and a silent successor
-// costs a heal window per skip, so the engine's fixed 90s default can expire mid-race at scale
-// (seen at 56 peers: full roster joined, race started, wave-idle "timeout" at hop ~10). Scale it
-// like WAIT_MS; the test's own budgets stay the binding constraint.
-const WAVE_TIMEOUT_MS = 90000 + PEER_COUNT * 2000;
-// Writer-admission wait (engine admitTimeoutMs): the admission round-trip — add-writer floods to
-// the originator, the op linearizes, then replicates back to the requester — grows with roster
-// size and load. The engine's fixed 25s default starved at 128 peers (82 of 109 admitted writers
-// timed out before their admission replicated back, so their selfies were never posted).
+// Writer-admission wait (engine admitTimeoutMs): admission is batched at lobby close, so this
+// is just how long a poster waits for the originator's core (carrying its add-writer op) to
+// replicate back. One small-core sync — but give a loaded large-N box headroom.
 const ADMIT_TIMEOUT_MS = 25000 + PEER_COUNT * 500;
 
 // Whether the initiator's start trigger waits for the FULL roster (see START_TARGET): true at
@@ -94,7 +89,6 @@ test(
   async (t) => {
     const cluster = await new Cluster({
       lobbyMs: LOBBY_MS,
-      waveTimeoutMs: WAVE_TIMEOUT_MS,
       admitTimeoutMs: ADMIT_TIMEOUT_MS
     }).start();
     t.teardown(() => cluster.destroy());
@@ -124,28 +118,29 @@ test(
       );
     }
 
-    // and the token actually completed the lap back to the originator (didn't stall)
+    // and the sweep ran to its deterministic end (every peer self-completes at
+    // t0 + lapMs + grace — no completion message to lose)
     t.ok(
-      await peers[0].waitForEvent('completed', 10000),
+      await peers[0].waitForEvent('completed', 90000),
       'the wave completed at the originator'
     );
   }
 );
 
 test(
-  `the wave heals when peers die mid-race (${PEER_COUNT} peers, kill 2)`,
+  `the sweep survives peers dying mid-wave (${PEER_COUNT} peers, kill 2)`,
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const cluster = await new Cluster({
       lobbyMs: LOBBY_MS,
-      waveTimeoutMs: WAVE_TIMEOUT_MS,
       admitTimeoutMs: ADMIT_TIMEOUT_MS
     }).start();
     t.teardown(() => cluster.destroy());
 
     const { peers } = await launchWave(cluster);
 
-    // once the ball is moving, kill two mid-ring peers (not the initiator p1, its archivist)
+    // once the sweep is scheduled, kill two mid-ring peers (not the initiator p1 — it
+    // archives the gallery)
     await peers[0].waitForEvent('started', WAIT_MS);
     // like test 1: full count at small N, the lobby-gathered roster at scale
     const target = STRICT_FULL_ROSTER ? PEER_COUNT : gatheredRoster(peers[0]);
@@ -153,23 +148,20 @@ test(
     peers[2].kill(); // p3
     peers[4].kill(); // p5
 
-    // the wave must still finish — the ring routes around the dead peers (self-healing). This is
-    // the core of the test: the token completes its lap despite two mid-race deaths.
+    // the wave must still finish — nobody waits on a dead peer: every survivor
+    // self-completes at its own deterministic end timer (there is no token to lose,
+    // no healing, no stall)
     t.ok(
       await peers[1].waitForEvent('completed', WAIT_MS),
-      'wave completed despite 2 peers dying mid-race'
+      'wave completed despite 2 peers dying mid-wave'
     );
-    // The survivors' selfies then converge into the shared gallery. We check the survivor SET (not
-    // only the non-hub initiator) reaching PEER_COUNT-3 rather than the full PEER_COUNT-2, because two SIMULTANEOUS
-    // mid-race kills occasionally cost the token to one *extra* live neighbour: a healer skips a
-    // peer whose wave-pos ACK doesn't arrive within HEAL_TIMEOUT_MS during the connection churn,
-    // so that peer never holds the token and never selfies (verified: it joins + sees the ball but
-    // logs no receipt). Waiting can't recover it — it's a heal-precision limit under aggressive
-    // churn, not a convergence lag — so we tolerate one dropped selfie. Full coverage (every peer
-    // posts + converges) is asserted churn-free by the first test.
+    // The survivors' selfies converge into the shared gallery. The ONLY loss is the two
+    // killed peers' own slots (they died before posting) — the token-era heal-precision
+    // loss mode (a live peer skipped by an imprecise heal) no longer exists, so the
+    // bound is exact: everyone else posts and converges.
     t.ok(
-      await waitForAnyGallery(survivors, target - 3, WAIT_MS),
-      `the healed wave still populated the gallery (≥ ${target - 3} survivor selfies converged)`
+      await waitForAnyGallery(survivors, target - 2, WAIT_MS),
+      `the sweep still populated the gallery (≥ ${target - 2} survivor selfies converged)`
     );
   }
 );

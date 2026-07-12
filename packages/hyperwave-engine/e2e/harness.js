@@ -202,16 +202,11 @@ class Proc {
 // over the public DHT flawlessly. Public discovery on a cold topic takes ~20-35s, so expect
 // slower (but more production-faithful) runs.
 class Cluster {
-  constructor({
-    lobbyMs = 5000,
-    waveTimeoutMs = null,
-    admitTimeoutMs = null
-  } = {}) {
+  constructor({ lobbyMs = 5000, admitTimeoutMs = null } = {}) {
     this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-e2e-'));
     const randomHex = Math.random().toString(16);
     this.match = 'e2e-' + randomHex.slice(2, 10);
     this.lobbyMs = String(lobbyMs);
-    this.waveTimeoutMs = waveTimeoutMs === null ? null : String(waveTimeoutMs);
     this.admitTimeoutMs =
       admitTimeoutMs === null ? null : String(admitTimeoutMs);
     this.public = process.env.E2E_PUBLIC === '1';
@@ -251,11 +246,7 @@ class Cluster {
       ...(this.public ? {} : { HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}` }),
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,
-      // scale the max wave duration with the roster (the lap is one hop per peer)
-      ...(this.waveTimeoutMs === null
-        ? {}
-        : { HYPERWAVE_WAVE_TIMEOUT_MS: this.waveTimeoutMs }),
-      // scale the writer-admission wait too (the admission round-trip grows with roster size)
+      // scale the batch-admission replicate-back wait with the roster
       ...(this.admitTimeoutMs === null
         ? {}
         : { HYPERWAVE_ADMIT_TIMEOUT_MS: this.admitTimeoutMs }),

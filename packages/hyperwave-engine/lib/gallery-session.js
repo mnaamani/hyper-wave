@@ -17,7 +17,7 @@
 const Autobase = require('autobase');
 const b4a = require('b4a');
 const { galleryConfig, readGallery } = require('./gallery');
-const { verifyJoin, burnAuthorizes } = require('./token');
+const { verifyJoin, burnAuthorizes } = require('./attest');
 
 // How long postSelfie waits for MY batch admission to replicate back (originator core →
 // me) before giving up. One small-core sync, not an RPC round-trip — but it can lag on a
@@ -71,7 +71,7 @@ function waitFor(pred, timeoutMs) {
  * @property {function(): (string|null)} walletAddress - My TRX address, for the tip field.
  * @property {function(): (Object|null)} burnProof - My signed fee-burn attestation.
  * @property {function(): (string|null)} joinProof - My signed join attestation for the
- *   current wave (token.js signJoin over waveId|peerId|writerKey) — every gallery entry
+ *   current wave (attest.js signJoin over waveId|peerId|writerKey) — every gallery entry
  *   carries it (apply()'s write-gate).
  * @property {number} [admitTimeoutMs] - How long postSelfie waits for my batch admission
  *   to replicate back before giving up (one small-core sync from the originator).

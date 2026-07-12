@@ -12,7 +12,7 @@ const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const { galleryConfig, readGallery } = require('./gallery');
-const { signJoin } = require('./token');
+const { signJoin } = require('./attest');
 
 const WAVE = 'w';
 

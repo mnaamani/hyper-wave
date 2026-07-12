@@ -2,7 +2,7 @@
 //   bare workers/lib/wave.logic.test.js   (or `npm test`)
 const test = require('brittle');
 const b4a = require('b4a');
-const { angleOf, liveRing, nextClockwise, pickReachable } = require('./ring');
+const { angleOf, liveRing, nextClockwise } = require('./ring');
 
 test('angleOf maps a key into [0,360)', (t) => {
   t.is(angleOf(b4a.alloc(8)), 0);
@@ -49,45 +49,4 @@ test('nextClockwise returns null on an empty ring', (t) => {
 
 test('single-peer ring: successor is always that peer (even if behind me)', (t) => {
   t.is(nextClockwise(200, [{ id: 'only', angle: 5 }]).id, 'only');
-});
-
-// healing: pickReachable = next clockwise that is reachable and not skipped
-const RING = [
-  { id: 'b', angle: 10 },
-  { id: 'c', angle: 150 },
-  { id: 'a', angle: 300 }
-];
-const ALL_REACHABLE = new Set(['a', 'b', 'c']);
-
-// pickReachable inputs with per-test overrides
-function pick(overrides) {
-  return pickReachable({
-    sortedRing: RING,
-    myAngle: 100,
-    reachable: ALL_REACHABLE,
-    skipped: new Set(),
-    ...overrides
-  });
-}
-
-test('pickReachable picks the next clockwise when all reachable', (t) => {
-  t.is(pick({ myAngle: 100 }).id, 'c'); // 100 -> c@150
-  t.is(pick({ myAngle: 200 }).id, 'a'); // 200 -> a@300
-});
-
-test('pickReachable wraps around', (t) => {
-  t.is(pick({ myAngle: 320 }).id, 'b'); // past a -> wrap to b
-});
-
-test('pickReachable skips a skipped (dead) successor to the next live one', (t) => {
-  t.is(pick({ skipped: new Set(['c']) }).id, 'a');
-});
-
-test('pickReachable skips peers we have no connection to (not reachable)', (t) => {
-  t.is(pick({ reachable: new Set(['a', 'b']) }).id, 'a'); // c unreachable
-});
-
-test('pickReachable returns null when nobody qualifies', (t) => {
-  t.is(pick({ myAngle: 0, reachable: new Set() }), null); // none reachable
-  t.is(pick({ myAngle: 0, skipped: new Set(['a', 'b', 'c']) }), null); // all skipped
 });
