@@ -261,7 +261,12 @@ class GallerySession {
    * @returns {void}
    */
   admitWriter(msg) {
-    if (!this.#base || !this.#base.writable || !msg.key || msg.waveId !== this.#waveId) {
+    if (
+      !this.#base ||
+      !this.#base.writable ||
+      !msg.key ||
+      msg.waveId !== this.#waveId
+    ) {
       return;
     }
     // Only the wave's ORIGINATOR admits (it retains this gallery). Optimistic *multi*-admitter
@@ -292,7 +297,10 @@ class GallerySession {
     ) {
       return;
     }
-    if (this.#enforcePaid() && !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)) {
+    if (
+      this.#enforcePaid() &&
+      !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)
+    ) {
       return; // needs a signed burn attestation
     }
     this.#admittedKeys.add(msg.key);
@@ -394,7 +402,15 @@ class GallerySession {
    * @param {string} [entry.image] - Inline JPEG data URL.
    * @returns {Promise<void>}
    */
-  async postSelfie({ waveId, hopCount, receiptSig, chainHash, receiptTs, caption, image }) {
+  async postSelfie({
+    waveId,
+    hopCount,
+    receiptSig,
+    chainHash,
+    receiptTs,
+    caption,
+    image
+  }) {
     if (!this.#base) {
       this.#onEvent({ event: 'gallery-error', reason: 'no-gallery-yet' });
       return;
@@ -404,11 +420,22 @@ class GallerySession {
     // it before the append — losing our own tip address. (The staged image/receipt are already
     // captured as args.)
     const burnProof = this.#burnProof();
-    if (!(await this.#ensureWriter({ waveId, hopCount, chainHash, receiptTs, receiptSig }))) {
+    if (
+      !(await this.#ensureWriter({
+        waveId,
+        hopCount,
+        chainHash,
+        receiptTs,
+        receiptSig
+      }))
+    ) {
       // distinguish the two failure modes so the UI can tell the user what actually went wrong:
       // no burn ticket at all (fee never paid/confirmed) vs. a valid ticket that timed out being
       // admitted (network/mesh). enforcePaid off (headless) → always the timeout case.
-      const reason = this.#enforcePaid() && !this.#burnProof() ? 'fee-unpaid' : 'admit-timeout';
+      const reason =
+        this.#enforcePaid() && !this.#burnProof()
+          ? 'fee-unpaid'
+          : 'admit-timeout';
       this.#onEvent({ event: 'gallery-error', reason });
       return;
     }

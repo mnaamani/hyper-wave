@@ -313,7 +313,9 @@ The four `wave-*` lifecycle messages below are **flooded** (§3.1): each carries
   "waveId": "<hex16>",
   "by": "<peerId>",
   "lobbyMs": 15000,
-  "paid": {/* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */}
+  "paid": {
+    /* kick-off attestation, §9.0 — present when the paid-wave gate is enforced */
+  }
 }
 ```
 
@@ -461,7 +463,9 @@ holding neither can no longer force-terminate a live wave.
   "chainHash": "<hex32>",
   "receiptTs": 1719705612080,
   "receiptSig": "<hex64>",
-  "burn": {/* the requester's fee-burn attestation, §9.0 — present when the gate is enforced */}
+  "burn": {
+    /* the requester's fee-burn attestation, §9.0 — present when the gate is enforced */
+  }
 }
 ```
 

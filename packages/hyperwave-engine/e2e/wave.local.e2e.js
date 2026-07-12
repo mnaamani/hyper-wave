@@ -59,7 +59,10 @@ const STRICT_FULL_ROSTER = START_TARGET === PEER_COUNT - 1;
 function gatheredRoster(initiator) {
   let maxCount = 0;
   for (const evt of initiator.events) {
-    if ((evt.event === 'roster' || evt.event === 'wave-active') && typeof evt.count === 'number') {
+    if (
+      (evt.event === 'roster' || evt.event === 'wave-active') &&
+      typeof evt.count === 'number'
+    ) {
       maxCount = Math.max(maxCount, evt.count);
     }
   }
@@ -115,11 +118,17 @@ test(
       );
     }
     for (const peer of peers) {
-      t.ok(await peer.waitForGallery(target, WAIT_MS), `${peer.name} converged to ${target}`);
+      t.ok(
+        await peer.waitForGallery(target, WAIT_MS),
+        `${peer.name} converged to ${target}`
+      );
     }
 
     // and the token actually completed the lap back to the originator (didn't stall)
-    t.ok(await peers[0].waitForEvent('completed', 10000), 'the wave completed at the originator');
+    t.ok(
+      await peers[0].waitForEvent('completed', 10000),
+      'the wave completed at the originator'
+    );
   }
 );
 

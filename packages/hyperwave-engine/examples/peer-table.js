@@ -17,7 +17,9 @@ table.upsert(peerA, Date.now(), 'BR');
 table.upsert(peerB, Date.now());
 console.log(
   'live ring:',
-  table.liveRing().map((seat) => `${seat.id.slice(0, 8)}@${seat.angle.toFixed(1)}`)
+  table
+    .liveRing()
+    .map((seat) => `${seat.id.slice(0, 8)}@${seat.angle.toFixed(1)}`)
 );
 
 // Channels: a connection stores its send fn; a disconnect is authoritative.

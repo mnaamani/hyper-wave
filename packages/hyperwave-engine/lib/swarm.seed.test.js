@@ -26,7 +26,10 @@ test('swarm seed persists so the peer id / ring seat is stable across restarts',
 
   // a separate storage dir gets its own independent identity
   const seedOther = loadOrCreateSwarmSeed(other);
-  t.absent(b4a.equals(seed1, seedOther), 'a separate storage dir gets its own identity');
+  t.absent(
+    b4a.equals(seed1, seedOther),
+    'a separate storage dir gets its own identity'
+  );
 });
 
 test('an injected hex seed is used verbatim and never written to disk', (t) => {

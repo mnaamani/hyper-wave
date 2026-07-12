@@ -35,7 +35,12 @@ async function main() {
   session.retain('w1');
   const mine = session.open('w1', null); // bootstrapKey=null → create fresh
   await mine.ready();
-  console.log('current wave:', session.waveId, 'key:', session.key.slice(0, 12) + '…');
+  console.log(
+    'current wave:',
+    session.waveId,
+    'key:',
+    session.key.slice(0, 12) + '…'
+  );
 
   // Post through the session: admission (we're the creator, already writable) + append.
   const receipt = {
@@ -58,7 +63,10 @@ async function main() {
   session.open('w2', null);
   console.log('moved on → current wave:', session.waveId);
   // …so coming back reuses the SAME Autobase (an unretained one would have been closed).
-  console.log('back to my wave, same instance:', session.open('w1', null) === mine);
+  console.log(
+    'back to my wave, same instance:',
+    session.open('w1', null) === mine
+  );
 
   session.tick(); // periodic pull for every held gallery (wave.js runs this on its ring tick)
   await new Promise((resolve) => setTimeout(resolve, 200)); // let the view emit

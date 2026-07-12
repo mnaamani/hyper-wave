@@ -76,7 +76,8 @@ async function createPayments({
   log = () => {}
 } = {}) {
   const { default: WDK } = await import('@tetherto/wdk');
-  const { default: WalletManagerTron } = await import('@tetherto/wdk-wallet-tron');
+  const { default: WalletManagerTron } =
+    await import('@tetherto/wdk-wallet-tron');
 
   // Seed precedence: injected -> file -> generate+persist. A mobile host injects the seed from
   // secure storage (Keychain/Keystore) and never touches the filesystem; desktop persists it in
@@ -114,7 +115,10 @@ async function createPayments({
     },
     // Send `amountTrx` (whole TRX) to a Tron address; resolves { hash, fee }.
     async send(recipient, amountTrx) {
-      const res = await account.sendTransaction({ to: recipient, value: toSun(amountTrx) });
+      const res = await account.sendTransaction({
+        to: recipient,
+        value: toSun(amountTrx)
+      });
       log('sent', amountTrx, 'TRX ->', recipient, 'hash', res.hash);
       return { hash: res.hash, fee: res.fee };
     },
@@ -131,7 +135,13 @@ async function createPayments({
         tx = await tronweb.transactionBuilder.addUpdateData(tx, memo, 'utf8');
       }
       const res = await account.sendTransaction(tx); // prebuilt (has txID) -> WDK signs + broadcasts
-      log('burned', amountTrx, 'TRX 🔥 hash', res.hash, memo ? `memo=${memo}` : '');
+      log(
+        'burned',
+        amountTrx,
+        'TRX 🔥 hash',
+        res.hash,
+        memo ? `memo=${memo}` : ''
+      );
       return { hash: res.hash, fee: res.fee };
     },
     // Verify (on-chain) that `txHash` is a burn matching expectations — the anti-spam gate a
@@ -159,11 +169,16 @@ async function createPayments({
             return { ok: false, reason: 'wrong-sender' };
           }
         }
-        if (expect.minTrx !== undefined && BigInt(value.amount || 0) < toSun(expect.minTrx)) {
+        if (
+          expect.minTrx !== undefined &&
+          BigInt(value.amount || 0) < toSun(expect.minTrx)
+        ) {
           return { ok: false, reason: 'amount-too-low' };
         }
         // Memo is `hyperwave:<waveId>:<peerId>` — check it commits the waveId.
-        const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : '';
+        const memo = tx.raw_data.data
+          ? b4a.from(tx.raw_data.data, 'hex').toString()
+          : '';
         if (expect.waveId && !memo.includes(expect.waveId)) {
           return { ok: false, reason: 'memo-mismatch' };
         }
@@ -189,18 +204,28 @@ async function createPayments({
         const myHex = tronweb.address.toHex(address).toLowerCase();
         const out = [];
         for (const tx of (res && res.data) || []) {
-          const contract = tx.raw_data && tx.raw_data.contract && tx.raw_data.contract[0];
+          const contract =
+            tx.raw_data && tx.raw_data.contract && tx.raw_data.contract[0];
           if (!contract || contract.type !== 'TransferContract') {
             continue; // native TRX transfers only
           }
           const value = (contract.parameter && contract.parameter.value) || {};
-          const memo = tx.raw_data.data ? b4a.from(tx.raw_data.data, 'hex').toString() : '';
+          const memo = tx.raw_data.data
+            ? b4a.from(tx.raw_data.data, 'hex').toString()
+            : '';
           out.push({
             hash: tx.txID,
-            direction: (value.owner_address || '').toLowerCase() === myHex ? 'out' : 'in',
+            direction:
+              (value.owner_address || '').toLowerCase() === myHex
+                ? 'out'
+                : 'in',
             amount: fromSun(value.amount || 0),
-            from: value.owner_address ? tronweb.address.fromHex(value.owner_address) : '',
-            to: value.to_address ? tronweb.address.fromHex(value.to_address) : '',
+            from: value.owner_address
+              ? tronweb.address.fromHex(value.owner_address)
+              : '',
+            to: value.to_address
+              ? tronweb.address.fromHex(value.to_address)
+              : '',
             timestamp: tx.block_timestamp || 0,
             memo
           });
@@ -251,7 +276,12 @@ async function payFee({ wave, payments, waveId, reason }) {
   const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id));
   // pass waveId so the attestation records even if the (instant) wave already ended — it's the
   // ticket for a late gallery admission into the persisted gallery (wave.js recordBurn).
-  const proof = wave.recordBurn({ reason, amount: FEE_TRX, txHash: hash, waveId });
+  const proof = wave.recordBurn({
+    reason,
+    amount: FEE_TRX,
+    txHash: hash,
+    waveId
+  });
   return { hash, proof };
 }
 
@@ -286,7 +316,17 @@ async function confirmBurn(payments, waveId, hash) {
  * @returns {void}
  */
 function wireWallet(wave, payments) {
-  wave.setWallet(payments.address, (txHash, expect) => payments.verifyBurnTx(txHash, expect));
+  wave.setWallet(payments.address, (txHash, expect) =>
+    payments.verifyBurnTx(txHash, expect)
+  );
 }
 
-module.exports = { createPayments, toSun, fromSun, FEE_TRX, payFee, confirmBurn, wireWallet };
+module.exports = {
+  createPayments,
+  toSun,
+  fromSun,
+  FEE_TRX,
+  payFee,
+  confirmBurn,
+  wireWallet
+};

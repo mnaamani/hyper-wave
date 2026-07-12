@@ -16,7 +16,9 @@ const updaterConfig = {
   name: Bare.argv[7]
 };
 
-const store = new Corestore(path.join(updaterConfig.dir, 'pear-runtime/corestore'));
+const store = new Corestore(
+  path.join(updaterConfig.dir, 'pear-runtime/corestore')
+);
 const swarm = new Hyperswarm();
 const pear = new PearRuntime({ ...updaterConfig, swarm, store });
 

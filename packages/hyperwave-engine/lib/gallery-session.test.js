@@ -14,7 +14,8 @@ const { signReceipt } = require('./token');
 // A session over a throwaway store, with capturable host callbacks. Payments off
 // (enforcePaid false) — the paid-gate signature checks are covered by wave.token/autobase.
 function makeSession(t, { events = [], views = [] } = {}) {
-  const dir = '/tmp/hyperwave-gallery-session-test-' + Date.now() + '-' + Math.random();
+  const dir =
+    '/tmp/hyperwave-gallery-session-test-' + Date.now() + '-' + Math.random();
   const store = new Corestore(dir);
   const keyPair = crypto.keyPair();
   const session = new GallerySession({
@@ -58,8 +59,16 @@ test('open creates a per-wave gallery and exposes its key + waveId once ready', 
   const gallery = session.open('wave-1', null);
   await gallery.ready();
   t.is(session.waveId, 'wave-1');
-  t.is(session.key, b4a.toString(gallery.key, 'hex'), 'key is the Autobase bootstrap key');
-  t.is(session.open('wave-1', null), gallery, 'reopening the current wave is a no-op');
+  t.is(
+    session.key,
+    b4a.toString(gallery.key, 'hex'),
+    'key is the Autobase bootstrap key'
+  );
+  t.is(
+    session.open('wave-1', null),
+    gallery,
+    'reopening the current wave is a no-op'
+  );
 });
 
 test('moving on replaces an ephemeral gallery but reuses a retained one', async (t) => {
@@ -68,7 +77,11 @@ test('moving on replaces an ephemeral gallery but reuses a retained one', async 
   const ephemeral = session.open('wave-eph', null);
   await ephemeral.ready();
   session.open('wave-next', null);
-  t.not(session.open('wave-eph', null), ephemeral, 'ephemeral gallery was closed, not kept');
+  t.not(
+    session.open('wave-eph', null),
+    ephemeral,
+    'ephemeral gallery was closed, not kept'
+  );
 
   // Retained (a wave I initiated): survives moving on; coming back reuses the SAME instance.
   session.retain('wave-mine');
@@ -76,7 +89,11 @@ test('moving on replaces an ephemeral gallery but reuses a retained one', async 
   await mine.ready();
   const mineKey = session.key;
   session.open('wave-other', null);
-  t.is(session.open('wave-mine', null), mine, 'the archivist keeps its own wave’s gallery');
+  t.is(
+    session.open('wave-mine', null),
+    mine,
+    'the archivist keeps its own wave’s gallery'
+  );
   t.is(session.key, mineKey, 'returning to it restores its key');
   t.is(session.waveId, 'wave-mine');
 });

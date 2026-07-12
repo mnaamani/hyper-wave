@@ -17,7 +17,9 @@ const rnbk = path.resolve(appDir, '../../node_modules/react-native-bare-kit');
 const out = path.join(rnbk, 'ios', 'addons');
 
 if (!fs.existsSync(rnbk)) {
-  console.log('[link-ios-addons] react-native-bare-kit not installed — skipping');
+  console.log(
+    '[link-ios-addons] react-native-bare-kit not installed — skipping'
+  );
   process.exit(0);
 }
 
@@ -31,4 +33,6 @@ for await (const _ of link(appDir, {
 const vendoredCount = fs.existsSync(out)
   ? fs.readdirSync(out).filter((name) => name.endsWith('.xcframework')).length
   : 0;
-console.log(`[link-ios-addons] vendored  addon xcframeworks -> ${path.relative(appDir, out)}`);
+console.log(
+  `[link-ios-addons] vendored  addon xcframeworks -> ${path.relative(appDir, out)}`
+);

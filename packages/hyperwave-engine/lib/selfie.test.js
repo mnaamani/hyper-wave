@@ -60,7 +60,11 @@ test('a receipt for a superseded wave never posts', (t) => {
   pipeline.recordReceipt(RECEIPT); // receipt is for w1...
   state.waveId = 'w0'; // ...but a lower-id wave won before both halves paired
   pipeline.stage({ image: 'data:jpeg' }); // re-trigger pairing
-  t.is(posts.filter((entry) => entry.waveId === 'w0').length, 0, 'never posts into another wave');
+  t.is(
+    posts.filter((entry) => entry.waveId === 'w0').length,
+    0,
+    'never posts into another wave'
+  );
 });
 
 test('receipts are ignored unless opted in (relays never selfie)', (t) => {
@@ -91,7 +95,11 @@ test('the burn proof survives reset (late-admission ticket) but not a new wave',
   const proof = { waveId: 'w1', peerId: 'p1', txHash: 'dead', sig: 'beef' };
   pipeline.setBurnProof(proof);
   pipeline.reset(); // wave ended at network speed; the burn may confirm after
-  t.is(pipeline.burnProof, proof, 'reset keeps the ticket for a late gallery admission');
+  t.is(
+    pipeline.burnProof,
+    proof,
+    'reset keeps the ticket for a late gallery admission'
+  );
   pipeline.clearBurnProof(); // a genuinely new wave's lobby began
   t.is(pipeline.burnProof, null, 'a new wave drops the previous ticket');
 });

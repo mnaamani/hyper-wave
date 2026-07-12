@@ -32,7 +32,8 @@ export function setMyAddress(addr) {
 // Show the tip button when the featured selfie has a payable address that isn't mine.
 function refreshTip() {
   const featured = items[centerIdx];
-  const payable = featured && featured.address && featured.address !== myAddress;
+  const payable =
+    featured && featured.address && featured.address !== myAddress;
   tipBtn.classList.toggle('show', !!payable);
   tipBtn.disabled = false;
   tipBtn.innerText = `💵 Tip ${TIP_TRX} TRX`;
@@ -124,7 +125,8 @@ function featureByFrac(frac, origin) {
   const travelled = frac * 360;
   let pick = -1;
   for (let i = 0; i < items.length; i++) {
-    const arcFromOrigin = (ring.angleOfId(items[i].peerId) - origin + 360) % 360;
+    const arcFromOrigin =
+      (ring.angleOfId(items[i].peerId) - origin + 360) % 360;
     if (arcFromOrigin <= travelled) {
       pick = i;
     } else {

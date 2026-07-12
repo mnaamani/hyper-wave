@@ -24,8 +24,12 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
     }
   }
 });
-bridge.onWorkerStdout(HYPERWAVE, (data) => console.log('[hyperwave]', decoder.decode(data)));
-bridge.onWorkerStderr(HYPERWAVE, (data) => console.error('[hyperwave]', decoder.decode(data)));
+bridge.onWorkerStdout(HYPERWAVE, (data) =>
+  console.log('[hyperwave]', decoder.decode(data))
+);
+bridge.onWorkerStderr(HYPERWAVE, (data) =>
+  console.error('[hyperwave]', decoder.decode(data))
+);
 
 // Register message handler
 export function on(type, fn) {

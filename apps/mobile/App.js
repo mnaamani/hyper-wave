@@ -31,7 +31,9 @@ export default function App() {
       <View style={styles.header}>
         <Text style={styles.title}>⚽ HyperWave</Text>
         <Text style={styles.chip}>
-          {wallet ? `💰 ${wallet.trx} TRX · ${wallet.address.slice(0, 6)}…` : '💰 …'}
+          {wallet
+            ? `💰 ${wallet.trx} TRX · ${wallet.address.slice(0, 6)}…`
+            : '💰 …'}
         </Text>
       </View>
 
@@ -62,8 +64,12 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.gallery}>
         {gallery.map((g, i) => (
           <View key={i} style={styles.card}>
-            {g.image ? <Image source={{ uri: g.image }} style={styles.thumb} /> : null}
-            <Text style={styles.caption}>{g.caption || g.peerId?.slice(0, 8) || 'selfie'}</Text>
+            {g.image ? (
+              <Image source={{ uri: g.image }} style={styles.thumb} />
+            ) : null}
+            <Text style={styles.caption}>
+              {g.caption || g.peerId?.slice(0, 8) || 'selfie'}
+            </Text>
             {g.address ? (
               <Pressable onPress={() => engine.tip(g.address, 1)}>
                 <Text style={styles.tip}>💵 Tip 1 TRX</Text>
@@ -101,13 +107,29 @@ const styles = StyleSheet.create({
   status: { paddingHorizontal: 16, gap: 4 },
   mono: { color: '#8aa0c0', fontFamily: 'Courier', fontSize: 13 },
   actions: { flexDirection: 'row', gap: 12, padding: 16 },
-  btn: { backgroundColor: '#2b6cff', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10 },
+  btn: {
+    backgroundColor: '#2b6cff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10
+  },
   btnDisabled: { backgroundColor: '#33415c' },
   btnText: { color: '#fff', fontWeight: '600' },
   toast: { color: '#ffd479', paddingHorizontal: 16, paddingBottom: 8 },
-  section: { color: '#fff', fontSize: 16, fontWeight: '600', paddingHorizontal: 16, paddingTop: 8 },
+  section: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    paddingHorizontal: 16,
+    paddingTop: 8
+  },
   gallery: { padding: 16, gap: 12 },
-  card: { backgroundColor: '#141a2e', borderRadius: 12, padding: 12, alignItems: 'center' },
+  card: {
+    backgroundColor: '#141a2e',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center'
+  },
   thumb: { width: 160, height: 160, borderRadius: 8, marginBottom: 8 },
   caption: { color: '#cfe0ff' },
   tip: { color: '#7dffa1', marginTop: 6 }

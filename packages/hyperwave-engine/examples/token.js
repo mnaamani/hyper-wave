@@ -59,14 +59,23 @@ const fields = {
 };
 const proof = { ...fields, sig: signBurn(kp, fields) };
 console.log('verifyBurn:', verifyBurn(fields, proof.sig));
-console.log('burnAuthorizes (this peer + wave):', burnAuthorizes(proof, peerId, waveId));
-console.log('burnAuthorizes for a DIFFERENT wave:', burnAuthorizes(proof, peerId, 'other-wave'));
+console.log(
+  'burnAuthorizes (this peer + wave):',
+  burnAuthorizes(proof, peerId, waveId)
+);
+console.log(
+  'burnAuthorizes for a DIFFERENT wave:',
+  burnAuthorizes(proof, peerId, 'other-wave')
+);
 
 // --- gallery-key + wave-end: the originator signs so a relay can't swap either ---
 const keySig = signGalleryKey(kp, { waveId, autobaseKey: 'autobaseKeyHex' });
 console.log(
   'verifyGalleryKey:',
-  verifyGalleryKey({ originatorId: peerId, waveId, autobaseKey: 'autobaseKeyHex' }, keySig)
+  verifyGalleryKey(
+    { originatorId: peerId, waveId, autobaseKey: 'autobaseKeyHex' },
+    keySig
+  )
 );
 const endSig = signWaveEnd(kp, { waveId, hops: 8, chainHash });
 console.log(

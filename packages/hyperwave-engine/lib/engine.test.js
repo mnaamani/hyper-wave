@@ -70,7 +70,11 @@ test('the engine routes commands to the wave protocol and forwards its events to
   engine.exec({ type: 'start-wave' });
   t.alike(
     wave.calls,
-    [['setCountry', 'JP'], ['stageSelfie', 'data:image/jpeg;base64,xxx'], 'startWave'],
+    [
+      ['setCountry', 'JP'],
+      ['stageSelfie', 'data:image/jpeg;base64,xxx'],
+      'startWave'
+    ],
     'set-country / stage-selfie / start-wave routed to the wave protocol'
   );
 
@@ -79,7 +83,9 @@ test('the engine routes commands to the wave protocol and forwards its events to
   engine.exec({ type: 'tip', to: 'Trecipient', amount: 1 });
   await flush();
   t.ok(
-    sent.find((msg) => msg.type === 'tip-result' && msg.error === 'wallet not ready'),
+    sent.find(
+      (msg) => msg.type === 'tip-result' && msg.error === 'wallet not ready'
+    ),
     'tip with no wallet returns an error result'
   );
   t.ok(
@@ -104,7 +110,13 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
       return { hash: 'f'.repeat(64) };
     },
     transactions: async () => [
-      { hash: 'a'.repeat(64), direction: 'in', amount: 5, timestamp: 1, memo: '' }
+      {
+        hash: 'a'.repeat(64),
+        direction: 'in',
+        amount: 5,
+        timestamp: 1,
+        memo: ''
+      }
     ],
     dispose: () => {}
   };
@@ -125,12 +137,18 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
 
   await flush(); // wallet init resolves
   t.ok(
-    sent.find((msg) => msg.type === 'wallet' && msg.address === 'Tmywallet' && msg.trx === 7),
+    sent.find(
+      (msg) =>
+        msg.type === 'wallet' && msg.address === 'Tmywallet' && msg.trx === 7
+    ),
     'balance pushed to the host once the wallet is ready'
   );
   t.ok(
     wave.calls.find(
-      (call) => Array.isArray(call) && call[0] === 'setWallet' && call[1] === 'Tmywallet'
+      (call) =>
+        Array.isArray(call) &&
+        call[0] === 'setWallet' &&
+        call[1] === 'Tmywallet'
     ),
     'the wallet is wired into the wave protocol (setWallet)'
   );
@@ -139,7 +157,9 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   await flush();
   t.alike(tipped, [['Trecipient', 2]], 'tip forwarded to payments.send');
   t.ok(
-    sent.find((msg) => msg.type === 'tip-result' && msg.hash && msg.to === 'Trecipient'),
+    sent.find(
+      (msg) => msg.type === 'tip-result' && msg.hash && msg.to === 'Trecipient'
+    ),
     'tip-result with the tx hash returned to the host'
   );
 
@@ -148,7 +168,11 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   t.alike(tipped.at(-1), ['Tfriend', 3], 'send-trx forwarded to payments.send');
   t.ok(
     sent.find(
-      (msg) => msg.type === 'send-result' && msg.hash && msg.to === 'Tfriend' && msg.amount === 3
+      (msg) =>
+        msg.type === 'send-result' &&
+        msg.hash &&
+        msg.to === 'Tfriend' &&
+        msg.amount === 3
     ),
     'send-result with the tx hash returned to the host'
   );

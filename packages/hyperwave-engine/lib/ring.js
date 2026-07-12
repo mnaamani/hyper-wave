@@ -39,7 +39,9 @@ function angleOfId(hex) {
  * @returns {RingPeer[]} The live peers sorted clockwise by angle.
  */
 function liveRing(entries, now, staleMs) {
-  return entries.filter((peer) => now - peer.lastSeen < staleMs).sort((a, b) => a.angle - b.angle);
+  return entries
+    .filter((peer) => now - peer.lastSeen < staleMs)
+    .sort((a, b) => a.angle - b.angle);
 }
 
 /**

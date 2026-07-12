@@ -72,19 +72,34 @@ function until(pred, timeoutMs = 20000) {
 
 async function captions(base) {
   await base.update();
-  return (await readGallery(base)).map((entry) => entry.caption).sort();
+  const entries = await readGallery(base);
+  return entries.map((entry) => entry.caption).sort();
 }
 
 test('gallery replicates transitively across a line A—B—C (no A<->C link)', async (t) => {
-  const dirs = ['a', 'b', 'c'].map((name) => `/tmp/hyperwave-repl-${name}-${Date.now()}`);
+  const dirs = ['a', 'b', 'c'].map(
+    (name) => `/tmp/hyperwave-repl-${name}-${Date.now()}`
+  );
   const [storeA, storeB, storeC] = dirs.map((dir) => new Corestore(dir));
 
   // A creates the gallery; B and C open it from A's bootstrap key.
-  const baseA = new Autobase(storeA.namespace('wave-gallery:' + WAVE), null, galleryConfig());
+  const baseA = new Autobase(
+    storeA.namespace('wave-gallery:' + WAVE),
+    null,
+    galleryConfig()
+  );
   await baseA.ready();
   const key = baseA.key;
-  const baseB = new Autobase(storeB.namespace('wave-gallery:' + WAVE), key, galleryConfig());
-  const baseC = new Autobase(storeC.namespace('wave-gallery:' + WAVE), key, galleryConfig());
+  const baseB = new Autobase(
+    storeB.namespace('wave-gallery:' + WAVE),
+    key,
+    galleryConfig()
+  );
+  const baseC = new Autobase(
+    storeC.namespace('wave-gallery:' + WAVE),
+    key,
+    galleryConfig()
+  );
   await baseB.ready();
   await baseC.ready();
 
@@ -112,8 +127,14 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
 
   // A admits B and C as writers (in the app this is the add-writer gossip; applied
   // directly here — this test is about the *data* plane, not the control plane).
-  await baseA.append({ type: 'add-writer', key: b4a.toString(baseB.local.key, 'hex') });
-  await baseA.append({ type: 'add-writer', key: b4a.toString(baseC.local.key, 'hex') });
+  await baseA.append({
+    type: 'add-writer',
+    key: b4a.toString(baseB.local.key, 'hex')
+  });
+  await baseA.append({
+    type: 'add-writer',
+    key: b4a.toString(baseC.local.key, 'hex')
+  });
 
   // C becoming writable already proves A's membership/system core reached it THROUGH B.
   t.ok(
@@ -138,7 +159,10 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
 
   // C must converge to all three — crucially A's, which reaches C only by forwarding
   // through B (A and C share no direct connection).
-  t.ok(await until(async () => (await captions(baseC)).length === 3), 'C converged to all 3');
+  t.ok(
+    await until(async () => (await captions(baseC)).length === 3),
+    'C converged to all 3'
+  );
   t.alike(
     await captions(baseC),
     ['A', 'B', 'C'],
@@ -146,7 +170,10 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
   );
 
   // …and A receives C's selfie, which likewise only reaches A through B.
-  t.ok(await until(async () => (await captions(baseA)).length === 3), 'A converged to all 3');
+  t.ok(
+    await until(async () => (await captions(baseA)).length === 3),
+    'A converged to all 3'
+  );
   t.alike(await captions(baseA), ['A', 'B', 'C'], 'A has C (transitive via B)');
 });
 
@@ -156,7 +183,9 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
 // full gallery. (If the initiator itself goes offline, the gallery isn't archived by anyone
 // else — the accepted simplification of dropping the standalone seed role.)
 test('the initiator retains its gallery and serves a latecomer', async (t) => {
-  const dirs = ['orig', 'late'].map((name) => `/tmp/hyperwave-retain-${name}-${Date.now()}`);
+  const dirs = ['orig', 'late'].map(
+    (name) => `/tmp/hyperwave-retain-${name}-${Date.now()}`
+  );
   const [storeA, storeC] = dirs.map((dir) => new Corestore(dir));
   const streams = [];
   const closed = new Set();
@@ -168,7 +197,11 @@ test('the initiator retains its gallery and serves a latecomer', async (t) => {
   };
 
   // the initiator creates the gallery and keeps it open (it's the archivist for its own wave)
-  const baseA = new Autobase(storeA.namespace('wave-gallery:' + WAVE), null, galleryConfig());
+  const baseA = new Autobase(
+    storeA.namespace('wave-gallery:' + WAVE),
+    null,
+    galleryConfig()
+  );
   await baseA.ready();
   const key = baseA.key;
   let baseC = null;
@@ -191,7 +224,11 @@ test('the initiator retains its gallery and serves a latecomer', async (t) => {
   await baseA.append(selfie(crypto.keyPair(), 0, 'A'));
 
   // a latecomer shows up AFTER the post and connects only to the retained initiator
-  baseC = new Autobase(storeC.namespace('wave-gallery:' + WAVE), key, galleryConfig());
+  baseC = new Autobase(
+    storeC.namespace('wave-gallery:' + WAVE),
+    key,
+    galleryConfig()
+  );
   await baseC.ready();
   streams.push(...link(storeA, storeC));
 
@@ -199,5 +236,9 @@ test('the initiator retains its gallery and serves a latecomer', async (t) => {
     await until(async () => (await captions(baseC)).length === 1),
     'latecomer got the gallery from the initiator that retained it'
   );
-  t.alike(await captions(baseC), ['A'], 'the initiator served its retained gallery');
+  t.alike(
+    await captions(baseC),
+    ['A'],
+    'the initiator served its retained gallery'
+  );
 });

@@ -8,7 +8,12 @@
 // in private fields.
 const b4a = require('b4a');
 const crypto = require('hypercore-crypto');
-const { findSuccessorStep, closestPrecedingNode, nodeIdOfHex, RING } = require('./chord');
+const {
+  findSuccessorStep,
+  closestPrecedingNode,
+  nodeIdOfHex,
+  RING
+} = require('./chord');
 const { nextClockwise } = require('./ring');
 
 /**
@@ -91,7 +96,12 @@ class ChordRouting {
       }, LOOKUP_TIMEOUT_MS);
       this.#pendingLookups.set(qid, { resolve, timer });
       if (
-        !this.#trySend(start, { kind: 'find-succ', qid, target: targetNid.toString(), hops: 0 })
+        !this.#trySend(start, {
+          kind: 'find-succ',
+          qid,
+          target: targetNid.toString(),
+          hops: 0
+        })
       ) {
         clearTimeout(timer);
         this.#pendingLookups.delete(qid);
@@ -178,7 +188,9 @@ class ChordRouting {
     if (this.#table.senderCount === 0) {
       return;
     }
-    const succId = await this.findSuccessor((nodeIdOfHex(this.#me.id) + 1n) % RING);
+    const succId = await this.findSuccessor(
+      (nodeIdOfHex(this.#me.id) + 1n) % RING
+    );
     if (succId && succId !== this.#me.id && !this.#table.hasSender(succId)) {
       this.#routed.set(succId, Date.now() + PIN_CANDIDATE_MS);
       this.#maintainNeighbours();

@@ -14,7 +14,12 @@ const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
 const { nodeIdOfHex, RING } = require('../lib/chord.js');
-const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('../lib/wallet.js');
+const {
+  FEE_TRX,
+  payFee,
+  confirmBurn,
+  wireWallet
+} = require('../lib/wallet.js');
 
 const name = Bare.argv[2] || 'peer';
 const storageDir = Bare.argv[3];
@@ -53,7 +58,9 @@ const wave = createWave({
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
-  waveTimeoutMs: env.HYPERWAVE_WAVE_TIMEOUT_MS ? Number(env.HYPERWAVE_WAVE_TIMEOUT_MS) : undefined,
+  waveTimeoutMs: env.HYPERWAVE_WAVE_TIMEOUT_MS
+    ? Number(env.HYPERWAVE_WAVE_TIMEOUT_MS)
+    : undefined,
   admitTimeoutMs: env.HYPERWAVE_ADMIT_TIMEOUT_MS
     ? Number(env.HYPERWAVE_ADMIT_TIMEOUT_MS)
     : undefined,
@@ -102,13 +109,19 @@ const wave = createWave({
     // stage a (fake) selfie during the lobby, exactly like the renderer does at kickoff;
     // the worker posts it to the gallery when the token reaches this peer.
     if (env.AUTOSELFIE && evt.event === 'wave-active' && evt.joined) {
-      wave.stageSelfie({ caption: `${name} was here`, image: `fake-image-${name}` });
+      wave.stageSelfie({
+        caption: `${name} was here`,
+        image: `fake-image-${name}`
+      });
     }
   },
   onGallery: (items) =>
     console.log(
       `[${name}] GALLERY size=${items.length} [${items
-        .map((item) => item.caption + (item.address ? ' $' + item.address.slice(0, 5) : ''))
+        .map(
+          (item) =>
+            item.caption + (item.address ? ' $' + item.address.slice(0, 5) : '')
+        )
         .join(', ')}]`
     ),
   log: (...args) => console.log(`[]`, ...args)
@@ -166,8 +179,12 @@ async function joinAndBurn() {
 // looking up the successor of the position just after me (my true successor).
 if (env.PROBE) {
   setTimeout(async () => {
-    const succ = await wave.findSuccessor((nodeIdOfHex(wave.me.id) + 1n) % RING);
-    console.log(`[${name}] FINDSUCC my-successor = ${succ ? succ.slice(0, 8) : 'null'}`);
+    const succ = await wave.findSuccessor(
+      (nodeIdOfHex(wave.me.id) + 1n) % RING
+    );
+    console.log(
+      `[${name}] FINDSUCC my-successor = ${succ ? succ.slice(0, 8) : 'null'}`
+    );
   }, 8000);
 }
 
@@ -175,12 +192,17 @@ if (env.PROBE) {
 // WALLET_SEND=<addr>:<amt> -> also do a one-off TRX transfer (funded wallets only).
 if (env.WALLET) {
   const { createPayments } = require('../lib/wallet.js');
-  createPayments({ storageDir, log: (...args) => console.log(`[] wallet`, ...args) })
+  createPayments({
+    storageDir,
+    log: (...args) => console.log(`[] wallet`, ...args)
+  })
     .then(async (pay) => {
       payments = pay;
       wireWallet(wave, pay); // paid-wave gate (on-chain burn verifier)
       const b = await pay.balances();
-      console.log(`[${name}] WALLET ${b.address} trx=${b.trx} storage=${absStorageDir}`);
+      console.log(
+        `[${name}] WALLET ${b.address} trx=${b.trx} storage=${absStorageDir}`
+      );
       if (env.WALLET_SEND) {
         const [to, amt] = env.WALLET_SEND.split(':');
         const result = await pay.send(to, Number(amt));

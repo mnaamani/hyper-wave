@@ -41,7 +41,11 @@ function selfie(keyPair, hopCount, caption, timestamp) {
 test('gallery apply() appends valid selfies, rejects unsigned/impersonated', async (t) => {
   const dir = '/tmp/hyperwave-autobase-test-' + Date.now();
   const store = new Corestore(dir);
-  const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig());
+  const base = new Autobase(
+    store.namespace('wave-gallery'),
+    null,
+    galleryConfig()
+  );
   t.teardown(async () => {
     await base.close();
     await store.close();
@@ -89,7 +93,10 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
   t.is((await readGallery(base)).length, 2, 'oversized-image selfie dropped');
 
   // add-writer op is accepted by apply() without throwing
-  await base.append({ type: 'add-writer', key: b4a.toString(crypto.keyPair().publicKey, 'hex') });
+  await base.append({
+    type: 'add-writer',
+    key: b4a.toString(crypto.keyPair().publicKey, 'hex')
+  });
   await base.update();
   t.pass('add-writer op processed by apply()');
 });
@@ -100,7 +107,11 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
 test('gallery apply() keeps a tip address only if a matching burn backs it', async (t) => {
   const dir = '/tmp/hyperwave-tipaddr-test-' + Date.now();
   const store = new Corestore(dir);
-  const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig());
+  const base = new Autobase(
+    store.namespace('wave-gallery'),
+    null,
+    galleryConfig()
+  );
   t.teardown(async () => {
     await base.close();
     await store.close();
@@ -143,7 +154,11 @@ test('gallery apply() keeps a tip address only if a matching burn backs it', asy
   );
   t.is(byCaption.paid, 'TPaid', 'burn-backed address is kept (tippable)');
   t.is(byCaption.spoof, '', 'unbacked address is stripped (not tippable)');
-  t.is(byCaption.mismatch, '', 'address not matching the burn wallet is stripped');
+  t.is(
+    byCaption.mismatch,
+    '',
+    'address not matching the burn wallet is stripped'
+  );
   t.absent(
     'burn' in (await base.view.get(0)),
     'the burn attestation is dropped from stored entries'

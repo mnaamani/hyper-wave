@@ -70,7 +70,9 @@ function byNid(a, b) {
  * @returns {RingNode[]} the deduped ids sorted ascending by nodeId.
  */
 function ringOrder(ids) {
-  return [...new Set(ids)].map((id) => ({ id, nid: nodeIdOfHex(id) })).sort(byNid);
+  return [...new Set(ids)]
+    .map((id) => ({ id, nid: nodeIdOfHex(id) }))
+    .sort(byNid);
 }
 
 /**

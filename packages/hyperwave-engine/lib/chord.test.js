@@ -22,7 +22,8 @@ const {
 
 // A 32-byte peer id (64 hex chars) whose top-8-byte nodeId is exactly `nid`.
 function makeId(nid) {
-  return BigInt(nid).toString(16).padStart(16, '0') + '0'.repeat(48);
+  const hex = BigInt(nid).toString(16);
+  return hex.padStart(16, '0') + '0'.repeat(48);
 }
 
 test('nodeId reads the top 8 bytes as a big-endian u64', (t) => {
@@ -52,7 +53,10 @@ test('successors wraps around the top of the ring', (t) => {
 
 test('successors never wraps back onto me on a small ring', (t) => {
   // me + 2 others, k=3 -> only the 2 others (no self-inclusion)
-  t.alike(successors([makeId(20), makeId(30)], makeId(10), 3), [makeId(20), makeId(30)]);
+  t.alike(successors([makeId(20), makeId(30)], makeId(10), 3), [
+    makeId(20),
+    makeId(30)
+  ]);
 });
 
 test('successors is empty when I am the only node', (t) => {
@@ -101,14 +105,21 @@ test('fingers resolves finger[i] = successor(myNid + 2^i)', (t) => {
 test('fingers dedupes to O(log N) distinct nodes', (t) => {
   // one far node: every 2^i <= 100 resolves to it; larger targets wrap back to me
   const fingerSet = fingers([makeId(100)], makeId(0));
-  t.alike([...fingerSet], [makeId(100)], '64 finger targets collapse to a single distinct node');
+  t.alike(
+    [...fingerSet],
+    [makeId(100)],
+    '64 finger targets collapse to a single distinct node'
+  );
 });
 
 test('pinTargets unions successor-list, predecessor, and fingers', (t) => {
   const ids = [makeId(1), makeId(2), makeId(4), makeId(8)];
   const targets = pinTargets(ids, makeId(0), 2);
   // successors {1,2}, predecessor {8} (highest wraps to me's predecessor), fingers {1,2,4,8}
-  t.alike([...targets].sort(), [makeId(1), makeId(2), makeId(4), makeId(8)].sort());
+  t.alike(
+    [...targets].sort(),
+    [makeId(1), makeId(2), makeId(4), makeId(8)].sort()
+  );
 });
 
 test('inOpenInterval handles the normal and wrapping cases', (t) => {
@@ -132,13 +143,21 @@ test('stabilizeStep adopts a successor discovered between me and my successor', 
     makeId(40),
     'succ.pred 50 is outside -> keep'
   );
-  t.is(stabilizeStep(makeId(10), makeId(40), null), makeId(40), 'no succ.pred -> keep');
+  t.is(
+    stabilizeStep(makeId(10), makeId(40), null),
+    makeId(40),
+    'no succ.pred -> keep'
+  );
   t.is(
     stabilizeStep(makeId(10), makeId(40), makeId(10)),
     makeId(40),
     "succ.pred is me -> keep (I'm its pred)"
   );
-  t.is(stabilizeStep(makeId(10), null, makeId(20)), makeId(20), 'no current successor -> take it');
+  t.is(
+    stabilizeStep(makeId(10), null, makeId(20)),
+    makeId(20),
+    'no current successor -> take it'
+  );
 });
 
 // --- distributed findSuccessor routing (§4.5) -------------------------------
@@ -152,13 +171,27 @@ test('inHalfOpenInterval includes the upper end and wraps', (t) => {
 });
 
 test('closestPrecedingNode picks the highest known id below the target', (t) => {
-  t.is(closestPrecedingNode([makeId(10), makeId(20), makeId(30)], makeId(0), 35n), makeId(30));
-  t.is(closestPrecedingNode([makeId(10), makeId(20), makeId(30)], makeId(0), 25n), makeId(20));
-  t.is(closestPrecedingNode([makeId(10)], makeId(0), 5n), null, 'nothing precedes the target');
+  t.is(
+    closestPrecedingNode([makeId(10), makeId(20), makeId(30)], makeId(0), 35n),
+    makeId(30)
+  );
+  t.is(
+    closestPrecedingNode([makeId(10), makeId(20), makeId(30)], makeId(0), 25n),
+    makeId(20)
+  );
+  t.is(
+    closestPrecedingNode([makeId(10)], makeId(0), 5n),
+    null,
+    'nothing precedes the target'
+  );
 });
 
 test('findSuccessorStep resolves locally in (me, successor], else forwards', (t) => {
-  const at = { me: makeId(10), successor: makeId(20), known: [makeId(20), makeId(40), makeId(80)] };
+  const at = {
+    me: makeId(10),
+    successor: makeId(20),
+    known: [makeId(20), makeId(40), makeId(80)]
+  };
   t.alike(findSuccessorStep({ ...at, target: 15n }), {
     done: true,
     successor: makeId(20)
@@ -240,7 +273,11 @@ test('distributed findSuccessor resolves correctly in O(log N) hops (partial kno
   for (let originIdx = 0; originIdx < ids.length; originIdx += 5) {
     for (const target of targets) {
       const got = route(net, ids[originIdx], target);
-      t.is(got.successor, findSuccessor(ids, target), 'matches the global truth');
+      t.is(
+        got.successor,
+        findSuccessor(ids, target),
+        'matches the global truth'
+      );
       if (got.hops > maxHops) {
         maxHops = got.hops;
       }
@@ -255,7 +292,10 @@ test('routing stays correct with successor pointers only (degrades, never wrong)
   const net = buildNet(ids, false); // no fingers — successor only => linear walk
   for (let originIdx = 0; originIdx < ids.length; originIdx += 4) {
     for (const target of spreadTargets(6)) {
-      t.is(route(net, ids[originIdx], target).successor, findSuccessor(ids, target));
+      t.is(
+        route(net, ids[originIdx], target).successor,
+        findSuccessor(ids, target)
+      );
     }
   }
 });

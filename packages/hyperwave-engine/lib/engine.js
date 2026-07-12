@@ -8,7 +8,13 @@
 // (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('./wave');
-const { createPayments, FEE_TRX, payFee, confirmBurn, wireWallet } = require('./wallet');
+const {
+  createPayments,
+  FEE_TRX,
+  payFee,
+  confirmBurn,
+  wireWallet
+} = require('./wallet');
 
 /**
  * Host-supplied engine configuration (only these fields are read).
@@ -65,7 +71,12 @@ function createEngine({
     onGallery: (items) => notify({ type: 'gallery', items }),
     log
   });
-  log('engine up, me=', wave.me.id.slice(0, 8), 'angle=', wave.me.angle.toFixed(1));
+  log(
+    'engine up, me=',
+    wave.me.id.slice(0, 8),
+    'angle=',
+    wave.me.angle.toFixed(1)
+  );
 
   // Self-custodial WDK wallet (Tron testnet TRX) for fee burns + gallery tips. Async ESM init;
   // emits `wallet` {address,trx} on ready + every 15s, and wires into the engine (address for
@@ -76,7 +87,11 @@ function createEngine({
   let tBalance = null;
   let pushBalance = null; // re-fetch the balance + send a `wallet` msg; set once the wallet is up
   if (config.wallet !== false) {
-    makePayments({ storageDir, seed: config.seed, log: (...args) => log('[wallet]', ...args) })
+    makePayments({
+      storageDir,
+      seed: config.seed,
+      log: (...args) => log('[wallet]', ...args)
+    })
       .then(async (pay) => {
         payments = pay;
         wireWallet(wave, pay);
@@ -85,7 +100,9 @@ function createEngine({
         pushBalance = async () =>
           notify({
             type: 'wallet',
-            ...(await pay.balances().catch(() => ({ address: pay.address, trx: 0 })))
+            ...(await pay
+              .balances()
+              .catch(() => ({ address: pay.address, trx: 0 })))
           });
         await pushBalance();
         // Self-rescheduling poll (CLAUDE.md Code Style: no setInterval): the next poll is armed
@@ -134,8 +151,19 @@ function createEngine({
       return; // busy / no wallet (unpaid path already announced)
     }
     try {
-      const { hash, proof } = await payFee({ wave, payments, waveId, reason: 'kickoff' });
-      notify({ type: 'burn-result', stage: 'confirming', hash, waveId, reason: 'kickoff' });
+      const { hash, proof } = await payFee({
+        wave,
+        payments,
+        waveId,
+        reason: 'kickoff'
+      });
+      notify({
+        type: 'burn-result',
+        stage: 'confirming',
+        hash,
+        waveId,
+        reason: 'kickoff'
+      });
       if (await confirmBurn(payments, waveId, hash)) {
         notify({
           type: 'burn-result',
@@ -148,7 +176,13 @@ function createEngine({
         wave.announcePaid(proof);
       } else {
         const error = 'burn not confirmed on-chain';
-        notify({ type: 'burn-result', stage: 'failed', error, waveId, reason: 'kickoff' });
+        notify({
+          type: 'burn-result',
+          stage: 'failed',
+          error,
+          waveId,
+          reason: 'kickoff'
+        });
       }
     } catch (err) {
       notify({
@@ -195,7 +229,13 @@ function createEngine({
         reason: 'join'
       });
     } catch (err) {
-      notify({ type: 'burn-result', stage: 'failed', error: err.message, waveId, reason: 'join' });
+      notify({
+        type: 'burn-result',
+        stage: 'failed',
+        error: err.message,
+        waveId,
+        reason: 'join'
+      });
     }
   }
 
@@ -226,7 +266,11 @@ function createEngine({
     }
     const bal = await payments.balances().catch(() => null);
     if (bal && bal.trx < trx) {
-      notify({ type: 'send-result', error: `insufficient balance (${bal.trx} TRX)`, to });
+      notify({
+        type: 'send-result',
+        error: `insufficient balance (${bal.trx} TRX)`,
+        to
+      });
       return;
     }
     try {

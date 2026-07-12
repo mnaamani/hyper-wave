@@ -29,7 +29,11 @@ test(
     // stagger the launches (with the DHT warm-up in start(), this is what makes discovery
     // reliable — otherwise a peer can join a half-formed DHT and stay isolated). P2 first, then
     // the initiator P1 (which kicks off once it sees P2).
-    const p2 = cluster.launch('p2', { AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' }, P2_SEED);
+    const p2 = cluster.launch(
+      'p2',
+      { AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' },
+      P2_SEED
+    );
     await sleep(600);
     const p1 = cluster.launch(
       'p1',
@@ -45,12 +49,21 @@ test(
     t.pass('both funded wallets loaded');
 
     // paid-wave gate: P1 burns the kick-off fee and confirms it on-chain BEFORE announcing
-    t.ok(await p1.waitForLine(/KICKOFF-BURNED/, 120000), 'P1 burned the kick-off fee');
+    t.ok(
+      await p1.waitForLine(/KICKOFF-BURNED/, 120000),
+      'P1 burned the kick-off fee'
+    );
     // P2 independently verifies that kick-off burn on-chain, then opts in and burns its own fee
-    t.ok(await p2.waitForEvent('wave-verified', 120000), 'P2 verified the kick-off burn on-chain');
+    t.ok(
+      await p2.waitForEvent('wave-verified', 120000),
+      'P2 verified the kick-off burn on-chain'
+    );
     t.ok(await p2.waitForLine(/JOIN-BURNED/, 120000), 'P2 burned its join fee');
     // OPTIMISTIC admission: P1 admits P2 with no on-chain check on the write path
-    t.ok(await p1.waitForLine(/admitted gallery writer/, 120000), 'P1 admitted P2 (optimistic)');
+    t.ok(
+      await p1.waitForLine(/admitted gallery writer/, 120000),
+      'P1 admitted P2 (optimistic)'
+    );
     // both selfies converge into the gallery P1 retains (tip addresses bound to the burn wallets)
     t.ok(await p1.waitForGallery(2, 150000), 'the gallery converged to 2');
   }

@@ -23,7 +23,11 @@ test('upsert derives the angle from the id and never seats me', (t) => {
   table.upsert(ME, Date.now());
   const ring = table.liveRing();
   t.is(ring.length, 1, 'my own id is never a seat');
-  t.is(ring[0].angle, angleOfId(PEER_A), 'angle comes from the id, not the wire');
+  t.is(
+    ring[0].angle,
+    angleOfId(PEER_A),
+    'angle comes from the id, not the wire'
+  );
 });
 
 test('a fresher sighting wins; a staler one may still contribute its country', (t) => {
@@ -36,7 +40,11 @@ test('a fresher sighting wins; a staler one may still contribute its country', (
   t.is(seat.country, 'BR', 'known country survives a country-less refresh');
   table.upsert(PEER_A, now - 500, 'AR'); // staler but carries a country
   seat = table.liveRing(now)[0];
-  t.is(seat.country, 'AR', 'a stale sighting can still update the cosmetic country');
+  t.is(
+    seat.country,
+    'AR',
+    'a stale sighting can still update the cosmetic country'
+  );
 });
 
 test('liveRing drops stale seats and sorts clockwise by angle', (t) => {
@@ -97,13 +105,21 @@ test('the cooldown expires (and self-prunes) after staleMs', (t) => {
 test('updatePins diffs against the desired targets and reports the churn', (t) => {
   const table = makeTable();
   const first = table.updatePins(new Set([PEER_A, PEER_B]));
-  t.alike(first.added.sort(), [PEER_A, PEER_B].sort(), 'all new targets pinned');
+  t.alike(
+    first.added.sort(),
+    [PEER_A, PEER_B].sort(),
+    'all new targets pinned'
+  );
   t.alike(first.removed, []);
   const second = table.updatePins(new Set([PEER_B]));
   t.alike(second.added, []);
   t.alike(second.removed, [PEER_A], 'a dropped target is unpinned');
   t.alike([...table.pinnedIds()], [PEER_B]);
-  t.is(table.onDisconnect(PEER_B).wasPinned, true, 'pin state feeds the churn repair');
+  t.is(
+    table.onDisconnect(PEER_B).wasPinned,
+    true,
+    'pin state feeds the churn repair'
+  );
 });
 
 test('knownIds is pinned ∪ connected, deduped', (t) => {

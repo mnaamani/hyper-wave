@@ -16,7 +16,12 @@ for (const msg of incoming) {
   if (flood.firstSight(msg.mid)) {
     console.log('process + relay', msg.mid, '(from', msg.from + ')');
   } else {
-    console.log('drop         ', msg.mid, '(from', msg.from + ') — already seen');
+    console.log(
+      'drop         ',
+      msg.mid,
+      '(from',
+      msg.from + ') — already seen'
+    );
   }
 }
 

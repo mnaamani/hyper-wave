@@ -34,7 +34,10 @@ export async function open(lobbyMsLeft) {
   proofEl.classList.add('show');
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: false
+    });
     preview.srcObject = stream;
     preview.style.display = '';
   } catch (err) {
@@ -55,7 +58,9 @@ function paint() {
   countdownEl.innerText = secs > 0 ? `📸 ${secs}` : '📸';
   // keep a clear countdown to auto-capture visible (the big lobby countdown is gone once you're in)
   hintEl.innerText =
-    secs > 0 ? `📸 auto-capturing in ${secs}s — or press Capture now` : '📸 capturing…';
+    secs > 0
+      ? `📸 auto-capturing in ${secs}s — or press Capture now`
+      : '📸 capturing…';
 }
 
 // Paint now, then re-arm — a self-rescheduling timeout (CLAUDE.md Code Style: no setInterval).

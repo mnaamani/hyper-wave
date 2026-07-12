@@ -6,7 +6,8 @@ const pkg = require('./package.json');
 const appName = pkg.productName ?? pkg.name;
 
 function getWindowsKitVersion() {
-  const programFiles = process.env['PROGRAMFILES(X86)'] || process.env.PROGRAMFILES;
+  const programFiles =
+    process.env['PROGRAMFILES(X86)'] || process.env.PROGRAMFILES;
   if (!programFiles) {
     return undefined;
   }
@@ -125,8 +126,20 @@ module.exports = {
     // engines so pear-runtime's bare-semver doesn't choke on the freshly-installed tree.
     packageAfterCopy: async (_forgeConfig, buildPath) => {
       const childProcess = require('child_process');
-      const coreDir = path.resolve(__dirname, '..', '..', 'packages', 'hyperwave-engine');
-      const shim = path.resolve(__dirname, '..', '..', 'scripts', 'fix-bare-engines.js');
+      const coreDir = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'packages',
+        'hyperwave-engine'
+      );
+      const shim = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'scripts',
+        'fix-bare-engines.js'
+      );
       const pjPath = path.join(buildPath, 'package.json');
       const packageJson = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
       packageJson.dependencies['hyperwave-engine'] = 'file:' + coreDir;
@@ -139,7 +152,9 @@ module.exports = {
           stdio: 'inherit'
         }
       );
-      childProcess.execSync(`node "${shim}" "${buildPath}"`, { stdio: 'inherit' });
+      childProcess.execSync(`node "${shim}" "${buildPath}"`, {
+        stdio: 'inherit'
+      });
     },
     readPackageJson: async (forgeConfig, packageJson) => {
       if (process.env.UPGRADE_KEY) {
@@ -149,18 +164,26 @@ module.exports = {
       try {
         plink.parse(packageJson.upgrade);
       } catch {
-        throw new Error('Use `pear touch` to get a valid upgrade key for package.json#upgrade');
+        throw new Error(
+          'Use `pear touch` to get a valid upgrade key for package.json#upgrade'
+        );
       }
 
       return packageJson;
     },
     preMake: async () => {
-      fs.rmSync(path.join(__dirname, 'out', 'make'), { recursive: true, force: true });
+      fs.rmSync(path.join(__dirname, 'out', 'make'), {
+        recursive: true,
+        force: true
+      });
 
       const manifest = path.join(__dirname, 'build', 'AppxManifest.xml');
       const msixVersion = pkg.version.replace(/^(\d+\.\d+\.\d+)$/, '$1.0');
       const xml = fs.readFileSync(manifest, 'utf-8');
-      fs.writeFileSync(manifest, xml.replace(/Version="[^"]*"/, `Version="${msixVersion}"`));
+      fs.writeFileSync(
+        manifest,
+        xml.replace(/Version="[^"]*"/, `Version="${msixVersion}"`)
+      );
     },
     postMake: async (forgeConfig, results) => {
       for (const result of results) {
@@ -171,7 +194,11 @@ module.exports = {
           if (!artifact.endsWith('.msix')) {
             continue;
           }
-          const standardDir = path.join(__dirname, 'out', `${appName}-win32-${result.arch}`);
+          const standardDir = path.join(
+            __dirname,
+            'out',
+            `${appName}-win32-${result.arch}`
+          );
           fs.mkdirSync(standardDir, { recursive: true });
           const dest = path.join(standardDir, path.basename(artifact));
           fs.renameSync(artifact, dest);

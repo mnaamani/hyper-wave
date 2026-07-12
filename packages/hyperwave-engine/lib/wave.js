@@ -20,7 +20,12 @@ const b4a = require('b4a');
 const fs = require('bare-fs');
 
 const { angleOf, angleOfId, nextClockwise, pickReachable } = require('./ring');
-const { pinTargets, successors, predecessor, stabilizeStep } = require('./chord');
+const {
+  pinTargets,
+  successors,
+  predecessor,
+  stabilizeStep
+} = require('./chord');
 const { ChordRouting } = require('./chord-routing');
 const { Flood } = require('./flood');
 const { GallerySession } = require('./gallery-session');
@@ -155,7 +160,11 @@ const SWARM_SEED_BYTES = 32; // hypercore-crypto.keyPair seed length
  * @param {(...args: any[]) => void} [log] Logger.
  * @returns {Buffer} The 32-byte swarm identity seed.
  */
-function loadOrCreateSwarmSeed(storageDir, injectedSeed = null, log = () => {}) {
+function loadOrCreateSwarmSeed(
+  storageDir,
+  injectedSeed = null,
+  log = () => {}
+) {
   const seedFile = storageDir + '/swarm.seed';
   let seed = null;
   if (injectedSeed && injectedSeed.trim()) {
@@ -177,7 +186,10 @@ function loadOrCreateSwarmSeed(storageDir, injectedSeed = null, log = () => {}) 
       fs.writeFileSync(seedFile, b4a.toString(seed, 'hex'));
       log('swarm identity seed created:', seedFile);
     } catch (err) {
-      log('swarm seed persist failed (ephemeral identity this run):', err.message);
+      log(
+        'swarm seed persist failed (ephemeral identity this run):',
+        err.message
+      );
     }
   }
   return seed;
@@ -251,13 +263,22 @@ function createWave({
   // Persisted swarm identity: derive the Noise keypair from a seed that survives restarts, so a
   // peer keeps the SAME id / ring seat / signing key across runs (loadOrCreateSwarmSeed). Passing
   // an explicit keyPair overrides Hyperswarm's fresh-per-run default.
-  const swarmKeyPair = crypto.keyPair(loadOrCreateSwarmSeed(storageDir, swarmSeed, log));
+  const swarmKeyPair = crypto.keyPair(
+    loadOrCreateSwarmSeed(storageDir, swarmSeed, log)
+  );
   // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
-  const swarm = new Hyperswarm({ keyPair: swarmKeyPair, ...(bootstrap ? { bootstrap } : {}) });
+  const swarm = new Hyperswarm({
+    keyPair: swarmKeyPair,
+    ...(bootstrap ? { bootstrap } : {})
+  });
 
   const meKey = swarm.keyPair.publicKey;
-  const me = { id: b4a.toString(meKey, 'hex'), angle: angleOf(meKey), country: null };
+  const me = {
+    id: b4a.toString(meKey, 'hex'),
+    angle: angleOf(meKey),
+    country: null
+  };
   let walletAddress = null; // my TRX wallet address (set by the worker once WDK is ready)
   let enforcePaid = false; // gate waves on a proven kick-off burn (enabled once wallet is up)
   let verifyBurnOnChain = null; // on-chain burn check (set once the wallet is up, via setWallet)
@@ -311,7 +332,13 @@ function createWave({
   // Distributed findSuccessor routing (chord-routing.js) — the Chord control plane over the
   // gossip mesh: join-time self-placement, periodic successor repair, and the find-succ RPC.
   // `trySend`/`maintainNeighbours` are function declarations below (hoisted), safe to pass here.
-  const chord = new ChordRouting({ me, table, trySend, maintainNeighbours, log });
+  const chord = new ChordRouting({
+    me,
+    table,
+    trySend,
+    maintainNeighbours,
+    log
+  });
 
   // --- ring / peer table -----------------------------------------------------
   /** Recompute the live ring and push `{ me, peers, successor, connected }` to the host (onState). */
@@ -602,7 +629,12 @@ function createWave({
             msg.receiptSig
           )
         : verifyWaveEnd(
-            { originatorId: msg.by, waveId: msg.waveId, hops: msg.hops, chainHash: msg.chainHash },
+            {
+              originatorId: msg.by,
+              waveId: msg.waveId,
+              hops: msg.hops,
+              chainHash: msg.chainHash
+            },
             msg.sig
           );
       if (!authentic) {
@@ -768,8 +800,13 @@ function createWave({
       log('gallery-key: originator mismatch for wave', shortId(waveId));
       return;
     }
-    if (!verifyGalleryKey({ originatorId, waveId, autobaseKey: keyHex }, keySig)) {
-      log('gallery-key: rejected unsigned/forged key for wave', shortId(waveId));
+    if (
+      !verifyGalleryKey({ originatorId, waveId, autobaseKey: keyHex }, keySig)
+    ) {
+      log(
+        'gallery-key: rejected unsigned/forged key for wave',
+        shortId(waveId)
+      );
       return;
     }
     if (wave && wave.id === waveId) {
@@ -852,7 +889,13 @@ function createWave({
    * @param {number} [opts.dur] Lobby duration in ms (defaults to lobbyMs).
    * @param {boolean} [opts.silent] Suppress the wave-announce UI event.
    */
-  function enterLobby({ waveId, by, mine = false, dur = lobbyMs, silent = false }) {
+  function enterLobby({
+    waveId,
+    by,
+    mine = false,
+    dur = lobbyMs,
+    silent = false
+  }) {
     if (wave && wave.id === waveId) {
       return;
     }
@@ -974,11 +1017,20 @@ function createWave({
    * @param {string} [outcome.chainHash] Final accumulator chain hash.
    * @param {string} [outcome.byId] Hex id whose angle to feature (defaults to me).
    */
-  function finishWave(waveId, { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}) {
+  function finishWave(
+    waveId,
+    { stalled = false, hops = 0, chainHash = '', byId = me.id } = {}
+  ) {
     if (stalled) {
       onEvent({ event: 'stalled', waveId, reason: 'no successor' });
     } else {
-      onEvent({ event: 'completed', waveId, hops, chainHash, angle: angleOfId(byId) });
+      onEvent({
+        event: 'completed',
+        waveId,
+        hops,
+        chainHash,
+        angle: angleOfId(byId)
+      });
     }
     goIdle(stalled ? 'stalled' : 'ended');
   }
@@ -1077,12 +1129,21 @@ function createWave({
       return;
     }
     table.send(succ.id)(JSON.stringify(token));
-    onEvent({ event: 'forwarded', waveId: token.waveId, hopCount: token.hopCount, to: succ.id });
+    onEvent({
+      event: 'forwarded',
+      waveId: token.waveId,
+      hopCount: token.hopCount,
+      to: succ.id
+    });
 
     // heal: expect the peer I forwarded to (succ) to hold the ball soon; its wave-pos is the
     // ACK. Record succ.id so only *its* position clears the watch (see the wave-pos handler).
     clearTimeout(healTimer);
-    healPending = { waveId: token.waveId, hop: token.hopCount, succId: succ.id };
+    healPending = {
+      waveId: token.waveId,
+      hop: token.hopCount,
+      succId: succ.id
+    };
     healTimer = setTimeout(() => {
       healPending = null;
       const sent = resends.get(succ.id) || 0;
@@ -1125,7 +1186,13 @@ function createWave({
    * @param {string} opts.autobaseKeyHex Hex gallery key to carry along.
    * @returns {Object} The stamped token message.
    */
-  function stampToken({ waveId, originator, hopCount, prevChainHash, autobaseKeyHex }) {
+  function stampToken({
+    waveId,
+    originator,
+    hopCount,
+    prevChainHash,
+    autobaseKeyHex
+  }) {
     const timestamp = Date.now();
     const senderReceiptSig = signReceipt(swarm.keyPair, {
       waveId,
@@ -1181,7 +1248,10 @@ function createWave({
     // Completion only counts for a wave I'm actually running (else a token with
     // originator=me for a wave I never started could forge a completion).
     const isCompletion =
-      wave && wave.id === token.waveId && token.originator === me.id && token.hopCount > 0;
+      wave &&
+      wave.id === token.waveId &&
+      token.originator === me.id &&
+      token.hopCount > 0;
     if (!isCompletion && (seen.has(key) || token.hopCount > MAX_HOPS)) {
       return;
     }
@@ -1206,7 +1276,10 @@ function createWave({
           chainHash: token.prevChainHash
         })
       });
-      finishWave(token.waveId, { hops: token.hopCount, chainHash: token.prevChainHash });
+      finishWave(token.waveId, {
+        hops: token.hopCount,
+        chainHash: token.prevChainHash
+      });
       return;
     }
     seen.add(key);
@@ -1214,7 +1287,12 @@ function createWave({
     // adopt into the race (may switch from a higher-id wave, or catch up if we
     // missed the announce/start) and learn this wave's gallery
     if (!wave || wave.id !== token.waveId) {
-      enterLobby({ waveId: token.waveId, by: token.originator, dur: 0, silent: true });
+      enterLobby({
+        waveId: token.waveId,
+        by: token.originator,
+        dur: 0,
+        silent: true
+      });
     }
     if (wave.phase !== 'racing') {
       beginRace();
@@ -1226,7 +1304,10 @@ function createWave({
       originatorId: token.originator
     });
 
-    const newChainHash = advanceChain(token.prevChainHash, token.senderReceiptSig);
+    const newChainHash = advanceChain(
+      token.prevChainHash,
+      token.senderReceiptSig
+    );
     const next = stampToken({
       waveId: token.waveId,
       originator: token.originator,
@@ -1363,7 +1444,10 @@ function createWave({
     await gallery.ready();
     // I'm the originator: sign (waveId, galleryKey) so peers can trust the key I publish
     // (it rides unsigned/relayed fields otherwise — § gallery-key attestation).
-    wave.keySig = signGalleryKey(swarm.keyPair, { waveId, autobaseKey: session.key });
+    wave.keySig = signGalleryKey(swarm.keyPair, {
+      waveId,
+      autobaseKey: session.key
+    });
 
     log(
       'starting wave',
@@ -1441,7 +1525,8 @@ function createWave({
           key: session.key,
           keySig: wave.keySig || undefined, // originator's signed gallery key (§ gallery-key)
           paid: wave.kickoffProof || undefined, // so a mid-lobby newcomer can verify + join
-          lobbyMsLeft: wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
+          lobbyMsLeft:
+            wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
         })
       );
     }

@@ -141,7 +141,10 @@ class Proc {
       const waiter = { ready, value, resolve };
       waiter.timer = setTimeout(() => {
         this.#waiters.delete(waiter);
-        console.error(`# ${this.name}: timed out (${ms}ms) waiting for ${what}\n` + this.tail());
+        console.error(
+          `# ${this.name}: timed out (${ms}ms) waiting for ${what}\n` +
+            this.tail()
+        );
         resolve(false);
       }, ms);
       this.#waiters.add(waiter);
@@ -160,7 +163,8 @@ class Proc {
 
   // Resolve with the first onEvent event named `name` (optionally matching `pred`).
   waitForEvent(name, ms = 30000, pred = () => true) {
-    const find = () => this.events.find((evt) => evt.event === name && pred(evt));
+    const find = () =>
+      this.events.find((evt) => evt.event === name && pred(evt));
     return this.#wait(() => !!find(), find, ms, `event ${name}`);
   }
 
@@ -198,12 +202,18 @@ class Proc {
 // over the public DHT flawlessly. Public discovery on a cold topic takes ~20-35s, so expect
 // slower (but more production-faithful) runs.
 class Cluster {
-  constructor({ lobbyMs = 5000, waveTimeoutMs = null, admitTimeoutMs = null } = {}) {
+  constructor({
+    lobbyMs = 5000,
+    waveTimeoutMs = null,
+    admitTimeoutMs = null
+  } = {}) {
     this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-e2e-'));
-    this.match = 'e2e-' + Math.random().toString(16).slice(2, 10);
+    const randomHex = Math.random().toString(16);
+    this.match = 'e2e-' + randomHex.slice(2, 10);
     this.lobbyMs = String(lobbyMs);
     this.waveTimeoutMs = waveTimeoutMs === null ? null : String(waveTimeoutMs);
-    this.admitTimeoutMs = admitTimeoutMs === null ? null : String(admitTimeoutMs);
+    this.admitTimeoutMs =
+      admitTimeoutMs === null ? null : String(admitTimeoutMs);
     this.public = process.env.E2E_PUBLIC === '1';
     this.procs = [];
   }
@@ -214,7 +224,10 @@ class Cluster {
     }
     this.boot = new Proc('boot', ['bin/dht-local.js'], {});
     this.procs.push(this.boot);
-    const bootMatch = await this.boot.waitForLine(/BOOTSTRAP 127\.0\.0\.1:(\d+)/, 15000);
+    const bootMatch = await this.boot.waitForLine(
+      /BOOTSTRAP 127\.0\.0\.1:(\d+)/,
+      15000
+    );
     this.port = bootMatch[1];
     // Let the local DHT fully warm up before peers join. Without this the very first peer can
     // announce onto a half-formed DHT and end up isolated (found by nobody). Staggering the
@@ -239,9 +252,13 @@ class Cluster {
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,
       // scale the max wave duration with the roster (the lap is one hop per peer)
-      ...(this.waveTimeoutMs === null ? {} : { HYPERWAVE_WAVE_TIMEOUT_MS: this.waveTimeoutMs }),
+      ...(this.waveTimeoutMs === null
+        ? {}
+        : { HYPERWAVE_WAVE_TIMEOUT_MS: this.waveTimeoutMs }),
       // scale the writer-admission wait too (the admission round-trip grows with roster size)
-      ...(this.admitTimeoutMs === null ? {} : { HYPERWAVE_ADMIT_TIMEOUT_MS: this.admitTimeoutMs }),
+      ...(this.admitTimeoutMs === null
+        ? {}
+        : { HYPERWAVE_ADMIT_TIMEOUT_MS: this.admitTimeoutMs }),
       ...env
     });
     this.procs.push(proc);
@@ -264,7 +281,9 @@ class Cluster {
 // guaranteed hub — e.g. under churn, the slowest node to converge shouldn't fail the test.
 // (waitForGallery only ever settles truthy on success / false on timeout, so racing is sound.)
 function waitForAnyGallery(procs, min, ms = 60000) {
-  return Promise.race(procs.map((proc) => proc.waitForGallery(min, ms))).then(Boolean);
+  return Promise.race(procs.map((proc) => proc.waitForGallery(min, ms))).then(
+    Boolean
+  );
 }
 
 module.exports = { Cluster, Proc, sleep, waitForAnyGallery };

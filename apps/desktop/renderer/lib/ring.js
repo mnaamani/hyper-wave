@@ -32,7 +32,10 @@ let confetti = []; // particles for the current flourish (browser rAF, so Math.r
 // its single row and can't paint outside it.
 function safeCaption(text) {
   return String(text || '')
-    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .replace(
+      /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
+      ''
+    )
     .slice(0, 60);
 }
 
@@ -187,7 +190,10 @@ export function startFlourish() {
   confetti = [];
   for (let i = 0; i < PARTICLES; i++) {
     // start on the ring edge
-    const [startX, startY] = pointOn((i / PARTICLES) * 360 + Math.random() * 8, RING_RADIUS);
+    const [startX, startY] = pointOn(
+      (i / PARTICLES) * 360 + Math.random() * 8,
+      RING_RADIUS
+    );
     const offsetX = startX - centerX;
     const offsetY = startY - centerY;
     const distance = Math.hypot(offsetX, offsetY) || 1;
@@ -236,11 +242,18 @@ function drawFlourish(centerX, centerY) {
     ctx.globalAlpha = 1 - progress;
     ctx.translate(
       particle.x + particle.vx * elapsedSec,
-      particle.y + particle.vy * elapsedSec + 0.5 * GRAVITY * elapsedSec * elapsedSec
+      particle.y +
+        particle.vy * elapsedSec +
+        0.5 * GRAVITY * elapsedSec * elapsedSec
     );
     ctx.rotate(particle.rot + particle.spin * elapsedSec);
     ctx.fillStyle = particle.color;
-    ctx.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size * 0.6);
+    ctx.fillRect(
+      -particle.size / 2,
+      -particle.size / 2,
+      particle.size,
+      particle.size * 0.6
+    );
     ctx.restore();
   }
   ctx.globalAlpha = 1;
@@ -282,7 +295,13 @@ function drawCover(img, x, y, size) {
     drawHeight = size;
     drawWidth = size * aspect;
   }
-  ctx.drawImage(img, x - drawWidth / 2, y - drawHeight / 2, drawWidth, drawHeight);
+  ctx.drawImage(
+    img,
+    x - drawWidth / 2,
+    y - drawHeight / 2,
+    drawWidth,
+    drawHeight
+  );
 }
 
 function drawCenterSelfie(centerX, centerY) {
@@ -342,7 +361,11 @@ function drawCenterSelfie(centerX, centerY) {
   ctx.fillStyle = 'rgba(234,255,240,0.92)';
   ctx.font = '13px -apple-system, sans-serif';
   const caption = safeCaption(center.caption) || center.peerId.slice(0, 6);
-  ctx.fillText(`hop ${center.hopCount} · ${caption}`, centerX, centerY + selfieRadius + 20);
+  ctx.fillText(
+    `hop ${center.hopCount} · ${caption}`,
+    centerX,
+    centerY + selfieRadius + 20
+  );
 }
 
 // --- frame ------------------------------------------------------------------

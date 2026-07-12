@@ -159,7 +159,9 @@ function buildGallery(entries) {
       byKey.set(key, entry);
     }
   }
-  return [...byKey.values()].sort((a, b) => a.hopCount - b.hopCount || a.timestamp - b.timestamp);
+  return [...byKey.values()].sort(
+    (a, b) => a.hopCount - b.hopCount || a.timestamp - b.timestamp
+  );
 }
 
 /**

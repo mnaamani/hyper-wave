@@ -66,14 +66,18 @@ export function useEngine(config = {}) {
         case 'burn-result':
         case 'tip-result':
           setToast(
-            msg.error ? `⚠ ${msg.error}` : `✓ ${msg.type} ${msg.hash ? msg.hash.slice(0, 8) : ''}`
+            msg.error
+              ? `⚠ ${msg.error}`
+              : `✓ ${msg.type} ${msg.hash ? msg.hash.slice(0, 8) : ''}`
           );
           break;
       }
     });
 
     // one-time init: storageDir + config (matchId, bootstrap, seed)
-    pipe.write(JSON.stringify({ type: 'init', storageDir: STORAGE_DIR, config }));
+    pipe.write(
+      JSON.stringify({ type: 'init', storageDir: STORAGE_DIR, config })
+    );
 
     // Cooperate with the OS lifecycle: react-native-bare-kit's Worklet.update() takes an RN
     // AppStateStatus and suspends/resumes the Bare runtime accordingly, so we don't burn battery

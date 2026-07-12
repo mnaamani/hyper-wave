@@ -1,4 +1,11 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, clipboard } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  ipcMain,
+  shell,
+  clipboard
+} = require('electron');
 const os = require('os');
 const path = require('path');
 const PearRuntime = require('pear-runtime');
@@ -51,7 +58,9 @@ ipcMain.on('isPackaged', (evt) => {
 
 // Copy text to the OS clipboard (e.g. the wallet address). The renderer is sandboxed, so it goes
 // through main rather than navigator.clipboard.
-ipcMain.handle('copy-text', (_evt, text) => clipboard.writeText(String(text ?? '')));
+ipcMain.handle('copy-text', (_evt, text) =>
+  clipboard.writeText(String(text ?? ''))
+);
 
 // Open a URL in the user's default browser (e.g. the Nile faucet). Restricted to http(s) so a
 // compromised renderer can't ask main to open file:// or other schemes.
@@ -99,7 +108,8 @@ function getWorker(specifier) {
     dirSource = 'default (dev: os.tmpdir)';
   } else {
     const isSnap = !!process.env.SNAP_USER_COMMON;
-    const linuxConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+    const linuxConfigHome =
+      process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
     if (isMac) {
       dir = path.join(os.homedir(), 'Library', 'Application Support', appName);
     } else if (isSnap) {
@@ -178,8 +188,8 @@ async function createWindow() {
   });
 
   // allow webcam access for the proof-window selfie capture
-  win.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) =>
-    callback(permission === 'media')
+  win.webContents.session.setPermissionRequestHandler(
+    (_webContents, permission, callback) => callback(permission === 'media')
   );
 
   // Right-click edit menu for text fields (e.g. paste a wallet address into Send). Electron
@@ -244,7 +254,9 @@ ipcMain.handle('app:afterUpdate', () => {
       execPath: process.env.APPIMAGE,
       args: [
         '--appimage-extract-and-run',
-        ...process.argv.slice(1).filter((arg) => arg !== '--appimage-extract-and-run')
+        ...process.argv
+          .slice(1)
+          .filter((arg) => arg !== '--appimage-extract-and-run')
       ]
     });
   } else if (!isWindows) {

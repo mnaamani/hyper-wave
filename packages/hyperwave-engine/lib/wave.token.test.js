@@ -27,9 +27,17 @@ const ids = keyPairs.map((keyPair) => b4a.toString(keyPair.publicKey, 'hex'));
 // forge one hop: given the token a peer received, produce the token it forwards
 function stampHop(keyPair, peerId, waveId, prevToken) {
   const hopCount = prevToken.hopCount + 1;
-  const prevChainHash = advanceChain(prevToken.prevChainHash, prevToken.senderReceiptSig);
+  const prevChainHash = advanceChain(
+    prevToken.prevChainHash,
+    prevToken.senderReceiptSig
+  );
   const timestamp = prevToken.timestamp + 50;
-  const senderReceiptSig = signReceipt(keyPair, { waveId, hopCount, prevChainHash, timestamp });
+  const senderReceiptSig = signReceipt(keyPair, {
+    waveId,
+    hopCount,
+    prevChainHash,
+    timestamp
+  });
   return {
     waveId,
     originator: prevToken.originator,
@@ -67,14 +75,21 @@ test('every hop receipt verifies against its signer', (t) => {
 
 test('advanceChain is deterministic and input-sensitive', (t) => {
   t.is(advanceChain(ZERO, token0.senderReceiptSig), token1.prevChainHash);
-  t.not(advanceChain(ZERO, token0.senderReceiptSig), advanceChain(ZERO, token1.senderReceiptSig));
+  t.not(
+    advanceChain(ZERO, token0.senderReceiptSig),
+    advanceChain(ZERO, token1.senderReceiptSig)
+  );
 });
 
 test('chain accumulator reproducible by an independent validator walk', (t) => {
   let chainHash = ZERO;
   chainHash = advanceChain(chainHash, token0.senderReceiptSig);
   chainHash = advanceChain(chainHash, token1.senderReceiptSig);
-  t.is(chainHash, token2.prevChainHash, 'validator reaches the same accumulator P2 carried');
+  t.is(
+    chainHash,
+    token2.prevChainHash,
+    'validator reaches the same accumulator P2 carried'
+  );
 });
 
 test('completion condition: token back at originator with hopCount > 0', (t) => {
@@ -83,7 +98,10 @@ test('completion condition: token back at originator with hopCount > 0', (t) => 
 
 test('tampered receipt signature fails verification', (t) => {
   t.absent(
-    verifyToken({ ...token1, senderReceiptSig: token1.senderReceiptSig.replace(/^../, '00') })
+    verifyToken({
+      ...token1,
+      senderReceiptSig: token1.senderReceiptSig.replace(/^../, '00')
+    })
   );
 });
 
@@ -96,7 +114,12 @@ test('receipt cannot be attributed to a different peer', (t) => {
 });
 
 test('receiptHash is stable for identical inputs', (t) => {
-  const hopTuple = { waveId, hopCount: 1, prevChainHash: ZERO, timestamp: 1000 };
+  const hopTuple = {
+    waveId,
+    hopCount: 1,
+    prevChainHash: ZERO,
+    timestamp: 1000
+  };
   t.ok(b4a.equals(receiptHash(hopTuple), receiptHash({ ...hopTuple })));
 });
 
@@ -118,20 +141,41 @@ test('signBurn/verifyBurn binds the ring peer to its on-chain burn', (t) => {
 
 test('burn attestation rejects impersonation and tampering', (t) => {
   const sig = signBurn(keyPairs[1], burnFields);
-  t.absent(verifyBurn({ ...burnFields, peerId: ids[2] }, sig), 'wrong peerId (impersonation)');
-  t.absent(verifyBurn({ ...burnFields, txHash: 'other' }, sig), 'swapped txHash');
-  t.absent(verifyBurn({ ...burnFields, waveId: 'other-wave' }, sig), 'reused for another wave');
+  t.absent(
+    verifyBurn({ ...burnFields, peerId: ids[2] }, sig),
+    'wrong peerId (impersonation)'
+  );
+  t.absent(
+    verifyBurn({ ...burnFields, txHash: 'other' }, sig),
+    'swapped txHash'
+  );
+  t.absent(
+    verifyBurn({ ...burnFields, waveId: 'other-wave' }, sig),
+    'reused for another wave'
+  );
   t.absent(verifyBurn({ ...burnFields, amount: 99 }, sig), 'inflated amount');
 });
 
 test('burnAuthorizes gates gallery admission on a real, bound burn', (t) => {
   const proof = { ...burnFields, sig: signBurn(keyPairs[1], burnFields) };
-  t.ok(burnAuthorizes(proof, ids[1], waveId), 'a valid burn authorizes its own peer + wave');
+  t.ok(
+    burnAuthorizes(proof, ids[1], waveId),
+    'a valid burn authorizes its own peer + wave'
+  );
   t.absent(burnAuthorizes(null, ids[1], waveId), 'no burn = no gallery seat');
-  t.absent(burnAuthorizes(proof, ids[2], waveId), 'not another peer’s admission (bound to peerId)');
-  t.absent(burnAuthorizes(proof, ids[1], 'other-wave'), 'not reusable for another wave');
+  t.absent(
+    burnAuthorizes(proof, ids[2], waveId),
+    'not another peer’s admission (bound to peerId)'
+  );
+  t.absent(
+    burnAuthorizes(proof, ids[1], 'other-wave'),
+    'not reusable for another wave'
+  );
   const forged = { ...burnFields, sig: signBurn(keyPairs[2], burnFields) }; // someone else's signature
-  t.absent(burnAuthorizes(forged, ids[1], waveId), 'signature must be by the admitted peer');
+  t.absent(
+    burnAuthorizes(forged, ids[1], waveId),
+    'signature must be by the admitted peer'
+  );
 });
 
 // --- gallery-key attestation -----------------------------------------------
@@ -159,7 +203,10 @@ const completion = { waveId, hops: 3, chainHash: 'abc123' };
 
 test('signWaveEnd/verifyWaveEnd authenticates a completion to the originator', (t) => {
   const sig = signWaveEnd(keyPairs[0], completion);
-  t.ok(verifyWaveEnd({ ...completion, originatorId: ids[0] }, sig), 'valid completion verifies');
+  t.ok(
+    verifyWaveEnd({ ...completion, originatorId: ids[0] }, sig),
+    'valid completion verifies'
+  );
 });
 
 test('wave-end attestation rejects forgery and tampering', (t) => {
@@ -170,6 +217,12 @@ test('wave-end attestation rejects forgery and tampering', (t) => {
     'a non-originator can’t sign a completion'
   );
   t.absent(verifyWaveEnd({ ...bound, hops: 9 }, sig), 'tampered hop count');
-  t.absent(verifyWaveEnd({ ...bound, chainHash: 'deadbeef' }, sig), 'tampered chain hash');
-  t.absent(verifyWaveEnd({ ...bound, waveId: 'other-wave' }, sig), 'reused for another wave');
+  t.absent(
+    verifyWaveEnd({ ...bound, chainHash: 'deadbeef' }, sig),
+    'tampered chain hash'
+  );
+  t.absent(
+    verifyWaveEnd({ ...bound, waveId: 'other-wave' }, sig),
+    'reused for another wave'
+  );
 });

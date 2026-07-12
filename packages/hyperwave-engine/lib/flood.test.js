@@ -132,7 +132,11 @@ function randomMesh(count, extra, seed) {
 test('line: reaches every node; rounds = diameter (N-1)', (t) => {
   const { graph } = lineGraph(10);
   const stats = simulateFlood(graph, 'n0');
-  t.is(stats.processed.size, 10, 'all 10 reached across a chain (worst-case topology)');
+  t.is(
+    stats.processed.size,
+    10,
+    'all 10 reached across a chain (worst-case topology)'
+  );
   t.is(stats.rounds, 9, 'N-1 relay hops end to end');
   t.ok(stats.sends <= 2 * edgeCount(graph), 'sends bounded by 2·|E|');
 });
@@ -143,7 +147,9 @@ test('ring: reaches every node from both directions, deduped', (t) => {
   t.is(stats.processed.size, 12, 'all reached');
   t.ok(stats.rounds <= 7, 'two half-laps meet in the middle (~N/2)');
   // the two directions collide, so at least one node gets a redundant copy it dedups
-  const redundant = [...stats.receipts.values()].filter((count) => count > 1).length;
+  const redundant = [...stats.receipts.values()].filter(
+    (count) => count > 1
+  ).length;
   t.ok(redundant > 0, 'dedup actually suppressed a re-process');
   t.ok(stats.sends <= 2 * edgeCount(graph), 'sends bounded by 2·|E|');
 });
@@ -159,8 +165,14 @@ test('random partial mesh (N=200): full reach, small diameter, bounded cost', (t
   const { graph } = randomMesh(200, 400, 1234); // avg degree ~ (199 + 400·2)/200 ≈ 5
   const stats = simulateFlood(graph, 'n0');
   t.is(stats.processed.size, 200, 'every seat reached across the partial mesh');
-  t.ok(stats.rounds <= 20, `low diameter (${stats.rounds} rounds) — ~hundreds of ms in practice`);
-  t.ok(stats.sends <= 2 * edgeCount(graph), 'each edge traversed at most once per direction');
+  t.ok(
+    stats.rounds <= 20,
+    `low diameter (${stats.rounds} rounds) — ~hundreds of ms in practice`
+  );
+  t.ok(
+    stats.sends <= 2 * edgeCount(graph),
+    'each edge traversed at most once per direction'
+  );
 });
 
 test('low-degree origin still floods the whole mesh', (t) => {
@@ -178,7 +190,11 @@ test('low-degree origin still floods the whole mesh', (t) => {
   }
   graph.set('n0', [only]);
   const stats = simulateFlood(graph, 'n0');
-  t.is(stats.processed.size, 120, 'reach does not depend on the origin being well-connected');
+  t.is(
+    stats.processed.size,
+    120,
+    'reach does not depend on the origin being well-connected'
+  );
 });
 
 test('disconnected graph: flood stays inside the origin component', (t) => {
@@ -197,7 +213,11 @@ test('disconnected graph: flood stays inside the origin component', (t) => {
     );
   }
   const stats = simulateFlood(graph, 'n0');
-  t.is(stats.processed.size, 5, 'only the origin component (n0..n4) is reached');
+  t.is(
+    stats.processed.size,
+    5,
+    'only the origin component (n0..n4) is reached'
+  );
   t.absent(
     stats.processed.has('m0'),
     'the isolated component gets nothing — reach is real, not assumed'

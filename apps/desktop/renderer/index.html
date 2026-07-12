@@ -6,10 +6,15 @@
     <style>
       body {
         font-family:
-          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+          Arial, sans-serif;
         margin: 0;
         min-height: 100vh;
-        background: radial-gradient(circle at 50% 20%, #0e4f15 0%, #041007 100%);
+        background: radial-gradient(
+          circle at 50% 20%,
+          #0e4f15 0%,
+          #041007 100%
+        );
         color: #eafff0;
         display: flex;
         flex-direction: column;
@@ -74,7 +79,11 @@
         position: fixed;
         inset: 0;
         z-index: 20;
-        background: radial-gradient(circle at 50% 30%, #0e4f15 0%, #041007 100%);
+        background: radial-gradient(
+          circle at 50% 30%,
+          #0e4f15 0%,
+          #041007 100%
+        );
         align-items: center;
         justify-content: center;
       }
@@ -190,7 +199,8 @@
       .wallet-card-head h2 {
         font-size: 18px;
         margin: 0;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
       #wallet-close {
         border: none;
@@ -650,19 +660,43 @@
         <div class="wallet-row">
           <button id="wallet-refresh" title="Re-check your balance">🔄</button>
           <a id="wallet-address" title="View this address on Tronscan"></a>
-          <button id="wallet-copy" class="pill" title="Copy your wallet address">📋 Copy</button>
-          <button id="wallet-faucet" class="pill" title="Get free testnet TRX from the Nile faucet">
+          <button
+            id="wallet-copy"
+            class="pill"
+            title="Copy your wallet address"
+          >
+            📋 Copy
+          </button>
+          <button
+            id="wallet-faucet"
+            class="pill"
+            title="Get free testnet TRX from the Nile faucet"
+          >
             💧 Get test TRX
           </button>
-          <button id="wallet-send-toggle" class="pill" title="Send TRX to another address">
+          <button
+            id="wallet-send-toggle"
+            class="pill"
+            title="Send TRX to another address"
+          >
             Send ▸
           </button>
         </div>
         <!-- send form: revealed by the "Send ▸" pill; a plain TRX transfer to any address -->
         <div id="wallet-send">
-          <input id="send-to" placeholder="Recipient address (T…)" spellcheck="false" />
+          <input
+            id="send-to"
+            placeholder="Recipient address (T…)"
+            spellcheck="false"
+          />
           <div class="send-amt-row">
-            <input id="send-amount" type="number" min="0" step="1" placeholder="Amount" />
+            <input
+              id="send-amount"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="Amount"
+            />
             <span class="send-unit">TRX</span>
             <button id="send-btn" class="pill send-go">Send</button>
           </div>
@@ -670,7 +704,10 @@
         </div>
         <div class="wallet-section">Transactions (this session)</div>
         <div id="wallet-txs"></div>
-        <a id="wallet-explorer" title="Open the full on-chain history on Tronscan">
+        <a
+          id="wallet-explorer"
+          title="Open the full on-chain history on Tronscan"
+        >
           View full history on Tronscan →
         </a>
       </div>
@@ -712,7 +749,9 @@
       <div id="progress-label"></div>
     </div>
 
-    <button id="tip" title="Send a real testnet TRX tip to this selfie">💵 Tip 1 TRX</button>
+    <button id="tip" title="Send a real testnet TRX tip to this selfie">
+      💵 Tip 1 TRX
+    </button>
     <div id="tip-toast"></div>
 
     <!-- status lines live at the bottom so the top stays uncluttered -->

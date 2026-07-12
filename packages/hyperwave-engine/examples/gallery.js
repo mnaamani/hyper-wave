@@ -39,9 +39,16 @@ function selfie(keyPair, hopCount, caption, timestamp) {
 async function main() {
   const dir = '/tmp/hw-example-gallery-' + Date.now();
   const store = new Corestore(dir);
-  const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig());
+  const base = new Autobase(
+    store.namespace('wave-gallery'),
+    null,
+    galleryConfig()
+  );
   await base.ready();
-  console.log('gallery bootstrap key:', b4a.toString(base.key, 'hex').slice(0, 12) + '…');
+  console.log(
+    'gallery bootstrap key:',
+    b4a.toString(base.key, 'hex').slice(0, 12) + '…'
+  );
 
   const alice = crypto.keyPair();
   const bob = crypto.keyPair();

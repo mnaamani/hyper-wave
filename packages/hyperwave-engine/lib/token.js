@@ -55,7 +55,9 @@ const ZERO_HASH = b4a.toString(b4a.alloc(32), 'hex'); // genesis accumulator
  * @returns {Buffer} The blake2b hash of the hop tuple.
  */
 function receiptHash({ waveId, hopCount, prevChainHash, timestamp }) {
-  return crypto.hash(b4a.from(`${waveId}|${hopCount}|${prevChainHash}|${timestamp}`));
+  return crypto.hash(
+    b4a.from(`${waveId}|${hopCount}|${prevChainHash}|${timestamp}`)
+  );
 }
 
 /**
@@ -65,7 +67,10 @@ function receiptHash({ waveId, hopCount, prevChainHash, timestamp }) {
  * @returns {string} The Ed25519 receipt signature (hex).
  */
 function signReceipt(keyPair, fields) {
-  return b4a.toString(crypto.sign(receiptHash(fields), keyPair.secretKey), 'hex');
+  return b4a.toString(
+    crypto.sign(receiptHash(fields), keyPair.secretKey),
+    'hex'
+  );
 }
 
 /**
@@ -81,7 +86,11 @@ function signReceipt(keyPair, fields) {
 function verifyReceipt(fields, receiptSigHex) {
   try {
     const hash = receiptHash(fields);
-    return crypto.verify(hash, b4a.from(receiptSigHex, 'hex'), b4a.from(fields.peerId, 'hex'));
+    return crypto.verify(
+      hash,
+      b4a.from(receiptSigHex, 'hex'),
+      b4a.from(fields.peerId, 'hex')
+    );
   } catch {
     return false;
   }
@@ -113,7 +122,12 @@ function verifyToken(token) {
  */
 function advanceChain(prevChainHash, receiptSigHex) {
   return b4a.toString(
-    crypto.hash(b4a.concat([b4a.from(prevChainHash, 'hex'), b4a.from(receiptSigHex, 'hex')])),
+    crypto.hash(
+      b4a.concat([
+        b4a.from(prevChainHash, 'hex'),
+        b4a.from(receiptSigHex, 'hex')
+      ])
+    ),
     'hex'
   );
 }
@@ -130,9 +144,19 @@ function advanceChain(prevChainHash, receiptSigHex) {
  * @param {BurnFields} fields - The burn attestation fields.
  * @returns {Buffer} The blake2b hash of the burn tuple.
  */
-function burnHash({ waveId, peerId, reason, amount, txHash, tronAddress, burnTs }) {
+function burnHash({
+  waveId,
+  peerId,
+  reason,
+  amount,
+  txHash,
+  tronAddress,
+  burnTs
+}) {
   return crypto.hash(
-    b4a.from(`${waveId}|${peerId}|${reason}|${amount}|${txHash}|${tronAddress}|${burnTs}`)
+    b4a.from(
+      `${waveId}|${peerId}|${reason}|${amount}|${txHash}|${tronAddress}|${burnTs}`
+    )
   );
 }
 
@@ -156,7 +180,11 @@ function signBurn(keyPair, fields) {
  */
 function verifyBurn(fields, sigHex) {
   try {
-    return crypto.verify(burnHash(fields), b4a.from(sigHex, 'hex'), b4a.from(fields.peerId, 'hex'));
+    return crypto.verify(
+      burnHash(fields),
+      b4a.from(sigHex, 'hex'),
+      b4a.from(fields.peerId, 'hex')
+    );
   } catch {
     return false;
   }
@@ -176,7 +204,12 @@ function verifyBurn(fields, sigHex) {
  * @returns {boolean} True if the burn is valid and bound to this peer + wave.
  */
 function burnAuthorizes(burn, peerId, waveId) {
-  return !!(burn && burn.peerId === peerId && burn.waveId === waveId && verifyBurn(burn, burn.sig));
+  return !!(
+    burn &&
+    burn.peerId === peerId &&
+    burn.waveId === waveId &&
+    verifyBurn(burn, burn.sig)
+  );
 }
 
 // --- gallery-key attestation -----------------------------------------------
@@ -202,7 +235,10 @@ function galleryKeyHash(waveId, autobaseKey) {
  * @returns {string} The Ed25519 gallery-key signature (hex).
  */
 function signGalleryKey(keyPair, { waveId, autobaseKey }) {
-  return b4a.toString(crypto.sign(galleryKeyHash(waveId, autobaseKey), keyPair.secretKey), 'hex');
+  return b4a.toString(
+    crypto.sign(galleryKeyHash(waveId, autobaseKey), keyPair.secretKey),
+    'hex'
+  );
 }
 
 /**
@@ -248,7 +284,10 @@ function waveEndHash(waveId, hops, chainHash) {
  * @returns {string} The Ed25519 wave-end signature (hex).
  */
 function signWaveEnd(keyPair, { waveId, hops, chainHash }) {
-  return b4a.toString(crypto.sign(waveEndHash(waveId, hops, chainHash), keyPair.secretKey), 'hex');
+  return b4a.toString(
+    crypto.sign(waveEndHash(waveId, hops, chainHash), keyPair.secretKey),
+    'hex'
+  );
 }
 
 /**

@@ -28,8 +28,10 @@ const fieldEl = document.querySelector('.field'); // the ring + gallery canvas a
 
 // Why a selfie didn't make it into the gallery, keyed by the engine's gallery-error reason.
 const GALLERY_ERRORS = {
-  'fee-unpaid': "⚠️ your selfie wasn't added — the participation fee wasn't paid/confirmed in time",
-  'admit-timeout': "⚠️ your selfie wasn't added — gallery admission timed out (network); try again",
+  'fee-unpaid':
+    "⚠️ your selfie wasn't added — the participation fee wasn't paid/confirmed in time",
+  'admit-timeout':
+    "⚠️ your selfie wasn't added — gallery admission timed out (network); try again",
   'no-gallery-yet': "⚠️ your selfie wasn't added — the gallery wasn't ready yet"
 };
 
@@ -183,7 +185,11 @@ const EVENT_HANDLERS = {
     setDim(false); // wave is racing — restore the ring (lobby may have timed out still dimmed)
     lobby.close();
     proof.captureAndStage(); // snap + stage the lobby selfie, then free the centre
-    hud.waveStatus(evt.joined ? '📸 captured - here comes the wave!' : '👀 spectating this wave');
+    hud.waveStatus(
+      evt.joined
+        ? '📸 captured - here comes the wave!'
+        : '👀 spectating this wave'
+    );
   },
 
   'wave-idle': () => {
@@ -239,7 +245,10 @@ const EVENT_HANDLERS = {
   },
 
   'gallery-error': (evt) => {
-    hud.waveStatus(GALLERY_ERRORS[evt.reason] || `⚠️ couldn't post your selfie (${evt.reason})`);
+    hud.waveStatus(
+      GALLERY_ERRORS[evt.reason] ||
+        `⚠️ couldn't post your selfie (${evt.reason})`
+    );
   },
 
   stalled: (evt) => {

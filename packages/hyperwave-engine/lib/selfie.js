@@ -90,7 +90,11 @@ class SelfiePipeline {
       return;
     }
     this.#posted = true;
-    this.#post({ ...this.#receipt, image: this.#staged.image, caption: this.#staged.caption });
+    this.#post({
+      ...this.#receipt,
+      image: this.#staged.image,
+      caption: this.#staged.caption
+    });
   }
 
   /**

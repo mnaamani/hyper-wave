@@ -118,7 +118,9 @@ function fixPackage(pkgDir) {
   if (changed) {
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
     fixed++;
-    console.log(`[fix-bare-engines] normalized engines in ${path.relative(ROOT, file)}`);
+    console.log(
+      `[fix-bare-engines] normalized engines in ${path.relative(ROOT, file)}`
+    );
   }
 }
 

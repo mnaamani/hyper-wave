@@ -31,7 +31,10 @@ export function flagOf(code) {
 }
 
 function buildCountries() {
-  const names = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });
+  const names = new Intl.DisplayNames(['en'], {
+    type: 'region',
+    fallback: 'none'
+  });
   const out = [];
   for (const code of ISO_CODES) {
     let name;

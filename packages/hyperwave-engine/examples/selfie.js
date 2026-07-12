@@ -9,7 +9,8 @@ const state = { canSelfie: true, waveId: 'w1' };
 const pipeline = new SelfiePipeline({
   canSelfie: () => state.canSelfie,
   currentWaveId: () => state.waveId,
-  post: (entry) => console.log('POST →', entry.caption, '(hop', entry.hopCount + ')')
+  post: (entry) =>
+    console.log('POST →', entry.caption, '(hop', entry.hopCount + ')')
 });
 
 const receipt = {

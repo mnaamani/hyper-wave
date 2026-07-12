@@ -24,17 +24,27 @@ test('orders selfies by hop count', (t) => {
 });
 
 test('newest entry wins per (wave, peer)', (t) => {
-  const gallery = buildGallery([makeEntry('w', 'a', 1, 10), makeEntry('w', 'a', 1, 50)]);
+  const gallery = buildGallery([
+    makeEntry('w', 'a', 1, 10),
+    makeEntry('w', 'a', 1, 50)
+  ]);
   t.is(gallery.length, 1);
   t.is(gallery[0].timestamp, 50);
 });
 
 test('keeps entries from different waves separate', (t) => {
-  t.is(buildGallery([makeEntry('w1', 'a', 0, 10), makeEntry('w2', 'a', 0, 10)]).length, 2);
+  t.is(
+    buildGallery([makeEntry('w1', 'a', 0, 10), makeEntry('w2', 'a', 0, 10)])
+      .length,
+    2
+  );
 });
 
 test('ties on hop broken by timestamp', (t) => {
-  const gallery = buildGallery([makeEntry('w', 'b', 1, 99), makeEntry('w', 'a', 1, 5)]);
+  const gallery = buildGallery([
+    makeEntry('w', 'b', 1, 99),
+    makeEntry('w', 'a', 1, 5)
+  ]);
   t.alike(
     gallery.map((item) => item.peerId),
     ['a', 'b']
@@ -65,6 +75,13 @@ test('empty input -> empty gallery', (t) => {
 });
 
 test('preserves the wallet address (for gallery tipping)', (t) => {
-  const entry = { ...makeEntry('w', 'a', 0, 10), address: 'TXYZ...ownerWallet' };
-  t.is(buildGallery([entry])[0].address, 'TXYZ...ownerWallet', 'address rides through to the view');
+  const entry = {
+    ...makeEntry('w', 'a', 0, 10),
+    address: 'TXYZ...ownerWallet'
+  };
+  t.is(
+    buildGallery([entry])[0].address,
+    'TXYZ...ownerWallet',
+    'address rides through to the view'
+  );
 });

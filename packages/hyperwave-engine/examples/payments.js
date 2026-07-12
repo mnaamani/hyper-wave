@@ -7,7 +7,9 @@ const { createPayments } = require('hyperwave-engine');
 
 async function main() {
   const dir = '/tmp/hw-example-wallet-' + Date.now();
-  const pay = await createPayments({ storageDir: dir /*, seed: '<mnemonic>' */ });
+  const pay = await createPayments({
+    storageDir: dir /*, seed: '<mnemonic>' */
+  });
 
   // Derived offline from the seed persisted at <storage>/wallet.seed.
   console.log('wallet address:', pay.address);
@@ -15,7 +17,12 @@ async function main() {
   // balances() is a network call; tolerate offline / rate limits in the example.
   try {
     const bal = await pay.balances();
-    console.log('balance:', bal.trx, 'TRX', bal.trx === 0 ? '(fund it at the Nile faucet)' : '');
+    console.log(
+      'balance:',
+      bal.trx,
+      'TRX',
+      bal.trx === 0 ? '(fund it at the Nile faucet)' : ''
+    );
   } catch (err) {
     console.log('balance lookup skipped:', err.message);
   }

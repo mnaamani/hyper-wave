@@ -18,7 +18,9 @@ const { createEngine } = require('../lib/engine');
 // work for the wallet seed.)
 function resolveStorage(dir) {
   const resolved = dir || 'hyperwave';
-  return path.isAbsolute(resolved) ? resolved : path.join(os.tmpdir(), resolved);
+  return path.isAbsolute(resolved)
+    ? resolved
+    : path.join(os.tmpdir(), resolved);
 }
 
 const pipe = new FramedStream(BareKit.IPC); // bare-kit's worklet-side IPC (cf. Bare.IPC on desktop)
@@ -30,7 +32,10 @@ const send = (msg) => pipe.write(JSON.stringify(msg));
 if (typeof Bare !== 'undefined' && Bare.on) {
   Bare.on('unhandledRejection', (err) => {
     try {
-      send({ type: 'engine-error', error: String((err && err.message) || err) });
+      send({
+        type: 'engine-error',
+        error: String((err && err.message) || err)
+      });
     } catch {}
   });
 }
@@ -55,6 +60,8 @@ pipe.on('data', (data) => {
     engine.exec(msg);
   } else {
     // RN host did not yet send an init message, so whatever this message is, its too early to be sending.
-    console.warn(`Dropped message of type ${msg.type}. Init message not yet received`);
+    console.warn(
+      `Dropped message of type ${msg.type}. Init message not yet received`
+    );
   }
 });

@@ -19,7 +19,12 @@ const {
   parseBootstrap,
   loadOrCreateSwarmSeed
 } = require('hyperwave-engine');
-const { FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine'); // wallet.js
+const {
+  FEE_TRX,
+  payFee,
+  confirmBurn,
+  wireWallet
+} = require('hyperwave-engine'); // wallet.js
 
 // 2. The pure submodules are imported by subpath (not re-exported from the index):
 const ring = require('hyperwave-engine/lib/ring');
@@ -77,7 +82,10 @@ const engine = createEngine({
 engine.exec({ type: 'set-country', country: 'BR' });
 engine.exec({ type: 'start-wave' }); // burns the kick-off fee, then announces + opens the lobby
 engine.exec({ type: 'join-wave' }); // opt into an announced wave (+ burns the join fee)
-engine.exec({ type: 'stage-selfie', selfie: { image: '<jpeg-data-url>', caption: 'hi' } });
+engine.exec({
+  type: 'stage-selfie',
+  selfie: { image: '<jpeg-data-url>', caption: 'hi' }
+});
 engine.exec({ type: 'tip', to: 'T...', amount: 5 }); // real testnet TRX to a selfie owner
 engine.exec({ type: 'send-trx', to: 'T...', amount: 10 });
 engine.exec({ type: 'fetch-transactions' }); // → { type:'transactions', list }
@@ -123,7 +131,9 @@ console.log('my seat:', wave.me); // { id, angle, country }
 const waveId = wave.startWave(); // announce + open the lobby; returns the new waveId (or null if busy)
 wave.setCountry('BR');
 wave.stageSelfie({ image: 'fake', caption: 'me' }); // staged; posts when the ball arrives
-const succId = await wave.findSuccessor(BigInt('0x' + wave.me.id.slice(0, 16)) + 1n); // distributed Chord lookup
+const succId = await wave.findSuccessor(
+  BigInt('0x' + wave.me.id.slice(0, 16)) + 1n
+); // distributed Chord lookup
 await wave.close();
 ```
 
@@ -185,7 +195,9 @@ const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 const chord = require('hyperwave-engine/lib/chord');
 
-const ids = Array.from({ length: 8 }, () => b4a.toString(crypto.keyPair().publicKey, 'hex'));
+const ids = Array.from({ length: 8 }, () =>
+  b4a.toString(crypto.keyPair().publicKey, 'hex')
+);
 const myId = ids[0];
 
 // neighbourhood (pass the full id list — it injects/dedupes myId internally)
@@ -257,7 +269,11 @@ verifyToken(tokenMsg); // → true
 gallery write:
 
 ```js
-const { signBurn, verifyBurn, burnAuthorizes } = require('hyperwave-engine/lib/token');
+const {
+  signBurn,
+  verifyBurn,
+  burnAuthorizes
+} = require('hyperwave-engine/lib/token');
 
 const fields = {
   waveId,
@@ -329,11 +345,19 @@ const Corestore = require('corestore');
 const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const { galleryConfig, readGallery, buildGallery } = require('hyperwave-engine/lib/gallery');
+const {
+  galleryConfig,
+  readGallery,
+  buildGallery
+} = require('hyperwave-engine/lib/gallery');
 const { signReceipt } = require('hyperwave-engine/lib/token');
 
 const store = new Corestore('/tmp/hw-gallery');
-const base = new Autobase(store.namespace('wave-gallery'), null, galleryConfig());
+const base = new Autobase(
+  store.namespace('wave-gallery'),
+  null,
+  galleryConfig()
+);
 await base.ready();
 
 // build a receipt-valid wave-selfie op (an invalid/unsigned one is silently dropped by apply())
@@ -378,13 +402,19 @@ ESM-only. The same module composes it into the wave (fee burns + the paid-wave g
 ```js
 const { createPayments } = require('hyperwave-engine');
 
-const pay = await createPayments({ storageDir: '/tmp/hw/a' /*, seed: '<mnemonic>' */ });
+const pay = await createPayments({
+  storageDir: '/tmp/hw/a' /*, seed: '<mnemonic>' */
+});
 console.log(pay.address); // T… (derived offline from the seed at <storage>/wallet.seed)
 
 await pay.balances(); // → { address, trx }  (network call)
 await pay.send('T…recipient', 5); // → { hash, fee }  a real testnet transfer
 await pay.burn(1, `hyperwave:${'w1'}:${pay.address}`); // → { hash, fee }  send to the black hole + memo
-await pay.verifyBurnTx('deadbeef…', { waveId: 'w1', from: pay.address, minTrx: 1 }); // → { ok, reason? }
+await pay.verifyBurnTx('deadbeef…', {
+  waveId: 'w1',
+  from: pay.address,
+  minTrx: 1
+}); // → { ok, reason? }
 await pay.transactions(10); // → recent on-chain txs, both directions
 pay.dispose();
 ```
@@ -392,7 +422,13 @@ pay.dispose();
 Wire it into a `createWave` instance and run the fee flow:
 
 ```js
-const { createWave, FEE_TRX, payFee, confirmBurn, wireWallet } = require('hyperwave-engine');
+const {
+  createWave,
+  FEE_TRX,
+  payFee,
+  confirmBurn,
+  wireWallet
+} = require('hyperwave-engine');
 
 const wave = createWave({ storageDir: '/tmp/hw/a', onState() {} });
 wireWallet(wave, pay); // sets the wallet address (tips) + the on-chain burn verifier (paid gate)

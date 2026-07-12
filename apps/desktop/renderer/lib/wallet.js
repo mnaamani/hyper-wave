@@ -42,7 +42,8 @@ export function walletStatus({ address, trx }) {
     return;
   }
   walletAddress = address;
-  balanceEl.innerText = `${trx.toFixed(2)} TRX` + (trx === 0 ? '  ⚠ unfunded' : '');
+  balanceEl.innerText =
+    `${trx.toFixed(2)} TRX` + (trx === 0 ? '  ⚠ unfunded' : '');
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
 }
 
@@ -53,7 +54,14 @@ export function record({ kind, hash, amount }) {
     return;
   }
   const meta = SENT_META[kind] || { icon: '•', label: kind };
-  txById.set(hash, { hash, dir: 'out', amount, ts: Date.now(), fromEvent: true, ...meta });
+  txById.set(hash, {
+    hash,
+    dir: 'out',
+    amount,
+    ts: Date.now(),
+    fromEvent: true,
+    ...meta
+  });
   renderHistory();
 }
 
@@ -225,7 +233,10 @@ export function sendResult({ hash, to, amount, error }) {
     return;
   }
   record({ kind: 'send', hash, amount });
-  setSendStatus(`✅ sent ${amount} TRX to ${to.slice(0, 6)}…${to.slice(-4)}`, 'ok');
+  setSendStatus(
+    `✅ sent ${amount} TRX to ${to.slice(0, 6)}…${to.slice(-4)}`,
+    'ok'
+  );
   sendToInput.value = '';
   sendAmountInput.value = '';
 }

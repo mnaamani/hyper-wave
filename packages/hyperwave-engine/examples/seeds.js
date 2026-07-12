@@ -15,7 +15,12 @@ const dir = '/tmp/hw-example-seed-' + Date.now();
 // First call mints + persists <dir>/swarm.seed; the derived keypair is this peer's identity.
 const seed1 = loadOrCreateSwarmSeed(dir);
 const id1 = b4a.toString(crypto.keyPair(seed1).publicKey, 'hex');
-console.log('seed persisted:', fs.existsSync(dir + '/swarm.seed'), '→ id', id1.slice(0, 8));
+console.log(
+  'seed persisted:',
+  fs.existsSync(dir + '/swarm.seed'),
+  '→ id',
+  id1.slice(0, 8)
+);
 
 // A second call (a "restart") returns the SAME seed → the same seat/id.
 const seed2 = loadOrCreateSwarmSeed(dir);
@@ -24,7 +29,13 @@ console.log('stable across restart:', id1 === id2);
 
 // An injected hex seed is used verbatim and never written (e.g. mobile secure storage).
 const injected = b4a.toString(crypto.randomBytes(32), 'hex');
-const injectedSeed = loadOrCreateSwarmSeed('/tmp/hw-example-seed-inject', injected);
-console.log('injected seed used as-is:', b4a.toString(injectedSeed, 'hex') === injected);
+const injectedSeed = loadOrCreateSwarmSeed(
+  '/tmp/hw-example-seed-inject',
+  injected
+);
+console.log(
+  'injected seed used as-is:',
+  b4a.toString(injectedSeed, 'hex') === injected
+);
 
 fs.rmSync(dir, { recursive: true, force: true });

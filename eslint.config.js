@@ -20,18 +20,24 @@ const styleRules = {
   // brittle's t. Property names (protocol fields) are not ours to rename.
   'id-length': [
     'error',
-    { min: 2, exceptions: ['i', 'j', 'k', 't', 'a', 'b', 'x', 'y', '_'], properties: 'never' }
+    {
+      min: 2,
+      exceptions: ['i', 'j', 'k', 't', 'a', 'b', 'x', 'y', '_'],
+      properties: 'never'
+    }
   ],
   // never setInterval — use a self-rescheduling setTimeout (CLAUDE.md Code Style)
   'no-restricted-globals': [
     'error',
     {
       name: 'setInterval',
-      message: 'Use a self-rescheduling setTimeout that re-arms as its last step (CLAUDE.md).'
+      message:
+        'Use a self-rescheduling setTimeout that re-arms as its last step (CLAUDE.md).'
     },
     {
       name: 'clearInterval',
-      message: 'Pairs with setInterval — use clearTimeout with the self-rescheduling pattern.'
+      message:
+        'Pairs with setInterval — use clearTimeout with the self-rescheduling pattern.'
     }
   ]
 };
