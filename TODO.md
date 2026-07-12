@@ -346,6 +346,20 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       force a partial mesh locally; needs a real >mesh-limit deployment). Includes
       re-running the 128-peer public-DHT dispatch on the sweep (expect: no admission
       timeouts, no skipped-live-peer losses, roster-exact convergence).
+- [ ] **Conditional: replace ring pinning with K random pins and delete `chord.js`.**
+      Nothing in the protocol consumes successor/predecessor anymore — the ring rule
+      survives only as the pin-selection heuristic, valued for its _deterministic_
+      connectivity guarantee (every peer pinning its successor ⇒ the edge union
+      contains the ring). Pinning K random discovered peers instead is connected only
+      with high probability (random K-out graphs, K≥2; plus Hyperswarm's ~64-degree
+      incidental mesh) but deletes `chord.js` (~230 lines + tests) and the last
+      successor/predecessor concepts. Gate on evidence, in order: (1) `flood`-harness
+      reach over a random-K topology at target N (cheap, local); (2) the 128-peer
+      public-DHT run passing on the current pinning. If both look comfortable, make
+      the swap; if flood reach ever gets flaky at scale, the deterministic ring is
+      the easier topology to debug — keep it. (`angleOfId`/`ring.js` stay regardless:
+      the seating chart is protocol semantics — sweep order, gallery order, the
+      visual — not topology.)
 - [ ] Measure gallery replication lag at depth
 - [ ] **Late/reactive admission fallback (deliberately dropped).** A peer whose join
       misses the lobby window is a spectator — the reactive `add-writer` path was
