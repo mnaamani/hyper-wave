@@ -17,7 +17,7 @@ class Flood {
 
   /**
    * @param {object} [options] - Options.
-   * @param {number} [options.cap=4096] - Max ids to remember before wholesale clear.
+   * @param {number} [options.cap=4096] - Max ids to remember (oldest evicted first).
    */
   constructor({ cap = 4096 } = {}) {
     this.#cap = cap;
@@ -25,8 +25,10 @@ class Flood {
 
   /**
    * True the first time `mid` is seen (=> process it locally and relay it onward);
-   * false on any repeat (=> drop). Past `cap` the set is cleared wholesale, which at
-   * worst lets a lone straggler re-flood once — harmless and very rare.
+   * false on any repeat (=> drop). At `cap` the OLDEST id is evicted (a Set iterates
+   * in insertion order, so this is O(1) FIFO) — under pressure the tracker forgets the
+   * ids least likely to still be in flight, instead of wholesale-clearing and
+   * forgetting the RECENT ones exactly when duplicates are still circulating.
    * @param {string} mid - The unique flood message id.
    * @returns {boolean} True on first sight, false on a repeat.
    */
@@ -35,7 +37,8 @@ class Flood {
       return false;
     }
     if (this.#seen.size >= this.#cap) {
-      this.#seen.clear();
+      const oldest = this.#seen.values().next().value;
+      this.#seen.delete(oldest);
     }
     this.#seen.add(mid);
     return true;

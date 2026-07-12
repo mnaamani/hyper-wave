@@ -223,3 +223,16 @@ test('disconnected graph: flood stays inside the origin component', (t) => {
     'the isolated component gets nothing — reach is real, not assumed'
   );
 });
+
+test('the seen-cap evicts oldest-first instead of wholesale clearing', (t) => {
+  const flood = new Flood({ cap: 3 });
+  t.ok(flood.firstSight('m1'));
+  t.ok(flood.firstSight('m2'));
+  t.ok(flood.firstSight('m3'));
+  t.absent(flood.firstSight('m2'), 'recent ids are still deduped at the cap');
+  t.ok(flood.firstSight('m4'), 'a new id lands by evicting the oldest');
+  t.is(flood.size, 3, 'the tracker stays at the cap');
+  t.absent(flood.firstSight('m3'), 'recent ids survived the eviction');
+  t.absent(flood.firstSight('m4'), 'the newest id is remembered');
+  t.ok(flood.firstSight('m1'), 'only the OLDEST id was forgotten');
+});

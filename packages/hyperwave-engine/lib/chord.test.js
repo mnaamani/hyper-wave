@@ -11,13 +11,10 @@ const {
   connectionTargets,
   findSuccessor,
   fingers,
+  farFingers,
   pinTargets,
   inOpenInterval,
-  stabilizeStep,
-  inHalfOpenInterval,
-  closestPrecedingNode,
-  findSuccessorStep,
-  RING
+  stabilizeStep
 } = require('./chord');
 
 // A 32-byte peer id (64 hex chars) whose top-8-byte nodeId is exactly `nid`.
@@ -112,13 +109,32 @@ test('fingers dedupes to O(log N) distinct nodes', (t) => {
   );
 });
 
-test('pinTargets unions successor-list, predecessor, and fingers', (t) => {
-  const ids = [makeId(1), makeId(2), makeId(4), makeId(8)];
+test('farFingers keeps only the farthest distinct fingers (long edges)', (t) => {
+  // me at 0, nodes on the powers of two: distinct fingers {1,2,4,8,16,32};
+  // the 3 FARTHEST (by clockwise distance) are 32, 16, 8.
+  const ids = [1, 2, 4, 8, 16, 32].map(makeId);
+  t.alike(
+    [...farFingers(ids, makeId(0), 3)].sort(),
+    [makeId(8), makeId(16), makeId(32)].sort(),
+    'near fingers (duplicating the successor-list) are dropped'
+  );
+  t.alike(
+    [...farFingers(ids, makeId(0), 99)].sort(),
+    ids.sort(),
+    'a generous cap keeps every distinct finger'
+  );
+});
+
+test('pinTargets = successor-list ∪ predecessor ∪ capped far fingers', (t) => {
+  // me at 0, nodes on the powers of two up to 32; k=2.
+  const ids = [1, 2, 4, 8, 16, 32].map(makeId);
   const targets = pinTargets(ids, makeId(0), 2);
-  // successors {1,2}, predecessor {8} (highest wraps to me's predecessor), fingers {1,2,4,8}
+  // successors {1,2}; predecessor {32} (highest wraps around);
+  // far fingers (cap 3, farthest first) {32,16,8} — near fingers 1,2,4 dropped.
   t.alike(
     [...targets].sort(),
-    [makeId(1), makeId(2), makeId(4), makeId(8)].sort()
+    [makeId(1), makeId(2), makeId(8), makeId(16), makeId(32)].sort(),
+    'constant pin budget: k + predecessor + far fingers'
   );
 });
 
@@ -158,144 +174,4 @@ test('stabilizeStep adopts a successor discovered between me and my successor', 
     makeId(20),
     'no current successor -> take it'
   );
-});
-
-// --- distributed findSuccessor routing (§4.5) -------------------------------
-
-test('inHalfOpenInterval includes the upper end and wraps', (t) => {
-  t.ok(inHalfOpenInterval(40n, 10n, 40n), 'includes b');
-  t.absent(inHalfOpenInterval(10n, 10n, 40n), 'excludes a');
-  t.ok(inHalfOpenInterval(20n, 10n, 40n), 'inside');
-  t.ok(inHalfOpenInterval(5n, 40n, 10n), 'wraps: 5 in (40,10]');
-  t.ok(inHalfOpenInterval(99n, 7n, 7n), 'a===b is the whole ring');
-});
-
-test('closestPrecedingNode picks the highest known id below the target', (t) => {
-  t.is(
-    closestPrecedingNode([makeId(10), makeId(20), makeId(30)], makeId(0), 35n),
-    makeId(30)
-  );
-  t.is(
-    closestPrecedingNode([makeId(10), makeId(20), makeId(30)], makeId(0), 25n),
-    makeId(20)
-  );
-  t.is(
-    closestPrecedingNode([makeId(10)], makeId(0), 5n),
-    null,
-    'nothing precedes the target'
-  );
-});
-
-test('findSuccessorStep resolves locally in (me, successor], else forwards', (t) => {
-  const at = {
-    me: makeId(10),
-    successor: makeId(20),
-    known: [makeId(20), makeId(40), makeId(80)]
-  };
-  t.alike(findSuccessorStep({ ...at, target: 15n }), {
-    done: true,
-    successor: makeId(20)
-  });
-  t.alike(
-    findSuccessorStep({ ...at, target: 20n }),
-    { done: true, successor: makeId(20) },
-    'inclusive'
-  );
-  t.alike(
-    findSuccessorStep({ ...at, target: 50n }),
-    { done: false, next: makeId(40) },
-    'jump to 40'
-  );
-});
-
-// Simulated Chord network: N nodes, each knowing ONLY its finger table + successor (not
-// the whole ring). Walk a lookup hop-to-hop using each node's local knowledge and assert
-// it still resolves to the globally-correct successor — this is the convergence-under-
-// partial-knowledge property that a local findSuccessor can't guarantee.
-function makeIdFromNid(nid) {
-  return nid.toString(16).padStart(16, '0') + '0'.repeat(48);
-}
-function chordIds(count) {
-  const ids = [];
-  let nid = 0n;
-  for (let i = 0; i < count; i++) {
-    nid = (nid + 0x9e3779b97f4a7c15n) % RING; // Fibonacci hashing spreads ids across the ring
-    ids.push(makeIdFromNid(nid));
-  }
-  return ids;
-}
-function buildNet(ids, withFingers = true) {
-  const net = new Map();
-  for (const id of ids) {
-    const succ = successors(ids, id, 1)[0];
-    const known = withFingers ? [...fingers(ids, id)] : [];
-    if (succ && !known.includes(succ)) {
-      known.push(succ);
-    }
-    net.set(id, { successor: succ, known });
-  }
-  return net;
-}
-function route(net, origin, target) {
-  let at = origin;
-  let hops = 0;
-  while (hops <= 1000) {
-    const node = net.get(at);
-    const step = findSuccessorStep({
-      me: at,
-      successor: node.successor,
-      known: node.known,
-      target
-    });
-    if (step.done) {
-      return { successor: step.successor, hops };
-    }
-    at = step.next;
-    hops++;
-  }
-  throw new Error('routing did not converge');
-}
-function spreadTargets(count) {
-  const out = [];
-  let nid = 12345n;
-  for (let i = 0; i < count; i++) {
-    nid = (nid + 0x9e3779b97f4a7c15n) % RING;
-    out.push(nid);
-  }
-  return out;
-}
-
-test('distributed findSuccessor resolves correctly in O(log N) hops (partial knowledge)', (t) => {
-  const ids = chordIds(64);
-  const net = buildNet(ids, true);
-  const targets = spreadTargets(40);
-  let maxHops = 0;
-  for (let originIdx = 0; originIdx < ids.length; originIdx += 5) {
-    for (const target of targets) {
-      const got = route(net, ids[originIdx], target);
-      t.is(
-        got.successor,
-        findSuccessor(ids, target),
-        'matches the global truth'
-      );
-      if (got.hops > maxHops) {
-        maxHops = got.hops;
-      }
-    }
-  }
-  t.ok(maxHops >= 2, `actually multi-hops (max ${maxHops})`);
-  t.ok(maxHops <= 12, `converges in <= 2·log2(64) = 12 hops (max ${maxHops})`);
-});
-
-test('routing stays correct with successor pointers only (degrades, never wrong)', (t) => {
-  const ids = chordIds(30);
-  const net = buildNet(ids, false); // no fingers — successor only => linear walk
-  for (let originIdx = 0; originIdx < ids.length; originIdx += 4) {
-    for (const target of spreadTargets(6)) {
-      t.is(
-        route(net, ids[originIdx], target).successor,
-        findSuccessor(ids, target)
-      );
-    }
-  }
 });

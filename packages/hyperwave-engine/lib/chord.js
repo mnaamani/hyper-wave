@@ -203,24 +203,6 @@ function inOpenInterval(x, a, b) {
 }
 
 /**
- * x ∈ (a, b] on the mod-2^64 ring (half-open, includes the upper end). a === b is the
- * whole ring (single-node case). Used for Chord's "target ∈ (me, successor]" test.
- * @param {bigint} x - the nodeId to test.
- * @param {bigint} a - the exclusive lower bound of the interval.
- * @param {bigint} b - the inclusive upper bound of the interval.
- * @returns {boolean} true if x ∈ (a, b] clockwise.
- */
-function inHalfOpenInterval(x, a, b) {
-  if (a === b) {
-    return true;
-  }
-  if (a < b) {
-    return x > a && x <= b;
-  }
-  return x > a || x <= b;
-}
-
-/**
  * Clockwise ring distance from a to b (mod 2^64).
  * @param {bigint} a - the starting nodeId.
  * @param {bigint} b - the target nodeId.
@@ -228,67 +210,6 @@ function inHalfOpenInterval(x, a, b) {
  */
 function ringForward(a, b) {
   return (b - a + RING) % RING;
-}
-
-/**
- * Chord's closest_preceding_node: among the ids I know (fingers + successors), the one
- * whose nodeId lies in the open interval (me, target) and is *closest* to target — the
- * finger to forward a lookup for `target` to, so each hop jumps as far as possible
- * without overshooting.
- * @param {(string[]|Set<string>)} known - the hex peer ids I know (fingers + successors).
- * @param {string} myId - my hex peer id.
- * @param {bigint} target - the keyspace position being looked up.
- * @returns {(string|null)} the closest preceding node's hex id, or null if none precedes target.
- */
-function closestPrecedingNode(known, myId, target) {
-  const myNid = nodeIdOfHex(myId);
-  let best = null;
-  let bestFwd = -1n;
-  for (const id of known) {
-    if (id === myId) {
-      continue;
-    }
-    const nid = nodeIdOfHex(id);
-    if (!inOpenInterval(nid, myNid, target)) {
-      continue;
-    }
-    const fwd = ringForward(myNid, nid);
-    if (fwd > bestFwd) {
-      best = id;
-      bestFwd = fwd;
-    }
-  }
-  return best;
-}
-
-/**
- * One hop of Chord's DISTRIBUTED findSuccessor (§4.5), evaluated over MY local knowledge
- * only — this is what lets a lookup resolve correctly when no single node knows the whole
- * ring.
- *   - target ∈ (me, successor]  → the answer is my successor: { done: true, successor }
- *   - otherwise                 → forward to my closest preceding finger: { done: false, next }
- *   - no finger precedes target → my successor is the best answer: { done: true, successor }
- * Applied hop-to-hop (each node using its own `known`), this converges to the true
- * successor in O(log N) hops with a full finger table, or degrades to a correct linear
- * walk along successors if a node only knows its successor.
- * @param {Object} opts The lookup step inputs, over MY local knowledge.
- * @param {string} opts.me - my hex peer id.
- * @param {(string|null)} opts.successor - my successor's hex id, or null if I have none.
- * @param {(string[]|Set<string>)} opts.known - my finger + successor hex ids.
- * @param {bigint} opts.target - the keyspace position whose successor we're locating.
- * @returns {FindSuccessorStepResult} whether we're done (with the answer) or must forward to `next`.
- */
-function findSuccessorStep({ me, successor, known, target }) {
-  const myNid = nodeIdOfHex(me);
-  const succNid = successor !== null ? nodeIdOfHex(successor) : myNid;
-  if (inHalfOpenInterval(target, myNid, succNid)) {
-    return { done: true, successor };
-  }
-  const next = closestPrecedingNode(known, me, target);
-  if (next === null) {
-    return { done: true, successor };
-  }
-  return { done: false, next };
 }
 
 /**
@@ -313,10 +234,39 @@ function stabilizeStep(myId, currentSuccId, succPredId) {
   return inOpenInterval(candidateNid, me, succNid) ? succPredId : currentSuccId;
 }
 
+// How many far fingers to pin. The sweep's control plane only needs a CONNECTED flood
+// graph with small diameter, not Chord-precise routing — and the near fingers mostly
+// duplicate the successor-list anyway. A few long edges (~half-ring, ~quarter-ring,
+// ~eighth-ring) give near-logarithmic flood diameter at a constant pin budget
+// (small-world), instead of the full O(log N) finger table.
+const FAR_FINGERS = 3;
+
 /**
- * The full set of peers to keep physically connected (Phase 3): successor-list +
- * predecessor (for the token walk / fault tolerance) unioned with the finger table
- * (for O(log N) ring-spanning reachability). This is what wave.js joinPeer()s.
+ * The farthest `cap` distinct fingers — the long-range edges. Fingers are ordered by
+ * clockwise ring distance from me (descending) and the top `cap` kept.
+ * @param {string[]} ids - the other known hex peer ids.
+ * @param {string} myId - my hex peer id.
+ * @param {number} [cap=FAR_FINGERS] - how many far fingers to keep.
+ * @returns {Set<string>} the capped far-finger ids.
+ */
+function farFingers(ids, myId, cap = FAR_FINGERS) {
+  const myNid = nodeIdOfHex(myId);
+  const byDistanceDesc = [...fingers(ids, myId)].sort((a, b) => {
+    const distA = ringForward(myNid, nodeIdOfHex(a));
+    const distB = ringForward(myNid, nodeIdOfHex(b));
+    if (distA === distB) {
+      return a < b ? -1 : 1;
+    }
+    return distA > distB ? -1 : 1;
+  });
+  return new Set(byDistanceDesc.slice(0, cap));
+}
+
+/**
+ * The full set of peers to keep physically connected: successor-list + predecessor
+ * (local ring integrity / fault tolerance) unioned with the capped FAR fingers (the
+ * long-range edges that keep the flood diameter small). This is what wave.js
+ * joinPeer()s — a constant pin budget (~k + 1 + FAR_FINGERS).
  * @param {string[]} ids - the other known hex peer ids.
  * @param {string} myId - my hex peer id.
  * @param {number} [k=3] - the successor-list size.
@@ -324,7 +274,7 @@ function stabilizeStep(myId, currentSuccId, succPredId) {
  */
 function pinTargets(ids, myId, k = 3) {
   const set = connectionTargets(ids, myId, k);
-  for (const finger of fingers(ids, myId)) {
+  for (const finger of farFingers(ids, myId)) {
     set.add(finger);
   }
   return set;
@@ -332,6 +282,7 @@ function pinTargets(ids, myId, k = 3) {
 
 module.exports = {
   RING,
+  FAR_FINGERS,
   nodeId,
   nodeIdOfHex,
   ringOrder,
@@ -340,11 +291,9 @@ module.exports = {
   connectionTargets,
   findSuccessor,
   fingers,
+  farFingers,
   pinTargets,
   inOpenInterval,
   stabilizeStep,
-  inHalfOpenInterval,
-  ringForward,
-  closestPrecedingNode,
-  findSuccessorStep
+  ringForward
 };

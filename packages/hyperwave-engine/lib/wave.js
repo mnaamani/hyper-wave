@@ -1,10 +1,9 @@
 // HyperWave orchestrator — the composition root. Wires the transport (Hyperswarm +
 // Protomux gossip) to the pure domains — ring geometry (ring.js), Chord topology
 // (chord.js), attestation crypto (attest.js), gallery ordering (gallery.js), sweep slot
-// math (sweep.js) — and composes the
-// stateful machines: PeerTable (seats/channels/pins), ChordRouting (distributed
-// findSuccessor), Flood (gossip dedup), SelfiePipeline (stage+slot pairing), and
-// GallerySession (per-wave Autobase + writer admission). What remains here is the wave
+// math (sweep.js) — and composes the stateful machines: PeerTable (seats/channels/pins),
+// Flood (gossip dedup), SelfiePipeline (stage+slot pairing), and GallerySession
+// (per-wave Autobase + writer admission). What remains here is the wave
 // lifecycle FSM, the deterministic sweep, and the gossip dispatch that binds them.
 // The payment layer (wallet.js, WDK) is injected by the worker via setWallet(): wallet
 // address (for gallery tips) + the on-chain burn verifier (the paid-wave anti-spam gate).
@@ -28,7 +27,6 @@ const {
   predecessor,
   stabilizeStep
 } = require('./chord');
-const { ChordRouting } = require('./chord-routing');
 const { Flood } = require('./flood');
 const { GallerySession } = require('./gallery-session');
 const { PeerTable } = require('./peer-table');
@@ -83,8 +81,9 @@ const SELF_ID_FIELD = {
   // is a third party; its admission credential is authenticated by the carried join
   // signature (attest.js verifyJoin), not the connection.
 };
-// Cap on remembered message ids (flood dedup). Cleared wholesale when exceeded — a
-// straggling duplicate might then re-flood once, which is harmless and very rare.
+// Cap on remembered message ids (flood dedup); the oldest ids are evicted first
+// (flood.js), so a straggling duplicate of a very old message might re-flood once —
+// harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096;
 // How long the initiator waits for its kick-off burn to confirm + announce before aborting
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
@@ -198,7 +197,6 @@ function loadOrCreateSwarmSeed(
  * @property {(address: string|null, verifier?: Function) => void} setWallet Wire the payment layer (address + on-chain burn verifier).
  * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed kick-off proof and announce.
  * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket).
- * @property {(target: bigint) => Promise<string|null>} findSuccessor Distributed Chord lookup for a keyspace target.
  * @property {() => Promise<void>} close Tear down timers, swarm, galleries, and the store.
  */
 
@@ -289,7 +287,6 @@ function createWave({
   let sweepTimers = []; // my-slot + ball-position timers for the running sweep
   let tHeartbeat = null; // heartbeat timer (self-rescheduling, see the timers section)
   let tRing = null; // ring-maintenance timer
-  let tRepair = null; // Chord successor-repair timer
 
   // Selfie is captured up-front during the lobby (renderer stages it into the pipeline),
   // then posted to the gallery when my sweep slot fires. The pipeline (selfie.js) owns
@@ -299,17 +296,6 @@ function createWave({
     canSelfie: () => canSelfieNow(),
     currentWaveId: () => (wave ? wave.id : null),
     post: (entry) => session.postSelfie(entry)
-  });
-
-  // Distributed findSuccessor routing (chord-routing.js) — the Chord control plane over the
-  // gossip mesh: join-time self-placement, periodic successor repair, and the find-succ RPC.
-  // `trySend`/`maintainNeighbours` are function declarations below (hoisted), safe to pass here.
-  const chord = new ChordRouting({
-    me,
-    table,
-    trySend,
-    maintainNeighbours,
-    log
   });
 
   // --- ring / peer table -----------------------------------------------------
@@ -367,8 +353,7 @@ function createWave({
     const cand = new Set([
       ...discoveredIds(),
       ...table.senderIds(),
-      ...table.peerIds(),
-      ...chord.pinCandidates()
+      ...table.peerIds()
     ]);
     cand.delete(me.id);
     const targets = pinTargets([...cand], me.id, K_SUCCESSORS);
@@ -434,7 +419,7 @@ function createWave({
 
   /**
    * Central inbound-gossip dispatcher: identity-binds, floods relayable control messages,
-   * then routes each message kind to its handler (token, wave-*, find-succ, pointers…).
+   * then routes each message kind to its handler (wave-*, pointers…).
    * @param {Object} msg Parsed gossip message (has a `kind`).
    * @param {string} fromId Hex id of the Noise-authenticated connection it arrived on.
    */
@@ -453,14 +438,6 @@ function createWave({
         return; // already seen -> drop (stops loops)
       }
       relayFlood(msg, fromId);
-    }
-    if (msg.kind === 'find-succ') {
-      chord.handleFindSucc(msg, fromId);
-      return;
-    }
-    if (msg.kind === 'find-succ-reply') {
-      chord.handleFindSuccReply(msg);
-      return;
     }
     if (msg.kind === 'wave-sync') {
       // a peer told us the wave state when we joined mid-lobby / mid-race
@@ -662,29 +639,10 @@ function createWave({
     }
   }
 
-  /**
-   * Send a message to one specific peer if we have a direct channel to it.
-   * @param {string} id Target peer hex id.
-   * @param {Object} obj The gossip message to send.
-   * @returns {boolean} True if it was sent, false if there's no channel (or the send threw).
-   */
-  function trySend(id, obj) {
-    const send = table.send(id);
-    if (!send) {
-      return false;
-    }
-    try {
-      send(JSON.stringify(obj));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  // Send only to our pinned ring neighbours (successor-list + predecessor + fingers).
-  // Used for the slimmed membership gossip (the pointers heartbeat) — O(k + log N)
-  // fanout instead of hitting every connection. wave-* fanout stays on broadcast() (the
-  // visual ball / roster still need broad reach) pending the Phase-5 sweep decision.
+  // Send only to our pinned ring neighbours (successor-list + predecessor + far
+  // fingers). Used for the slimmed membership gossip (the pointers heartbeat) —
+  // constant fanout instead of hitting every connection. wave-* fanout stays on
+  // broadcast() + flood relay (roster/lifecycle need full reach).
   /**
    * @param {Object} obj The gossip message to send only to pinned ring neighbours.
    */
@@ -1309,7 +1267,6 @@ function createWave({
 
     const send = (str) => message.send(str);
     table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
-    chord.scheduleBootstrap(); // first connection -> place myself in the ring via findSuccessor
 
     // greet: my compact pointers (Phase 4 — no O(N) snapshot; carries liveness +
     // country too). The newcomer converges via DHT discovery (swarm.peers) +
@@ -1339,10 +1296,7 @@ function createWave({
 
     conn.on('close', () => {
       // authoritative disconnect: drop the channel + seat, start the churn cooldown
-      const { solo, wasPinned } = table.onDisconnect(id);
-      if (solo) {
-        chord.markSolo(); // went solo -> re-bootstrap on reconnect
-      }
+      const { wasPinned } = table.onDisconnect(id);
       log('peer disconnected', shortId(id));
       // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
       // promotes the next successor-list entry and repairs fingers without waiting
@@ -1398,15 +1352,6 @@ function createWave({
   }
   tRing = setTimeout(ringTick, RINGUPDATE_MS);
 
-  // Chord repair via distributed findSuccessor — correct a successor pointer my local
-  // (possibly partial) view missed. Slow cadence; a no-op when local knowledge suffices.
-  /** Chord successor-repair tick: run one distributed findSuccessor repair, then re-arm. */
-  function repairTick() {
-    chord.repairSuccessor().catch(() => {});
-    tRepair = setTimeout(repairTick, RINGUPDATE_MS * 4);
-  }
-  tRepair = setTimeout(repairTick, RINGUPDATE_MS * 4);
-
   return {
     me,
     startWave,
@@ -1424,19 +1369,14 @@ function createWave({
     },
     announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
     recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)
-    // Distributed Chord lookup: the true successor of a peer id's ring position (or a
-    // raw BigInt keyspace target). Resolves to a peer id, or null. (§4.5)
-    findSuccessor: (target) => chord.findSuccessor(target),
     async close() {
       clearTimeout(tHeartbeat);
       clearTimeout(tRing);
-      clearTimeout(tRepair);
       clearTimeout(lobbyTimer);
       clearTimeout(waveTimer);
       for (const timer of sweepTimers) {
         clearTimeout(timer);
       }
-      chord.close();
       await swarm.destroy();
       await session.close();
       await store.close();

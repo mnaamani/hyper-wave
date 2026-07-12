@@ -12,7 +12,6 @@
 const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
-const { nodeIdOfHex, RING } = require('../lib/chord.js');
 const {
   FEE_TRX,
   payFee,
@@ -169,19 +168,6 @@ async function joinAndBurn() {
   } catch (err) {
     console.log(`[${name}] join burn FAIL`, err.message);
   }
-}
-
-// env PROBE=1 -> after peers converge, exercise the distributed findSuccessor RPC by
-// looking up the successor of the position just after me (my true successor).
-if (env.PROBE) {
-  setTimeout(async () => {
-    const succ = await wave.findSuccessor(
-      (nodeIdOfHex(wave.me.id) + 1n) % RING
-    );
-    console.log(
-      `[${name}] FINDSUCC my-successor = ${succ ? succ.slice(0, 8) : 'null'}`
-    );
-  }, 8000);
 }
 
 // env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).

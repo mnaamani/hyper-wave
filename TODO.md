@@ -47,6 +47,26 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 - [x] Gallery over a partial mesh: transitive replication proven (line topology, no swarm);
       the wave **initiator** retains its own wave's gallery (per-wave persistence — no peer
       roles, no dedicated archivist hub)
+- [x] **Batch gallery admission at lobby close** (sweep Phase 1): `wave-join` carries the
+      joiner's writer key + signed **join attestation** (`attest.js signJoin`) + burn; the
+      initiator validates and batch-appends every `add-writer` op (`admitRoster`) before
+      `wave-start` — admission rides the bootstrap core sync everyone needs anyway. The
+      reactive `add-writer` flood + retry storm + `apply()`'s receipt gate are deleted
+      (the write-gate is now the join attestation). Killed the two measured 128-peer scale
+      failures: the O(N) mid-race admission funnel and the fresh-`mid` re-flood storm.
+- [x] **The deterministic sweep replaces the token walk** (sweep Phases 2+3):
+      `wave-start` carries `t0` + `lapMs`; every roster peer derives the identical
+      angle-ordered schedule (`sweep.js`) and self-triggers at its own slot; the ball is
+      rendered from the schedule (no `wave-pos`); the wave ends deterministically at
+      `t0 + lapMs + grace` on every peer (no `wave-end`). Deleted: token race, healing,
+      receipts + chain accumulator (`token.js` → `attest.js`), `pickReachable`. Wire
+      protocol 10 → 7 message kinds; wall-clock is a chosen constant regardless of N; a
+      live roster member can no longer be silently skipped.
+- [x] **Topology diet for the sweep** (sweep Phase 4): deleted `chord-routing.js` (the
+      distributed `find-succ` RPC/placement/repair — successor _precision_ is unneeded;
+      only flood connectivity matters); `pinTargets` now pins successor-list (k=3) +
+      predecessor + the **capped far fingers** (`FAR_FINGERS`=3 longest edges) → constant
+      pin budget ≈7; flood dedup evicts **oldest-first** instead of wholesale-clearing.
 
 ### Payment layer (WDK, Tron Nile testnet, native TRX) — burned fees + tips, no rewards
 
@@ -118,12 +138,10 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       `E2E_DUMP=<dir>` (write each peer's full log on a failed run). CI's two e2e steps still
       carry a temporary `continue-on-error` — drop it after a few green runs.
 
-### Propagation at extreme scale (Phase 5 — decision deferred)
+### Propagation at extreme scale (Phase 5 — DECIDED: the sweep is built)
 
-Serial token is O(N) in per-hop network round-trips — many seconds at N=10k. The designed alternative is the
-**deterministic angular sweep** (each peer self-triggers from `(startTime, speed)`;
-independent per-seat proofs). Decision deliberately parked — the serial token is the product
-for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
+The deterministic angular sweep replaced the serial token entirely (see the Done
+section above and `docs/scalable-topology.md` §3B). Remaining scale work:
 
 - [ ] **Roster field scales O(N) — `wave-start`/`wave-sync` get huge for large waves.** The
       `roster` is a JSON array of full 64-char hex peer ids, carried in the **flooded** `wave-start`
@@ -317,29 +335,22 @@ for now (small/medium waves). See `docs/scalable-topology.md` §3B/§8.
 
 ### Remaining hardening (scalable-topology §8)
 
-- [ ] **Capped far-finger set (constant pin budget).** Replace the full O(log N)
-      finger table in `pinTargets` (`chord.js`) with only the 2–3 _farthest_
-      fingers (~half-ring, ~quarter-ring, ~eighth) → constant pins:
-      successor-list (k=3) + predecessor + 2–3 long edges ≈ 7. The token only
-      ever hops to the successor; fingers exist for the control plane, and the
-      far ones do that work — small-world long edges keep the flood diameter
-      near-logarithmic and `find-succ` sub-linear, while the near fingers
-      mostly duplicate the successor-list. Add the cap as a named constant
-      beside `K_SUCCESSORS` (`wave.js`). Validate reach/diameter with the
-      `flood` harness at target N before switching. Related caveats: the
-      "never unpin a live channel" rule in `maintainNeighbours` folds all of
-      `senderIds()` back into the pin set, so pins still ratchet toward every
-      live connection — a truly bounded neighbour count needs hysteresis
-      there, not just fewer fingers; and Hyperswarm explicit pins bypass
-      `maxPeers` while shrinking the topic-dial budget (÷4 at ≥4 explicit
-      peers), so a low `maxPeers` makes the pinned graph ≈ the whole topology.
-- [ ] Validate Chord convergence under real large-N churn (can't force a partial mesh
-      locally; needs a real >mesh-limit deployment)
-- [ ] Clean seam switch: forward via `successor-list[0]` instead of full-ring
-      `nextClockwise` (works today via pin coupling; unverified at partial-neighbourhood scale)
-- [ ] `add-writer` admission across a partial mesh (currently one-hop; fine while the
-      wave initiator is well-connected)
+- [ ] **Bounded neighbour count needs unpin hysteresis.** The capped far-finger set is
+      built (Done above), but the "never unpin a live channel" rule in
+      `maintainNeighbours` still folds all of `senderIds()` back into the pin set, so
+      pins ratchet toward every live connection. A truly bounded count needs a grace
+      period / hysteresis on unpinning instead of never-unpin. Related: Hyperswarm
+      explicit pins bypass `maxPeers` while shrinking the topic-dial budget (÷4 at ≥4
+      explicit peers), so a low `maxPeers` makes the pinned graph ≈ the whole topology.
+- [ ] Validate flood reach + pinned-ring convergence under real large-N churn (can't
+      force a partial mesh locally; needs a real >mesh-limit deployment). Includes
+      re-running the 128-peer public-DHT dispatch on the sweep (expect: no admission
+      timeouts, no skipped-live-peer losses, roster-exact convergence).
 - [ ] Measure gallery replication lag at depth
+- [ ] **Late/reactive admission fallback (deliberately dropped).** A peer whose join
+      misses the lobby window is a spectator — the reactive `add-writer` path was
+      deleted with the sweep. Re-add a (backoff-limited) flooded admission request only
+      if late posting turns out to matter for the product.
 
 ### Demo polish / wow factor
 
