@@ -153,19 +153,6 @@ function successorOf(ring, target) {
 }
 
 /**
- * Public findSuccessor: the id of the first node clockwise from keyspace position
- * `target`. Used to build the finger table; also the lookup primitive for placing
- * where a token starts / where a joining node inserts (§4.5).
- * @param {string[]} ids - the known hex peer ids to search.
- * @param {bigint} target - the keyspace position to locate the successor of.
- * @returns {(string|null)} the successor's hex id, or null if no ids.
- */
-function findSuccessor(ids, target) {
-  const node = successorOf(ringOrder(ids), target);
-  return node ? node.id : null;
-}
-
-/**
  * Chord finger table (§4.3): finger[i] = successor of (myNid + 2^i) mod 2^64, for
  * i in 0..63. Returns the DISTINCT finger node ids (excluding me). For a ring of N
  * nodes the distinct fingers collapse to O(log N) — the whole point: deliberate
@@ -188,21 +175,6 @@ function fingers(ids, myId) {
 }
 
 /**
- * Is nodeId `x` strictly inside the open ring interval (a, b), moving clockwise
- * (mod 2^64)? When a >= b the interval wraps past the top of the ring.
- * @param {bigint} x - the nodeId to test.
- * @param {bigint} a - the exclusive lower bound of the interval.
- * @param {bigint} b - the exclusive upper bound of the interval.
- * @returns {boolean} true if x ∈ (a, b) clockwise.
- */
-function inOpenInterval(x, a, b) {
-  if (a < b) {
-    return x > a && x < b;
-  }
-  return x > a || x < b;
-}
-
-/**
  * Clockwise ring distance from a to b (mod 2^64).
  * @param {bigint} a - the starting nodeId.
  * @param {bigint} b - the target nodeId.
@@ -210,28 +182,6 @@ function inOpenInterval(x, a, b) {
  */
 function ringForward(a, b) {
   return (b - a + RING) % RING;
-}
-
-/**
- * One Chord stabilize step (§4.4): my successor's predecessor `succPredId` becomes my
- * successor if it sits strictly between me and my current successor — that means a
- * node joined (or was discovered) between us.
- * @param {string} myId - my hex peer id.
- * @param {(string|null)} currentSuccId - my current successor's hex id, or null if none.
- * @param {(string|null)} succPredId - my successor's reported predecessor hex id, or null.
- * @returns {(string|null)} the id to use as successor (`succPredId` if closer, else the unchanged current).
- */
-function stabilizeStep(myId, currentSuccId, succPredId) {
-  if (!succPredId || succPredId === myId || succPredId === currentSuccId) {
-    return currentSuccId;
-  }
-  if (!currentSuccId) {
-    return succPredId;
-  }
-  const me = nodeIdOfHex(myId);
-  const succNid = nodeIdOfHex(currentSuccId);
-  const candidateNid = nodeIdOfHex(succPredId);
-  return inOpenInterval(candidateNid, me, succNid) ? succPredId : currentSuccId;
 }
 
 // How many far fingers to pin. The sweep's control plane only needs a CONNECTED flood
@@ -289,11 +239,8 @@ module.exports = {
   successors,
   predecessor,
   connectionTargets,
-  findSuccessor,
   fingers,
   farFingers,
   pinTargets,
-  inOpenInterval,
-  stabilizeStep,
   ringForward
 };

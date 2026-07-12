@@ -21,12 +21,7 @@ const fs = require('bare-fs');
 
 const { angleOf, angleOfId, nextClockwise } = require('./ring');
 const { sweepSchedule, mySlot } = require('./sweep');
-const {
-  pinTargets,
-  successors,
-  predecessor,
-  stabilizeStep
-} = require('./chord');
+const { pinTargets } = require('./chord');
 const { Flood } = require('./flood');
 const { GallerySession } = require('./gallery-session');
 const { PeerTable } = require('./peer-table');
@@ -40,7 +35,7 @@ const {
 } = require('./attest');
 
 const MATCH = 'hyperwave:demo-match:v1';
-const HEARTBEAT_MS = 2000; // pointers-heartbeat cadence (liveness + Chord pointer exchange)
+const HEARTBEAT_MS = 2000; // heartbeat cadence (liveness + country)
 const RINGUPDATE_MS = 4000; // re-pin + gallery-pull maintenance cadence
 const PEER_STALE_MS = 12000; // a peer whose last heartbeat is older than this is stale (dropped)
 // Lobby: after "kick off", the wave is announced and peers get this long to opt in
@@ -76,7 +71,7 @@ const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start']);
 // so their `by`/`peerId` is a third party at relay hops — those are authenticated by their
 // carried signatures (kick-off burn-proof, receipts) instead, not by the connection.
 const SELF_ID_FIELD = {
-  pointers: 'id' // the heartbeat sender
+  heartbeat: 'id' // the heartbeat sender
   // NB: wave-join is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its `peerId`
   // is a third party; its admission credential is authenticated by the carried join
   // signature (attest.js verifyJoin), not the connection.
@@ -390,7 +385,7 @@ function createWave({
   }
 
   /**
-   * Set the nation this peer supports; rides the pointers heartbeat + selfie entries (cosmetic).
+   * Set the nation this peer supports; rides the heartbeat + selfie entries (cosmetic).
    * @param {string} code Supported-nation code (falsy clears it).
    */
   function setCountry(code) {
@@ -398,28 +393,22 @@ function createWave({
     emit();
   }
 
-  // Phase 4 (scalable-topology.md §4.6): the compact pointer advertisement that
-  // replaces the O(N) `peers` snapshot. Each peer tells its neighbours only its own
-  // successor-list + predecessor — O(k + log N), not O(N). Recipients learn the local
-  // ring structure around us (transitive discovery, bounded) and run one stabilize
-  // step. Primary membership still comes from DHT discovery (`swarm.peers`).
-  // Doubles as the liveness heartbeat (it refreshes lastSeen and carries country),
-  // so there is no separate `presence` message.
-  /** @returns {Object} A `pointers` gossip message: my id, country, successor-list, and predecessor. */
-  function myPointers() {
-    const ids = table.liveRing().map((peer) => peer.id);
+  // The heartbeat: pure liveness + country, sent to pinned neighbours. Membership
+  // comes from DHT discovery (`swarm.peers`) + direct connections; there is no pointer
+  // exchange — the sweep needs no successor precision, so peers don't gossip ring
+  // structure at all (the old succ/pred advert + stabilize step went with the token).
+  /** @returns {Object} A `heartbeat` gossip message: my id + country (pure liveness). */
+  function myHeartbeat() {
     return {
-      kind: 'pointers',
+      kind: 'heartbeat',
       id: me.id,
-      country: me.country,
-      succ: successors(ids, me.id, K_SUCCESSORS),
-      pred: predecessor(ids, me.id)
+      country: me.country
     };
   }
 
   /**
    * Central inbound-gossip dispatcher: identity-binds, floods relayable control messages,
-   * then routes each message kind to its handler (wave-*, pointers…).
+   * then routes each message kind to its handler (wave-*, heartbeat).
    * @param {Object} msg Parsed gossip message (has a `kind`).
    * @param {string} fromId Hex id of the Noise-authenticated connection it arrived on.
    */
@@ -555,44 +544,12 @@ function createWave({
       }
       return;
     }
-    if (msg.kind !== 'pointers') {
+    if (msg.kind !== 'heartbeat') {
       return;
     }
-    // sender is a live neighbour (direct channel); its advertised succ/pred are
-    // discovery hints, marked slightly stale so they age out unless independently
-    // refreshed. Skip a hint for a peer we just saw disconnect (the table's churn
-    // cooldown), so a third peer's advert can't resurrect a ghost seat.
-    const now = Date.now();
-    table.upsert(msg.id, now, msg.country);
-    const learned = now - Math.floor(PEER_STALE_MS / 2);
-    for (const id of [...(msg.succ || []), msg.pred]) {
-      if (id && !table.coolingDown(id, now)) {
-        table.upsert(id, learned);
-      }
-    }
-    stabilize(msg);
+    // sender is a live neighbour (direct channel): refresh its seat + country
+    table.upsert(msg.id, Date.now(), msg.country);
     emit();
-  }
-
-  // Chord stabilize (§4.4): if this pointer advert came from my current successor and
-  // its predecessor sits between us, that peer is my true successor — I've just
-  // upserted it, so re-pin now (nextClockwise over the ring adopts it automatically).
-  // My own periodic `pointers` advert is the reciprocal "notify" to my successor.
-  /**
-   * @param {Object} msg A `pointers` advert from a neighbour (carries its `id` + `pred`).
-   */
-  function stabilize(msg) {
-    if (!msg.pred) {
-      return;
-    }
-    const succ = nextClockwise(me.angle, table.liveRing());
-    if (!succ || succ.id !== msg.id) {
-      return;
-    }
-    if (stabilizeStep(me.id, succ.id, msg.pred) !== succ.id) {
-      log('stabilize: closer successor', shortId(msg.pred));
-      maintainNeighbours();
-    }
   }
 
   /**
@@ -640,9 +597,9 @@ function createWave({
   }
 
   // Send only to our pinned ring neighbours (successor-list + predecessor + far
-  // fingers). Used for the slimmed membership gossip (the pointers heartbeat) —
-  // constant fanout instead of hitting every connection. wave-* fanout stays on
-  // broadcast() + flood relay (roster/lifecycle need full reach).
+  // fingers). Used for the heartbeat — constant fanout instead of hitting every
+  // connection. wave-* fanout stays on broadcast() + flood relay (roster/lifecycle
+  // need full reach).
   /**
    * @param {Object} obj The gossip message to send only to pinned ring neighbours.
    */
@@ -1268,10 +1225,9 @@ function createWave({
     const send = (str) => message.send(str);
     table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
 
-    // greet: my compact pointers (Phase 4 — no O(N) snapshot; carries liveness +
-    // country too). The newcomer converges via DHT discovery (swarm.peers) +
-    // pointer exchange; at small N the mesh also upserts every peer directly on connect.
-    send(JSON.stringify(myPointers()));
+    // greet: my heartbeat (liveness + country), so the newcomer seats me immediately.
+    // Membership converges via DHT discovery (swarm.peers) + direct connections.
+    send(JSON.stringify(myHeartbeat()));
     // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
     // start a competing one (broadcasts they missed won't reach them otherwise)
     if (wave) {
@@ -1332,11 +1288,9 @@ function createWave({
   // --- timers ----------------------------------------------------------------
   // All periodic work is a self-rescheduling setTimeout (CLAUDE.md Code Style: no setInterval):
   // each tick re-arms itself as its last step, so a slow tick delays the next instead of stacking.
-  // The single heartbeat: pointers double as liveness (lastSeen refresh) and the slim
-  // Phase-4 pointer exchange, so there's no separate presence message to keep in step.
-  /** Heartbeat tick: broadcast my pointers to pinned neighbours, then re-arm. */
+  /** Heartbeat tick: broadcast my liveness to pinned neighbours, then re-arm. */
   function heartbeatTick() {
-    broadcastToNeighbours(myPointers());
+    broadcastToNeighbours(myHeartbeat());
     tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
   }
   tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);

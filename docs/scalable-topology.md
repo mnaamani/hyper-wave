@@ -1,6 +1,6 @@
 # HyperWave — Scalable Topology (design / plan)
 
-**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + capped far fingers via `joinPeer`; stabilize + churn cooldown + slim pointer-exchange gossip), **plus control-plane flooding** (lifecycle `wave-*` relayed with dedup, §4.6) and **the deterministic sweep** (§3B / Phase 5 — it **replaced** the serial token). The distributed `findSuccessor` routing (§4.5) was built, verified, and then **retired** along with the token walk. See §8 for remaining items. This is the design for making HyperWave scale
+**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + capped far fingers via `joinPeer`; churn cooldown + a liveness-only heartbeat — the stabilize/pointer exchange was later removed, §4.4), **plus control-plane flooding** (lifecycle `wave-*` relayed with dedup, §4.6) and **the deterministic sweep** (§3B / Phase 5 — it **replaced** the serial token). The distributed `findSuccessor` routing (§4.5) was built, verified, and then **retired** along with the token walk. See §8 for remaining items. This is the design for making HyperWave scale
 from a handful of peers to a large, global swarm by aligning our logical ring with the
 physical Hyperswarm connection graph — the "make the ring drive connections" idea.
 
@@ -74,8 +74,8 @@ headroom without BigInt-heavy math getting silly; revisit if collisions matter a
 
 - Seed the peer set from **`swarm.peers`** (PeerInfo public keys on the topic) and refresh
   on `swarm.on('update')` — DHT discovery gives ring members before/without gossip.
-- Liveness + country ride the **`pointers` heartbeat** to neighbours (no separate presence
-  message). Drop the O(N) full `peers` snapshot (§4.6). (There is no `role` field — every peer
+- Liveness + country ride the **`heartbeat`** to pinned neighbours (no separate presence
+  message; it carries no ring structure — see §4.4). Drop the O(N) full `peers` snapshot (§4.6). (There is no `role` field — every peer
   is equal; see §4.7.)
 
 ### 4.3 Pointers & connections (the core change)
@@ -100,16 +100,18 @@ near-logarithmic. Pure ring-only pinning (no fingers) was considered and rejecte
 diameter degrades to O(N/k) hops and a contiguous run of k+1 failures cuts the flood graph
 — reintroducing exactly the fragility the fingers exist to remove.
 
-### 4.4 Stabilization (Chord)
+### 4.4 Stabilization — **removed (the sweep needs none)**
 
-- **stabilize** (periodic): ask successor for its predecessor `x`; if `x` is between me and
-  my successor, adopt `x` as successor; then notify the successor of me.
-- **fixFingers**: as built, the whole finger set is recomputed locally from known ids on
-  each topology refresh (pure `fingers(ids, myId)` inside `maintainNeighbours`) — that
-  recompute _is_ fixFingers; there is no per-tick single-finger `findSuccessor` lookup.
-- **checkPredecessor**: as built, covered by the connection-`close` path only — there is no
-  periodic predecessor probe (see §8).
-- **churn:** on a connection close, promote the next successor-list entry and re-stabilize.
+Chord's stabilize/notify protocol (and the succ/pred pointer advert that carried it) was
+built, then **removed with the token walk**: pointer _precision_ only mattered while a
+serial token had to find its true successor. As built now:
+
+- pins are recomputed on every topology refresh purely from **DHT discovery + live
+  connections** (`pinTargets` inside `maintainNeighbours`) — that recompute is the only
+  "fixFingers"-like step, and it needs no gossip;
+- the `heartbeat` carries **no ring structure** (liveness + country only);
+- **churn:** on a pinned connection's close, re-pin immediately (the next successor-list
+  entry and a recomputed far-finger set take over).
 
 ### 4.5 Routing / lookup — **retired (built, verified, then removed with the token)**
 
@@ -127,18 +129,17 @@ Then the **sweep replaced the token** (§3B), and successor precision stopped ma
 every peer computes its own slot from the flooded canonical roster, so nothing is ever
 routed to "the successor" at all. The control plane only needs a connected flood graph
 (§4.3/§4.6). So `chord-routing.js`, the `find-succ`/`find-succ-reply` messages, join-time
-self-placement, and the periodic successor repair were **deleted**. `chord.js` keeps the
-pointer math (ringOrder/successors/predecessor/stabilizeStep/fingers/farFingers) that
-drives pinning; local `pointers` stabilization (§4.4) keeps the successor-list/predecessor
-honest for topology maintenance and display.
+self-placement, and the periodic successor repair were **deleted**. `chord.js` keeps the pointer math
+(ringOrder/successors/predecessor/fingers/farFingers) that drives pinning purely from
+local knowledge (DHT discovery + live connections).
 
 ### 4.6 Gossip slimming & flooding
 
 Two changes, both implemented:
 
-- **Slim the membership plane.** Replace the O(N) `peers` snapshot with **pointer exchange**
-  (successor-list + predecessor), O(k + log N), sent only to neighbours; `pointers` doubles
-  as the liveness heartbeat (country rides it — no separate presence message).
+- **Slim the membership plane.** The O(N) `peers` snapshot became a pointer exchange,
+  which was then slimmed again to a bare **`heartbeat`** (id + country, O(1), to pinned
+  neighbours only) once the sweep removed the need for pointer precision (§4.4).
   Membership is DHT-discovered but **liveness-gated** — `swarm.peers` drives
   _who we dial_ (pinning), while a ring **seat** requires a real connection or direct gossip,
   so a stale announce can't become a ghost seat.
@@ -193,7 +194,7 @@ flowchart LR
     A1["Hyperswarm full mesh"] --> A2["liveRing = all live peers"] --> A3["neighbours = everyone"]
   end
   subgraph Next["scalable (as built)"]
-    B1["swarm.peers discovery + joinPeer pins"] --> B2["Chord pointers: successor-list, predecessor, far fingers"] --> B3["constant pin budget (~7)"]
+    B1["swarm.peers discovery + joinPeer pins"] --> B2["successor-list, predecessor, far fingers (local math)"] --> B3["constant pin budget (~7)"]
   end
   A3 --> Seam["connected flood graph"]
   B3 --> Seam
@@ -230,10 +231,12 @@ gallery cores replicating.
    refresh _is_ `fixFingers`. Brittle-tested in `chord.test.js`. The far-finger set spans
    the ring so flood reach no longer depends on the incidental mesh.
 4. **`stabilize` + churn handling + slim gossip** — remove the O(N) `peers` snapshot.
+   _(Historical: the pointer advert + stabilize step built here were themselves removed
+   after the sweep landed — the heartbeat is now liveness-only, §4.4.)_
    **✅ Done:** the O(N) `peers` snapshot is gone; membership is DHT-discovery-first
    (`swarm.peers`) plus a compact **`pointers`** advert (successor-list + predecessor,
    O(k + log N)) sent only to pinned neighbours — it doubles as the liveness heartbeat.
-   `chord.js` adds `inOpenInterval` + `stabilizeStep` (brittle-tested); a `pointers` from
+   `chord.js` added `inOpenInterval` + `stabilizeStep` (brittle-tested); a `pointers` from
    my current successor whose predecessor sits between us triggers an immediate re-pin
    (nextClockwise then adopts the closer successor). Churn: on a pinned-neighbour close we
    re-pin immediately (successor-list failover / finger repair), and a churn cooldown
@@ -250,8 +253,8 @@ gallery cores replicating.
 
 ## 7. Testing
 
-- **Pure unit tests (brittle):** `nodeId` from key; finger targets; `findSuccessor` over a
-  synthetic node set; one `stabilize` step; successor-list failover. Put Chord math in a
+- **Pure unit tests (brittle):** `nodeId` from key; finger targets + the far-finger cap;
+  successor-list/predecessor/pin targets. Put the ring math in a
   pure module (`packages/hyperwave-engine/lib/chord.js`) so it's unit-testable without a swarm.
 - **Partial-topology flood harness** (`flood.test.js`): drives the real per-node flood
   decision (`flood.js`) over synthetic graphs (line, ring, star, random partial mesh,
@@ -267,7 +270,7 @@ gallery cores replicating.
 - **Local DHT integration** (`dht-local.js` + the e2e harness): N processes; assert the ring
   converges, a wave's roster converges, every roster member's sweep slot fires, and the
   gallery replicates across the partial mesh.
-- **Churn:** kill a node mid-wave; assert successor-list failover + stabilize repair; the
+- **Churn:** kill a node mid-wave; assert re-pin failover; the
   sweep is unaffected (the dead peer's slot passes) and the wave still ends on time.
 
 ## 8. Remaining work / risks

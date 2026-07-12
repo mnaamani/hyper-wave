@@ -153,7 +153,7 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
     sweep.js         pure sweep slot math (sweepSchedule, mySlot): the identical angle-ordered
                      schedule every peer derives from the flooded (roster, t0, lapMs)
     chord.js         pure Chord pointer math (nodeId, successors, predecessor, fingers,
-                     farFingers, pinTargets, stabilizeStep)
+                     farFingers, pinTargets)
     flood.js         Flood class: gossip-flood dedup (firstSight, oldest-first eviction) for
                      relayed lifecycle messages
     peer-table.js    PeerTable class: seats/channels/pins/churn-cooldowns (angle always derived

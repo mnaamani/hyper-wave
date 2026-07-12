@@ -138,7 +138,7 @@ propagated differently to match what each needs:
 | Class                       | Messages                                   | Fanout                                     |
 | --------------------------- | ------------------------------------------ | ------------------------------------------ |
 | **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start` | every peer                                 |
-| **Neighbour-scoped**        | `pointers` (the heartbeat)                 | pinned ring neighbours (constant, §4)      |
+| **Neighbour-scoped**        | `heartbeat`                                | pinned ring neighbours (constant, §4)      |
 | **Unicast**                 | `wave-sync`                                | one specific peer (a newcomer, on connect) |
 
 **Flood (epidemic broadcast).** The wave _lifecycle_ messages must reach every seat, so they
@@ -165,11 +165,12 @@ catch-up path for a peer that joins after a flood has already passed.
 set on the topic) drives _which peers we dial_ (Chord pinning), not the visible ring — a DHT
 announcement alone is just "this key advertised the topic once", so a stale announce from a
 since-closed instance is never shown as a seat. A **seat requires real liveness**: a live
-connection or direct gossip. On top of that, a slim **pointer exchange** (`pointers`: each
-peer advertising only its own successor-list + predecessor, O(k)) propagates local
-ring structure, replacing the old O(N) full-table snapshot. `pointers` doubles as the
-liveness **heartbeat** (it refreshes `lastSeen` and carries `country`) — there is
-no separate presence message.
+connection or direct gossip. The only membership gossip is the **`heartbeat`** (a peer's
+own `id` + `country`, sent to its pinned neighbours every `HEARTBEAT_MS`): it refreshes
+`lastSeen` and carries the cosmetic country — nothing else. There is **no pointer
+exchange**: peers do not gossip ring structure (successor/predecessor adverts and the
+Chord stabilize step were removed with the token walk — the sweep needs no successor
+precision, so pins are recomputed purely from DHT discovery + live connections).
 
 The ring **drives connections** (Chord over Hyperswarm, see
 [`scalable-topology.md`](./scalable-topology.md)): each peer deliberately `swarm.joinPeer`s
@@ -188,12 +189,12 @@ trusted from the wire; `country` is a cosmetic ISO-3166-1 alpha-2 code (or null)
 
 Inputs that build the map:
 
-| Event                                                                            | Effect                                                                                                                              |
-| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source.                                                    |
-| connection **open**                                                              | `upsert(remoteId, now)`; lift any churn cooldown. A direct connection is authoritative liveness.                                    |
-| connection **close**                                                             | delete the peer; set a churn cooldown (`PEER_STALE_MS`) so DHT re-seeding can't immediately resurrect the dead peer.                |
-| `pointers { id, country, succ: [id…], pred: id }`                                | `upsert(id, now, country)` (the heartbeat); upsert each `succ`/`pred` id at `now − TTL/2` (discovery hint); run one stabilize step. |
+| Event                                                                            | Effect                                                                                                               |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **DHT discovery** (`swarm.peers`, refreshed on `swarm.on('update')` + each tick) | `upsert(id, now)` for every discovered PeerInfo — the primary membership source.                                     |
+| connection **open**                                                              | `upsert(remoteId, now)`; lift any churn cooldown. A direct connection is authoritative liveness.                     |
+| connection **close**                                                             | delete the peer; set a churn cooldown (`PEER_STALE_MS`) so DHT re-seeding can't immediately resurrect the dead peer. |
+| `heartbeat { id, country }`                                                      | `upsert(id, now, country)` — refresh the sender's seat + country.                                                    |
 
 ```
 upsert(id, lastSeen, country):
@@ -211,8 +212,8 @@ from the id.
 **Liveness, ring, successor.** A peer is **live** if `now − lastSeen < PEER_STALE_MS`. The **ring**
 is the live peers sorted by angle; the **successor** is the next live peer clockwise
 (§2.1). A direct disconnect removes a peer immediately (and cools it down against DHT
-re-seeding); the TTL only expires peers known _indirectly_ (a `pointers` discovery hint, or
-a `swarm.peers` entry that has since gone) once they stop being refreshed.
+re-seeding); the TTL only expires peers known _indirectly_ (a `swarm.peers` entry that has
+since gone) once they stop being refreshed.
 
 Note the peer map serves **topology and display**, not the sweep: the sweep's schedule is
 derived from the canonical roster flooded on `wave-start` (§6), so all peers agree on it even
@@ -222,7 +223,7 @@ if their live-ring views differ.
 flowchart LR
   Dht["swarm.peers (DHT discovery)"] --> U0["upsert id, now"]
   Conn["connection open"] --> U["upsert id, now"]
-  Ptr["pointers (heartbeat, succ/pred)"] --> U3["upsert sender now, country; hints at now minus TTL/2; stabilize"]
+  Ptr["heartbeat (id, country)"] --> U3["upsert sender now, country"]
   U0 --> M[("peer map")]
   U --> M
   U3 --> M
@@ -231,7 +232,7 @@ flowchart LR
   L --> S["successor = next clockwise"]
 ```
 
-On connect, a peer **greets** the newcomer with its `pointers` and — if a wave is active —
+On connect, a peer **greets** the newcomer with its `heartbeat` and — if a wave is active —
 a `wave-sync` (§7.4), so the newcomer's map _and_ wave state converge immediately.
 
 ## 5. Gossip message catalog
@@ -242,7 +243,7 @@ The protocol has exactly **five** message kinds, all JSON objects on the
 ### 5.0 Uniform message envelope (planned)
 
 > **Status: planned, not yet implemented.** The per-message schemas below document the wire
-> format **as built**, which is inconsistent: the author field is variously `id` (`pointers`),
+> format **as built**, which is inconsistent: the author field is variously `id` (`heartbeat`),
 > `by` (`wave-announce`/`wave-start`/`wave-sync`), or `peerId` (`wave-join`); only some
 > messages carry a signature; and there is no uniform per-message timestamp. The target is a
 > single envelope shared by **every** gossip message. Tracked in `TODO.md` (Adversarial
@@ -281,27 +282,23 @@ Every message will carry these three envelope fields in addition to its `kind` a
 
 Until implemented, treat the individual schemas below as authoritative.
 
-### pointers — to pinned neighbours, every `HEARTBEAT_MS`
+### heartbeat — to pinned neighbours, every `HEARTBEAT_MS`
 
 ```json
 {
-  "kind": "pointers",
+  "kind": "heartbeat",
   "id": "<peerId>",
-  "country": "BR" | null,
-  "succ": ["<peerId>", ...],
-  "pred": "<peerId>" | null
+  "country": "BR" | null
 }
 ```
 
-The heartbeat **and** the Chord pointer exchange in one message, sent only to pinned ring
-neighbours (successor-list + predecessor + far fingers), not every connection. Carries the
-sender's own pointers — successor-list (`succ`, ≤ `K_SUCCESSORS`) + predecessor (`pred`) —
-O(k), replacing the old O(N) full peer snapshot. Receiver upserts the sender
-(`lastSeen = now`, `country`) and each advertised id as a discovery hint (`lastSeen = now −
-TTL/2`), then runs one Chord stabilize step (`scalable-topology.md` §4.4). Every peer is
-equal — `pointers` carries no role and no peer is pinned specially. Primary membership comes
-from DHT discovery (`swarm.peers`), so pointers are structure/liveness hints, not the
-authoritative peer set.
+Pure liveness + cosmetic country, sent only to pinned ring neighbours (successor-list +
+predecessor + far fingers), not every connection. Receiver upserts the sender
+(`lastSeen = now`, `country`). It carries **no ring structure** — the old `pointers`
+succ/pred advert and its Chord stabilize step were removed with the token walk (the sweep
+needs no successor precision). Every peer is equal — the heartbeat carries no role and no
+peer is pinned specially. Primary membership comes from DHT discovery (`swarm.peers`); the
+heartbeat is liveness, not the authoritative peer set.
 
 The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carries a unique
 `mid` (random hex id); receivers relay on first sight and drop repeats.
@@ -808,7 +805,7 @@ the gate (waves announce immediately, unpaid).
 
 | Constant              | Value  | Meaning                                                                |
 | --------------------- | ------ | ---------------------------------------------------------------------- |
-| `HEARTBEAT_MS`        | 2000   | pointers-heartbeat cadence                                             |
+| `HEARTBEAT_MS`        | 2000   | heartbeat cadence (liveness + country)                                 |
 | `RINGUPDATE_MS`       | 4000   | re-pin + gallery-pull maintenance cadence                              |
 | `PEER_STALE_MS`       | 12000  | a peer with no heartbeat within this window is stale (dropped)         |
 | `LOBBY_MS`            | 15000  | lobby / opt-in window                                                  |
@@ -857,7 +854,7 @@ application logic must actually **use** that rather than trust self-reported fie
 following guards keep a hostile peer running a modified app from disrupting honest peers:
 
 - **Identity binding.** For a message that describes its own sender and arrives direct —
-  `pointers.id` — the claimed id must equal the authenticated connection id it arrived on,
+  `heartbeat.id` — the claimed id must equal the authenticated connection id it arrived on,
   else it's dropped. This blocks peer-map/ring pollution under spoofed ids. The flooded
   `wave-*` messages are deliberately **not** connection-bound: they are relayed, so their
   `by`/`peerId` is a third party at relay hops — they are authenticated by the signatures

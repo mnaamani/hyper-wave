@@ -240,20 +240,11 @@ const EVENT_HANDLERS = {
     gallery.startReplay(); // roll the ⚽ once around the ring, featuring selfies in hop order
   },
 
-  healed: () => {
-    hud.waveStatus('🩹 routing around a dropped peer…');
-  },
-
   'gallery-error': (evt) => {
     hud.waveStatus(
       GALLERY_ERRORS[evt.reason] ||
         `⚠️ couldn't post your selfie (${evt.reason})`
     );
-  },
-
-  stalled: (evt) => {
-    hud.waveStatus(`⚠️ wave stalled (${evt.reason})`);
-    gallery.startReplay(); // still replay whatever selfies were collected before the stall
   }
 };
 

@@ -9,12 +9,9 @@ const {
   successors,
   predecessor,
   connectionTargets,
-  findSuccessor,
   fingers,
   farFingers,
-  pinTargets,
-  inOpenInterval,
-  stabilizeStep
+  pinTargets
 } = require('./chord');
 
 // A 32-byte peer id (64 hex chars) whose top-8-byte nodeId is exactly `nid`.
@@ -80,15 +77,6 @@ test('connectionTargets is the successor-list unioned with the predecessor', (t)
   );
 });
 
-test('findSuccessor returns the first node at or clockwise-after a target', (t) => {
-  const ids = [makeId(10), makeId(20), makeId(30), makeId(40)];
-  t.is(findSuccessor(ids, 15n), makeId(20), 'strictly after');
-  t.is(findSuccessor(ids, 20n), makeId(20), 'exact match counts');
-  t.is(findSuccessor(ids, 5n), makeId(10), 'before all -> lowest');
-  t.is(findSuccessor(ids, 45n), makeId(10), 'past the top wraps to lowest');
-  t.is(findSuccessor([], 1n), null, 'empty set -> null');
-});
-
 test('fingers resolves finger[i] = successor(myNid + 2^i)', (t) => {
   // me at 0, nodes sitting exactly on the low powers of two
   const fingerSet = fingers([makeId(1), makeId(2), makeId(4)], makeId(0));
@@ -135,43 +123,5 @@ test('pinTargets = successor-list ∪ predecessor ∪ capped far fingers', (t) =
     [...targets].sort(),
     [makeId(1), makeId(2), makeId(8), makeId(16), makeId(32)].sort(),
     'constant pin budget: k + predecessor + far fingers'
-  );
-});
-
-test('inOpenInterval handles the normal and wrapping cases', (t) => {
-  t.ok(inOpenInterval(20n, 10n, 40n), 'inside');
-  t.absent(inOpenInterval(50n, 10n, 40n), 'outside');
-  t.absent(inOpenInterval(10n, 10n, 40n), 'open at the low end');
-  t.absent(inOpenInterval(40n, 10n, 40n), 'open at the high end');
-  t.ok(inOpenInterval(50n, 40n, 10n), 'wraps: 50 in (40,10)');
-  t.ok(inOpenInterval(5n, 40n, 10n), 'wraps: 5 in (40,10)');
-  t.absent(inOpenInterval(20n, 40n, 10n), 'wraps: 20 not in (40,10)');
-});
-
-test('stabilizeStep adopts a successor discovered between me and my successor', (t) => {
-  t.is(
-    stabilizeStep(makeId(10), makeId(40), makeId(20)),
-    makeId(20),
-    'succ.pred 20 is closer -> adopt'
-  );
-  t.is(
-    stabilizeStep(makeId(10), makeId(40), makeId(50)),
-    makeId(40),
-    'succ.pred 50 is outside -> keep'
-  );
-  t.is(
-    stabilizeStep(makeId(10), makeId(40), null),
-    makeId(40),
-    'no succ.pred -> keep'
-  );
-  t.is(
-    stabilizeStep(makeId(10), makeId(40), makeId(10)),
-    makeId(40),
-    "succ.pred is me -> keep (I'm its pred)"
-  );
-  t.is(
-    stabilizeStep(makeId(10), null, makeId(20)),
-    makeId(20),
-    'no current successor -> take it'
   );
 });
