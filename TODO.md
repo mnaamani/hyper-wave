@@ -384,7 +384,23 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       over a real partial mesh (validate with a flood-harness-style sim BEFORE committing —
       that's the load-bearing assumption). The committee/k-of-n-indexer alternative was
       considered and rejected: it re-introduces the quorum-stall the single indexer
-      deliberately escaped, for only partial relief.
+      deliberately escaped, for only partial relief (Autobase's multi-indexer needs a
+      strict MAJORITY of indexers reachable — `consensus.js: (n>>>1)+1` — to advance the
+      indexed view; single-indexer is majority-of-1, trivially met).
+      **De-risked (2026-07-14) — `gallery.replication.bench.test.js`** compares both
+      strategies over the SAME synthetic partial mesh (real Corestore/Autobase/Hypercore,
+      degree-capped graph = maxPeers). Measured N=64, degree=16: both reach 64/64, but
+      the multicore CRDT converges in ~13.3s vs the single-indexer Autobase's ~18.4s
+      (~28% faster, and that excludes the ~1s admission the Autobase path also pays) —
+      the N-core replication overhead did NOT prevent or slow convergence; it was faster,
+      with no SPOF. Load-bearing finding baked into the harness: each node must ACTIVELY
+      `core.download()` every gallery core — the log LENGTH propagates for free but the
+      block DATA only arrives when requested (a length-only convergence check is
+      over-optimistic; the real design must drive downloads). Corestore-with-large-N is
+      also far cheaper than the old model: corestore 7 / hypercore-storage 3.x use ONE
+      shared RocksDB backend, not a file-set per core. Caveat: the bench is in-process
+      (no WAN latency) — the real-swarm absolute-latency complement is the
+      HYPERWAVE_MAX_PEERS-limited e2e (knob now plumbed; run E2E_MAX_PEERS=16 E2E_PEERS=64).
 
 - [ ] **Bounded neighbour count needs unpin hysteresis.** The capped far-finger set is
       built (Done above), but the "never unpin a live channel" rule in

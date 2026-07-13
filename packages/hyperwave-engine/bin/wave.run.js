@@ -10,6 +10,7 @@
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 //   env HYPERWAVE_ADMIT_TIMEOUT_MS=<ms> -> max wait for my batch admission to replicate back
 //   env HYPERWAVE_PIN_BUDGET=<n>       -> sticky random pins to hold (0 = pinning off)
+//   env HYPERWAVE_MAX_PEERS=<n>        -> Hyperswarm connection cap (lower to force a partial mesh)
 const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
@@ -59,6 +60,9 @@ const wave = createWave({
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
   pinBudget: env.HYPERWAVE_PIN_BUDGET
     ? Number(env.HYPERWAVE_PIN_BUDGET)
+    : undefined,
+  maxPeers: env.HYPERWAVE_MAX_PEERS
+    ? Number(env.HYPERWAVE_MAX_PEERS)
     : undefined,
   admitTimeoutMs: env.HYPERWAVE_ADMIT_TIMEOUT_MS
     ? Number(env.HYPERWAVE_ADMIT_TIMEOUT_MS)

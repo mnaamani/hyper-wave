@@ -187,6 +187,7 @@ function loadOrCreateSwarmSeed(
  * @property {string} [matchId] Match topic string (all peers on the same id share one ring).
  * @property {number} [lobbyMs] Lobby window length in ms (opt-in window before the race).
  * @property {number} [pinBudget] Sticky random pins to hold (pins.js; 0 disables pinning).
+ * @property {number} [maxPeers] Hyperswarm connection cap (default 64; lower to force a partial mesh).
  * @property {number} [admitTimeoutMs] Max wait in ms for gallery writer admission to replicate back (scale with expected roster size).
  * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments).
  */
@@ -222,6 +223,10 @@ function createWave({
   lobbyMs = LOBBY_MS,
   // Random-K pin budget (pins.js); 0 disables pinning (rely on the incidental mesh).
   pinBudget = PIN_BUDGET,
+  // Hyperswarm's connection cap. 64 is Hyperswarm's own default; lower it (e.g. 16) to
+  // force a genuine partial mesh below the peer count — the condition the flood + pins
+  // are designed for, and what a real large swarm looks like.
+  maxPeers = 64,
   // How long postSelfie waits for this peer's batch admission (an add-writer op in the
   // originator's core, appended at lobby close) to replicate back before giving up.
   admitTimeoutMs = undefined,
@@ -247,7 +252,7 @@ function createWave({
   // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
   const swarm = new Hyperswarm({
     keyPair: swarmKeyPair,
-    maxPeers: 64,
+    maxPeers,
     ...(bootstrap ? { bootstrap } : {})
   });
 

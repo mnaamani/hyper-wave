@@ -79,6 +79,10 @@ async function launchWave(cluster, initEnv = {}) {
         ...(process.env.E2E_PIN_BUDGET
           ? { HYPERWAVE_PIN_BUDGET: process.env.E2E_PIN_BUDGET }
           : {}),
+        // force a partial mesh below the peer count (E2E_MAX_PEERS=16 at N=64)
+        ...(process.env.E2E_MAX_PEERS
+          ? { HYPERWAVE_MAX_PEERS: process.env.E2E_MAX_PEERS }
+          : {}),
         ...(i === 1 ? { START: String(START_TARGET), ...initEnv } : {})
       })
     );
