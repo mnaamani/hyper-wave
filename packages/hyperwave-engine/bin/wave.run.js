@@ -9,6 +9,7 @@
 //   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted at my sweep slot, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 //   env HYPERWAVE_ADMIT_TIMEOUT_MS=<ms> -> max wait for my batch admission to replicate back
+//   env HYPERWAVE_PIN_BUDGET=<n>       -> sticky random pins to hold (0 = pinning off)
 const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
@@ -56,6 +57,9 @@ const wave = createWave({
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
+  pinBudget: env.HYPERWAVE_PIN_BUDGET
+    ? Number(env.HYPERWAVE_PIN_BUDGET)
+    : undefined,
   admitTimeoutMs: env.HYPERWAVE_ADMIT_TIMEOUT_MS
     ? Number(env.HYPERWAVE_ADMIT_TIMEOUT_MS)
     : undefined,

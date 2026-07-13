@@ -75,6 +75,10 @@ async function launchWave(cluster, initEnv = {}) {
       cluster.launch('p' + i, {
         AUTOJOIN: '1',
         AUTOSELFIE: '1',
+        // A/B knob: E2E_PIN_BUDGET=0 runs the whole cluster with pinning off
+        ...(process.env.E2E_PIN_BUDGET
+          ? { HYPERWAVE_PIN_BUDGET: process.env.E2E_PIN_BUDGET }
+          : {}),
         ...(i === 1 ? { START: String(START_TARGET), ...initEnv } : {})
       })
     );

@@ -54,7 +54,9 @@ const MAX_LAP_MS = 60000;
 const END_GRACE_MS = 2000; // after the last slot, before every peer returns to idle
 // How many peers we deliberately pin (swarm.joinPeer) as the flood graph's floor —
 // random-K, sticky (see pins.js for the full reasoning + the measured reach cliff:
-// keep this well above K=3).
+// keep this well above K=3). Overridable per-instance (pinBudget option; 0 disables
+// pinning entirely — the A/B knob for testing whether the incidental topic mesh
+// alone carries the flood at scale).
 const PIN_BUDGET = 7;
 // Wave lifecycle control messages that must reach *every* peer (not just direct
 // neighbours). At scale Hyperswarm is only a partial random mesh, so these are
@@ -179,6 +181,7 @@ function loadOrCreateSwarmSeed(
  * @property {Array<{host: string, port: number}>|null} [bootstrap] Local-DHT bootstrap nodes, or null for the public DHT.
  * @property {string} [matchId] Match topic string (all peers on the same id share one ring).
  * @property {number} [lobbyMs] Lobby window length in ms (opt-in window before the race).
+ * @property {number} [pinBudget] Sticky random pins to hold (pins.js; 0 disables pinning).
  * @property {number} [admitTimeoutMs] Max wait in ms for gallery writer admission to replicate back (scale with expected roster size).
  * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments).
  */
@@ -212,6 +215,8 @@ function createWave({
   bootstrap = null,
   matchId = MATCH,
   lobbyMs = LOBBY_MS,
+  // Random-K pin budget (pins.js); 0 disables pinning (rely on the incidental mesh).
+  pinBudget = PIN_BUDGET,
   // How long postSelfie waits for this peer's batch admission (an add-writer op in the
   // originator's core, appended at lobby close) to replicate back before giving up.
   admitTimeoutMs = undefined,
@@ -351,7 +356,7 @@ function createWave({
     const targets = topUpPins({
       current: table.pinnedIds(),
       candidates: cand,
-      budget: PIN_BUDGET
+      budget: pinBudget
     });
     // Never unpin a peer we already have a live channel to: leavePeer on a connected
     // peer makes Hyperswarm reap the connection, and reaping live channels mid-wave
