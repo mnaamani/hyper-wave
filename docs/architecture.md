@@ -6,7 +6,7 @@ deterministic schedule), each participant takes a selfie into a
 shared gallery, their supported-country flag rides along — and real (testnet) money
 flows through it: participation fees are **burned** on-chain (anti-spam, no beneficiary),
 and viewers **tip** selfies directly. No sponsor rewards. No servers — discovery,
-state, and storage are all peer-to-peer (Hyperswarm + Autobase), and payments are
+state, and storage are all peer-to-peer (Hyperswarm + Corestore/Hypercore), and payments are
 self-custodial (WDK, Tron Nile testnet).
 
 This document covers the **process/layer structure**. For the wire protocol and state
@@ -29,7 +29,7 @@ flowchart TB
       R["renderer/app.js + lib/*<br/>ring canvas · lobby · webcam ·<br/>gallery · hud · country picker"]
     end
     subgraph Worker["Bare worker (per --storage)"]
-      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + wallet.js)<br/>discovery · random-K pinning · gossip · the sweep ·<br/>lifecycle · Autobase gallery ·<br/>WDK wallet · fee burns · tips"]
+      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + wallet.js)<br/>discovery · random-K pinning · gossip · the sweep ·<br/>lifecycle · CRDT gallery ·<br/>WDK wallet · fee burns · tips"]
     end
     subgraph Updater["Bare worker (OTA, template)"]
       U["workers/updater.js<br/>pear-runtime auto-update"]
@@ -58,7 +58,7 @@ mobile the same `hyperwave` boots as a single Bare **worklet**
 | ------------------------------------------------ | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                                     |
 | **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                              |
-| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, pinning, gossip, the deterministic sweep, attestations, lifecycle, Autobase gallery, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
+| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, pinning, gossip, the deterministic sweep, attestations, lifecycle, the CRDT gallery, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
 | **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                            |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
@@ -129,16 +129,19 @@ participates fully (pays fees, joins waves, selfies, relays), and every peer's
 `storageDir/hyperwave` store is **wiped on startup**, so galleries are ephemeral per run —
 keyed by the random `waveId`, nothing persists across runs.
 
-The only asymmetries are **per-wave**:
+The gallery is a **multicore CRDT** — one Hypercore per participant, merged locally (no
+indexer, no coordinator; see `protocol.md` §8) — so every participant already holds every
+core and could serve the whole gallery. The only asymmetries are **per-wave** and are just
+about who keeps cores open longest:
 
-- The wave's **initiator** is its gallery's sole Autobase indexer and retains it for the
-  life of the process (so it survives for latecomers and replication).
+- The wave's **initiator** retains its held cores for the life of the process (so the gallery
+  survives for latecomers and replication). It is otherwise an ordinary participant — it posts
+  its own selfie and publishes its own core exactly like everyone else.
 - Plus **`ARCHIVIST_COUNT` (3) roster peers**, chosen deterministically from the frozen
   roster (evenly spread by ring angle, `sweep.js archivists` — no message names them),
-  also retain the gallery, so extra copies survive the initiator leaving. They preserve the
-  gallery as-of the initiator's last checkpoint; they don't re-index it (the initiator is
-  still the sole indexer). A fuller fix — dropping the single indexer for a CRDT gallery —
-  is tracked in `TODO.md`.
+  also keep their held cores open, so extra copies survive the initiator leaving. With the
+  CRDT gallery "retain" just means "don't close on move-on" — there is no checkpoint or index
+  to preserve.
 
 ## Module map
 
@@ -163,13 +166,14 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
                      from the id; disconnects are authoritative + cooled down)
     selfie.js        SelfiePipeline class: pairs the staged lobby selfie with my sweep slot,
                      posts exactly once per wave, owns the burn-ticket lifetime
-    attest.js        pure attestation crypto (burn, gallery-key, and join attestations:
-                     signBurn/burnAuthorizes, signGalleryKey, signJoin/verifyJoin)
-    gallery.js       Autobase config + ordering (galleryConfig, buildGallery, readGallery);
-                     apply()'s write-gate verifies the entry's join attestation
-    gallery-session.js GallerySession class: per-wave open/create/retain (archivist rule) +
-                     batch writer admission at lobby close (admitRoster) + the
-                     writable-wait postSelfie
+    attest.js        pure attestation crypto (burn + join attestations:
+                     signBurn/burnAuthorizes, signJoin/verifyJoin)
+    gallery.js       the pure CRDT merge (mergeGallery) + buildGallery ordering, applying the
+                     join-attestation write-gate + byte caps + one-per-peer over a bag of ops;
+                     galleryConfig/readGallery remain as the Autobase A/B benchmark baseline only
+    gallery-crdt.js  CrdtGallery class: the multicore CRDT gallery — per-participant cores,
+                     addWriter (open + download block 0 of a peer's core), postSelfie (append
+                     my one op to my own core), retain (archivist), tick/merge into the view
     wallet.js        WDK wallet (Tron Nile, native TRX) + shared fee flow (burn memo,
                      payFee, confirmBurn, wireWallet): send, burn(+memo), verifyBurnTx,
                      transactions (on-chain history via TronGrid, both directions)

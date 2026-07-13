@@ -157,43 +157,47 @@ Two changes, both implemented:
   repeats (pure `flood.js`, verified for reach over synthetic partial meshes in
   `flood.test.js`; at the `GOSSIP_SEEN_CAP` the dedup set evicts **oldest-first** instead of
   wholesale clearing). On the random mesh (diameter ≈ log N / log degree) this blankets
-  every seat in a few relay rounds. `wave-join` doubles as the gallery-admission request
-  (writer key + join attestation + burn ride it to the initiator, which batch-admits at
-  lobby close) — it's authenticated by its carried join signature, so relaying is sound.
-  The token-era `wave-pos`, `wave-end`, and flooded `add-writer` messages no longer exist
-  (§3B): the ball animates from the local schedule, the wave ends on a local deterministic
-  timer, and admission is an Autobase op the initiator appends locally.
+  every seat in a few relay rounds. `wave-join` **publishes the joiner's own gallery core**
+  (writer key + join attestation + optional burn ride it to _every_ peer, each of which opens
+  that core — the CRDT gallery, §4.7) — it's authenticated by its carried join signature, so
+  relaying is sound. The token-era `wave-pos`, `wave-end`, and flooded `add-writer` messages
+  no longer exist (§3B): the ball animates from the local schedule, the wave ends on a local
+  deterministic timer, and there is no admission step at all — a peer posts to its own core.
 
 **`wave-sync` on connect** stays essential as the catch-up path for a peer that joins after a
 flood has already passed.
 
-### 4.7 Gallery replication over a partial mesh — **reach verified; persistence held by the initiator**
+### 4.7 Gallery replication over a partial mesh — **CRDT: every participant holds every core**
 
-`Corestore.replicate(conn)` runs on every connection, and the gallery Autobase is opened by
-essentially every peer that sees the wave (the gallery session opens on `wave-announce` —
-peers need it open in the lobby to join with a writer credential — and again on
-`wave-start` / `wave-sync`, spectators included) — so intermediate peers hold the cores and
-can re-serve them. Selfie images are **inline** (JSON dataURL, no separate Hyperblobs), so
-this is the only core set to propagate.
+The gallery is a **multicore CRDT** (`protocol.md` §8): each participant owns one Hypercore
+and appends its single selfie op at block 0; its key rides the flooded `wave-join`. **Every
+peer** that sees a join opens that participant's core and downloads block 0, so a peer already
+holds the cores of every participant it has heard of — there is no single Autobase, no
+indexer, and no shared key. `Corestore.replicate(conn)` runs on every connection; selfie
+images are **inline** (JSON dataURL, no separate Hyperblobs), so these per-participant cores
+are the only set to propagate. The ordered view is a **pure local merge** (`mergeGallery`):
+the same set of cores yields a byte-identical gallery on every peer, so convergence is purely
+epidemic ("have I replicated core X?").
 
-**Transitive reach is now proven** (`gallery.replication.test.js`): over a **line** topology
-A—B—C wired A↔B and B↔C but _not_ A↔C, C becomes a writer and converges to A's selfie **purely
-through B**, and A receives C's selfie through B. So Hypercore/Corestore does forward the
-gallery along connected (ring/finger) paths when intermediates keep it open — no full mesh
-required.
+**Transitive reach is proven.** The A/B benchmark (`gallery.replication.bench.test.js`) runs
+the old single-indexer Autobase gallery (Path A) and the multicore CRDT (Path B) over the
+_same_ synthetic partial mesh and asserts **both converge fully** — Path B spreads each
+participant's core epidemically with no indexer/admission (measured ~28% faster, no SPOF). The
+line-topology case (`gallery.replication.test.js`, still on the Autobase baseline) confirms
+the underlying transitive property directly: over A—B—C wired A↔B and B↔C but _not_ A↔C, C's
+writes converge to A **purely through B**. So Hypercore/Corestore forwards cores along
+connected (ring/finger) paths when intermediates keep them open — no full mesh required.
 
-**Persistence — held by the initiator plus K archivists.** There are **no peer roles** (no
-validator/seed archivist hub). Every peer is equal and wipes its store per run, so a gallery
-only survives as long as _some_ peer keeps it open. The per-wave asymmetry: the wave's
-**initiator** retains its gallery (and is its sole indexer), and `ARCHIVIST_COUNT` (3) roster
-peers chosen deterministically from the frozen roster (spread by ring angle, `sweep.js
-archivists`) also retain it — so the gallery survives the initiator leaving, not just other
-participants. The archivists preserve the gallery as-of the initiator's last checkpoint;
-they don't re-index it (single-indexer, see §8 / `gallery.js`). Verified in `gallery.replication.test.js`: a latecomer connected _only_ to the
-initiator gets the full gallery after other participants have left. **Accepted simplification:**
-if the initiator goes offline its wave's gallery isn't archived anywhere else (no dedicated hub
-pins/retains it), and nothing persists across runs. (Convergence _lag_ at large depth remains
-unmeasured.)
+**Persistence — retention by the initiator plus K archivists.** There are **no peer roles**
+(no validator/seed archivist hub). Every peer is equal and wipes its store per run, so a
+gallery only survives as long as _some_ peer keeps its cores open. Because the CRDT already
+has every participant holding every core, retention is just **not closing them on move-on**:
+the wave's **initiator** and `ARCHIVIST_COUNT` (3) roster peers chosen deterministically from
+the frozen roster (spread by ring angle, `sweep.js archivists`) keep their held cores open, so
+the gallery survives the initiator leaving, not just other participants — any archivist can
+serve the whole thing (there is no checkpoint or index to preserve). **Accepted
+simplification:** if _all_ archivists go offline the wave's gallery isn't archived anywhere
+else, and nothing persists across runs. (Convergence _lag_ at large depth remains unmeasured.)
 
 ## 5. Migration behind the seam
 
@@ -275,7 +279,12 @@ gallery cores replicating.
   real Corestores/Autobases with no swarm. (1) A↔B, B↔C (no A↔C) — the gallery replicates
   _transitively_ (C converges to A's writes through B). (2) the wave initiator retains its own
   gallery, other participants leave, a latecomer connected _only_ to the initiator still gets
-  the full gallery. The §4.7 reach + persistence tests.
+  the full gallery. The §4.7 reach + persistence tests (on the Autobase baseline).
+- **Gallery CRDT** (`gallery-crdt.test.js`) + **the A/B replication benchmark**
+  (`gallery.replication.bench.test.js`): the CRDT gallery's per-participant cores, block-0-only
+  download, and one-per-peer merge, plus a controlled compare that runs the old single-indexer
+  Autobase (Path A) and the multicore CRDT (Path B) over the _same_ partial mesh and asserts
+  both converge fully (§4.7).
 - **Local DHT integration** (`dht-local.js` + the e2e harness): N processes; assert the ring
   converges, a wave's roster converges, every roster member's sweep slot fires, and the
   gallery replicates across the partial mesh.
@@ -287,7 +296,10 @@ gallery cores replicating.
 Everything structural is built: Phases 1–4, the control-plane flood, the capped far-finger
 pin budget (§4.3), **and the sweep** (§3B / Phase 5 — the O(N) serial token is gone, so
 wave duration is a chosen constant at any N). Gallery reach + per-wave persistence are
-covered too (§4.7). What remains is validation and a few bounded refinements:
+covered too (§4.7), and the **single-indexer gallery bottleneck/SPOF is now resolved**: the
+gallery is a **multicore CRDT** (one core per participant, merged locally — no indexer, no
+admission funnel; §4.7 / `protocol.md` §8), so the old O(N) fan-in/out through the initiator
+and its live SPOF are gone. What remains is validation and a few bounded refinements:
 
 1. **Unpin hysteresis.** The `maintainNeighbours` "never unpin a live channel" rule folds
    every live connection back into the pin set (deliberate — pin flapping is what broke the
@@ -301,13 +313,14 @@ covered too (§4.7). What remains is validation and a few bounded refinements:
    every slot fires, deterministic end) and push N/churn further. Real partial-mesh
    behaviour (Hyperswarm connection caps + churn) can't be fully forced locally.
 3. **Replication-lag measurement (§4.7).** Transitive gallery reach is proven; convergence
-   _lag_ at depth/scale is unmeasured (how long until a far peer's gallery settles, and how
-   `ADMIT_TIMEOUT_MS` behaves near it).
-4. **No late admission — deliberate.** A peer whose join misses the lobby close is a
-   spectator; the batch-at-lobby-close model has no re-admission path (the old flooded
-   `add-writer` retry loop was deleted with the token). A late-admission fallback was
-   considered and **deliberately dropped** for the MVP — one admission moment keeps the
-   writer set, the schedule, and the paid gate all derived from the same roster snapshot.
+   _lag_ at depth/scale is unmeasured (how long until a far peer's gallery settles as its
+   participant cores replicate through the mesh).
+4. **No late joins — deliberate.** A peer whose `wave-join` misses the lobby close is a
+   spectator: the roster freezes into the schedule at lobby close, so a late join can't take a
+   slot it could never fill. (There is no admission step to be late for — a participant owns
+   its own core — but the roster/schedule snapshot is still fixed at one moment.) A
+   late-join fallback was considered and **deliberately dropped** for the MVP, so the roster,
+   the schedule, and the paid gate all derive from the same snapshot.
 
 Secondary: no explicit periodic `checkPredecessor` (conn-close covers it today); and Chord
 remains real code — keep the pointer math isolated and pure (`chord.js`) so a bug can't

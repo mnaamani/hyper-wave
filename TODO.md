@@ -364,8 +364,15 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
 
 ### Remaining hardening (scalable-topology §8)
 
-- [ ] **Gallery-as-CRDT: drop the single Autobase indexer (removes the initiator
-      bottleneck + SPOF).** The gallery's displayed output (`buildGallery`) is a pure
+- [x] **Gallery-as-CRDT: DONE (2026-07-14, commits cd7f6e0 + 7d9b271).** Dropped the
+      single Autobase indexer for a multicore CRDT gallery — removes the O(N) funnel + the
+      live SPOF. Each participant owns one Hypercore (key rides its wave-join, self-certified
+      by the join attestation); every peer merges the set locally (mergeGallery); no indexer,
+      no admission, no shared gallery key. wave-start/wave-sync carry the full writers set so
+      late adopters are self-contained. 8-peer e2e green; 128-peer re-validation still
+      pending. Original analysis kept below.
+
+- [ ] **(historical) Gallery-as-CRDT design notes.** The gallery's displayed output (`buildGallery`) is a pure
       function of the entry _set_ — dedupe by peerId, sort by rank — and never uses
       Autobase's linearization ORDER. So the gallery is a conflict-free replicated data
       type (a peerId→entry LWW-map): each entry is self-authenticating (join attestation),
