@@ -80,8 +80,9 @@ const wave = createWave({
     // With WALLET=1, wait for the wallet before arming — else startWave runs with the paid-gate
     // still off and announces an UNPAID wave (races wallet init vs discovery).
     const startTarget = Number(env.START);
+    const discovered = Math.max(state.discovered || 0, state.peers.length);
     const ready =
-      state.peers.length >= startTarget &&
+      discovered >= startTarget &&
       state.connected >= Math.min(startTarget, CONNECTED_FLOOR) &&
       !(env.WALLET && !payments);
     if (ready && settleTimer === null) {

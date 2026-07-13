@@ -300,14 +300,18 @@ function createWave({
   });
 
   // --- ring / peer table -----------------------------------------------------
-  /** Recompute the live ring and push `{ me, peers, successor, connected }` to the host (onState). */
+  /** Recompute the live ring and push `{ me, peers, successor, connected, discovered }` to the host (onState). */
   function emit() {
     const ring = table.liveRing();
     onState({
       me,
       peers: ring,
       successor: nextClockwise(me.angle, ring),
-      connected: [...table.senderIds()].length
+      connected: [...table.senderIds()].length,
+      // DHT-discovered count (may exceed live seats): hosts gate start triggers on
+      // this — a seat needs a live connection, but "the roster exists" only needs
+      // the DHT to have seen the peers.
+      discovered: swarm.peers.size
     });
   }
 
@@ -508,12 +512,23 @@ function createWave({
       return;
     }
     if (msg.kind === 'wave-join') {
-      if (wave && msg.waveId === wave.id && msg.peerId) {
+      // A join counts only WITH its admission credential (a credential-less join
+      // would take a roster seat — and a sweep slot — it can never fill) and only
+      // DURING THE LOBBY: the roster freezes into the schedule at lobby close, so a
+      // late join can't take a seat (it would inflate roster counts past what the
+      // frozen schedule can ever deliver).
+      if (
+        wave &&
+        wave.phase === 'lobby' &&
+        msg.waveId === wave.id &&
+        msg.peerId &&
+        msg.writerKey
+      ) {
         wave.roster.add(msg.peerId);
-        // (initiator) collect the joiner's admission credential for the lobby-close
-        // batch (admitRoster). Upsert: a joiner re-floods its join once its burn
-        // confirms, so a later credential with a burn replaces an earlier bare one.
-        if (wave.by === me.id && msg.writerKey && msg.joinSig) {
+        // (initiator) collect the credential for the lobby-close batch (admitRoster).
+        // Upsert: a joiner re-floods its join once its burn confirms, so a later
+        // credential with a burn replaces an earlier one.
+        if (wave.by === me.id && msg.joinSig) {
           wave.joinCreds.set(msg.peerId, {
             peerId: msg.peerId,
             writerKey: msg.writerKey,
@@ -779,6 +794,14 @@ function createWave({
       joinSig: null, // MY join attestation (attest.js signJoin) — every gallery entry carries it
       joinCreds: new Map() // (initiator) peerId -> {peerId, writerKey, joinSig, burn} from wave-joins
     };
+    // Re-adopting a wave I joined, then abandoned on a revivable lobby-timeout (a late
+    // wave-start re-opened it): restore my join state so my slot still arms + posts.
+    if (abandonedJoin && abandonedJoin.waveId === waveId) {
+      wave.joined = true;
+      wave.joinSig = abandonedJoin.joinSig;
+      wave.roster.add(me.id);
+      abandonedJoin = null;
+    }
     if (mine) {
       wave.roster.add(me.id);
     }
@@ -827,27 +850,35 @@ function createWave({
    * wave's gallery + my join attestation over it (and my burn attestation once the join
    * fee confirms — recordBurn re-floods the join to attach it). The join IS the admission
    * request: the initiator collects these and batch-admits the roster at lobby close.
-   * The writer key needs the gallery Autobase (opened when the announce/ sync carried the
-   * key) to be ready, so the flood happens async; a credential-less join still floods as
-   * a roster opt-in if the gallery isn't held (that peer just can't post).
+   * The writer key needs the gallery Autobase (opened when the announce/ sync carried
+   * the key) to be ready, so the flood happens async — given up to the rest of the
+   * lobby to resolve. A join NEVER floods without its credential: a bare join would be
+   * counted into the roster (and the sweep schedule) without ever being admissible,
+   * making full convergence unreachable by construction (measured at N=128: one slow
+   * joiner per ~100 hit the old 5s wait and became a permanently empty seat).
    * @param {string} waveId The wave being joined (guards against the wave moving on).
    */
   function floodJoin(waveId) {
+    const lobbyLeftMs = Math.max(5000, lobbyEndsAt - Date.now() - 1000);
     session
-      .credentials(waveId)
+      .credentials(waveId, lobbyLeftMs)
       .then((writerKey) => {
         if (!wave || wave.id !== waveId || !wave.joined) {
           return; // wave moved on while the gallery was getting ready
         }
-        if (writerKey && !wave.joinSig) {
+        if (!writerKey) {
+          log('join not flooded: no gallery credential before lobby close');
+          return;
+        }
+        if (!wave.joinSig) {
           wave.joinSig = signJoin(swarm.keyPair, { waveId, writerKey });
         }
         floodGossip({
           kind: 'wave-join',
           waveId,
           peerId: me.id,
-          writerKey: writerKey || undefined,
-          joinSig: (writerKey && wave.joinSig) || undefined,
+          writerKey,
+          joinSig: wave.joinSig,
           burn: selfie.burnProof || undefined
         });
       })
@@ -958,16 +989,38 @@ function createWave({
     tick();
   }
 
+  // Idle reasons that must NOT blacklist the waveId: a lobby-timeout means "I gave up
+  // waiting for wave-start", not "the wave ended" — at scale the initiator's start can
+  // arrive after a receiver's fallback fired (measured at N=128: the batch admission
+  // once delayed the start flood past every receiver's 30s lobby fallback, and the
+  // blacklist then made the whole swarm unrecoverable). A late wave-start (or sync)
+  // simply re-adopts the wave. Genuine ends (completed, unpaid-rejected, superseded)
+  // still blacklist, so stale floods can't revive a finished wave.
+  const REVIVABLE_IDLE_REASONS = new Set(['lobby-timeout']);
+  // When a revivable idle abandons a wave I had JOINED, remember my join state: a late
+  // wave-start re-adopts the wave through enterLobby, which builds fresh state — without
+  // this memo the re-adopted wave would have joined=false (my slot never arms, my selfie
+  // never posts) and a blank joinSig (my entry would fail apply()'s write-gate). Single
+  // slot: only one wave is ever engaged at a time. (Found at N=128: one peer per ~100
+  // hit exactly this path.)
+  let abandonedJoin = null; // { waveId, joinSig } | null
+
   /**
-   * Return to idle: mark the wave ended, clear per-wave state, and notify the UI.
-   * @param {string} reason Why we went idle (timeout, stalled, ended, unpaid…).
+   * Return to idle: mark the wave ended (unless the reason is revivable), clear
+   * per-wave state, and notify the UI.
+   * @param {string} reason Why we went idle (lobby-timeout, ended, unpaid…).
    */
   function goIdle(reason) {
     if (!wave) {
       return;
     }
     const waveId = wave.id;
-    endedWaves.add(waveId);
+    if (!REVIVABLE_IDLE_REASONS.has(reason)) {
+      endedWaves.add(waveId);
+      abandonedJoin = null;
+    } else if (wave.joined) {
+      abandonedJoin = { waveId, joinSig: wave.joinSig };
+    }
     wave = null;
     resetSelfie(); // drop any staged selfie / slot for the next wave
     teardown();
@@ -1165,12 +1218,7 @@ function createWave({
         writerKey: session.writerKey
       });
     }
-    // batch admission (§8.2): every valid credential collected from the lobby's
-    // wave-joins becomes an add-writer op in MY core, so a joiner's admission arrives
-    // with the same core sync it needs to open the gallery at all.
-    const admitted = await session.admitRoster([...wave.joinCreds.values()]);
-    log('admitted', admitted, 'of', wave.joinCreds.size, 'join credentials');
-
+    const joinCreds = [...wave.joinCreds.values()];
     log(
       'starting wave',
       shortId(waveId),
@@ -1200,6 +1248,28 @@ function createWave({
     });
     onEvent({ event: 'started', waveId, by: me.id });
     beginSweep({ rosterIds, t0, lapMs });
+    // Batch admission (§8.2) AFTER the start flood — the flood's timing is critical
+    // (receivers' lobby fallbacks, t0 freshness) while the 100+ awaited add-writer
+    // appends are not: a joiner's postSelfie waits for writability (admitTimeoutMs)
+    // anyway, and the ops replicate during the sweep. Measured at N=128: appending
+    // first once delayed the start past every receiver's lobby fallback.
+    const admitStarted = Date.now();
+    session
+      .admitRoster(joinCreds)
+      .then((admitted) => {
+        log(
+          'admitted',
+          admitted,
+          'of',
+          joinCreds.length,
+          'join credentials in',
+          Date.now() - admitStarted,
+          'ms'
+        );
+      })
+      .catch((err) => {
+        log('admitRoster failed', err && err.message);
+      });
   }
 
   // --- connections -----------------------------------------------------------

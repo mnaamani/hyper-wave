@@ -62,6 +62,24 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       receipts + chain accumulator (`token.js` → `attest.js`), `pickReachable`. Wire
       protocol 10 → 7 message kinds; wall-clock is a chosen constant regardless of N; a
       live roster member can no longer be silently skipped.
+- [x] **128-peer scale campaign: seven bugs found+fixed by instrumented runs (2026-07-13).**
+      (1) a receiver's lobby-timeout blacklisted the wave, so a late `wave-start` could
+      never be adopted — lobby-timeout is now revivable; (2) the initiator ran the batch
+      admission BETWEEN lobby close and the start flood, delaying the start past every
+      receiver's fallback — the start now floods first; (3) admission was O(roster)
+      awaited appends (measured 277s at 127 writers, ~2.2s each, starving every poster's
+      writable-wait) — now ONE batched array append (0.6s); (4) the start trigger gated
+      on live connections, whose equilibrium (~46 with the pins ÷4 dial squeeze) sat at
+      the old 48 threshold — hosts now gate on the DHT-discovered count (new `discovered`
+      field in onState); (5) re-adopting a wave after a revivable timeout lost the
+      peer's joined flag + joinSig (its slot never armed) — join state is now memoized
+      and restored; (6) a credential-less `wave-join` took a roster seat (and sweep
+      slot) it could never fill, making full convergence unreachable by construction —
+      joins now only count WITH a credential, and `credentials()` gets the rest of the
+      lobby to resolve; (7) joins arriving after lobby close still grew the roster past
+      the frozen schedule — joins now count only during the lobby. Plus e2e calibration:
+      scale START_TARGET 48→32 (local discovery plateaus ~40-60/node), convergence
+      budgets scaled ×2-3 for the 16-peers-per-core environment.
 - [x] **Random-K pins replace the structured ring; `chord.js` deleted.** With the sweep,
       nothing consumes successor/predecessor — pinning's only job is a flood-graph floor
       the transport can't bias (pins dial with priority + bypass `maxPeers`). Harness at
@@ -353,10 +371,18 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       period / hysteresis on unpinning instead of never-unpin. Related: Hyperswarm
       explicit pins bypass `maxPeers` while shrinking the topic-dial budget (÷4 at ≥4
       explicit peers), so a low `maxPeers` makes the pinned graph ≈ the whole topology.
-- [ ] Validate flood reach + pinned-ring convergence under real large-N churn (can't
-      force a partial mesh locally; needs a real >mesh-limit deployment). Includes
-      re-running the 128-peer public-DHT dispatch on the sweep (expect: no admission
-      timeouts, no skipped-live-peer losses, roster-exact convergence).
+- [ ] **128-peer scale validation — DONE locally (2026-07-13); public-DHT variant needs
+      multi-machine.** The local-testnet 128-peer run now PASSES end-to-end (130/130
+      asserts: 102-peer lobby, batch admission in ~0.6-3s, sweep completed on schedule,
+      ALL 128 peers — roster members and spectators — converged to the full gallery in
+      ~10 min wall-clock on an 8-core box running all 128 peers). The campaign found and
+      fixed seven real scale bugs (see the Done entry). Still open here:
+      (a) the PUBLIC-DHT variant is impossible from one home IP (128 same-IP peers
+      managed 6 connections in 9 min — NAT hairpin/conntrack/per-IP DHT limits; needs
+      peers spread across real machines, e.g. a cloud dispatch); (b) the pins-off A/B
+      endgame is still open — pins-off DID gather a full 128-peer lobby over the local
+      DHT (flood reach without pins confirmed at 128), but a like-for-like convergence
+      A/B on clean runs hasn't happened; (c) churn-during-sweep at scale untested.
 - [ ] Measure gallery replication lag at depth
 - [ ] **Late/reactive admission fallback (deliberately dropped).** A peer whose join
       misses the lobby window is a spectator — the reactive `add-writer` path was

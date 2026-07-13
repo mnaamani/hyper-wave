@@ -18,8 +18,8 @@ const PEER_COUNT = Number(process.env.E2E_PEERS || 8);
 // (The sweep itself is a chosen constant — lapMs is clamped in the engine — so the wave's own
 // duration no longer scales with N.) At the default 8 these come out a whisker above the
 // historical fixed values (90s wait / 150s test), so small runs behave as before.
-const WAIT_MS = 90000 + PEER_COUNT * 2000;
-const TEST_TIMEOUT_MS = 150000 + PEER_COUNT * 3000;
+const WAIT_MS = 90000 + PEER_COUNT * 4000;
+const TEST_TIMEOUT_MS = 150000 + PEER_COUNT * 9000;
 
 // The initiator's start trigger, capped for scale. At small N the initiator waits to SEE the whole
 // roster in its live ring — the strictest start. But past Phase 4 the live ring is deliberately a
@@ -29,7 +29,7 @@ const TEST_TIMEOUT_MS = 150000 + PEER_COUNT * 3000;
 // floods the partial mesh, joins flood back, and latecomers are caught up by wave-sync on connect.
 // So at scale the initiator just waits for a healthy chunk of the ring and announces; the lobby
 // (scaled below) does the rest.
-const START_TARGET = Math.min(PEER_COUNT - 1, 48);
+const START_TARGET = Math.min(PEER_COUNT - 1, 32);
 // Lobby length: joins have to flood back across the mesh from every peer, so give large rosters
 // more time to opt in. At the default 8 this is the historical 8s.
 const LOBBY_MS = 8000 + Math.max(0, PEER_COUNT - 8) * 100;

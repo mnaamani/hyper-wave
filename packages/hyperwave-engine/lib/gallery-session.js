@@ -163,11 +163,13 @@ class GallerySession {
    * the gallery — so tolerate that ordering by waiting briefly for the gallery
    * to appear. Null if it never does (or the wave is superseded while waiting).
    * @param {string} waveId - The wave whose gallery writer key to resolve.
+   * @param {number} [waitMs] - How long to wait for the gallery (defaults to
+   *   CREDENTIALS_WAIT_MS; callers with a lobby deadline pass the time left).
    * @returns {Promise<string|null>} My writer core key (hex), or null.
    */
-  async credentials(waveId) {
+  async credentials(waveId, waitMs = CREDENTIALS_WAIT_MS) {
     if (!this.#galleries.has(waveId)) {
-      await waitFor(() => this.#galleries.has(waveId), CREDENTIALS_WAIT_MS);
+      await waitFor(() => this.#galleries.has(waveId), waitMs);
     }
     const base = this.#galleries.get(waveId);
     if (!base) {
@@ -302,7 +304,7 @@ class GallerySession {
     if (!this.#retained.has(this.#waveId)) {
       return 0;
     }
-    let admitted = 0;
+    const ops = [];
     for (const cred of creds) {
       if (!cred || !cred.writerKey || !cred.peerId) {
         continue;
@@ -325,11 +327,17 @@ class GallerySession {
         continue; // needs a signed burn attestation
       }
       this.#admittedKeys.add(cred.writerKey);
-      await this.#base.append({ type: 'add-writer', key: cred.writerKey });
-      admitted++;
-      this.#log('admitted gallery writer', shortId(cred.peerId));
+      ops.push({ type: 'add-writer', key: cred.writerKey });
+      this.#log('admitting gallery writer', shortId(cred.peerId));
     }
-    return admitted;
+    if (ops.length > 0) {
+      // ONE batched append for the whole roster: Autobase.append accepts an array, so
+      // the linearizer processes the batch in a single pass. Appending one-at-a-time
+      // was O(roster) awaited linearizer round-trips — measured at 128 peers: ~2.2s
+      // EACH (277s total, starving every poster's writable-wait); the batch is one.
+      await this.#base.append(ops);
+    }
+    return ops.length;
   }
 
   /**
