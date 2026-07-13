@@ -62,6 +62,17 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       receipts + chain accumulator (`token.js` → `attest.js`), `pickReachable`. Wire
       protocol 10 → 7 message kinds; wall-clock is a chosen constant regardless of N; a
       live roster member can no longer be silently skipped.
+- [x] **Random-K pins replace the structured ring; `chord.js` deleted.** With the sweep,
+      nothing consumes successor/predecessor — pinning's only job is a flood-graph floor
+      the transport can't bias (pins dial with priority + bypass `maxPeers`). Harness at
+      N=128 (real Flood, 200 graphs/config, ±10% kills): random K=7 = 100% reach in every
+      trial and better diameter than the ring (4 rounds vs 4.9–6); cliff at K≤3. Now:
+      `PIN_BUDGET = 7` sticky random pins (`pins.js` `topUpPins` — keep live pins, top up
+      on churn, never reshuffle), `chord.js` + its suite deleted (~300 lines). Downside
+      (accepted): connectivity is probabilistic, not proven; escape hatch = raise
+      `PIN_BUDGET` or resurrect the ring rule from git history. The 128-peer public-DHT
+      run remains the real-world validation (consider A/B with pinning disabled to test
+      whether the incidental mesh alone suffices — the no-pinning endgame).
 - [x] **Topology diet for the sweep** (sweep Phase 4): deleted `chord-routing.js` (the
       distributed `find-succ` RPC/placement/repair — successor _precision_ is unneeded;
       only flood connectivity matters); `pinTargets` now pins successor-list (k=3) +
@@ -346,36 +357,6 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       force a partial mesh locally; needs a real >mesh-limit deployment). Includes
       re-running the 128-peer public-DHT dispatch on the sweep (expect: no admission
       timeouts, no skipped-live-peer losses, roster-exact convergence).
-- [ ] **Conditional: replace ring pinning with K random pins and delete `chord.js`.**
-      Nothing in the protocol consumes successor/predecessor anymore — the ring rule
-      survives only as the pin-selection heuristic, valued for its _deterministic_
-      connectivity guarantee (every peer pinning its successor ⇒ the edge union
-      contains the ring). Pinning K random discovered peers instead is connected only
-      with high probability (random K-out graphs, K≥2; plus Hyperswarm's ~64-degree
-      incidental mesh) but deletes `chord.js` (~230 lines + tests) and the last
-      successor/predecessor concepts. Gate on evidence, in order: (1) `flood`-harness
-      reach over a random-K topology at target N (cheap, local); (2) the 128-peer
-      public-DHT run passing on the current pinning. If both look comfortable, make
-      the swap; if flood reach ever gets flaky at scale, the deterministic ring is
-      the easier topology to debug — keep it. (`angleOfId`/`ring.js` stay regardless:
-      the seating chart is protocol semantics — sweep order, gallery order, the
-      visual — not topology.)
-      **Gate (1) MEASURED (2026-07-13, real Flood + real pinTargets, N=128, 200
-      fresh graphs/row, random origin; kill = 10% of nodes removed before the
-      flood):** ring pins 100% full reach (±kill), rounds 4.9 mean / 6 max, deg
-      12; random K=7 100% full reach (±kill), rounds 4.0 flat (beats the ring —
-      uniform random edges are better shortcuts than fingers), deg 14; random K=4
-      100% full reach (±kill), deg 8; the cliff: K=3+kill 98.5% full reach (worst
-      trial stranded ~1 node → would flake roster-exact assertions), K=2+kill
-      87.5%. Verdict: random-K works at 128 — use **K ≥ 5** for margin (K=7 =
-      today's budget, best diameter). Caveats: simulation assumes successful
-      dials/no frame loss/static graph mid-flood, and excludes Hyperswarm's
-      incidental topic mesh (which only helps). Gate (2) — the real 128-peer
-      dispatch — still pending; consider A/B-ing it with pinning DISABLED to
-      answer the deeper question (is pinning needed at all, or is the incidental
-      topic mesh at maxPeers≈64 alone sufficient?). Scratch harness preserved at
-      the session job dir (`flood-randomk.js`); trivially rebuildable from
-      flood.test.js's simulateFlood.
 - [ ] Measure gallery replication lag at depth
 - [ ] **Late/reactive admission fallback (deliberately dropped).** A peer whose join
       misses the lobby window is a spectator — the reactive `add-writer` path was

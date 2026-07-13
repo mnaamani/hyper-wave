@@ -1,6 +1,6 @@
 # HyperWave — Scalable Topology (design / plan)
 
-**Status:** Phases 1–4 implemented (DHT discovery; pin successor-list + predecessor + capped far fingers via `joinPeer`; churn cooldown + a liveness-only heartbeat — the stabilize/pointer exchange was later removed, §4.4), **plus control-plane flooding** (lifecycle `wave-*` relayed with dedup, §4.6) and **the deterministic sweep** (§3B / Phase 5 — it **replaced** the serial token). The distributed `findSuccessor` routing (§4.5) was built, verified, and then **retired** along with the token walk. See §8 for remaining items. This is the design for making HyperWave scale
+**Status: largely historical.** The Chord phases below were built, verified, and then progressively simplified away once the sweep (§3B) removed every routing need. As built today, the topology is: DHT discovery + **`PIN_BUDGET` sticky random pins** (`pins.js` — random-K replaced the structured ring pinning, §4.3) + churn cooldown + a liveness-only heartbeat (§4.4) + **control-plane flooding** (§4.6) + **the deterministic sweep** (§3B / Phase 5 — it **replaced** the serial token). The distributed `findSuccessor` routing (§4.5) and the ring/finger pin rule (§4.3) were each built, verified, then **retired**. See §8 for remaining items. This doc remains the design record for making HyperWave scale
 from a handful of peers to a large, global swarm by aligning our logical ring with the
 physical Hyperswarm connection graph — the "make the ring drive connections" idea.
 
@@ -89,16 +89,23 @@ Maintain, per node:
 `swarm.joinPeer()` the successor(s), predecessor, and long-range fingers. Stop depending on
 Hyperswarm's incidental meshing for the ring.
 
-**Implemented refinement — capped far-finger set (constant pins).** The sweep's control
-plane only needs a **connected flood graph with small diameter** (§4.6), not Chord-precise
-routing — and the near fingers mostly collapse into the successor-list. So instead of
-pinning all O(log N) distinct fingers, `chord.js` pins only the `FAR_FINGERS = 3`
-**farthest** distinct fingers by clockwise ring distance (~half-ring, ~quarter-ring,
-~eighth-ring edges): `pinTargets` = successor-list (k=3) + predecessor + 3 far fingers — a
-**constant pin budget (~7)** whose small-world long edges keep the flood diameter
-near-logarithmic. Pure ring-only pinning (no fingers) was considered and rejected: flood
-diameter degrades to O(N/k) hops and a contiguous run of k+1 failures cuts the flood graph
-— reintroducing exactly the fragility the fingers exist to remove.
+**RETIRED — superseded by random-K pins (`pins.js`).** This section's structured pin rule
+went through two implemented generations (full O(log N) finger table, then successor-list
+
+- predecessor + the 3 farthest fingers ≈ 7 pins) before being replaced outright: with the
+  sweep, nothing consumes successor/predecessor, so ring-shaped pins only bought a
+  _deterministic_ connectivity proof. Measured at N=128 (200 fresh graphs/config, the real
+  Flood decision, 10% simultaneous kills), **random K=7 pinning matched the ring's 100%
+  flood reach and beat it on diameter** (4 rounds flat vs 4.9–6 — uniform random edges are
+  better long-range shortcuts than fingers); the reach cliff sits at K≤3. So `wave.js` now
+  holds `PIN_BUDGET = 7` **sticky random pins** (kept while alive, topped up on churn —
+  never reshuffled), and `chord.js` (nodeId math, successors, predecessor, fingers) is
+  deleted. What pinning still buys over no pinning at all: the pins are edges we _chose_ —
+  dialed with priority, immune to `maxPeers` — a floor under the flood graph that doesn't
+  depend on Hyperswarm's incidental mesh being unbiased (DHT lookup order, join cohorts,
+  NAT islands, cap contention). Accepted downside: connectivity is now probabilistic
+  rather than proven — see `pins.js`'s header for the full reasoning and the escape hatch
+  (raise `PIN_BUDGET`, or resurrect the ring rule from git history).
 
 ### 4.4 Stabilization — **removed (the sweep needs none)**
 

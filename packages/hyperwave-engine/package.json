@@ -19,7 +19,7 @@
     "test": "bare test.js",
     "test:e2e:local": "node e2e/wave.local.e2e.js",
     "test:e2e:onchain": "node e2e/wave.onchain.e2e.js",
-    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/sweep.js lib/gallery.js lib/gallery-session.js lib/flood.js lib/peer-table.js lib/selfie.js lib/wave.js lib/wallet.js lib/engine.js lib/chord.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/sweep.js lib/gallery.js lib/gallery-session.js lib/flood.js lib/peer-table.js lib/selfie.js lib/wave.js lib/wallet.js lib/engine.js lib/pins.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
   },
   "dependencies": {
     "@tetherto/wdk": "^1.0.0-beta.13",

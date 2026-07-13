@@ -1,6 +1,6 @@
 // HyperWave orchestrator — the composition root. Wires the transport (Hyperswarm +
-// Protomux gossip) to the pure domains — ring geometry (ring.js), Chord topology
-// (chord.js), attestation crypto (attest.js), gallery ordering (gallery.js), sweep slot
+// Protomux gossip) to the pure domains — ring geometry (ring.js), pin selection
+// (pins.js), attestation crypto (attest.js), gallery ordering (gallery.js), sweep slot
 // math (sweep.js) — and composes the stateful machines: PeerTable (seats/channels/pins),
 // Flood (gossip dedup), SelfiePipeline (stage+slot pairing), and GallerySession
 // (per-wave Autobase + writer admission). What remains here is the wave
@@ -21,7 +21,7 @@ const fs = require('bare-fs');
 
 const { angleOf, angleOfId, nextClockwise } = require('./ring');
 const { sweepSchedule, mySlot } = require('./sweep');
-const { pinTargets } = require('./chord');
+const { topUpPins } = require('./pins');
 const { Flood } = require('./flood');
 const { GallerySession } = require('./gallery-session');
 const { PeerTable } = require('./peer-table');
@@ -52,9 +52,10 @@ const SLOT_MS = 400; // per-roster-member slot spacing target
 const MIN_LAP_MS = 4000;
 const MAX_LAP_MS = 60000;
 const END_GRACE_MS = 2000; // after the last slot, before every peer returns to idle
-// Successor-list length (scalable-topology.md §4.3): how many peers clockwise we
-// deliberately connect to for fault tolerance. Predecessor is pinned too.
-const K_SUCCESSORS = 3;
+// How many peers we deliberately pin (swarm.joinPeer) as the flood graph's floor —
+// random-K, sticky (see pins.js for the full reasoning + the measured reach cliff:
+// keep this well above K=3).
+const PIN_BUDGET = 7;
 // Wave lifecycle control messages that must reach *every* peer (not just direct
 // neighbours). At scale Hyperswarm is only a partial random mesh, so these are
 // flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1).
@@ -328,37 +329,35 @@ function createWave({
   }
 
   /**
-   * Phase 2+3 (scalable-topology.md §4.3/§4.5/§6): make the ring's edges *physical*.
-   * We deliberately swarm.joinPeer() our successor-list (k clockwise) + predecessor
-   * (the token walk / fault tolerance) plus our finger table (O(log N) ring-spanning
-   * reachability), then diff against the table's pinned set as the ring churns
-   * (table.updatePins) — joinPeer the additions, leavePeer the removals. Recomputing
-   * the fingers here each refresh *is* Chord's fixFingers. leavePeer only drops the
-   * explicit pin (not a live topic-driven connection), so the full mesh stays as a
-   * fallback until gossip is slimmed (Phase 4); the finger set means we no longer
-   * *rely* on that mesh for reachability.
+   * Keep PIN_BUDGET sticky random pins (pins.js has the full reasoning): the pins are
+   * the flood graph's chosen floor — dialed with priority, immune to maxPeers — so
+   * flood reach never depends on the quality of Hyperswarm's incidental topic mesh.
+   * Diff against the table's pinned set as peers churn (table.updatePins): joinPeer
+   * the additions, leavePeer the removals. A dead pin leaves the candidate set (its
+   * disconnect starts a churn cooldown that also suppresses its stale DHT announce),
+   * so the top-up replaces it on the next refresh.
    *
-   * Candidates = DHT-discovered ∪ already-connected ∪ gossip-known (live seats). The
-   * token-walk seats (the table's live ring) still come only from connections +
-   * gossip, so a stale discovery we can't reach is pinned (dialed) but never shown
-   * as a seat.
+   * Candidates = DHT-discovered ∪ already-connected ∪ gossip-known (live seats). A
+   * stale discovery we can't reach may be pinned (dialed) but is never shown as a
+   * seat (seats require real liveness).
    */
   function maintainNeighbours() {
-    // Candidates: DHT-discovered ∪ connected ∪ gossip-known ∪ routing-discovered (chord).
     const cand = new Set([
       ...discoveredIds(),
       ...table.senderIds(),
       ...table.peerIds()
     ]);
     cand.delete(me.id);
-    const targets = pinTargets([...cand], me.id, K_SUCCESSORS);
-    // Never unpin a peer we already have a live channel to. leavePeer on a connected peer makes
-    // Hyperswarm reap the connection (the "full mesh stays as a fallback" the design assumes only
-    // holds if we don't tear it down) — and the connection set churns every time pinTargets shifts
-    // (fingers/successors move as the ring settles). That flapping is what broke the token walk:
-    // a forwarder would send to a peer that hasSender() still reported as live but whose channel had
-    // just been reaped, so the token was lost and that peer was skipped. Keeping live channels pinned
-    // holds the mesh stable; genuinely-closed peers drop out of senderIds via conn.on('close').
+    const targets = topUpPins({
+      current: table.pinnedIds(),
+      candidates: cand,
+      budget: PIN_BUDGET
+    });
+    // Never unpin a peer we already have a live channel to: leavePeer on a connected
+    // peer makes Hyperswarm reap the connection, and reaping live channels mid-wave
+    // once cost messages on channels that hasSender() still reported live. Keeping
+    // live channels pinned holds the mesh stable; genuinely-closed peers drop out of
+    // senderIds via conn.on('close').
     for (const id of table.senderIds()) {
       targets.add(id);
     }
@@ -596,12 +595,11 @@ function createWave({
     }
   }
 
-  // Send only to our pinned ring neighbours (successor-list + predecessor + far
-  // fingers). Used for the heartbeat — constant fanout instead of hitting every
-  // connection. wave-* fanout stays on broadcast() + flood relay (roster/lifecycle
-  // need full reach).
+  // Send only to our pinned peers (the random-K floor, pins.js). Used for the
+  // heartbeat — constant fanout instead of hitting every connection. wave-* fanout
+  // stays on broadcast() + flood relay (roster/lifecycle need full reach).
   /**
-   * @param {Object} obj The gossip message to send only to pinned ring neighbours.
+   * @param {Object} obj The gossip message to send only to pinned peers.
    */
   function broadcastToNeighbours(obj) {
     const str = JSON.stringify(obj);

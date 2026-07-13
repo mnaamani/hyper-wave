@@ -162,7 +162,7 @@ are relayed hop-to-hop:
 catch-up path for a peer that joins after a flood has already passed.
 
 **Membership** is **DHT-discovered but liveness-gated.** `swarm.peers` (Hyperswarm's PeerInfo
-set on the topic) drives _which peers we dial_ (Chord pinning), not the visible ring — a DHT
+set on the topic) drives _which peers we dial_ (pinning), not the visible ring — a DHT
 announcement alone is just "this key advertised the topic once", so a stale announce from a
 since-closed instance is never shown as a seat. A **seat requires real liveness**: a live
 connection or direct gossip. The only membership gossip is the **`heartbeat`** (a peer's
@@ -172,14 +172,16 @@ exchange**: peers do not gossip ring structure (successor/predecessor adverts an
 Chord stabilize step were removed with the token walk — the sweep needs no successor
 precision, so pins are recomputed purely from DHT discovery + live connections).
 
-The ring **drives connections** (Chord over Hyperswarm, see
-[`scalable-topology.md`](./scalable-topology.md)): each peer deliberately `swarm.joinPeer`s
-its successor-list, predecessor, and a capped set of **far fingers** (`FAR_FINGERS` long-range
-edges — a constant pin budget whose small-world links keep the flood diameter
-near-logarithmic). The sweep needs only a **connected flood graph** with small diameter, not
-successor-precise routing — flooding rides these connections, so lifecycle messages reach
-every seat whether or not the swarm is fully meshed; **`wave-sync`** on connect remains the
-catch-up path.
+Each peer deliberately `swarm.joinPeer`s **`PIN_BUDGET` sticky random peers** (random-K
+pinning, see `pins.js` and [`scalable-topology.md`](./scalable-topology.md) §4.3): pins are
+edges the peer _chose_ — dialed with priority and immune to `maxPeers` — so the flood graph
+has a floor that does not depend on the quality of Hyperswarm's incidental topic mesh. The
+sweep needs only a **connected flood graph** with small diameter; measured at N=128, random
+K=7 pinning floods with full reach (even with 10% of peers killed) in ≤4 relay rounds.
+Pins are topped up, never reshuffled (a stable pin set keeps channels alive), and a dead
+pin is replaced on the next topology refresh. The structured Chord ring pinning this
+replaced is retired — nothing routes, so nothing needs a successor. **`wave-sync`** on
+connect remains the catch-up path.
 
 ## 4. Peer map (membership & liveness)
 
@@ -292,8 +294,8 @@ Until implemented, treat the individual schemas below as authoritative.
 }
 ```
 
-Pure liveness + cosmetic country, sent only to pinned ring neighbours (successor-list +
-predecessor + far fingers), not every connection. Receiver upserts the sender
+Pure liveness + cosmetic country, sent only to pinned peers (the random-K floor), not
+every connection. Receiver upserts the sender
 (`lastSeen = now`, `country`). It carries **no ring structure** — the old `pointers`
 succ/pred advert and its Chord stabilize step were removed with the token walk (the sweep
 needs no successor precision). Every peer is equal — the heartbeat carries no role and no
@@ -817,8 +819,7 @@ the gate (waves announce immediately, unpaid).
 | `CREDENTIALS_WAIT_MS` | 5000   | how long a join waits for the wave's gallery to open (writer key)      |
 | `ADMIT_TIMEOUT_MS`    | 25000  | posting waits this long for the batch admission to replicate back      |
 | `PAY_TIMEOUT_MS`      | 60000  | initiator abandons the wave if its kick-off burn never confirms        |
-| `K_SUCCESSORS`        | 3      | successor-list length (pinned neighbours clockwise)                    |
-| `FAR_FINGERS`         | 3      | farthest distinct fingers pinned (long-range flood edges)              |
+| `PIN_BUDGET`          | 7      | sticky random pins held (the flood graph's chosen floor)               |
 | `GOSSIP_SEEN_CAP`     | 4096   | flood-dedup id cap (oldest evicted first)                              |
 | `MAX_IMAGE_BYTES`     | 262144 | per-selfie image cap (bounds writes under optimistic admission, §8.2)  |
 | `MAX_CAPTION_BYTES`   | 512    | per-selfie caption cap                                                 |
