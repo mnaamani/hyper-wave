@@ -360,6 +360,22 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       the easier topology to debug — keep it. (`angleOfId`/`ring.js` stay regardless:
       the seating chart is protocol semantics — sweep order, gallery order, the
       visual — not topology.)
+      **Gate (1) MEASURED (2026-07-13, real Flood + real pinTargets, N=128, 200
+      fresh graphs/row, random origin; kill = 10% of nodes removed before the
+      flood):** ring pins 100% full reach (±kill), rounds 4.9 mean / 6 max, deg
+      12; random K=7 100% full reach (±kill), rounds 4.0 flat (beats the ring —
+      uniform random edges are better shortcuts than fingers), deg 14; random K=4
+      100% full reach (±kill), deg 8; the cliff: K=3+kill 98.5% full reach (worst
+      trial stranded ~1 node → would flake roster-exact assertions), K=2+kill
+      87.5%. Verdict: random-K works at 128 — use **K ≥ 5** for margin (K=7 =
+      today's budget, best diameter). Caveats: simulation assumes successful
+      dials/no frame loss/static graph mid-flood, and excludes Hyperswarm's
+      incidental topic mesh (which only helps). Gate (2) — the real 128-peer
+      dispatch — still pending; consider A/B-ing it with pinning DISABLED to
+      answer the deeper question (is pinning needed at all, or is the incidental
+      topic mesh at maxPeers≈64 alone sufficient?). Scratch harness preserved at
+      the session job dir (`flood-randomk.js`); trivially rebuildable from
+      flood.test.js's simulateFlood.
 - [ ] Measure gallery replication lag at depth
 - [ ] **Late/reactive admission fallback (deliberately dropped).** A peer whose join
       misses the lobby window is a spectator — the reactive `add-writer` path was
