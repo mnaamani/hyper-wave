@@ -12,7 +12,6 @@ require('./lib/wave.gallery.test.js');
 require('./lib/wave.autobase.test.js');
 require('./lib/gallery.replication.test.js');
 require('./lib/gallery.replication.bench.test.js');
-require('./lib/gallery-session.test.js');
 require('./lib/gallery-crdt.test.js');
 require('./lib/wallet.test.js');
 require('./lib/engine.test.js');

@@ -1,6 +1,6 @@
 // CrdtGallery (gallery-crdt.js) + the pure mergeGallery gate: the multicore CRDT gallery
 // that replaces the single-indexer Autobase. Tests (1) the pure merge's write-gate +
-// tip-address binding + one-per-peer, and (2) real convergence — N sessions, each with
+// tip-address binding + one-per-peer, and (2) real convergence — PEERS sessions, each with
 // its own core, wired over a mesh, every peer learning every core (as the flooded
 // wave-joins would), all merging to the identical gallery. Uses real Corestore/Hypercore
 // on disk, no swarm. Runs under Bare:  bare lib/gallery-crdt.test.js  (or `npm test`)
@@ -129,16 +129,16 @@ function until(pred, timeoutMs = 30000) {
   });
 }
 
-test('CrdtGallery: N peers each with their own core converge to one gallery', async (t) => {
+test('CrdtGallery: PEERS peers each with their own core converge to one gallery', async (t) => {
   keepAlive(t);
-  const N = 6;
+  const PEERS = 6;
   const dirs = [];
   const stores = [];
   const keyPairs = [];
   const holders = []; // per-peer { joinSig } (set after open — the wave-join credential)
   const views = []; // per-peer latest onGallery output
   const sessions = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     const dir = `/tmp/hw-crdt-${Date.now()}-${i}-${Math.floor(Math.random() * 1e6)}`;
     dirs.push(dir);
     stores.push(new Corestore(dir));
@@ -158,7 +158,7 @@ test('CrdtGallery: N peers each with their own core converge to one gallery', as
     }
   });
 
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     sessions.push(
       new CrdtGallery({
         store: stores[i],
@@ -176,7 +176,7 @@ test('CrdtGallery: N peers each with their own core converge to one gallery', as
 
   // each peer opens its own core → its writer key
   const writerKeys = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     writerKeys.push(await sessions[i].open(WAVE));
     holders[i].joinSig = signJoin(keyPairs[i], {
       waveId: WAVE,
@@ -184,12 +184,12 @@ test('CrdtGallery: N peers each with their own core converge to one gallery', as
     });
   }
 
-  // full mesh (small N) — the flooded wave-joins reach everyone: every peer learns
+  // full mesh (small PEERS) — the flooded wave-joins reach everyone: every peer learns
   // every OTHER peer's core key
   const streams = [];
-  for (let u = 0; u < N; u++) {
-    for (let v = u + 1; v < N; v++) {
-      streams.push(...link(stores[u], stores[v]));
+  for (let a = 0; a < PEERS; a++) {
+    for (let b = a + 1; b < PEERS; b++) {
+      streams.push(...link(stores[a], stores[b]));
     }
   }
   t.teardown(() => {
@@ -197,8 +197,8 @@ test('CrdtGallery: N peers each with their own core converge to one gallery', as
       stream.destroy();
     }
   });
-  for (let i = 0; i < N; i++) {
-    for (let j = 0; j < N; j++) {
+  for (let i = 0; i < PEERS; i++) {
+    for (let j = 0; j < PEERS; j++) {
       if (i !== j) {
         sessions[i].addWriter(
           WAVE,
@@ -210,7 +210,7 @@ test('CrdtGallery: N peers each with their own core converge to one gallery', as
   }
 
   // everyone posts their one selfie (no admission, no writable-wait)
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     await sessions[i].postSelfie({
       waveId: WAVE,
       hopCount: i,
@@ -223,12 +223,12 @@ test('CrdtGallery: N peers each with their own core converge to one gallery', as
     for (const session of sessions) {
       session.tick();
     }
-    return views.every((view) => view.length === N);
+    return views.every((view) => view.length === PEERS);
   });
-  t.ok(converged, 'every peer converged to all N selfies');
+  t.ok(converged, 'every peer converged to all PEERS selfies');
   t.alike(
     views[0].map((entry) => entry.caption).sort(),
-    [...Array(N)].map((_, i) => 'peer' + i).sort(),
+    [...Array(PEERS)].map((_, i) => 'peer' + i).sort(),
     'the merged gallery holds every peer’s entry'
   );
 });

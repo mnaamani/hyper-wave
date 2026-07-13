@@ -128,9 +128,15 @@ class CrdtGallery {
    * @param {string} waveId - The wave whose gallery to open.
    * @returns {Promise<string>} My writer core key (hex) for this wave.
    */
-  async open(waveId) {
-    if (this.#waveId !== waveId && !this.#retained.has(this.#waveId)) {
-      await this.#closeWave(this.#waveId);
+  open(waveId) {
+    // Set the current wave + its record SYNCHRONOUSLY, so addWriter/emitView work
+    // immediately; only my core's readiness (for the writer key) is awaited.
+    if (
+      this.#waveId !== waveId &&
+      this.#waveId !== null &&
+      !this.#retained.has(this.#waveId)
+    ) {
+      this.#closeWave(this.#waveId).catch(() => {}); // background-close the previous wave
     }
     this.#waveId = waveId;
     let wave = this.#waves.get(waveId);
@@ -147,8 +153,7 @@ class CrdtGallery {
         }
       });
     }
-    await wave.own.ready();
-    return b4a.toString(wave.own.key, 'hex');
+    return wave.own.ready().then(() => b4a.toString(wave.own.key, 'hex'));
   }
 
   /**

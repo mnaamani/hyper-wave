@@ -7,19 +7,19 @@
 // the technique gallery.replication.test.js uses) rather than real Hyperswarm: a live
 // swarm would hand the two strategies DIFFERENT random meshes and confound the compare.
 //
-// WHAT IT MEASURES (faithfully): reach — does every node converge to all N *entries*
+// WHAT IT MEASURES (faithfully): reach — does every node converge to all PEERS *entries*
 // (block data, not just the log length — Path B must actively download() each core; a
 // length-only check is over-optimistic) — and the STRUCTURE of convergence: Path A
 // funnels every op through one indexer (create → admit → each writer replicates the
-// indexer's output); Path B spreads N independent cores epidemically, no indexer, no
+// indexer's output); Path B spreads PEERS independent cores epidemically, no indexer, no
 // admission, no consensus. WHAT IT DOESN'T measure: real WAN latency (streams are
 // in-process pipes) — the real-swarm variant (HYPERWAVE_MAX_PEERS-limited e2e) is the
 // absolute-latency complement.
 //
-// Measured N=64, degree=16 (identical mesh, both paths): A 64/64 in ~18.4s (incl. ~1s
+// Measured PEERS=64, degree=16 (identical mesh, both paths): A 64/64 in ~18.4s (incl. ~1s
 // admission), B 64/64 in ~13.3s — B converges fully AND ~28% faster, with no SPOF.
 //
-// Defaults are CI-safe (small N; asserts correctness only, not timing — timing is noisy).
+// Defaults are CI-safe (small PEERS; asserts correctness only, not timing — timing is noisy).
 // The real experiment runs bigger; BENCH_DEGREE models Hyperswarm's maxPeers (per-node
 // connection cap):
 //   BENCH_N=64 BENCH_DEGREE=16 bare lib/gallery.replication.bench.test.js
@@ -34,7 +34,7 @@ const { galleryConfig, readGallery, buildGallery } = require('./gallery');
 const { signJoin, verifyJoin } = require('./attest');
 
 const WAVE = 'bench';
-const N = Number(env.BENCH_N || 10);
+const PEERS = Number(env.BENCH_N || 10);
 const DEGREE = Number(env.BENCH_DEGREE || 4); // per-node connection cap (models maxPeers)
 const CONVERGE_TIMEOUT_MS = 120000;
 
@@ -87,20 +87,20 @@ function link(store1, store2) {
 }
 
 /**
- * A CONNECTED random partial mesh over `n` nodes with per-node degree capped at `degree`.
+ * A CONNECTED random partial mesh over `count` nodes with per-node degree capped at `degree`.
  * A random Hamiltonian cycle guarantees connectivity (so the A/B isn't decided by a split
  * neither strategy can cross); random extra edges up to the cap add realism.
- * @param {number} n Node count.
+ * @param {number} count Node count.
  * @param {number} degree Per-node degree cap (models maxPeers).
  * @returns {Array<[number, number]>} Undirected edges as index pairs.
  */
-function partialMesh(n, degree) {
-  const order = [...Array(n).keys()];
-  for (let i = n - 1; i > 0; i--) {
+function partialMesh(count, degree) {
+  const order = [...Array(count).keys()];
+  for (let i = count - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
   }
-  const deg = new Array(n).fill(0);
+  const deg = new Array(count).fill(0);
   const has = new Set();
   const edges = [];
   const addEdge = (a, b) => {
@@ -113,14 +113,17 @@ function partialMesh(n, degree) {
     deg[a]++;
     deg[b]++;
   };
-  for (let i = 0; i < n; i++) {
-    addEdge(order[i], order[(i + 1) % n]); // the cycle: connectivity floor
+  for (let i = 0; i < count; i++) {
+    addEdge(order[i], order[(i + 1) % count]); // the cycle: connectivity floor
   }
-  const targetEdges = Math.floor((n * degree) / 2);
+  const targetEdges = Math.floor((count * degree) / 2);
   let attempts = 0;
-  while (edges.length < targetEdges && attempts < n * degree * 4) {
+  while (edges.length < targetEdges && attempts < count * degree * 4) {
     attempts++;
-    addEdge(Math.floor(Math.random() * n), Math.floor(Math.random() * n));
+    addEdge(
+      Math.floor(Math.random() * count),
+      Math.floor(Math.random() * count)
+    );
   }
   return edges;
 }
@@ -156,7 +159,7 @@ function mergedCount(entries) {
 function makeStores(tag) {
   const dirs = [];
   const stores = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     const rand = Math.floor(Math.random() * 1e6);
     const dir = `/tmp/hw-bench-${tag}-${Date.now()}-${i}-${rand}`;
     dirs.push(dir);
@@ -181,7 +184,7 @@ async function benchAutobase(edges, keyPairs) {
   const base0 = new Autobase(stores[0].namespace(WAVE), null, galleryConfig());
   await base0.ready();
   const bases = [base0];
-  for (let i = 1; i < N; i++) {
+  for (let i = 1; i < PEERS; i++) {
     const base = new Autobase(
       stores[i].namespace(WAVE),
       base0.key,
@@ -191,13 +194,13 @@ async function benchAutobase(edges, keyPairs) {
     bases.push(base);
   }
   const streams = [];
-  for (const [u, v] of edges) {
-    streams.push(...link(stores[u], stores[v]));
+  for (const [a, b] of edges) {
+    streams.push(...link(stores[a], stores[b]));
   }
   const start = Date.now();
   // admission: the sole indexer (node 0) batch-appends add-writer for every joiner
   const addWriters = [];
-  for (let i = 1; i < N; i++) {
+  for (let i = 1; i < PEERS; i++) {
     addWriters.push({
       type: 'add-writer',
       key: b4a.toString(bases[i].local.key, 'hex')
@@ -214,7 +217,7 @@ async function benchAutobase(edges, keyPairs) {
     }
     return true;
   });
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     await bases[i].append(
       selfieOp(keyPairs[i], b4a.toString(bases[i].local.key, 'hex'), i)
     );
@@ -222,7 +225,7 @@ async function benchAutobase(edges, keyPairs) {
   const convergeMs = await timeUntil(async () => {
     for (const base of bases) {
       await base.update().catch(() => {});
-      if ((await readGallery(base)).length < N) {
+      if ((await readGallery(base)).length < PEERS) {
         return false;
       }
     }
@@ -230,7 +233,7 @@ async function benchAutobase(edges, keyPairs) {
   });
   let reached = 0;
   for (const base of bases) {
-    if ((await readGallery(base)).length === N) {
+    if ((await readGallery(base)).length === PEERS) {
       reached++;
     }
   }
@@ -262,18 +265,18 @@ async function benchMulticore(edges, keyPairs) {
     }
   }
   const streams = [];
-  for (const [u, v] of edges) {
-    streams.push(...link(stores[u], stores[v]));
+  for (const [a, b] of edges) {
+    streams.push(...link(stores[a], stores[b]));
   }
   const start = Date.now();
   // every peer posts its one selfie to its OWN core — no admission, no indexer
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     await mine[i].append(
       selfieOp(keyPairs[i], b4a.toString(mine[i].key, 'hex'), i)
     );
   }
   const convergeMs = await timeUntil(async () => {
-    for (let i = 0; i < N; i++) {
+    for (let i = 0; i < PEERS; i++) {
       let downloaded = 0;
       for (const core of views[i]) {
         await core.update().catch(() => {});
@@ -281,21 +284,21 @@ async function benchMulticore(edges, keyPairs) {
           downloaded++;
         }
       }
-      if (downloaded < N) {
+      if (downloaded < PEERS) {
         return false;
       }
     }
     return true;
   });
   let reached = 0;
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < PEERS; i++) {
     const entries = [];
     for (const core of views[i]) {
       if (core.has(0)) {
         entries.push(await core.get(0));
       }
     }
-    if (mergedCount(entries) === N) {
+    if (mergedCount(entries) === PEERS) {
       reached++;
     }
   }
@@ -304,25 +307,25 @@ async function benchMulticore(edges, keyPairs) {
   return { reached, totalMs };
 }
 
-test(`gallery replication A/B over a partial mesh (N=${N}, degree=${DEGREE})`, async (t) => {
+test(`gallery replication A/B over a partial mesh (PEERS=${PEERS}, degree=${DEGREE})`, async (t) => {
   keepAlive(t);
-  const edges = partialMesh(N, DEGREE);
-  const avgDegree = ((2 * edges.length) / N).toFixed(1);
-  const keyPairs = [...Array(N)].map(() => crypto.keyPair());
+  const edges = partialMesh(PEERS, DEGREE);
+  const avgDegree = ((2 * edges.length) / PEERS).toFixed(1);
+  const keyPairs = [...Array(PEERS)].map(() => crypto.keyPair());
 
   const resultA = await benchAutobase(edges, keyPairs);
   const resultB = await benchMulticore(edges, keyPairs);
 
   console.log(
-    `\n  mesh: N=${N} avg-degree=${avgDegree} edges=${edges.length}` +
-      `\n  A single-indexer Autobase: reach ${resultA.reached}/${N}` +
+    `\count  mesh: PEERS=${PEERS} avg-degree=${avgDegree} edges=${edges.length}` +
+      `\count  A single-indexer Autobase: reach ${resultA.reached}/${PEERS}` +
       ` total ${resultA.totalMs}ms (admission/writable ${resultA.writableMs}ms)` +
-      `\n  B multicore CRDT:          reach ${resultB.reached}/${N}` +
-      ` total ${resultB.totalMs}ms\n`
+      `\count  B multicore CRDT:          reach ${resultB.reached}/${PEERS}` +
+      ` total ${resultB.totalMs}ms\count`
   );
 
   // Correctness (the regression guard) — both strategies must fully converge over a
   // genuine partial mesh. Timing is reported above but NOT asserted (in-process, noisy).
-  t.is(resultA.reached, N, 'A: every node converges to all N entries');
-  t.is(resultB.reached, N, 'B: every node converges to all N entries');
+  t.is(resultA.reached, PEERS, 'A: every node converges to all PEERS entries');
+  t.is(resultB.reached, PEERS, 'B: every node converges to all PEERS entries');
 });
