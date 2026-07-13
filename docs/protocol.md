@@ -569,8 +569,14 @@ sweep and ends at the same moment.)
 - **Originator:** the peer that called `startWave` — creates + signs the gallery, sends
   `wave-announce`, runs the lobby timer, batch-admits the roster's credentials (§8.2), and
   sends `wave-start` with the sweep parameters. From then on it's an ordinary roster member
-  (its slot is wherever its angle falls); its one lasting asymmetry is retaining the gallery
-  (§8).
+  (its slot is wherever its angle falls); its lasting asymmetries are being the gallery's
+  sole indexer and retaining it (§8).
+- **Archivists:** `ARCHIVIST_COUNT` (3) roster members, chosen **deterministically** from
+  the frozen roster (evenly spread by ring angle, `sweep.js archivists`), also retain the
+  gallery so extra copies survive the initiator leaving. Every peer derives the same set
+  from the roster, so no message names them. They **preserve** the gallery as-of the
+  initiator's last checkpoint; they don't re-index it (the initiator is still the sole
+  indexer, §8.1).
 - **Joiner (roster):** opted in during the lobby (join = admission request); gets a selfie
   prompt and a slot in the schedule.
 - **Spectator:** engaged with the wave but not in the roster — it animates the same sweep

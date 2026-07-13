@@ -129,13 +129,16 @@ participates fully (pays fees, joins waves, selfies, relays), and every peer's
 `storageDir/hyperwave` store is **wiped on startup**, so galleries are ephemeral per run —
 keyed by the random `waveId`, nothing persists across runs.
 
-The only asymmetry is **per-wave and belongs to that wave's initiator** (the peer that kicked
-it off):
+The only asymmetries are **per-wave**:
 
-- It **keeps its own wave's gallery Autobase open and retains it** for the life of the
-  process, so the gallery survives for latecomers and replication — but it is the archivist
-  for _its own_ wave only. If the initiator goes offline, its wave's gallery is not archived
-  by anyone else.
+- The wave's **initiator** is its gallery's sole Autobase indexer and retains it for the
+  life of the process (so it survives for latecomers and replication).
+- Plus **`ARCHIVIST_COUNT` (3) roster peers**, chosen deterministically from the frozen
+  roster (evenly spread by ring angle, `sweep.js archivists` — no message names them),
+  also retain the gallery, so extra copies survive the initiator leaving. They preserve the
+  gallery as-of the initiator's last checkpoint; they don't re-index it (the initiator is
+  still the sole indexer). A fuller fix — dropping the single indexer for a CRDT gallery —
+  is tracked in `TODO.md`.
 
 ## Module map
 

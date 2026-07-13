@@ -364,6 +364,28 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
 
 ### Remaining hardening (scalable-topology §8)
 
+- [ ] **Gallery-as-CRDT: drop the single Autobase indexer (removes the initiator
+      bottleneck + SPOF).** The gallery's displayed output (`buildGallery`) is a pure
+      function of the entry _set_ — dedupe by peerId, sort by rank — and never uses
+      Autobase's linearization ORDER. So the gallery is a conflict-free replicated data
+      type (a peerId→entry LWW-map): each entry is self-authenticating (join attestation),
+      self-ordering (rank), idempotent (one per peer), and commutative. The single indexer
+      (the wave initiator, `gallery.js`) exists only to produce a total order we compute
+      and discard — and it's the O(N) fan-in/out bottleneck (~0.3 entries/s at 128 on an
+      oversubscribed box) AND a live SPOF (initiator dies mid-wave → nobody can advance the
+      indexed view). K-archivist retention (DONE) mitigates the _post-wave_ archival SPOF
+      but not this. Real fix: replace the Autobase gallery with N per-participant Hypercores
+      in a shared Corestore namespace — each peer posts to its own core, everyone replicates
+      the cores they can reach (writer keys are ALREADY flooded on `wave-join`, so key
+      distribution is solved) and merges via `buildGallery` over the union. No indexer, no
+      quorum, no leader, no funnel; convergence becomes epidemic ("have I replicated core
+      X"). Costs: a real rewrite of `gallery.js` + `gallery-session.js` (~600 lines), and
+      re-proving that raw multi-core corestore replication spreads as well as Autobase's
+      over a real partial mesh (validate with a flood-harness-style sim BEFORE committing —
+      that's the load-bearing assumption). The committee/k-of-n-indexer alternative was
+      considered and rejected: it re-introduces the quorum-stall the single indexer
+      deliberately escaped, for only partial relief.
+
 - [ ] **Bounded neighbour count needs unpin hysteresis.** The capped far-finger set is
       built (Done above), but the "never unpin a live channel" rule in
       `maintainNeighbours` still folds all of `senderIds()` back into the pin set, so

@@ -20,7 +20,7 @@ const b4a = require('b4a');
 const fs = require('bare-fs');
 
 const { angleOf, angleOfId, nextClockwise } = require('./ring');
-const { sweepSchedule, mySlot } = require('./sweep');
+const { sweepSchedule, mySlot, archivists } = require('./sweep');
 const { topUpPins } = require('./pins');
 const { Flood } = require('./flood');
 const { GallerySession } = require('./gallery-session');
@@ -58,6 +58,11 @@ const END_GRACE_MS = 2000; // after the last slot, before every peer returns to 
 // pinning entirely — the A/B knob for testing whether the incidental topic mesh
 // alone carries the flood at scale).
 const PIN_BUDGET = 7;
+// How many roster peers (spread around the ring, deterministic from the frozen roster)
+// retain each wave's gallery so it survives its initiator leaving — not just the
+// initiator. They preserve the gallery as-of the initiator's last checkpoint; they don't
+// re-index it (the initiator is still the sole indexer — see gallery.js).
+const ARCHIVIST_COUNT = 3;
 // Wave lifecycle control messages that must reach *every* peer (not just direct
 // neighbours). At scale Hyperswarm is only a partial random mesh, so these are
 // flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1).
@@ -915,6 +920,13 @@ function createWave({
       wave.roster.add(id);
     }
     const schedule = sweepSchedule({ rosterIds: ids, t0, lapMs: cappedLapMs });
+    // K deterministic archivists (spread around the ring) retain the gallery so it
+    // survives the initiator leaving. Every peer derives the same set from the frozen
+    // roster, so no extra message is needed. (The initiator always retains too, from
+    // startWave — the effective archivist set is {initiator} ∪ these K.)
+    if (archivists(schedule, ARCHIVIST_COUNT).has(me.id)) {
+      session.retain(wave.id);
+    }
     clearTimeout(lobbyTimer);
     armSweepTimers(schedule);
     // the deterministic end: EVERY peer observes t0 + lap + grace locally — there is

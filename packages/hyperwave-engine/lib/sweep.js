@@ -60,4 +60,25 @@ function mySlot(schedule, myId) {
   return null;
 }
 
-module.exports = { sweepSchedule, mySlot };
+/**
+ * The `count` deterministic gallery archivists: roster members spread EVENLY around the
+ * ring (every peer derives the same set from the same schedule, so no extra message is
+ * needed). They retain the wave's gallery after moving on — extra copies that survive the
+ * initiator leaving. Spreading by angle keeps the archivists from clustering in one
+ * failure-correlated region of the ring. If the roster is smaller than `count`, everyone
+ * is an archivist.
+ * @param {SweepSlot[]} schedule The angle-ordered sweep schedule.
+ * @param {number} count How many archivists to pick.
+ * @returns {Set<string>} The chosen archivist ids.
+ */
+function archivists(schedule, count) {
+  const total = schedule.length;
+  const chosenCount = Math.min(count, total);
+  const chosen = new Set();
+  for (let i = 0; i < chosenCount; i++) {
+    chosen.add(schedule[Math.floor((i * total) / chosenCount)].id);
+  }
+  return chosen;
+}
+
+module.exports = { sweepSchedule, mySlot, archivists };

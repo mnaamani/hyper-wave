@@ -182,12 +182,14 @@ through B**, and A receives C's selfie through B. So Hypercore/Corestore does fo
 gallery along connected (ring/finger) paths when intermediates keep it open — no full mesh
 required.
 
-**Persistence — held by the wave's initiator.** There are **no peer roles** (no validator/seed
-archivist hub). Every peer is equal and wipes its store per run, so a gallery only survives as
-long as a peer keeps it open. The one per-wave asymmetry belongs to the **initiator** of a
-wave: the peer that kicks it off keeps _that_ wave's gallery open and retains it (archivist for
-its own wave only), so it can keep serving that gallery to latecomers after other participants
-disconnect. Verified in `gallery.replication.test.js`: a latecomer connected _only_ to the
+**Persistence — held by the initiator plus K archivists.** There are **no peer roles** (no
+validator/seed archivist hub). Every peer is equal and wipes its store per run, so a gallery
+only survives as long as _some_ peer keeps it open. The per-wave asymmetry: the wave's
+**initiator** retains its gallery (and is its sole indexer), and `ARCHIVIST_COUNT` (3) roster
+peers chosen deterministically from the frozen roster (spread by ring angle, `sweep.js
+archivists`) also retain it — so the gallery survives the initiator leaving, not just other
+participants. The archivists preserve the gallery as-of the initiator's last checkpoint;
+they don't re-index it (single-indexer, see §8 / `gallery.js`). Verified in `gallery.replication.test.js`: a latecomer connected _only_ to the
 initiator gets the full gallery after other participants have left. **Accepted simplification:**
 if the initiator goes offline its wave's gallery isn't archived anywhere else (no dedicated hub
 pins/retains it), and nothing persists across runs. (Convergence _lag_ at large depth remains
