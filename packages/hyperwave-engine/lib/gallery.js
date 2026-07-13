@@ -175,4 +175,40 @@ async function readGallery(base) {
   return buildGallery(items);
 }
 
-module.exports = { galleryConfig, buildGallery, readGallery };
+/**
+ * The pure CRDT merge (gallery-crdt.js): fold a bag of raw wave-selfie ops — collected
+ * from every participant's own core — into the ordered gallery, applying the SAME
+ * deterministic gate the Autobase `apply()` did, but over the whole set at once (no
+ * linearizer, no indexer). Every peer that has replicated the same set of ops produces
+ * a byte-identical result, which is what makes the gallery a conflict-free replicated
+ * data type. Drops ops without a valid join attestation or over the byte caps; keeps a
+ * tip `address` only if a matching burn backs it (else strips it), verifies-then-drops
+ * the bulky `burn` (keeping `burnTx`); one entry per peer + hop order via buildGallery.
+ * @param {SelfieOp[]} rawEntries - Raw ops read from participant cores.
+ * @returns {SelfieOp[]} The deduped, hop-ordered gallery entries.
+ */
+function mergeGallery(rawEntries) {
+  const valid = [];
+  for (const op of rawEntries) {
+    if (op?.type !== 'wave-selfie' || !selfieHasValidJoin(op)) {
+      continue;
+    }
+    if ((op.image || '').length > MAX_IMAGE_BYTES) {
+      continue;
+    }
+    if ((op.caption || '').length > MAX_CAPTION_BYTES) {
+      continue;
+    }
+    const { burn, ...entry } = op;
+    if (!tipAddressIsBackedByBurn(op)) {
+      entry.address = ''; // unverified address → not tippable
+    }
+    if (burn && burn.txHash) {
+      entry.burnTx = burn.txHash;
+    }
+    valid.push(entry);
+  }
+  return buildGallery(valid);
+}
+
+module.exports = { galleryConfig, buildGallery, readGallery, mergeGallery };
