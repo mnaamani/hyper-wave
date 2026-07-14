@@ -1,11 +1,12 @@
 // The live peer table: who is on the ring, who we can reach directly, who we've pinned
-// as physical ring edges, and who just disconnected (churn cooldown). Extracted from
-// wave.js so the consistency rules across these four collections live in one place:
+// (the flood graph's floor — pins.js), and who just disconnected (churn cooldown).
+// Extracted from wave.js so the consistency rules across these collections live in one
+// place:
 //   - a seat's angle is ALWAYS derived from its id (never trusted from the wire);
 //   - a fresher sighting wins; a stale one may still contribute its country;
 //   - a direct disconnect is authoritative: the seat is dropped immediately and the id
-//     enters a cooldown (goneUntil) so DHT retries / third-party pointer adverts can't
-//     resurrect a ghost seat before the cooldown expires;
+//     enters a cooldown (goneUntil) so DHT re-seeds can't resurrect a ghost seat before
+//     the cooldown expires;
 //   - pins are maintained as a diff (updatePins) so wave.js can mirror exactly the
 //     additions/removals into swarm.joinPeer/leavePeer.
 // Pure bookkeeping — no swarm, no transport, no timers.
@@ -88,22 +89,22 @@ class PeerTable {
 
   /**
    * A peer disconnected: a direct disconnect is authoritative, so drop its channel and
-   * seat immediately and start the churn cooldown (don't re-pin/re-hint it yet).
+   * seat immediately and start the churn cooldown (don't re-pin it yet).
    * @param {string} id - The disconnected peer's hex id.
-   * @returns {{solo: boolean, wasPinned: boolean}} Whether I now have no connections at
-   *   all, and whether the dropped peer was a pinned ring edge (both drive repairs).
+   * @returns {{wasPinned: boolean}} Whether the dropped peer was pinned (drives an
+   *   immediate pin top-up).
    */
   onDisconnect(id) {
     this.#senders.delete(id);
     this.#peers.delete(id);
     this.#goneUntil.set(id, Date.now() + this.#staleMs);
-    return { solo: this.#senders.size === 0, wasPinned: this.#pinned.has(id) };
+    return { wasPinned: this.#pinned.has(id) };
   }
 
   /**
    * Is this id inside its churn cooldown? (A just-disconnected peer: skip discovery
-   * re-seeds and third-party pointer hints so a ghost seat can't be resurrected.)
-   * Expired cooldowns are pruned as they're checked.
+   * re-seeds so a ghost seat can't be resurrected.) Expired cooldowns are pruned as
+   * they're checked.
    * @param {string} id - The peer hex id to check.
    * @param {number} [now] - Epoch ms to evaluate at (defaults to Date.now()).
    * @returns {boolean} True while the cooldown is active.
@@ -155,23 +156,6 @@ class PeerTable {
   }
 
   /**
-   * Is there a direct channel to this peer?
-   * @param {string} id - The peer hex id.
-   * @returns {boolean} True if connected.
-   */
-  hasSender(id) {
-    return this.#senders.has(id);
-  }
-
-  /**
-   * How many peers are directly connected.
-   * @returns {number} The connection count.
-   */
-  get senderCount() {
-    return this.#senders.size;
-  }
-
-  /**
    * Ids of all directly-connected peers.
    * @returns {IterableIterator<string>} The connected ids.
    */
@@ -196,19 +180,11 @@ class PeerTable {
   }
 
   /**
-   * Ids of the pinned ring edges.
+   * Ids of the pinned peers.
    * @returns {IterableIterator<string>} The pinned ids.
    */
   pinnedIds() {
     return this.#pinned.values();
-  }
-
-  /**
-   * Everyone I know a route to: pinned ∪ connected (Chord's per-hop `known` input).
-   * @returns {string[]} The deduped known hex peer ids.
-   */
-  knownIds() {
-    return [...new Set([...this.#pinned, ...this.#senders.keys()])];
   }
 }
 

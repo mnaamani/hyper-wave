@@ -84,7 +84,7 @@ test('reset clears staging/slot/posted so the next wave starts fresh', (t) => {
   t.is(posts[1].image, 'new', 'no stale staged frame leaked across waves');
 });
 
-test('the burn proof survives reset (late-admission ticket) but not a new wave', (t) => {
+test('the burn proof survives reset (late tip-address binding) but not a new wave', (t) => {
   const { pipeline } = makePipeline();
   const proof = { waveId: 'w1', peerId: 'p1', txHash: 'dead', sig: 'beef' };
   pipeline.setBurnProof(proof);
@@ -92,7 +92,7 @@ test('the burn proof survives reset (late-admission ticket) but not a new wave',
   t.is(
     pipeline.burnProof,
     proof,
-    'reset keeps the ticket for a late gallery admission'
+    'reset keeps the proof for a late-confirming burn'
   );
   pipeline.clearBurnProof(); // a genuinely new wave's lobby began
   t.is(pipeline.burnProof, null, 'a new wave drops the previous ticket');

@@ -68,15 +68,14 @@ const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start']);
 // Identity binding: for a message that describes its OWN sender, the claimed id must equal
 // the Noise-authenticated connection id it arrived on (`fromId`). Hyperswarm authenticates
 // *who* we're talking to; without this the app would still believe whatever a modified
-// client *claims* to be — letting one peer inject presence/holds/receipts/proofs under keys
-// it doesn't control (ring pollution, heal suppression, sybil proof stuffing). Only the
-// direct-path (unicast / one-hop) messages are listed; flooded messages (wave-*) are relayed
-// so their `by`/`peerId` is a third party at relay hops — those are authenticated by their
-// carried signatures (kick-off burn-proof, receipts) instead, not by the connection.
+// client *claims* to be — letting one peer fake other peers' liveness (ring pollution).
+// Only direct (one-hop) messages can be bound this way; flooded messages (wave-*) are
+// relayed, so their `by`/`peerId` is a third party at relay hops — those are authenticated
+// by their carried signatures (kick-off burn proof, join attestations) instead.
 const SELF_ID_FIELD = {
   heartbeat: 'id' // the heartbeat sender
-  // NB: wave-join is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its `peerId`
-  // is a third party; its admission credential is authenticated by the carried join
+  // NB: wave-join is NOT here — it's relayed (RELAYED_KINDS), so at relay hops its
+  // `peerId` is a third party; its credential is authenticated by the carried join
   // signature (attest.js verifyJoin), not the connection.
 };
 // Cap on remembered message ids (flood dedup); the oldest ids are evicted first
@@ -90,7 +89,7 @@ const PAY_TIMEOUT_MS = 60000;
 
 /**
  * Short 8-char prefix of a hex id, for readable logs.
- * @param {string} hex Full hex id (peer id, wave id, autobase key…).
+ * @param {string} hex Full hex id (peer id, wave id, core key…).
  * @returns {string} The first 8 hex characters.
  */
 function shortId(hex) {
@@ -190,7 +189,7 @@ function loadOrCreateSwarmSeed(
  * @property {() => string|null} startWave Announce a wave + open the lobby; returns the new waveId, or null if busy.
  * @property {() => string|null} join Opt into the current lobby; returns the joined waveId, or null on a no-op.
  * @property {(country: string) => void} setCountry Set the supported nation (cosmetic, rides the heartbeat).
- * @property {(selfie: {image: string, caption?: string}) => void} stageSelfie Stage the lobby selfie to post on my hop.
+ * @property {(selfie: {image: string, caption?: string}) => void} stageSelfie Stage the lobby selfie to post at my sweep slot.
  * @property {(address: string|null, verifier?: Function) => void} setWallet Wire the payment layer (address + on-chain burn verifier).
  * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed kick-off proof and announce.
  * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket).
@@ -198,9 +197,9 @@ function loadOrCreateSwarmSeed(
  */
 
 /**
- * Create the HyperWave orchestrator: joins the match swarm, maintains the ring/Chord
- * topology, runs the wave lifecycle (lobby → sweep → gallery), and exposes the
- * command surface the host (worker/harness) drives.
+ * Create the HyperWave orchestrator: joins the match swarm, maintains the pinned flood
+ * mesh, runs the wave lifecycle (lobby → sweep → gallery), and exposes the command
+ * surface the host (worker/harness) drives.
  * @param {CreateWaveOptions} options
  * @returns {WaveHandle} The command + identity surface for this peer.
  */
@@ -221,9 +220,6 @@ function createWave({
   maxPeers = 64,
   swarmSeed = null // hex seed for the swarm identity; distinct from the wallet seed (createPayments)
 }) {
-  // No roles — every peer is equal. The one asymmetry is per-wave: the peer that INITIATES a
-  // wave keeps that wave's gallery open (so it survives for latecomers/replication);
-  // everyone else treats galleries as ephemeral and closes them when moving on.
   // The store is per-run (galleries are keyed by the random waveId, so nothing persists
   // meaningfully across runs); wipe it on startup to reclaim disk.
   const storePath = storageDir + '/hyperwave';
@@ -273,10 +269,8 @@ function createWave({
   });
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
-  // concurrent starts resolve deterministically (lower waveId wins). During the
-  // lobby, peers opt in; only opted-in peers (the roster) get a selfie prompt — the
-  // ball still visits everyone (relays), keeping the full-ring visual.
-  //   wave = { id, phase: 'lobby'|'racing', by, roster: Set<id>, joined: bool } | null
+  // concurrent starts resolve deterministically (lower waveId wins). During the lobby,
+  // peers opt in; only the roster gets a selfie slot — everyone renders the sweep.
   let wave = null;
   let lobbyEndsAt = 0; // ~when the lobby closes (for syncing a late joiner's countdown)
   let lobbyTimer = null; // fires the sweep (initiator) or a fallback to idle (others)
@@ -311,12 +305,10 @@ function createWave({
     });
   }
 
-  // Phase 1 (scalable-topology.md §4.2/§6): the peer keys Hyperswarm has DISCOVERED on
-  // our topic (`swarm.peers`, PeerInfo keyed by hex key). This drives *who we try to
-  // connect to* (Chord pinning below) — NOT the visible ring. A DHT announcement only
-  // means "this key advertised the topic once"; a stale announce from a since-closed
-  // instance would otherwise become a permanent ghost seat. A seat requires real
-  // liveness (a connection or gossip); discovery just tells us who to dial.
+  // DHT discovery drives *who we try to connect to* (pin candidates) — NOT the visible
+  // ring. A DHT announcement only means "this key advertised the topic once"; a stale
+  // announce from a since-closed instance would otherwise become a permanent ghost seat.
+  // A seat requires real liveness (a connection or gossip); discovery says who to dial.
   /** @returns {string[]} Hex ids Hyperswarm has discovered on our topic, minus just-disconnected peers. */
   function discoveredIds() {
     const now = Date.now();
@@ -360,8 +352,8 @@ function createWave({
     });
     // Never unpin a peer we already have a live channel to: leavePeer on a connected
     // peer makes Hyperswarm reap the connection, and reaping live channels mid-wave
-    // once cost messages on channels that hasSender() still reported live. Keeping
-    // live channels pinned holds the mesh stable; genuinely-closed peers drop out of
+    // once cost messages on channels the table still reported live. Keeping live
+    // channels pinned holds the mesh stable; genuinely-closed peers drop out of
     // senderIds via conn.on('close').
     for (const id of table.senderIds()) {
       targets.add(id);
@@ -382,7 +374,7 @@ function createWave({
     }
   }
 
-  /** Re-pin our ring edges from current discovery/connectivity, and repaint. */
+  /** Top up the pins from current discovery/connectivity, and repaint. */
   function refreshTopology() {
     maintainNeighbours();
     emit();
@@ -398,9 +390,8 @@ function createWave({
   }
 
   // The heartbeat: pure liveness + country, sent to pinned neighbours. Membership
-  // comes from DHT discovery (`swarm.peers`) + direct connections; there is no pointer
-  // exchange — the sweep needs no successor precision, so peers don't gossip ring
-  // structure at all (the old succ/pred advert + stabilize step went with the token).
+  // comes from DHT discovery (`swarm.peers`) + direct connections; peers don't gossip
+  // ring structure at all — the sweep needs no successor precision.
   /** @returns {Object} A `heartbeat` gossip message: my id + country (pure liveness). */
   function myHeartbeat() {
     return {
@@ -502,8 +493,7 @@ function createWave({
         ingestWriter({
           peerId: msg.peerId,
           writerKey: msg.writerKey,
-          joinSig: msg.joinSig,
-          burn: msg.burn || undefined
+          joinSig: msg.joinSig
         });
       }
       return;
@@ -609,14 +599,13 @@ function createWave({
   // Learn a participant's gallery core: verify its join attestation (binds peerId →
   // writerKey, so a relayed credential can't be forged or substituted), then count it
   // into the roster + writers and open its core (gallery-crdt.js). Idempotent; the paid
-  // gate for direct wave-joins is enforced by the caller (the burn isn't carried here on
-  // wave-start/sync, whose writers are pre-vetted by the initiator).
+  // gate for direct wave-joins is enforced by the caller (wave-start/sync writers carry
+  // no burn — the wave itself is gated by the kick-off proof).
   /**
    * @param {Object} cred A gallery-core credential.
    * @param {string} cred.peerId The participant's ring id.
    * @param {string} cred.writerKey The participant's gallery core key (hex).
    * @param {string} cred.joinSig The join attestation over (waveId, peerId, writerKey).
-   * @param {Object} [cred.burn] The participant's fee-burn attestation (kept for wave-sync).
    */
   function ingestWriter(cred) {
     if (!wave || !cred || wave.writers.has(cred.peerId)) {
@@ -636,19 +625,17 @@ function createWave({
     wave.roster.add(cred.peerId);
     wave.writers.set(cred.peerId, {
       writerKey: cred.writerKey,
-      joinSig: cred.joinSig,
-      burn: cred.burn
+      joinSig: cred.joinSig
     });
     session.addWriter(wave.id, cred.peerId, cred.writerKey);
     onEvent({ event: 'roster', waveId: wave.id, count: wave.roster.size });
   }
 
   // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
-  // identity to the on-chain tx), stash it as my gallery-admission ticket, and return it.
-  // Two consumers: the initiator attaches its KICK-OFF proof to the wave-announce (the
-  // paid-wave gate, announcePaid); and any participant presents its proof (kick-off OR join)
-  // when it requests to write a selfie — so a gallery seat requires a real burn (the
-  // session's admission flow).
+  // identity to the on-chain tx), stash it, and return it. Two consumers: the initiator
+  // attaches its KICK-OFF proof to the wave-announce (the paid-wave gate, announcePaid);
+  // a joiner's proof rides its wave-join (the per-peer paid gate) and its gallery entry
+  // (the tip-address binding).
   /**
    * @param {Object} fields The confirmed on-chain burn.
    * @param {string} fields.reason 'kickoff' (initiator) or 'join' (participant).
@@ -658,11 +645,8 @@ function createWave({
    * @returns {Object|null} The signed burn attestation, or null if we've moved past that wave.
    */
   function recordBurn({ reason, amount, txHash, waveId }) {
-    // The burn is for `waveId` (threaded from payFee). Record it even if the wave has already
-    // ended — the race completes at network speed, before a fee burn confirms, and the burn is
-    // the ticket for a LATE gallery admission into the (still-open) originator gallery. Only drop
-    // it if we've moved past that wave entirely (its gallery is no longer current) — never let a
-    // stale burn overwrite the current wave's ticket.
+    // The burn is for `waveId` (threaded from payFee). A burn for an older wave must never
+    // overwrite the current wave's proof; one landing after its own wave moved on is inert.
     const wid = waveId || wave?.id;
     if (!wid || (wid !== wave?.id && wid !== session.waveId)) {
       return null;
@@ -678,9 +662,9 @@ function createWave({
     };
     const proof = { ...fields, sig: signBurn(swarm.keyPair, fields) };
     selfie.setBurnProof(proof);
-    // My join fee just confirmed while the lobby is still open: re-flood my wave-join so
-    // the burn attestation reaches the initiator before it batch-admits at lobby close
-    // (the join credential upserts on the initiator — see the wave-join handler).
+    // My join fee just confirmed while the lobby is still open: re-flood my wave-join with
+    // the burn attached — enforcing peers dropped the earlier burn-less join (per-peer paid
+    // gate), so this flood is the one that actually seats me.
     if (
       reason === 'join' &&
       wave &&
@@ -747,7 +731,7 @@ function createWave({
       endedWaves.add(wave.id);
       teardown();
     }
-    resetSelfie(); // fresh wave — clear any staged selfie/receipt from a prior one
+    selfie.reset(); // fresh wave — clear any staged selfie/slot from a prior one
     selfie.clearBurnProof(); // a genuinely new wave (guarded above): drop the previous wave's burn ticket
     // paid: 'verified' when the kick-off burn is confirmed (or enforcement is off);
     // 'pending' while a peer verifies it on-chain; 'rejected' if it isn't a real burn.
@@ -777,7 +761,7 @@ function createWave({
       wave.roster.add(me.id);
     }
     lobbyEndsAt = Date.now() + dur;
-    // fallback: if the race never starts (initiator vanished), drop back to idle
+    // fallback: if the start never arrives (initiator vanished), drop back to idle
     clearTimeout(lobbyTimer);
     lobbyTimer = setTimeout(() => goIdle('lobby-timeout'), lobbyMs + 10000);
     if (silent) {
@@ -820,8 +804,8 @@ function createWave({
    * Publish MY gallery core: open it (its key is my writer key), sign my join attestation
    * over it, remember myself in `writers`, and flood a wave-join carrying (writerKey,
    * joinSig, burn). Every peer ingests it → opens my core → sees my selfie. The core key
-   * needs my core ready, so the flood is async. Called by joiners (from join()) and by
-   * the initiator (from doAnnounce); recordBurn re-floods once a late join burn confirms.
+   * needs my core ready, so the flood is async. Called by joiners (from join()) and the
+   * initiator (from doAnnounce); recordBurn re-floods once a late join burn confirms.
    * @param {string} waveId The wave whose core to publish.
    */
   function floodMyGalleryCore(waveId) {
@@ -834,16 +818,15 @@ function createWave({
         if (!wave.joinSig) {
           wave.joinSig = signJoin(swarm.keyPair, { waveId, writerKey });
         }
-        const burn = selfie.burnProof || undefined;
         // remember myself so my own wave-sync shares my core with newcomers
-        wave.writers.set(me.id, { writerKey, joinSig: wave.joinSig, burn });
+        wave.writers.set(me.id, { writerKey, joinSig: wave.joinSig });
         floodGossip({
           kind: 'wave-join',
           waveId,
           peerId: me.id,
           writerKey,
           joinSig: wave.joinSig,
-          burn
+          burn: selfie.burnProof || undefined
         });
       })
       .catch(() => {});
@@ -955,18 +938,18 @@ function createWave({
 
   // Idle reasons that must NOT blacklist the waveId: a lobby-timeout means "I gave up
   // waiting for wave-start", not "the wave ended" — at scale the initiator's start can
-  // arrive after a receiver's fallback fired (measured at N=128: the batch admission
-  // once delayed the start flood past every receiver's 30s lobby fallback, and the
-  // blacklist then made the whole swarm unrecoverable). A late wave-start (or sync)
-  // simply re-adopts the wave. Genuine ends (completed, unpaid-rejected, superseded)
-  // still blacklist, so stale floods can't revive a finished wave.
+  // arrive after a receiver's fallback fired (measured at N=128: a slow pre-flood step
+  // once delayed the start past every receiver's 30s lobby fallback, and the blacklist
+  // made the whole swarm unrecoverable). A late wave-start (or sync) simply re-adopts
+  // the wave. Genuine ends (completed, unpaid-rejected, superseded) still blacklist, so
+  // stale floods can't revive a finished wave.
   const REVIVABLE_IDLE_REASONS = new Set(['lobby-timeout']);
   // When a revivable idle abandons a wave I had JOINED, remember my join state: a late
   // wave-start re-adopts the wave through enterLobby, which builds fresh state — without
   // this memo the re-adopted wave would have joined=false (my slot never arms, my selfie
-  // never posts) and a blank joinSig (my entry would fail apply()'s write-gate). Single
-  // slot: only one wave is ever engaged at a time. (Found at N=128: one peer per ~100
-  // hit exactly this path.)
+  // never posts) and a blank joinSig (my entry would fail mergeGallery's write-gate).
+  // Single slot: only one wave is ever engaged at a time. (Found at N=128: one peer per
+  // ~100 hit exactly this path.)
   let abandonedJoin = null; // { waveId, joinSig } | null
 
   /**
@@ -986,7 +969,7 @@ function createWave({
       abandonedJoin = { waveId, joinSig: wave.joinSig };
     }
     wave = null;
-    resetSelfie(); // drop any staged selfie / slot for the next wave
+    selfie.reset(); // drop any staged selfie / slot for the next wave
     teardown();
     onEvent({ event: 'wave-idle', waveId, reason });
   }
@@ -1020,16 +1003,8 @@ function createWave({
   }
 
   /**
-   * Clear this wave's selfie-pipeline + admission state (but NOT the burn ticket — the
-   * pipeline keeps it as the entry's tip-address binding; see selfie.js).
-   */
-  function resetSelfie() {
-    selfie.reset();
-  }
-
-  /**
-   * Announce a new wave and open the lobby (any peer can start when idle). After the
-   * lobby window the initiator batch-admits + finalizes the roster and the sweep runs.
+   * Announce a new wave and open the lobby (any peer can start when idle). At lobby
+   * close the initiator freezes the roster and starts the sweep.
    * @returns {string|null} The new waveId, or null if a wave is already engaged.
    */
   function startWave() {
@@ -1047,7 +1022,7 @@ function createWave({
       lobbyTimer = setTimeout(() => goIdle('unpaid'), PAY_TIMEOUT_MS);
       onEvent({ event: 'paying', waveId });
     } else {
-      // legacy/no-wallet path: announce immediately, unpaid
+      // no-wallet path (tests/headless): announce immediately, unpaid
       doAnnounce(waveId, null);
     }
     return waveId;
@@ -1164,8 +1139,7 @@ function createWave({
     if (session.writerKey && !wave.writers.has(me.id)) {
       wave.writers.set(me.id, {
         writerKey: session.writerKey,
-        joinSig: wave.joinSig,
-        burn: selfie.burnProof || undefined
+        joinSig: wave.joinSig
       });
     }
     // the sweep parameters: a short lead so the flooded start reaches everyone before
@@ -1262,10 +1236,8 @@ function createWave({
       // authoritative disconnect: drop the channel + seat, start the churn cooldown
       const { wasPinned } = table.onDisconnect(id);
       log('peer disconnected', shortId(id));
-      // churn (§4.4): if a pinned ring neighbour dropped, re-pin immediately —
-      // promotes the next successor-list entry and repairs fingers without waiting
-      // for the next tick. The table still holds the dead pin; maintainNeighbours diffs
-      // it out (leavePeer) and pins the replacement from the now-smaller ring.
+      // a pinned peer dropped: top up the pins immediately instead of waiting for the
+      // next tick (its churn cooldown keeps it out of the replacement candidates)
       if (wasPinned) {
         maintainNeighbours();
       }
@@ -1274,9 +1246,8 @@ function createWave({
     conn.on('error', () => {});
   });
 
-  // DHT discovery feeds ring membership (Phase 1) and drives which peers we pin
-  // (Phase 2): every time Hyperswarm learns of or drops peers on the topic, re-seed
-  // the ring from `swarm.peers` and re-pin our successor-list + predecessor.
+  // Every time Hyperswarm learns of or drops peers on the topic, refresh the pin
+  // candidates and the visible ring.
   swarm.on('update', refreshTopology);
 
   const topic = crypto.hash(b4a.from(matchId));
@@ -1303,9 +1274,9 @@ function createWave({
   }
   tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
 
-  /** Ring-maintenance tick: re-pin edges, prune stale seats, pull gallery updates, then re-arm. */
+  /** Maintenance tick: top up pins, prune stale seats, pull gallery updates, then re-arm. */
   function ringTick() {
-    // re-pin ring edges from current discovery even if no 'update' fired
+    // top up pins from current discovery even if no 'update' fired
     maintainNeighbours();
     emit(); // also re-evaluate staleness pruning
     // Pull replicated gallery writes for every gallery held and repaint.

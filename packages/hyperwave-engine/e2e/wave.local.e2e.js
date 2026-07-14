@@ -151,16 +151,14 @@ test(
     peers[4].kill(); // p5
 
     // the wave must still finish — nobody waits on a dead peer: every survivor
-    // self-completes at its own deterministic end timer (there is no token to lose,
-    // no healing, no stall)
+    // self-completes at its own deterministic end timer
     t.ok(
       await peers[1].waitForEvent('completed', WAIT_MS),
       'wave completed despite 2 peers dying mid-wave'
     );
     // The survivors' selfies converge into the shared gallery. The ONLY loss is the two
-    // killed peers' own slots (they died before posting) — the token-era heal-precision
-    // loss mode (a live peer skipped by an imprecise heal) no longer exists, so the
-    // bound is exact: everyone else posts and converges.
+    // killed peers' own slots (they died before posting): everyone else posts and
+    // converges, so the bound is exact.
     t.ok(
       await waitForAnyGallery(survivors, target - 2, WAIT_MS),
       `the sweep still populated the gallery (≥ ${target - 2} survivor selfies converged)`

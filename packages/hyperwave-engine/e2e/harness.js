@@ -92,7 +92,7 @@ class Proc {
     this.events = []; // parsed onEvent events, in order
     // `detached` puts the child in its OWN process group. `bare` here is a Node wrapper that
     // spawns the native runtime as a child, so killing the wrapper PID alone would orphan the
-    // real process (and a "killed" peer would keep running — breaking the healing test). We
+    // real process (and a "killed" peer would keep running — breaking the kill test). We
     // kill the whole group instead (kill() below).
     this.proc = spawn(BARE, args, {
       cwd: CORE_DIR,
@@ -244,7 +244,6 @@ class Cluster {
       ...(this.public ? {} : { HYPERWAVE_BOOTSTRAP: `127.0.0.1:${this.port}` }),
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,
-      // scale the batch-admission replicate-back wait with the roster
       ...env
     });
     this.procs.push(proc);

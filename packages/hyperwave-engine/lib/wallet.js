@@ -4,7 +4,7 @@
 // fee amount and the on-chain memo format, so a format drift between hosts can't silently break
 // verification. WDK is ESM-only, so this CJS module bridges to it via dynamic import(); it does
 // real Tron Nile-testnet transfers (the spike/wdk de-risk confirmed this runs under Bare). No
-// swarm here — the worker (hyperwave.js) / wave.js wire it in, mirroring ring/token/gallery as
+// swarm here — the worker (hyperwave.js) / wave.js wire it in, mirroring ring/gallery as
 // its own module.
 //
 // MVP uses **native TRX** as the payment currency (not TRC-20 USDT): no token contract, and
@@ -275,7 +275,7 @@ function burnMemo(waveId, peerId) {
 async function payFee({ wave, payments, waveId, reason }) {
   const { hash } = await payments.burn(FEE_TRX, burnMemo(waveId, wave.me.id));
   // pass waveId so the attestation records even if the (instant) wave already ended — it's the
-  // ticket for a late gallery admission into the persisted gallery (wave.js recordBurn).
+  // the entry's tip-address binding even when it confirms late (wave.js recordBurn).
   const proof = wave.recordBurn({
     reason,
     amount: FEE_TRX,

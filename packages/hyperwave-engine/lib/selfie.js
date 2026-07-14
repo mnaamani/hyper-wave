@@ -34,7 +34,7 @@ class SelfiePipeline {
   #staged = null; // { image, caption } captured in the lobby, awaiting my slot
   #slot = null; // my sweep slot once it fires, awaiting the selfie
   #posted = false; // guard: post my selfie exactly once per wave
-  #burnProof = null; // my signed fee-burn attestation — my gallery-admission ticket
+  #burnProof = null; // my signed fee-burn attestation — the entry's tip-address binding
   #canSelfie;
   #currentWaveId;
   #post;
@@ -107,8 +107,8 @@ class SelfiePipeline {
   }
 
   /**
-   * My signed fee-burn attestation (the gallery-admission ticket), or null before the
-   * worker reports a confirmed burn.
+   * My signed fee-burn attestation (the entry's tip-address binding), or null before
+   * the worker reports a confirmed burn.
    * @returns {(Object|null)} The signed burn proof.
    */
   get burnProof() {

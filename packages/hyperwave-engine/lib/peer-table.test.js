@@ -75,7 +75,6 @@ test('onConnect seats the peer, stores its channel, and lifts the cooldown', (t)
   t.ok(table.coolingDown(PEER_A), 'disconnect starts the churn cooldown');
   table.onConnect(PEER_A, NOOP_SEND);
   t.absent(table.coolingDown(PEER_A), 'reconnect lifts it');
-  t.ok(table.hasSender(PEER_A));
   t.is(table.send(PEER_A), NOOP_SEND);
   t.is(table.liveRing().length, 1, 'connected peer is seated');
 });
@@ -85,12 +84,10 @@ test('onDisconnect is authoritative: seat + channel drop at once, cooldown start
   table.onConnect(PEER_A, NOOP_SEND);
   table.onConnect(PEER_B, NOOP_SEND);
   const first = table.onDisconnect(PEER_A);
-  t.alike(first, { solo: false, wasPinned: false });
-  t.absent(table.hasSender(PEER_A));
+  t.alike(first, { wasPinned: false });
+  t.absent(table.send(PEER_A), 'channel dropped');
   t.is(table.liveRing().length, 1, 'the seat dropped immediately');
   t.ok(table.coolingDown(PEER_A), 'ghost-resurrection guard armed');
-  const second = table.onDisconnect(PEER_B);
-  t.is(second.solo, true, 'last connection gone -> solo');
 });
 
 test('the cooldown expires (and self-prunes) after staleMs', (t) => {
@@ -120,11 +117,4 @@ test('updatePins diffs against the desired targets and reports the churn', (t) =
     true,
     'pin state feeds the churn repair'
   );
-});
-
-test('knownIds is pinned ∪ connected, deduped', (t) => {
-  const table = makeTable();
-  table.onConnect(PEER_A, NOOP_SEND);
-  table.updatePins(new Set([PEER_A, PEER_B])); // A is both pinned and connected
-  t.alike(table.knownIds().sort(), [PEER_A, PEER_B].sort());
 });

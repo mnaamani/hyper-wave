@@ -162,7 +162,6 @@ function verifyJoin({ waveId, peerId, writerKey }, sigHex) {
 }
 
 module.exports = {
-  burnHash,
   signBurn,
   verifyBurn,
   burnAuthorizes,

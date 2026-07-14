@@ -2,7 +2,7 @@
 // renderer's worker bridge: it boots the Bare worklet (hyperwave-engine's worklet/app.js,
 // bundled by bare-pack), speaks the SAME JSON message protocol over the IPC stream, and exposes
 // engine state + actions to React. The engine itself (wave race, gallery, WDK wallet) runs
-// unchanged inside the worklet — this file never touches Hyperswarm/Autobase/WDK directly.
+// unchanged inside the worklet — this file never touches Hyperswarm/Corestore/WDK directly.
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState } from 'react-native';
 import { Worklet } from 'react-native-bare-kit';

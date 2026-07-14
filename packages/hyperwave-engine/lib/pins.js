@@ -2,7 +2,7 @@
 //
 // WHY PIN AT ALL (vs. relying on Hyperswarm's incidental topic mesh alone)?
 // The flood layer (flood.js) carries the entire wave protocol — announce, join
-// (with its admission credential), start. Flood reach needs a CONNECTED graph.
+// (with its gallery credential), start. Flood reach needs a CONNECTED graph.
 // Hyperswarm's own topic mesh is *approximately* a random graph of degree
 // ≈ maxPeers, which would flood fine — but "approximately" is doing real work
 // in that sentence: the mesh is shaped by DHT lookup order, join-time cohorts,

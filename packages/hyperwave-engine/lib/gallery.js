@@ -1,17 +1,19 @@
-// The wave selfie gallery: an Autobase multi-writer log merged into one ordered
-// view. Config + read/ordering helpers live here (pure/Autobase, no swarm); the
-// orchestrator in wave.js owns the live base instance. Unit-tested in
-// wave.gallery.test.js and wave.autobase.test.js.
+// The wave selfie gallery's pure logic: mergeGallery (the CRDT merge + write-gate the
+// product uses — gallery-crdt.js holds the cores, this holds the math) and buildGallery
+// (the deterministic ordering both paths share). galleryConfig/readGallery survive ONLY
+// as the single-indexer Autobase baseline that the A/B replication benchmark
+// (gallery.replication.bench.test.js) compares the CRDT against — they are not the
+// product gallery.
 const b4a = require('b4a');
 const { verifyJoin, burnAuthorizes } = require('./attest');
 
 /**
- * A `wave-selfie` op (the shape appended to the Autobase log and read back into the gallery).
+ * A `wave-selfie` op (the shape a participant appends to its core; read back into the gallery).
  * @typedef {Object} SelfieOp
  * @property {string} type - Op discriminator; a gallery selfie is `'wave-selfie'`.
  * @property {string} waveId - The wave this selfie belongs to.
  * @property {string} peerId - Hex id of the peer that posted the selfie.
- * @property {number} hopCount - The peer's hop index in the token lap (gallery ordering key).
+ * @property {number} hopCount - The peer's rank in the sweep schedule (gallery ordering key).
  * @property {string} writerKey - The poster's gallery writer core key (hex).
  * @property {string} joinSig - Ed25519 join-attestation signature (hex) binding the op to `peerId`.
  * @property {string} image - Inline selfie image as a JPEG data URL.
@@ -21,19 +23,19 @@ const { verifyJoin, burnAuthorizes } = require('./attest');
  * @property {Object} [burn] - Burn attestation proof (verified then dropped; `burnTx` kept).
  */
 
-// Per-entry write budget (deterministic, enforced in apply on every peer). With OPTIMISTIC
-// admission a gallery seat no longer costs a verified on-chain burn, so bound what a seat can
-// write: one entry per peer (dedup below) + these size caps. Keeps a modified client from
-// bloating the replicated/retained gallery. The inline selfie image (a JPEG data URL) is the
-// dominant field; caption is short. Oversized entries are dropped (not truncated).
+// Per-entry write budget (deterministic, enforced identically on every peer). A gallery
+// seat costs only a signature check, so bound what a seat can write: one entry per peer
+// (dedup below) + these size caps — a modified client can't bloat the replicated gallery.
+// The inline selfie image (a JPEG data URL) is the dominant field; caption is short.
+// Oversized entries are dropped (not truncated).
 const MAX_IMAGE_BYTES = 256 * 1024; // ~256 KB data-URL string (≈190 KB image after base64)
 const MAX_CAPTION_BYTES = 512;
 
 /**
- * A selfie is admitted to the gallery only if it carries a join attestation
- * validly signed by its own peerId for this wave + writer core — the anti-spam
- * gate ("no signed join = no write"). Runs in apply() so every peer enforces
- * it identically. (Authenticity, not uniqueness — see verifyJoin.)
+ * A selfie enters the gallery only if it carries a join attestation validly
+ * signed by its own peerId for this wave + writer core — the anti-spam gate
+ * ("no signed join = no write"), enforced identically on every peer.
+ * (Authenticity, not uniqueness — see verifyJoin.)
  * @param {SelfieOp} op - The candidate selfie op.
  * @returns {boolean} True if the op carries a valid join signed by its own peerId.
  */
@@ -52,9 +54,10 @@ function selfieHasValidJoin(op) {
 /**
  * Is this selfie's tip `address` provably the wallet that paid the peer's fee? The op carries
  * the peer's burn attestation; the address is trusted only if it's the `tronAddress` of a
- * validly-signed burn by this peer for this wave. (The burn's on-chain reality is checked at
- * admission, §8.2 — here we bind the address to that same burn deterministically.) So a tip
- * always goes to the wallet that burned in, never a self-declared unrelated address.
+ * validly-signed burn by this peer for this wave. (The burn's on-chain reality is checked
+ * where it pays off — tippers/auditors via `burnTx`; here we bind the address to that same
+ * burn deterministically.) So a tip always goes to the wallet that burned in, never a
+ * self-declared unrelated address.
  * @param {SelfieOp} op - The candidate selfie op.
  * @returns {boolean} True if `op.address` is backed by a validly-signed burn naming that address.
  */
@@ -68,7 +71,8 @@ function tipAddressIsBackedByBurn(op) {
 }
 
 /**
- * Autobase config shared by the engine and tests so apply/view is exercised identically.
+ * BENCHMARK BASELINE ONLY — the single-indexer Autobase reducer the product gallery
+ * replaced; kept so gallery.replication.bench.test.js can A/B the CRDT against it.
  * apply() admits writers and appends join-attested wave-selfie ops into one ordered view,
  * enforcing two rules deterministically on every peer:
  *   - one entry per peer per wave (first write wins) — bounds the log so a paid seat can't be
@@ -104,7 +108,7 @@ function galleryConfig() {
         if (op?.type !== 'wave-selfie' || !selfieHasValidJoin(op)) {
           continue;
         }
-        // size cap (optimistic admission → bound each seat's write); drop oversized entries
+        // size cap (bound each seat's write); drop oversized entries
         if ((op.image || '').length > MAX_IMAGE_BYTES) {
           continue;
         }
@@ -140,7 +144,7 @@ function galleryConfig() {
 }
 
 /**
- * Deterministic gallery: one entry per peer per wave (newest wins), ordered by hop.
+ * Deterministic gallery: one entry per peer per wave (newest wins), ordered by sweep rank.
  * @param {SelfieOp[]} entries - The raw wave-selfie entries read from the view.
  * @returns {SelfieOp[]} The deduped, hop-ordered gallery entries.
  */

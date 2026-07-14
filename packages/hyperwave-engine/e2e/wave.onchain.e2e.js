@@ -1,13 +1,13 @@
 // On-chain end-to-end test: a full ENFORCED wave against the real Tron Nile testnet — the
-// paid-wave gate, real fee burns, and optimistic gallery admission. This is a real
+// paid-wave gate, real fee burns, and the per-peer paid join gate. This is a real
 // external-testnet integration test: it needs FUNDED wallets, hits Nile RPC, and spends testnet
 // TRX — so it's SKIPPED unless explicitly enabled, and runs gated/nightly in CI (never on every PR).
 //
-// No roles: the wave's initiator (P1) is also its gallery archivist, and pays the kick-off burn.
+// No roles: the initiator (P1) is an ordinary participant that pays the kick-off burn.
 //
 // Enable with:  E2E_ONCHAIN=1  and two funded BIP39 mnemonics:
 //   HYPERWAVE_E2E_SEED_1  — initiator P1 (kick-off burn; keep it well-funded)
-//   HYPERWAVE_E2E_SEED_2  — joiner P2 (join burn, exercises optimistic admission)
+//   HYPERWAVE_E2E_SEED_2  — joiner P2 (join burn — its wave-join carries the burn attestation)
 // Fund via the Nile faucet (https://nileex.io/join/getJoinPage). See DEMO.md.
 const test = require('brittle');
 const { Cluster, sleep } = require('./harness');
@@ -19,7 +19,7 @@ const enabled = process.env.E2E_ONCHAIN === '1' && !!(P1_SEED && P2_SEED);
 const opts = { timeout: 300000, skip: !enabled };
 
 test(
-  'enforced wave on Nile: paid gate → optimistic admission → gallery convergence',
+  'enforced wave on Nile: paid gate → paid join → gallery convergence',
   opts,
   async (t) => {
     // 20s lobby: room for P2 to verify the kick-off burn on-chain and burn its own join fee.
@@ -59,12 +59,13 @@ test(
       'P2 verified the kick-off burn on-chain'
     );
     t.ok(await p2.waitForLine(/JOIN-BURNED/, 120000), 'P2 burned its join fee');
-    // OPTIMISTIC admission: P1 admits P2 with no on-chain check on the write path
+    // per-peer paid gate: P1 only ingests P2's join once it carries the burn attestation
+    // (signature check only — no on-chain call on the ingest path); it then opens P2's core
     t.ok(
-      await p1.waitForLine(/admitted gallery writer/, 120000),
-      'P1 admitted P2 (optimistic)'
+      await p1.waitForLine(/gallery: learned writer/, 120000),
+      'P1 ingested P2 (burn-attested join)'
     );
-    // both selfies converge into the gallery P1 retains (tip addresses bound to the burn wallets)
+    // both selfies converge (tip addresses bound to the burn wallets)
     t.ok(await p1.waitForGallery(2, 150000), 'the gallery converged to 2');
   }
 );

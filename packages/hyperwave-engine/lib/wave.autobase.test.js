@@ -1,8 +1,9 @@
-// In-process test of the gallery Autobase code path + the join-attestation write-gate.
+// In-process test of the Autobase BENCHMARK BASELINE (galleryConfig — not the product
+// gallery, see gallery.js) + the join-attestation write-gate it shares with mergeGallery.
 // Runs under Bare:  bare lib/wave.autobase.test.js   (or `npm test`)
 // Exercises the real galleryConfig() apply/open + readGallery: create base, admit a
 // writer, append wave-selfie ops (only join-attested ones survive), read them back
-// ordered. Multi-writer *replication* across processes is covered by spike/multiwriter.
+// ordered.
 const test = require('brittle');
 const fs = require('bare-fs');
 const Corestore = require('corestore');
@@ -77,7 +78,7 @@ test('gallery apply() appends valid selfies, rejects unsigned/impersonated', asy
   await base.update();
   t.is((await readGallery(base)).length, 2, 'impersonated selfie dropped');
 
-  // size cap: an oversized image is dropped (bounds each seat under optimistic admission).
+  // size cap: an oversized image is dropped (bounds each seat's write).
   // Use a fresh peer so it's not blocked by the one-entry-per-peer dedup.
   const big = crypto.keyPair();
   const huge = selfie(big, 4, 'huge', 500);

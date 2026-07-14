@@ -1,8 +1,8 @@
-// The per-wave gallery, rebuilt as a conflict-free replicated data type (TODO
-// "Gallery-as-CRDT"; validated by gallery.replication.bench.test.js). Replaces the
-// single-indexer Autobase GallerySession — which was the O(N) fan-in/out bottleneck and
-// a live SPOF (the sole indexer produced a total order the gallery never used, since
-// buildGallery re-derives order from entry fields).
+// The per-wave gallery as a conflict-free replicated data type: the displayed gallery
+// is a pure function of the entry SET (mergeGallery orders by each entry's own fields),
+// so no indexer, coordinator, or consensus is needed — any of those would only add a
+// bottleneck and a failure point for an order that gets recomputed locally anyway
+// (trade-offs measured in gallery.replication.bench.test.js).
 //
 // The model: each participant owns ONE Hypercore in the per-wave namespace
 // (wave-gallery:<waveId>) and appends its single selfie op at block 0. Writer keys ride
@@ -145,7 +145,7 @@ class CrdtGallery {
   /**
    * Learn a participant's gallery core (from its flooded wave-join): open it by key,
    * download its one entry (block 0), and track it under `peerId`. Idempotent. Every
-   * peer calls this for every wave-join it sees — this replaces the old admission.
+   * peer calls this for every wave-join it sees.
    * @param {string} waveId - The wave the participant joined.
    * @param {string} peerId - The participant's ring id.
    * @param {string} writerKey - The participant's gallery core key (hex).

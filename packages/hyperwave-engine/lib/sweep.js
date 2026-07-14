@@ -2,7 +2,8 @@
 // math, no transport. A wave-start carries the canonical roster plus `t0` (epoch ms)
 // and `lapMs`; every peer derives the SAME schedule locally — roster sorted by ring
 // angle, one slot per member, evenly spread across the lap — and self-triggers at its
-// own slot. No token, no healing: a dead peer's slot simply passes.
+// own slot. Nothing is passed peer-to-peer, so nothing can stall: a dead peer's
+// slot simply passes.
 const { angleOfId } = require('./ring');
 
 /**

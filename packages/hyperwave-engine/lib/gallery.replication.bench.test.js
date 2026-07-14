@@ -1,6 +1,6 @@
-// Gallery replication A/B benchmark — the instrument for the CRDT-gallery decision
-// (TODO "Gallery-as-CRDT"). It runs the CURRENT single-indexer Autobase gallery and a
-// prototype multicore CRDT gallery over the SAME synthetic partial mesh, asserts BOTH
+// Gallery replication A/B benchmark — the measurement that justified the CRDT gallery.
+// It runs the single-indexer Autobase baseline (galleryConfig) and the multicore CRDT
+// (now the product gallery) over the SAME synthetic partial mesh, asserts BOTH
 // converge fully (the regression guard), and reports convergence time for each (the
 // measurement). Running both over one identical graph is why this is a controlled
 // in-process harness (real Corestore/Autobase/Hypercore, explicit replicate-streams —
@@ -178,7 +178,7 @@ async function cleanup(streams, closables, dirs) {
   }
 }
 
-// --- Path A: the current single-indexer Autobase gallery ---------------------
+// --- Path A: the single-indexer Autobase baseline -----------------------------
 async function benchAutobase(edges, keyPairs) {
   const { dirs, stores } = makeStores('ab');
   const base0 = new Autobase(stores[0].namespace(WAVE), null, galleryConfig());
@@ -242,7 +242,7 @@ async function benchAutobase(edges, keyPairs) {
   return { reached, writableMs, totalMs };
 }
 
-// --- Path B: prototype multicore CRDT gallery (one core per participant) ------
+// --- Path B: the multicore CRDT (one core per participant) --------------------
 async function benchMulticore(edges, keyPairs) {
   const { dirs, stores } = makeStores('mc');
   const mine = stores.map((store) =>
