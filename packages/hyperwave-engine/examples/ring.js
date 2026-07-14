@@ -6,8 +6,7 @@ const {
   angleOf,
   angleOfId,
   liveRing,
-  nextClockwise,
-  pickReachable
+  nextClockwise
 } = require('hyperwave-engine/lib/ring');
 
 // A seat angle is DERIVED from the public key — never trusted from the wire.
@@ -31,20 +30,7 @@ console.log(
   live.map((peer) => peer.angle)
 );
 
-// The next seat clockwise from me (wraps to the first).
+// The next seat clockwise from me (wraps to the first). The seat/angle drives the sweep
+// order + the gallery order; the sweep visits every roster member by angle, no routing.
 const successor = nextClockwise(myAngle, live);
-console.log('my successor:', successor ? successor.angle : null);
-
-// Healing: the next reachable seat clockwise that we haven't already skipped.
-const reachable = new Set(live.map((peer) => peer.id));
-const skipped = new Set([successor && successor.id]); // pretend the successor went silent
-const alternate = pickReachable({
-  sortedRing: live,
-  myAngle,
-  reachable,
-  skipped
-});
-console.log(
-  'healed successor (skipping the first):',
-  alternate ? alternate.angle : null
-);
+console.log('next clockwise seat:', successor ? successor.angle : null);

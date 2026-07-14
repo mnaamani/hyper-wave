@@ -82,7 +82,7 @@ function createEngine({
   // emits `wallet` {address,trx} on ready + every 15s, and wires into the engine (address for
   // tips/attestations + the on-chain burn verifier = the paid-wave anti-spam gate). A host can
   // opt out with `config.wallet: false` (e.g. mobile, until WDK-in-worklet is confirmed) — the
-  // engine then runs wallet-less (receipt-only gallery, no burns/paid-gate/tips).
+  // engine then runs wallet-less (join-attestation gallery, no burns/paid-gate/tips).
   let payments = null;
   let tBalance = null;
   let pushBalance = null; // re-fetch the balance + send a `wallet` msg; set once the wallet is up
@@ -199,9 +199,9 @@ function createEngine({
   // burn the join fee for a wave that's proven paid. The join burn is fire-and-forget (no on-chain
   // confirmation), so it's reported as burned on broadcast.
   async function handleJoin() {
-    // Fail fast, like kick-off: an unfunded joiner would broadcast a burn that never confirms and
-    // then be refused gallery admission ("fee-unpaid") — confusing. Refuse the join up front with
-    // a clear message instead. Only when we could actually read the balance.
+    // Fail fast, like kick-off: an unfunded joiner would broadcast a burn that never confirms,
+    // so (when enforcing) no peer would count its join into the roster — confusing. Refuse the
+    // join up front with a clear message instead. Only when we could actually read the balance.
     if (payments) {
       const bal = await payments.balances().catch(() => null);
       if (bal && bal.trx < FEE_TRX) {

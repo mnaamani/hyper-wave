@@ -1,6 +1,6 @@
 // Attestation crypto (attest.js): the burn attestation (paid-wave gate + tip-address
-// binding), the originator's gallery-key signature, and the join attestation (the
-// gallery write/admission credential). Pure — no swarm, no Autobase. Runs under Bare:
+// binding) and the join attestation (the gallery write credential + self-certifying core
+// key). Pure — no swarm. Runs under Bare:
 //   bare lib/attest.test.js   (or `npm test`)
 const test = require('brittle');
 const crypto = require('hypercore-crypto');
@@ -9,8 +9,6 @@ const {
   signBurn,
   verifyBurn,
   burnAuthorizes,
-  signGalleryKey,
-  verifyGalleryKey,
   signJoin,
   verifyJoin
 } = require('./attest');
@@ -52,16 +50,16 @@ test('burn attestation rejects impersonation and tampering', (t) => {
   t.absent(verifyBurn({ ...burnFields, amount: 99 }, sig), 'inflated amount');
 });
 
-test('burnAuthorizes gates gallery admission on a real, bound burn', (t) => {
+test('burnAuthorizes gates the paid join on a real, bound burn', (t) => {
   const proof = { ...burnFields, sig: signBurn(keyPairs[1], burnFields) };
   t.ok(
     burnAuthorizes(proof, ids[1], waveId),
     'a valid burn authorizes its own peer + wave'
   );
-  t.absent(burnAuthorizes(null, ids[1], waveId), 'no burn = no gallery seat');
+  t.absent(burnAuthorizes(null, ids[1], waveId), 'no burn = not counted');
   t.absent(
     burnAuthorizes(proof, ids[2], waveId),
-    'not another peer’s admission (bound to peerId)'
+    'not another peer’s join (bound to peerId)'
   );
   t.absent(
     burnAuthorizes(proof, ids[1], 'other-wave'),
@@ -70,27 +68,7 @@ test('burnAuthorizes gates gallery admission on a real, bound burn', (t) => {
   const forged = { ...burnFields, sig: signBurn(keyPairs[2], burnFields) }; // someone else's signature
   t.absent(
     burnAuthorizes(forged, ids[1], waveId),
-    'signature must be by the admitted peer'
-  );
-});
-
-// --- gallery-key attestation -----------------------------------------------
-test('signGalleryKey/verifyGalleryKey binds the gallery key to the originator', (t) => {
-  const key = 'a4da63edc0ffee';
-  const bound = { originatorId: ids[0], waveId, autobaseKey: key };
-  const sig = signGalleryKey(keyPairs[0], { waveId, autobaseKey: key });
-  t.ok(verifyGalleryKey(bound, sig), 'the originator’s signed key verifies');
-  t.absent(
-    verifyGalleryKey({ ...bound, originatorId: ids[1] }, sig),
-    'a non-originator can’t vouch for the key'
-  );
-  t.absent(
-    verifyGalleryKey({ ...bound, autobaseKey: 'deadbeef' }, sig),
-    'a swapped key is rejected'
-  );
-  t.absent(
-    verifyGalleryKey({ ...bound, waveId: 'other-wave' }, sig),
-    'not reusable for another wave'
+    'signature must be by the joining peer'
   );
 });
 

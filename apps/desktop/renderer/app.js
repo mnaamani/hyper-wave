@@ -26,15 +26,6 @@ const setState = (patch) => Object.assign(state, patch);
 
 const fieldEl = document.querySelector('.field'); // the ring + gallery canvas area (dimmable)
 
-// Why a selfie didn't make it into the gallery, keyed by the engine's gallery-error reason.
-const GALLERY_ERRORS = {
-  'fee-unpaid':
-    "⚠️ your selfie wasn't added — the participation fee wasn't paid/confirmed in time",
-  'admit-timeout':
-    "⚠️ your selfie wasn't added — gallery admission timed out (network); try again",
-  'no-gallery-yet': "⚠️ your selfie wasn't added — the gallery wasn't ready yet"
-};
-
 // Dev-only console handle (`hw` = HyperWave): reach the orchestrator state + view modules from the
 // DevTools console, e.g. `hw.state`, `hw.gallery.count()`, `hw.hud.waveStatus('test')`. ES modules
 // don't expose their bindings globally, so nothing is reachable unless we put it here — which is
@@ -238,13 +229,6 @@ const EVENT_HANDLERS = {
     );
     ring.startFlourish(); // golden ring pulse + confetti — the wave made it all the way around
     gallery.startReplay(); // roll the ⚽ once around the ring, featuring selfies in hop order
-  },
-
-  'gallery-error': (evt) => {
-    hud.waveStatus(
-      GALLERY_ERRORS[evt.reason] ||
-        `⚠️ couldn't post your selfie (${evt.reason})`
-    );
   }
 };
 

@@ -125,8 +125,8 @@ class SelfiePipeline {
   }
 
   /**
-   * A genuinely new wave began — the previous wave's burn ticket can never admit it,
-   * so drop it (called from enterLobby, never from reset()).
+   * A genuinely new wave began — the previous wave's burn ticket can never apply to it
+   * (it's bound to its own waveId), so drop it (called from enterLobby, never from reset()).
    * @returns {void}
    */
   clearBurnProof() {

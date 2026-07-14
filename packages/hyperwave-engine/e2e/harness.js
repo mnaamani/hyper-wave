@@ -9,7 +9,7 @@
 //    condition is met, or resolve `false` (logging the output tail as a diagnostic) on timeout —
 //    fast AND non-flaky. Resolving falsy (not rejecting) means a timed-out `t.ok(await …)` fails
 //    just its own assertion instead of crashing the whole run with an unhandled rejection.
-//  - `wave.run.js` already prints structured events as `[name] TOKEN {json}`; we parse those,
+//  - `wave.run.js` already prints structured events as `[name] EVENT {json}`; we parse those,
 //    so assertions read against the protocol's own event stream, not brittle prose.
 //  - Teardown kills tracked PIDs (never `pkill`), so it can't touch unrelated processes.
 const { spawn } = require('node:child_process');
@@ -82,7 +82,7 @@ function installExitHooks() {
 }
 
 // One launched process (a peer or the bootstrap). Buffers stdout and exposes
-// promise-based waiters over its lines and parsed `TOKEN {json}` events.
+// promise-based waiters over its lines and parsed `EVENT {json}` events.
 class Proc {
   #waiters = new Set(); // { ready:()=>bool, value:()=>any, resolve, timer }
 
@@ -110,10 +110,10 @@ class Proc {
   #ingest(chunk) {
     this.out += chunk;
     for (const line of chunk.split('\n')) {
-      const tokenMatch = line.match(/\bTOKEN (\{.*\})\s*$/);
-      if (tokenMatch) {
+      const eventMatch = line.match(/\bEVENT (\{.*\})\s*$/);
+      if (eventMatch) {
         try {
-          this.events.push(JSON.parse(tokenMatch[1]));
+          this.events.push(JSON.parse(eventMatch[1]));
         } catch {}
       }
     }
@@ -202,13 +202,11 @@ class Proc {
 // over the public DHT flawlessly. Public discovery on a cold topic takes ~20-35s, so expect
 // slower (but more production-faithful) runs.
 class Cluster {
-  constructor({ lobbyMs = 5000, admitTimeoutMs = null } = {}) {
+  constructor({ lobbyMs = 5000 } = {}) {
     this.root = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-e2e-'));
     const randomHex = Math.random().toString(16);
     this.match = 'e2e-' + randomHex.slice(2, 10);
     this.lobbyMs = String(lobbyMs);
-    this.admitTimeoutMs =
-      admitTimeoutMs === null ? null : String(admitTimeoutMs);
     this.public = process.env.E2E_PUBLIC === '1';
     this.procs = [];
   }
@@ -247,9 +245,6 @@ class Cluster {
       HYPERWAVE_MATCH: this.match,
       HYPERWAVE_LOBBY_MS: this.lobbyMs,
       // scale the batch-admission replicate-back wait with the roster
-      ...(this.admitTimeoutMs === null
-        ? {}
-        : { HYPERWAVE_ADMIT_TIMEOUT_MS: this.admitTimeoutMs }),
       ...env
     });
     this.procs.push(proc);

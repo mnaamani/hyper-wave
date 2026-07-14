@@ -118,7 +118,7 @@ const SWARM_SEED_BYTES = 32; // hypercore-crypto.keyPair seed length
 
 /**
  * Load (or first-time create + persist) the 32-byte seed that derives this peer's swarm keypair —
- * its ring seat AND the key that signs receipts/burns/wave-end/gallery keys. Without a persisted
+ * its ring seat AND the key that signs its burn + join attestations. Without a persisted
  * seed, Hyperswarm mints a fresh keypair each run, so the peer id (and its ring position) changes
  * on every restart. Persisted as hex at <storageDir>/swarm.seed — a sibling of wallet.seed and
  * OUTSIDE the per-run hyperwave store that createWave wipes — so the identity/seat is stable across

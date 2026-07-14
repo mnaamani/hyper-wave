@@ -2,7 +2,7 @@
 
 A **scaffold** that runs the shared HyperWave engine (`hyperwave`) on iOS/Android by
 hosting it in a Bare worklet via [`react-native-bare-kit`](https://github.com/holepunchto/react-native-bare-kit).
-The engine — the wave race, gallery, and WDK wallet — is the **same code** the desktop app runs;
+The engine — the wave sweep, gallery, and WDK wallet — is the **same code** the desktop app runs;
 only the host (this Expo app) and the UI differ.
 
 ## How it fits together
@@ -14,7 +14,7 @@ Expo RN app (this package)                 Bare worklet (hyperwave-engine)
 ```
 
 - `bare-pack` bundles `../../packages/hyperwave-engine/worklet/app.js` (+ its whole
-  Hyperswarm/Autobase/WDK require graph) into `bundles/app.bundle.mjs`.
+  Hyperswarm/Corestore-Hypercore/WDK require graph) into `bundles/app.bundle.mjs`.
 - `react-native-bare-kit`'s `Worklet` boots that bundle inside the app; `src/useEngine.js` speaks
   the exact same JSON protocol the desktop renderer uses (`start-wave`, `tip`, `state`,
   `gallery`, `wallet`, …), so the UI is the only new surface.
@@ -24,12 +24,12 @@ Expo RN app (this package)                 Bare worklet (hyperwave-engine)
 Verified end-to-end on the iOS 26.5 simulator, **interoperating with a desktop peer over the
 public DHT**: a headless desktop peer (`bare bin/wave.run.js` on the same `matchId`) and the
 phone discovered each other (`peers 2` on the phone), the desktop kicked off a wave, and the
-desktop peers' selfies **replicated into the phone's Autobase gallery** (`Gallery (2)`,
+desktop peers' selfie cores **replicated into the phone's CRDT gallery** (`Gallery (2)`,
 "desktop was here"). Same engine, same protocol, mobile ↔ desktop.
 
 What works:
 
-- `bare-pack` packs the whole engine (Hyperswarm/Autobase/WDK) → ~8 MB (`ws`'s optional native
+- `bare-pack` packs the whole engine (Hyperswarm/Corestore-Hypercore/WDK) → ~8 MB (`ws`'s optional native
   deps handled with `--defer bufferutil --defer utf-8-validate`).
 - The **native addons are linked** (see below): `udx-native`, `sodium-native`, `rocksdb-native`,
   … — 41 xcframeworks — so the worklet's `dlopen` succeeds and the P2P stack runs.

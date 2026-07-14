@@ -33,10 +33,6 @@ const START_TARGET = Math.min(PEER_COUNT - 1, 32);
 // Lobby length: joins have to flood back across the mesh from every peer, so give large rosters
 // more time to opt in. At the default 8 this is the historical 8s.
 const LOBBY_MS = 8000 + Math.max(0, PEER_COUNT - 8) * 100;
-// Writer-admission wait (engine admitTimeoutMs): admission is batched at lobby close, so this
-// is just how long a poster waits for the originator's core (carrying its add-writer op) to
-// replicate back. One small-core sync — but give a loaded large-N box headroom.
-const ADMIT_TIMEOUT_MS = 25000 + PEER_COUNT * 500;
 
 // Whether the initiator's start trigger waits for the FULL roster (see START_TARGET): true at
 // small N, where the lobby reliably gathers everyone and the strict full-N assertions hold. At
@@ -96,8 +92,7 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const cluster = await new Cluster({
-      lobbyMs: LOBBY_MS,
-      admitTimeoutMs: ADMIT_TIMEOUT_MS
+      lobbyMs: LOBBY_MS
     }).start();
     t.teardown(() => cluster.destroy());
 
@@ -140,8 +135,7 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const cluster = await new Cluster({
-      lobbyMs: LOBBY_MS,
-      admitTimeoutMs: ADMIT_TIMEOUT_MS
+      lobbyMs: LOBBY_MS
     }).start();
     t.teardown(() => cluster.destroy());
 

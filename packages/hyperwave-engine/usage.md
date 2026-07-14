@@ -5,8 +5,8 @@ they interact, see [`docs/architecture.md`](../../docs/architecture.md) and
 [`docs/protocol.md`](../../docs/protocol.md); this file is all _how do I call it_.
 
 > **Runs under [Bare](https://github.com/holepunchto/bare), not Node.** Examples assume `bare`.
-> The pure submodules (`ring`/`token`/`chord`/`flood`/`gallery`) do no I/O and also run fine under
-> Node if you just want to play with the math/crypto.
+> The pure submodules (`ring`/`sweep`/`attest`/`flood`/`pins`/`gallery`) do no I/O and also run
+> fine under Node if you just want to play with the math/crypto.
 
 **Two import surfaces:**
 
@@ -28,21 +28,22 @@ const {
 
 // 2. The pure submodules are imported by subpath (not re-exported from the index):
 const ring = require('hyperwave-engine/lib/ring');
-const token = require('hyperwave-engine/lib/token');
-const chord = require('hyperwave-engine/lib/chord');
+const sweep = require('hyperwave-engine/lib/sweep');
+const attest = require('hyperwave-engine/lib/attest');
+const { topUpPins } = require('hyperwave-engine/lib/pins');
 const { Flood } = require('hyperwave-engine/lib/flood');
 const gallery = require('hyperwave-engine/lib/gallery');
 
 // 3. The stateful classes wave.js composes (also subpath imports — see §10):
 const { PeerTable } = require('hyperwave-engine/lib/peer-table');
 const { SelfiePipeline } = require('hyperwave-engine/lib/selfie');
-const { GallerySession } = require('hyperwave-engine/lib/gallery-session');
+const { CrdtGallery } = require('hyperwave-engine/lib/gallery-crdt');
 ```
 
 Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it headless](#2-drive-a-wave-headless-createwave) ·
-[ring.js](#3-ringjs--seats--successors) · [chord.js](#4-chordjs--topology-math) · [token.js](#5-tokenjs--receipts--attestations) ·
-[flood.js](#6-floodjs--gossip-dedup) · [gallery.js](#7-galleryjs--the-autobase-selfie-gallery) ·
-[payments](#8-payments--feesjs--payjs) · [seeds & bootstrap](#9-seed--bootstrap-helpers) ·
+[ring.js](#3-ringjs--seats--the-ring) · [sweep.js](#4-sweepjs--the-deterministic-schedule) · [attest.js](#5-attestjs--attestations) ·
+[flood.js & pins.js](#6-floodjs--pinsjs--the-flood-graph) · [gallery.js](#7-galleryjs--the-multicore-crdt-gallery) ·
+[payments](#8-payments--walletjs) · [seeds & bootstrap](#9-seed--bootstrap-helpers) ·
 [stateful classes](#10-the-stateful-classes-wavejs-composes)
 
 ---
@@ -61,7 +62,7 @@ const engine = createEngine({
   config: {
     matchId: 'hyperwave:my-match:v1', // peers on the same matchId share one ring
     bootstrap: '127.0.0.1:49737', // optional host:port → local DHT (instant same-machine discovery)
-    wallet: true // default; false → wallet-less (receipt-only gallery, no fees/tips)
+    wallet: true // default; false → wallet-less (join-attestation gallery, no fees/tips)
   },
   notify: (msg) => {
     // engine → host events, e.g. { type: 'state' | 'event' | 'gallery' | 'wallet' | 'burn-result' }
@@ -95,7 +96,7 @@ await engine.close();
 ```
 
 Command / event reference: `docs/protocol.md` §5; the state-machine `event` names (`started`,
-`holding`, `position`, `forwarded`, `healed`, `completed`, …) in §5 as well.
+`joined`, `roster`, `holding`, `position`, `completed`, …) in §5 as well.
 
 ---
 
@@ -112,14 +113,14 @@ const wave = createWave({
   storageDir: '/tmp/hw/a',
   matchId: 'demo',
   bootstrap: parseBootstrap('127.0.0.1:49737'), // or null for the public DHT
-  onState: ({ me, peers, successor }) => {
+  onState: ({ me, peers }) => {
     console.log(
       'me',
       me.id.slice(0, 8),
       '@',
       me.angle.toFixed(1),
-      'succ',
-      successor?.id.slice(0, 8)
+      'peers',
+      peers.length
     );
   },
   onEvent: (ev) => console.log('event', ev.event, ev.waveId),
@@ -130,23 +131,22 @@ const wave = createWave({
 console.log('my seat:', wave.me); // { id, angle, country }
 const waveId = wave.startWave(); // announce + open the lobby; returns the new waveId (or null if busy)
 wave.setCountry('BR');
-wave.stageSelfie({ image: 'fake', caption: 'me' }); // staged; posts when the ball arrives
-const succId = await wave.findSuccessor(
-  BigInt('0x' + wave.me.id.slice(0, 16)) + 1n
-); // distributed Chord lookup
+wave.stageSelfie({ image: 'fake', caption: 'me' }); // staged; posts when my sweep slot fires
 await wave.close();
 ```
 
 `createWave` returns: `{ me, startWave, join, setCountry, stageSelfie, setWallet, announcePaid,
-recordBurn, findSuccessor, close }`. The payment methods (`setWallet`/`announcePaid`/`recordBurn`)
-are wired by `wallet.js` — see §8.
+recordBurn, close }`. There is no `findSuccessor` / routing surface — the wave is a
+deterministic sweep, not a routed token. The payment methods
+(`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §8.
 
 ---
 
-## 3. `ring.js` — seats & successors
+## 3. `ring.js` — seats & the ring
 
 Pure geometry: a peer's key deterministically maps to a **seat angle**; the ring is the live peers
-sorted clockwise. No state, no I/O.
+sorted clockwise. It defines the wave's semantics (sweep order, gallery order) — it is **not** the
+connection topology (that's random-K pinning, §6). No state, no I/O.
 
 ```js
 const crypto = require('hypercore-crypto');
@@ -155,8 +155,7 @@ const {
   angleOf,
   angleOfId,
   liveRing,
-  nextClockwise,
-  pickReachable
+  nextClockwise
 } = require('hyperwave-engine/lib/ring');
 
 // a seat angle is derived from the public key — never trusted from the wire
@@ -175,106 +174,62 @@ const STALE_MS = 30_000;
 const live = liveRing(entries, now, STALE_MS); // drops the stale peer, sorts by angle
 
 const successor = nextClockwise(myAngle, live); // next seat clockwise (wraps to the first)
-
-// healing: the next seat clockwise that's reachable and not already skipped
-const reachable = new Set(live.map((peer) => peer.id));
-const skipped = new Set([successor?.id]); // pretend the successor went silent
-const alternate = pickReachable(live, myAngle, reachable, skipped);
 ```
 
 ---
 
-## 4. `chord.js` — topology math
+## 4. `sweep.js` — the deterministic schedule
 
-Pure Chord pointer math over a 64-bit id ring (`nodeId = top 8 bytes of the key`). `wave.js` uses
-it to decide which peers to physically connect to (`joinPeer`) so the logical ring's edges become
-real. All ids are lowercase hex; keyspace positions are `BigInt` mod `2^64`.
+The wave, since the token was removed. A `wave-start` carries the canonical roster plus the sweep
+parameters `t0` (epoch ms) and `lapMs`; every peer derives the **same** angle-ordered schedule
+locally and self-triggers its selfie at its own slot. A dead peer's slot simply passes — no
+routing, no healing. Pure math, no transport.
 
 ```js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const chord = require('hyperwave-engine/lib/chord');
+const { sweepSchedule, mySlot } = require('hyperwave-engine/lib/sweep');
 
-const ids = Array.from({ length: 8 }, () =>
+const rosterIds = Array.from({ length: 8 }, () =>
   b4a.toString(crypto.keyPair().publicKey, 'hex')
 );
-const myId = ids[0];
+const t0 = Date.now();
+const lapMs = 8000;
 
-// neighbourhood (pass the full id list — it injects/dedupes myId internally)
-chord.successors(ids, myId, 3); // up to 3 successor ids clockwise (the successor-list)
-chord.predecessor(ids, myId); // the one id counter-clockwise
-chord.fingers(ids, myId); // Set of O(log N) finger ids spanning the ring
-chord.pinTargets(ids, myId, 3); // Set: successors + predecessor + fingers → what wave.js joinPeer()s
+// the full schedule: ordered by ring angle (id tie-break), one evenly-spread slot each
+const schedule = sweepSchedule({ rosterIds, t0, lapMs });
+// → [{ id, angle, rank, at }, …] where `at` = t0 + round((rank / count) * lapMs)
 
-// find the successor of any keyspace position
-const target = (chord.nodeIdOfHex(myId) + 1n) % chord.RING;
-chord.findSuccessor(ids, target); // hex id of the first node clockwise of target
-
-// one hop of the DISTRIBUTED lookup, using only what THIS node knows (converges in O(log N) hops)
-const succId = chord.successors(ids, myId, 3)[0] ?? null;
-const known = [...chord.fingers(ids, myId), ...chord.successors(ids, myId, 3)];
-const step = chord.findSuccessorStep(myId, succId, known, target);
-// → { done: true, successor } (answer found) | { done: false, next } (forward to `next`, repeat)
-
-// stabilize: adopt my successor's predecessor if it slotted in between us
-chord.stabilizeStep(myId, succId, /* succPredId */ ids[3]); // → the id to use as successor
+// my slot (or null if I'm a spectator not in the roster)
+const slot = mySlot(schedule, rosterIds[0]);
+// self-trigger: setTimeout(fireMySelfie, slot.at - Date.now())
 ```
 
-Interval predicates are exported too if you need them directly: `inOpenInterval(x, a, b)`,
-`inHalfOpenInterval(x, a, b)`, `ringForward(a, b)`, `closestPrecedingNode(known, myId, target)`.
+The ⚽ on every screen is rendered from this same schedule (renderer-local, no gossip), and the
+wave ends deterministically on every peer at `t0 + lapMs + END_GRACE_MS` — there is no completion
+message.
 
 ---
 
-## 5. `token.js` — receipts & attestations
+## 5. `attest.js` — attestations
 
-The pure crypto behind the racing token and the paid-wave gates. Every function is stateless.
-
-**Receipt chain** — each hop signs a receipt; a constant-size accumulator rolls forward (never a
-growing `hops[]`):
-
-```js
-const crypto = require('hypercore-crypto');
-const b4a = require('b4a');
-const {
-  ZERO_HASH,
-  signReceipt,
-  verifyReceipt,
-  advanceChain,
-  verifyToken
-} = require('hyperwave-engine/lib/token');
-
-const kp = crypto.keyPair();
-const peerId = b4a.toString(kp.publicKey, 'hex');
-const waveId = 'w1';
-const hop = 1;
-const ts = Date.now();
-
-const sig = signReceipt(kp, waveId, hop, ZERO_HASH, ts); // ZERO_HASH = the genesis accumulator
-verifyReceipt(peerId, waveId, hop, ZERO_HASH, ts, sig); // → true
-const chainHash = advanceChain(ZERO_HASH, sig); // blake2b(prev || sig) — constant size
-
-// verifyToken() checks the receipt the SENDER stamped on a forwarded token
-const tokenMsg = {
-  senderPeerId: peerId,
-  waveId,
-  hopCount: hop,
-  prevChainHash: ZERO_HASH,
-  timestamp: ts,
-  senderReceiptSig: sig
-};
-verifyToken(tokenMsg); // → true
-```
+The pure Ed25519 crypto behind the paid-wave gate and the gallery write credential. Every function
+is stateless. (Renamed from the old `token.js`; the token receipts + the blake2b chain accumulator
+were deleted with the token.)
 
 **Burn attestation** — bridges a peer's ring identity to its on-chain fee burn; authorizes a
-gallery write:
+gallery write and binds the tip address:
 
 ```js
 const {
   signBurn,
   verifyBurn,
   burnAuthorizes
-} = require('hyperwave-engine/lib/token');
+} = require('hyperwave-engine/lib/attest');
 
+const kp = crypto.keyPair();
+const peerId = b4a.toString(kp.publicKey, 'hex');
+const waveId = 'w1';
 const fields = {
   waveId,
   peerId,
@@ -282,34 +237,28 @@ const fields = {
   amount: 1,
   txHash: 'deadbeef…',
   tronAddress: 'T…',
-  burnTs: ts
+  burnTs: Date.now()
 };
 const proof = { ...fields, sig: signBurn(kp, fields) };
 verifyBurn(fields, proof.sig); // → true
 burnAuthorizes(proof, peerId, waveId); // → true (signature valid AND bound to this peer + wave)
 ```
 
-**Gallery-key & wave-end attestations** — the originator signs the gallery key and the completion
-so a relay can't swap either:
+**Join attestation** — a peer's signed opt-in, binding its identity to the gallery writer core it
+publishes. It rides `wave-join` (the join IS the write credential — self-certifying, no central
+admission) and every gallery entry carries it (`mergeGallery`'s write-gate):
 
 ```js
-const {
-  signGalleryKey,
-  verifyGalleryKey,
-  signWaveEnd,
-  verifyWaveEnd
-} = require('hyperwave-engine/lib/token');
+const { signJoin, verifyJoin } = require('hyperwave-engine/lib/attest');
 
-const keySig = signGalleryKey(kp, waveId, /* autobaseKey */ 'ab12…');
-verifyGalleryKey(peerId, waveId, 'ab12…', keySig); // → true (peerId = the originator)
-
-const endSig = signWaveEnd(kp, waveId, /* hops */ 8, chainHash);
-verifyWaveEnd(peerId, waveId, 8, chainHash, endSig); // → true
+const writerKey = 'ab12…'; // this peer's gallery Hypercore key (hex)
+const joinSig = signJoin(kp, { waveId, writerKey });
+verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed this join)
 ```
 
 ---
 
-## 6. `flood.js` — gossip dedup
+## 6. `flood.js` & `pins.js` — the flood graph
 
 One rule turns a one-hop broadcast into an epidemic across a partial mesh: relay each message id on
 **first sight only**. Size-capped so the set can't grow unbounded.
@@ -332,65 +281,71 @@ function onGossip(msg, fromPeer) {
 flood.size; // current number of remembered ids
 ```
 
----
-
-## 7. `gallery.js` — the Autobase selfie gallery
-
-`galleryConfig()` is the Autobase apply/open config; `readGallery(base)` reads the ordered view.
-`apply()` deterministically enforces the write-gate (valid receipt), byte caps, one-entry-per-peer,
-and the burn-backed tip address — so every peer converges on the same gallery.
+Flood reach needs a connected graph, and Hyperswarm's incidental topic mesh is only
+_approximately_ one. `pins.js` puts a floor under it: each peer holds `PIN_BUDGET` (7) **sticky
+random** `swarm.joinPeer` edges (dialed with priority, bypassing `maxPeers`). This replaced the
+old structured Chord ring — random K=7 floods with equal-or-better reach and a shorter diameter,
+and deletes all successor/predecessor topology.
 
 ```js
-const Corestore = require('corestore');
-const Autobase = require('autobase');
+const { topUpPins } = require('hyperwave-engine/lib/pins');
+
+// keep every still-valid current pin, then add uniform-random candidates up to the budget.
+// Sticky: a live pin is never re-rolled (churning pins would flap connections).
+const targets = topUpPins({
+  current: new Set(['aa…', 'bb…']), // currently pinned ids
+  candidates: ['aa…', 'cc…', 'dd…', 'ee…'], // discovered ∪ connected ∪ known, minus self
+  budget: 7 // PIN_BUDGET
+});
+// wave.js diffs this against the live pins (via PeerTable) and joinPeer/leavePeer accordingly.
+```
+
+---
+
+## 7. `gallery.js` — the multicore CRDT gallery
+
+The product gallery is **not** a single shared Autobase — it's a multicore CRDT. Each participant
+owns **one** Hypercore and appends its single `wave-selfie` op at block 0; its writer key rides
+that peer's own `wave-join` (self-certified by the join attestation). Every peer opens every
+participant's core, downloads block 0, and folds the bag with the pure **`mergeGallery`** — every
+peer that has replicated the same set of cores computes a **byte-identical** gallery. No indexer,
+no admission, no consensus, no shared gallery key. The stateful `CrdtGallery` that owns the cores
+is in `gallery-crdt.js` (§10).
+
+```js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const {
-  galleryConfig,
-  readGallery,
-  buildGallery
-} = require('hyperwave-engine/lib/gallery');
-const { signReceipt } = require('hyperwave-engine/lib/token');
+const { mergeGallery, buildGallery } = require('hyperwave-engine/lib/gallery');
+const { signJoin } = require('hyperwave-engine/lib/attest');
 
-const store = new Corestore('/tmp/hw-gallery');
-const base = new Autobase(
-  store.namespace('wave-gallery'),
-  null,
-  galleryConfig()
-);
-await base.ready();
-
-// build a receipt-valid wave-selfie op (an invalid/unsigned one is silently dropped by apply())
+// a wave-selfie op self-authenticates via its join attestation (an unsigned/invalid one, or one
+// over the byte caps, is silently dropped by mergeGallery)
 const kp = crypto.keyPair();
 const peerId = b4a.toString(kp.publicKey, 'hex');
 const waveId = 'w1';
-const chainHash = b4a.toString(b4a.alloc(32), 'hex');
-const receiptTs = Date.now();
+const writerKey = 'ab12…'; // this peer's gallery core key (hex)
 const op = {
   type: 'wave-selfie',
   waveId,
   peerId,
-  hopCount: 0,
-  chainHash,
-  receiptTs,
-  receiptSig: signReceipt(kp, waveId, 0, chainHash, receiptTs),
+  hopCount: 0, // rank in the sweep → gallery order
+  writerKey,
+  joinSig: signJoin(kp, { waveId, writerKey }),
   image: '<jpeg-data-url>',
   caption: 'hello',
-  timestamp: receiptTs
+  timestamp: Date.now()
 };
 
-await base.append(op);
-await base.update();
-const items = await readGallery(base); // ordered by hop, one entry per peer
-await base.close();
-await store.close();
+// fold the bag of ops collected from every participant's core → the ordered gallery
+mergeGallery([op]); // → [op] (one entry per peer, hop order; tip address kept only if a burn backs it)
 
-// buildGallery(entries) is the same pure ordering/dedup over an array you already have
+// buildGallery(entries) is the same ordering/dedup once you already have gated entries
 buildGallery([op]); // → [op]
 ```
 
-To admit another writer, append `{ type: 'add-writer', key: '<hex writer key>' }` — `apply()` calls
-`host.addWriter` for it.
+> `galleryConfig()` / `readGallery(base)` also live in `gallery.js`, but they are the **Autobase
+> baseline** used only by the A/B replication benchmark (`gallery.replication.bench.test.js`) — not
+> the product gallery.
 
 ---
 
@@ -479,19 +434,16 @@ each subpath-importable and unit-tested. `Flood` is shown in §6; the others:
   derived from the id), direct-send channels, pinned ring edges (returned as a mirrorable
   `{added, removed}` diff for `swarm.joinPeer`/`leavePeer`), and churn cooldowns that stop a
   just-disconnected peer being resurrected as a ghost seat. `bare examples/peer-table.js`
-- **`SelfiePipeline`** (`lib/selfie.js`) — pairs the lobby-staged selfie with the hop receipt
-  (either order), posts exactly once per wave and only for the current wave, and owns the
-  burn-proof ticket lifetime (survives `reset()`, dropped by `clearBurnProof()` on a new
-  wave). `bare examples/selfie.js`
-- **`GallerySession`** (`lib/gallery-session.js`) — the per-wave gallery lifecycle over a
-  Corestore: `open(waveId, bootstrapKey)` creates/opens the current Autobase, `retain(waveId)`
-  marks a wave I initiated (its gallery is kept open for latecomers and reused on return;
-  others are closed when moving on), `admitWriter`/`postSelfie` are the two ends of the
-  optimistic writer-admission flow, `tick()` pulls replication. `bare examples/gallery-session.js`
-- **`ChordRouting`** (`lib/chord-routing.js`) — the distributed findSuccessor control plane
-  (find-succ RPC, join-time self-placement, successor repair). Transport-bound: it needs a
-  live gossip mesh, so drive it through `wave.findSuccessor(target)` (§2) rather than
-  standalone; the pure per-hop math it applies is `chord.findSuccessorStep` (§4).
+- **`SelfiePipeline`** (`lib/selfie.js`) — pairs the lobby-staged selfie with my sweep slot
+  (either order — the renderer can stage before or after my slot fires), posts exactly once
+  per wave and only for the current wave, and owns the burn-proof ticket lifetime (survives
+  `reset()`, dropped by `clearBurnProof()` on a new wave). `bare examples/selfie.js`
+- **`CrdtGallery`** (`lib/gallery-crdt.js`) — the per-wave multicore CRDT gallery over a
+  Corestore: `open(waveId)` creates MY writable core (its key is my writer key),
+  `addWriter(waveId, peerId, writerKey)` opens a participant's core (from its flooded
+  `wave-join`) and downloads its one entry, `postSelfie(entry)` appends my single op, and
+  `tick()` pulls replication + repaints the merged view. No admission, no indexer, no
+  retention — every peer holds every core and merges locally with `mergeGallery` (§7).
 
 ---
 
@@ -501,5 +453,5 @@ each subpath-importable and unit-tested. `Flood` is shown in §6; the others:
 bare bin/wave.run.js A /tmp/hw/a     # a headless wave host (dev CLI)
 bare bin/dht-local.js                # a local DHT bootstrap (prints host:port)
 npm test                             # unit suites (from repo root; delegates here)
-bare lib/chord.test.js               # a single suite
+bare lib/sweep.test.js               # a single suite
 ```

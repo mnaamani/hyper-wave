@@ -1,78 +1,52 @@
-// gallery.js — the wave selfie gallery is an Autobase multi-writer log merged into one
-// ordered view. galleryConfig() is the apply/open config; readGallery() reads it back.
-// apply() enforces the write-gate (valid receipt), byte caps, and one-entry-per-peer
-// deterministically on every peer. Run:  bare examples/gallery.js
-const Corestore = require('corestore');
-const Autobase = require('autobase');
+// gallery.js — the wave selfie gallery is a multicore CRDT: each participant owns one
+// Hypercore and appends its single selfie; every peer collects the block-0 entries and
+// folds them into one ordered view with the PURE mergeGallery(). Same set of ops in →
+// byte-identical gallery out on every peer (no indexer, no consensus). mergeGallery is
+// the write-gate: it drops ops without a valid join attestation or over the byte caps,
+// keeps a tip address only if a burn backs it, and keeps one entry per peer, hop-ordered.
+// This demo runs mergeGallery over a hand-built bag of ops (no swarm needed).
+// Run:  bare examples/gallery.js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const fs = require('bare-fs');
-const { galleryConfig, readGallery } = require('hyperwave-engine/lib/gallery');
-const { signReceipt } = require('hyperwave-engine/lib/token');
+const { mergeGallery } = require('hyperwave-engine/lib/gallery');
+const { signJoin } = require('hyperwave-engine/lib/attest');
 
 const waveId = 'w1';
-const chainHash = b4a.toString(b4a.alloc(32), 'hex');
 
-// Build a receipt-valid wave-selfie op signed by keyPair for a given hop.
+// Build a join-attested wave-selfie op signed by keyPair. writerKey is the peer's own
+// gallery core key; the join attestation binds (waveId, peerId, writerKey) — that's the
+// write-gate mergeGallery checks (there is no shared gallery key).
 function selfie(keyPair, hopCount, caption, timestamp) {
   const peerId = b4a.toString(keyPair.publicKey, 'hex');
-  const receiptTs = timestamp;
+  const writerKey = b4a.toString(crypto.keyPair().publicKey, 'hex');
   return {
     type: 'wave-selfie',
     waveId,
     peerId,
-    hopCount,
-    chainHash,
-    receiptTs,
-    receiptSig: signReceipt(keyPair, {
-      waveId,
-      hopCount,
-      prevChainHash: chainHash,
-      timestamp: receiptTs
-    }),
+    hopCount, // my rank in the angle-ordered sweep (the gallery ordering key)
+    writerKey,
+    joinSig: signJoin(keyPair, { waveId, writerKey }),
     image: '<jpeg-data-url>',
     caption,
     timestamp
   };
 }
 
-async function main() {
-  const dir = '/tmp/hw-example-gallery-' + Date.now();
-  const store = new Corestore(dir);
-  const base = new Autobase(
-    store.namespace('wave-gallery'),
-    null,
-    galleryConfig()
-  );
-  await base.ready();
-  console.log(
-    'gallery bootstrap key:',
-    b4a.toString(base.key, 'hex').slice(0, 12) + '…'
-  );
+const alice = crypto.keyPair();
+const bob = crypto.keyPair();
 
-  const alice = crypto.keyPair();
-  const bob = crypto.keyPair();
+const forged = selfie(bob, 2, 'forged', 400);
+forged.joinSig = '00'.repeat(64); // invalid join attestation → dropped by mergeGallery
 
-  await base.append(selfie(bob, 1, 'bob', 200));
-  await base.append(selfie(alice, 0, 'alice', 100));
-  await base.append(selfie(alice, 0, 'alice-again', 300)); // 2nd from alice → dropped at write
-  const unsigned = selfie(bob, 2, 'forged', 400);
-  unsigned.receiptSig = '00'.repeat(64); // invalid receipt → dropped by apply()
-  await base.append(unsigned);
-  await base.update();
+const bag = [
+  selfie(bob, 1, 'bob', 200),
+  selfie(alice, 0, 'alice', 100),
+  selfie(alice, 0, 'alice-newer', 300), // 2nd alice op → one-per-peer keeps the newest
+  forged
+];
 
-  const items = await readGallery(base);
-  console.log(
-    'gallery (ordered by hop, one per peer):',
-    items.map((entry) => entry.caption)
-  );
-
-  await base.close();
-  await store.close();
-  fs.rmSync(dir, { recursive: true, force: true });
-}
-
-main().catch((err) => {
-  console.error('FAIL', err);
-  Bare.exit(1);
-});
+const items = mergeGallery(bag);
+console.log(
+  'gallery (ordered by slot, one per peer, forged dropped):',
+  items.map((entry) => entry.caption)
+);

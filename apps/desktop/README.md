@@ -55,13 +55,14 @@ host, not desktop-specific.
 
 ## The UI
 
-The ring draws a yellow "you" dot, green peer dots, the **successor** in orange with a
-baton line, and a 💰 wallet chip. The token is a **⚽ football that rolls clockwise around
-the ring on every screen**. **Kick off the wave** burns the fee, then announces. During the
-**lobby**, opted-in peers frame their selfie on camera (countdown to kickoff; captured
-automatically at kickoff or on 📸). As the ball passes each participant, their staged selfie
-posts and features **in the centre of the ring**; a 💵 Tip button under the featured selfie
-sends real testnet TRX to its owner.
+The ring draws a yellow "you" dot, green peer dots, and a 💰 wallet chip. A **⚽ football
+rolls clockwise around the ring on every screen** — rendered from the shared sweep schedule
+(no token on the wire; every peer computes the same angle-ordered timing locally). **Kick
+off the wave** burns the fee, then announces. During the **lobby**, opted-in peers frame
+their selfie on camera (countdown to kickoff; captured automatically at kickoff or on 📸).
+As the ball reaches each participant's seat, their staged selfie posts and features **in the
+centre of the ring**; a 💵 Tip button under the featured selfie sends real testnet TRX to
+its owner.
 
 ## Notes (app-shell specifics)
 

@@ -8,7 +8,6 @@
 //   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
 //   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted at my sweep slot, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
-//   env HYPERWAVE_ADMIT_TIMEOUT_MS=<ms> -> max wait for my batch admission to replicate back
 //   env HYPERWAVE_PIN_BUDGET=<n>       -> sticky random pins to hold (0 = pinning off)
 //   env HYPERWAVE_MAX_PEERS=<n>        -> Hyperswarm connection cap (lower to force a partial mesh)
 const env = require('bare-env');
@@ -40,10 +39,10 @@ let settleTimer = null; // armed when connected to START peers; fires kickoff on
 let payments = null; // set by the WALLET=1 block below (if enabled)
 
 // Hold the kickoff gate this long before firing. Reaching the gate means *I* (the initiator)
-// finished meshing, but the other peers' immediate-successor channels may still be forming —
-// racing the instant I hit it let the token silently route around a peer whose predecessor wasn't
-// wired yet, dropping it from the wave (seen on a constrained runner: initiator fully connected,
-// yet 2 of 5 peers never posted). A brief settle lets the rest of the ring finish wiring.
+// finished meshing, but the other peers' gossip channels may still be forming — flooding the
+// announce the instant I hit the gate could miss a peer whose channels aren't wired yet,
+// dropping it from the wave (seen on a constrained runner: initiator fully connected, yet 2 of
+// 5 peers never joined). A brief settle lets the rest of the mesh finish wiring.
 const SETTLE_MS = 4000;
 // Connectivity floor for the kickoff gate. At small N a full mesh forms naturally and we wait for
 // all of it — the strictest start condition. But a full mesh is IMPOSSIBLE at scale: Hyperswarm
@@ -64,9 +63,6 @@ const wave = createWave({
   maxPeers: env.HYPERWAVE_MAX_PEERS
     ? Number(env.HYPERWAVE_MAX_PEERS)
     : undefined,
-  admitTimeoutMs: env.HYPERWAVE_ADMIT_TIMEOUT_MS
-    ? Number(env.HYPERWAVE_ADMIT_TIMEOUT_MS)
-    : undefined,
   onState: (state) => {
     console.log(
       `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)} ` +
@@ -74,8 +70,8 @@ const wave = createWave({
     );
     // Kick off once the whole roster is DISCOVERED and we're CONNECTED to min(START,
     // CONNECTED_FLOOR) of them, held for SETTLE_MS. At small N that means the full mesh (the
-    // strictest condition — discovery alone races ahead of the Protomux channels the token
-    // forwards over, and racing a half-wired mesh dropped peers / formed runaway sub-cycles); at
+    // strictest condition — discovery alone races ahead of the Protomux gossip channels the
+    // flood rides, and racing a half-wired mesh dropped peers); at
     // large N a full mesh can't exist (Hyperswarm maxPeers, see CONNECTED_FLOOR) and the pinned
     // Chord ring edges are what carry the lap.
     if (!env.START || started) {
@@ -100,7 +96,7 @@ const wave = createWave({
     }
   },
   onEvent: (evt) => {
-    console.log(`[${name}] TOKEN`, JSON.stringify(evt));
+    console.log(`[${name}] EVENT`, JSON.stringify(evt));
     // AUTOJOIN: try on announce (no-wallet path: already 'verified') and on wave-verified
     // (wallet path: after the kick-off burn confirms). join() dedupes + gates on paid.
     if (
@@ -111,7 +107,7 @@ const wave = createWave({
       joinAndBurn();
     }
     // stage a (fake) selfie during the lobby, exactly like the renderer does at kickoff;
-    // the worker posts it to the gallery when the token reaches this peer.
+    // the worker posts it to the gallery when this peer's sweep slot fires.
     if (env.AUTOSELFIE && evt.event === 'wave-active' && evt.joined) {
       wave.stageSelfie({
         caption: `${name} was here`,

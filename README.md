@@ -11,11 +11,14 @@ match-specific [Hyperswarm](https://github.com/holepunchto/hyperswarm) topic; ea
 public key deterministically maps to a fixed seat on a 256-bit ring — the ring _is_ the
 stadium seating chart.
 
-Anyone can **kick off a wave**: a signed ⚽ token races peer-to-peer clockwise around the
-ring visible on every screen, each hop cryptographically receipted into a
-constant-size chain. As the ball passes each participant it posts a selfie into a shared per-wave
-[Autobase](https://github.com/holepunchto/autobase) gallery that converges on every peer, with the
-newest selfie featured in the ring centre.
+Anyone can **kick off a wave**: the initiator floods a start time and lap duration, and every
+peer derives the **same angle-ordered schedule** locally and self-triggers its own moment —
+no token, no per-hop messages. The ⚽ visible on every screen is rendered from that shared
+schedule. As a peer's slot fires it posts a selfie into a per-wave **multicore CRDT** gallery
+(each participant owns one [Hypercore](https://github.com/holepunchto/hypercore); every peer
+merges the set locally and converges on a byte-identical gallery), with the newest selfie
+featured in the ring centre. A dead peer's slot simply passes — the wave ends deterministically
+on every screen at once.
 
 With a built-in self-custodial wallet via
 [WDK](https://docs.wdk.tether.io/) (for demo purpouses using TRON Nile Testnet)
@@ -26,18 +29,18 @@ With a built-in self-custodial wallet via
   joining).
 - **Gallery tips** — Tip a selfie 1 TRX straight to its owner's wallet.
 
-Every peer runs the same code; the only asymmetry is per-wave (the initiator archives its own wave's gallery). Waves self-heal around dead peers.
+Every peer runs the same code — the protocol is fully role-free (the initiator is an ordinary participant that just calls "kick off"). Every peer already holds every participant's gallery core, so there is no indexer, no archivist, and no single point of failure; galleries are ephemeral per run.
 
 Built for the [Tether Developers Cup](https://dorahacks.io/hackathon/tether-developers-cup) (theme: football / global tournament moment).
 
 ## Repo layout
 
-| Path                                                       | What                                                                                                                                                                                                                              |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`packages/hyperwave-engine/`](packages/hyperwave-engine/) | The reusable Bare engine: ring, token race, gossip/Chord topology, Autobase gallery, WDK wallet, fees. Unit + e2e tests.                                                                                                          |
-| [`apps/desktop/`](apps/desktop/)                           | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                                                                                                    |
-| [`apps/mobile/`](apps/mobile/)                             | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                           |
-| [`docs/`](docs/)                                           | [`architecture.md`](docs/architecture.md) · [`protocol.md`](docs/protocol.md) (on-wire spec) · [`scalable-topology.md`](docs/scalable-topology.md) (Chord over Hyperswarm) · [`idea.md`](docs/idea.md) (the idea, plain language) |
+| Path                                                       | What                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`packages/hyperwave-engine/`](packages/hyperwave-engine/) | The reusable Bare engine: ring geometry, the deterministic sweep, gossip + random-K pinning, multicore CRDT gallery, WDK wallet, fees. Unit + e2e tests.                                                                                                                        |
+| [`apps/desktop/`](apps/desktop/)                           | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                                                                                                                                                  |
+| [`apps/mobile/`](apps/mobile/)                             | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                                                                         |
+| [`docs/`](docs/)                                           | [`architecture.md`](docs/architecture.md) · [`protocol.md`](docs/protocol.md) (on-wire spec) · [`scalable-topology.md`](docs/scalable-topology.md) (topology: random-K pins + flooding; largely historical Chord record) · [`idea.md`](docs/idea.md) (the idea, plain language) |
 
 ## Quickstart
 

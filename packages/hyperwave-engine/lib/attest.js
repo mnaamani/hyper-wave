@@ -107,54 +107,6 @@ function burnAuthorizes(burn, peerId, waveId) {
   );
 }
 
-// --- gallery-key attestation -----------------------------------------------
-// The wave's gallery Autobase key is chosen by the originator and then travels on unsigned,
-// relayed fields (`wave-start`, the token, `wave-sync`). Without a binding, a malicious relay
-// could swap the key and point peers at an attacker-controlled gallery. So the originator
-// signs (waveId, autobaseKey) with its ring key; every peer verifies the signature against
-// the wave's originator before opening the gallery. (Independent of payments — pure integrity.)
-/**
- * Hash the (waveId, autobaseKey) binding the originator signs.
- * @param {string} waveId - The wave id.
- * @param {string} autobaseKey - The gallery Autobase key (hex).
- * @returns {Buffer} The blake2b hash of the gallery-key tuple.
- */
-function galleryKeyHash(waveId, autobaseKey) {
-  return crypto.hash(b4a.from(`gallery-key|${waveId}|${autobaseKey}`));
-}
-
-/**
- * Sign the gallery key binding with the originator's ring key.
- * @param {KeyPair} keyPair - The originator's signing ring keypair.
- * @param {{waveId: string, autobaseKey: string}} fields - The gallery-key tuple.
- * @returns {string} The Ed25519 gallery-key signature (hex).
- */
-function signGalleryKey(keyPair, { waveId, autobaseKey }) {
-  return b4a.toString(
-    crypto.sign(galleryKeyHash(waveId, autobaseKey), keyPair.secretKey),
-    'hex'
-  );
-}
-
-/**
- * Verify the gallery key is the one the wave's `originatorId` published for `waveId`.
- * @param {{originatorId: string, waveId: string, autobaseKey: string}} fields - The
- *   gallery-key tuple (originatorId is the claimed signer, hex).
- * @param {string} sigHex - The gallery-key signature to verify (hex).
- * @returns {boolean} True if the originator signed this key for this wave.
- */
-function verifyGalleryKey({ originatorId, waveId, autobaseKey }, sigHex) {
-  try {
-    return crypto.verify(
-      galleryKeyHash(waveId, autobaseKey),
-      b4a.from(sigHex, 'hex'),
-      b4a.from(originatorId, 'hex')
-    );
-  } catch {
-    return false;
-  }
-}
-
 // --- join attestation --------------------------------------------------------
 // A peer's signed opt-in to a wave, binding its identity to the gallery writer
 // core it wants admitted. Carried on `wave-join` (the join IS the admission
@@ -214,8 +166,6 @@ module.exports = {
   signBurn,
   verifyBurn,
   burnAuthorizes,
-  signGalleryKey,
-  verifyGalleryKey,
   signJoin,
   verifyJoin
 };
