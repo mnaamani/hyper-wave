@@ -44,13 +44,11 @@ let payments = null; // set by the WALLET=1 block below (if enabled)
 // dropping it from the wave (seen on a constrained runner: initiator fully connected, yet 2 of
 // 5 peers never joined). A brief settle lets the rest of the mesh finish wiring.
 const SETTLE_MS = 4000;
-// Connectivity floor for the kickoff gate. At small N a full mesh forms naturally and we wait for
-// all of it — the strictest start condition. But a full mesh is IMPOSSIBLE at scale: Hyperswarm
-// caps connections at maxPeers=64 by default (a 128-peer run plateaus around connected=58), and
-// the Chord design (scalable-topology.md) never needed one — each peer only pins its K successors
-// + predecessor + fingers (~11 connections at N=128). So require full connectivity only up to
-// this floor; past it, `peers >= START` (the whole roster DISCOVERED) plus a well-connected
-// initiator is the start condition, and the pinned ring edges carry the lap.
+// Connectivity floor for the kickoff gate. At small N a full mesh forms naturally and we wait
+// for all of it — the strictest start condition. But a full mesh is IMPOSSIBLE at scale
+// (Hyperswarm caps connections at maxPeers, and the protocol only needs the flood graph), so
+// require full connectivity only up to this floor; past it, `discovered >= START` (the whole
+// roster seen on the DHT) plus a well-connected initiator is the start condition.
 const CONNECTED_FLOOR = 16;
 const wave = createWave({
   storageDir,

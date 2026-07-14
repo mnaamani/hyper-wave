@@ -42,17 +42,12 @@ jobs:
       # announce/lookup + silently-dying connections; pinned to 6.32.0 in root package.json
       # overrides, see TODO.md "Dependency watch" and issue.md); public-only red = runner
       # UDP/internet or real-DHT trouble; both red = suspect the protocol itself.
-      #
-      # continue-on-error is a temporary guard from the regression hunt: drop it from both steps
-      # (making them blocking gates again) after a few green runs on the pinned hyperdht.
       - name: End-to-end tests (local DHT)
-        continue-on-error: true
         run: npm run test:e2e:local
         env:
           E2E_PEERS: 8
 
       - name: End-to-end tests (public DHT)
-        continue-on-error: true
         run: npm run test:e2e:local
         env:
           E2E_PUBLIC: 1

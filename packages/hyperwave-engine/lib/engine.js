@@ -23,6 +23,7 @@ const {
  * @property {string} [matchId] - Match-specific swarm topic id (isolates rings).
  * @property {boolean} [wallet] - Set `false` to run wallet-less (no burns/paid-gate/tips).
  * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by wallet.js).
+ * @property {string} [swarmSeed] - Injected hex swarm-identity seed (else persisted at <storage>/swarm.seed).
  */
 
 /**
@@ -66,6 +67,9 @@ function createEngine({
     storageDir,
     bootstrap: config.bootstrap ? parseBootstrap(config.bootstrap) : undefined,
     matchId: config.matchId,
+    // host-injected swarm identity seed (secure-seed-storage.md: the host owns the
+    // secret store; the engine never persists an injected seed)
+    swarmSeed: config.swarmSeed,
     onState: (state) => notify({ type: 'state', ...state }),
     onEvent: (event) => notify({ type: 'event', ...event }),
     onGallery: (items) => notify({ type: 'gallery', items }),
@@ -81,7 +85,7 @@ function createEngine({
   // Self-custodial WDK wallet (Tron testnet TRX) for fee burns + gallery tips. Async ESM init;
   // emits `wallet` {address,trx} on ready + every 15s, and wires into the engine (address for
   // tips/attestations + the on-chain burn verifier = the paid-wave anti-spam gate). A host can
-  // opt out with `config.wallet: false` (e.g. mobile, until WDK-in-worklet is confirmed) — the
+  // opt out with `config.wallet: false` — the
   // engine then runs wallet-less (join-attestation gallery, no burns/paid-gate/tips).
   let payments = null;
   let tBalance = null;

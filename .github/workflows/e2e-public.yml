@@ -2,20 +2,22 @@ name: E2E scale run (public DHT, manual)
 
 # Manually-dispatched e2e over the PUBLIC Hyperswarm DHT with a configurable peer count — for
 # occasional scale runs beyond CI's default 8 (how does a 24- or 48-peer wave behave on the real
-# network?). Same suite as CI's e2e steps (convergence + healing), isolated by a random per-run
-# match topic; no wallets / no on-chain.
+# network?). Same suite as CI's e2e steps (convergence + kill/survival), isolated by a random
+# per-run match topic; no wallets / no on-chain.
 #
 # Notes for large counts:
 #  - Every peer is its own Bare process on ONE runner: shared 2-core runners are the practical
 #    ceiling long before the protocol is (rough guide: ≤ 32 peers on ubuntu-latest — a 128-peer
 #    attempt saturated the box, with discovery still incomplete after 9 minutes; use a larger
-#    self-hosted runner for triple digits). The wave itself is O(N) hops, so time grows linearly.
+#    self-hosted runner for triple digits). The sweep itself is fixed-duration regardless of N;
+#    launch stagger + gallery convergence are what grow with the count.
+#  - All peers share ONE public IP here — per-IP DHT/NAT limits bite well before protocol limits
+#    (a single-IP 128-peer public run managed 6 connections; see TODO.md). A genuine large-N
+#    public validation needs peers spread across machines.
 #  - Above ~64 peers a full mesh is impossible anyway (Hyperswarm caps connections at maxPeers=64
-#    by default) — that's fine by design: the Chord ring only pins K successors + predecessor +
-#    fingers per peer, and the kickoff gate requires full connectivity only up to a floor
-#    (CONNECTED_FLOOR in bin/wave.run.js) plus full roster discovery.
+#    by default) — fine by design: floods ride the random-K pins (pins.js) + incidental mesh.
 #  - The suite scales its internal time budgets with E2E_PEERS (see wave.local.e2e.js), and the
-#    healing test kills peers #3 and #5 — keep the count ≥ 6.
+#    kill test kills peers #3 and #5 — keep the count ≥ 6.
 #  - E2E_DUMP is enabled: on a failure, every peer's full log is uploaded as a run artifact.
 on:
   workflow_dispatch:

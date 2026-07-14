@@ -98,8 +98,8 @@ Flow:
    worker to **wait for an init message** carrying the config, rather than booting immediately from
    `Bare.argv` / `bare-env` as it does today. The worklet is already init-message-driven; the
    desktop worker adopts the same shape.
-3. **`engine.js` passes `config.swarmSeed` through to `createWave({ swarmSeed })`** (today it only
-   forwards `config.seed` → the wallet). One-line passthrough; the param already exists.
+3. **`engine.js` passes `config.swarmSeed` through to `createWave({ swarmSeed })`** — DONE
+   (alongside the existing `config.seed` → wallet forwarding).
 4. **The engine no longer writes plaintext on desktop** — both seeds are injected, so
    `loadOrCreateSwarmSeed` and `wallet.js` take the injected branch and never touch disk. The file
    branch remains for hosts that pass no seed (dev/headless).

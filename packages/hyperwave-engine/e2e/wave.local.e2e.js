@@ -62,9 +62,9 @@ function gatheredRoster(initiator) {
 
 // Launch PEER_COUNT equal peers, all auto-joining and auto-selfie-ing (no roles). p1 initiates: it
 // kicks off once its ring reaches START_TARGET, and — as the initiator — it archives its wave's
-// gallery. `initEnv` passes extra env only to p1. Launches are staggered — the other half of
+// gallery. Launches are staggered — the other half of
 // reliable DHT discovery (see harness.start's warm-up). Returns { peers } (peers[0] is p1).
-async function launchWave(cluster, initEnv = {}) {
+async function launchWave(cluster) {
   const peers = [];
   for (let i = 1; i <= PEER_COUNT; i++) {
     peers.push(
@@ -79,7 +79,7 @@ async function launchWave(cluster, initEnv = {}) {
         ...(process.env.E2E_MAX_PEERS
           ? { HYPERWAVE_MAX_PEERS: process.env.E2E_MAX_PEERS }
           : {}),
-        ...(i === 1 ? { START: String(START_TARGET), ...initEnv } : {})
+        ...(i === 1 ? { START: String(START_TARGET) } : {})
       })
     );
     await sleep(400);

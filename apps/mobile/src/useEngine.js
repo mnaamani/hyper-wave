@@ -1,7 +1,7 @@
 // useEngine — the mobile host for the shared engine. This is the RN counterpart of the desktop
 // renderer's worker bridge: it boots the Bare worklet (hyperwave-engine's worklet/app.js,
 // bundled by bare-pack), speaks the SAME JSON message protocol over the IPC stream, and exposes
-// engine state + actions to React. The engine itself (wave race, gallery, WDK wallet) runs
+// engine state + actions to React. The engine itself (the sweep, gallery, WDK wallet) runs
 // unchanged inside the worklet — this file never touches Hyperswarm/Corestore/WDK directly.
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState } from 'react-native';
