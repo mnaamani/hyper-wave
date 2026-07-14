@@ -267,6 +267,13 @@ Every message will carry these three envelope fields in addition to its `kind` a
 
 Until implemented, treat the individual schemas below as authoritative.
 
+**Shape enforcement.** The schemas below are code, not just documentation: `lib/messages.js`
+defines one factory per kind (every send site builds through it) and one shape validator per
+kind, run once at the receive edge before any signature or state work. An unknown kind, a
+missing required field, or a mistyped field drops the message; unknown extra fields are
+tolerated (forward compatibility). Flooded kinds must carry their `mid`. Validation is shape
+only — signatures, the paid gate, and hostile-value clamps remain in the handlers.
+
 ### heartbeat — one hop to every connection, every `HEARTBEAT_MS`
 
 ```json

@@ -6,6 +6,7 @@ require('./lib/flood.test.js');
 require('./lib/peer-table.test.js');
 require('./lib/selfie.test.js');
 require('./lib/attest.test.js');
+require('./lib/messages.test.js');
 require('./lib/sweep.test.js');
 require('./lib/wave.gallery.test.js');
 require('./lib/gallery.replication.test.js');

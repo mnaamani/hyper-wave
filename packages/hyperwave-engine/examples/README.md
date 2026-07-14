@@ -10,6 +10,7 @@ Run any of them under **Bare**, from the package root:
 bare examples/ring.js       # seat angles, live ring, successor
 bare examples/sweep.js      # the deterministic schedule: roster → angle-ordered slots, my slot
 bare examples/attest.js     # burn + join attestations (the paid gate + gallery write credential)
+bare examples/messages.js   # gossip message factories + receive-edge shape validators
 bare examples/flood.js      # first-sight gossip dedup
 bare examples/peer-table.js # live peer bookkeeping: seats + direct channels
 bare examples/selfie.js     # the selfie pipeline: stage + sweep-slot pairing, once-per-wave, burn ticket
@@ -20,7 +21,7 @@ bare examples/engine.js     # host the whole engine via createEngine() (wallet-l
 bare examples/wave.js       # the lower-level createWave() transport, then close
 ```
 
-The pure-module examples (`ring`, `sweep`, `attest`, `flood`, `peer-table`, `selfie`,
+The pure-module examples (`ring`, `sweep`, `attest`, `messages`, `flood`, `peer-table`, `selfie`,
 `gallery`, `seeds`) run fully offline and deterministically. `payments.js` derives its address offline but needs network (and a
 funded wallet) for a live balance. `engine.js` / `wave.js` join a swarm and then shut themselves
 down; pass `HYPERWAVE_BOOTSTRAP=host:port` (see `bare bin/dht-local.js`) for instant local

@@ -5,8 +5,8 @@ they interact, see [`docs/architecture.md`](../../docs/architecture.md) and
 [`docs/protocol.md`](../../docs/protocol.md); this file is all _how do I call it_.
 
 > **Runs under [Bare](https://github.com/holepunchto/bare), not Node.** Examples assume `bare`.
-> The pure submodules (`ring`/`sweep`/`attest`/`flood`/`gallery`) do no I/O and also run
-> fine under Node if you just want to play with the math/crypto.
+> The pure submodules (`ring`/`sweep`/`attest`/`messages`/`flood`/`gallery`) do no I/O and
+> also run fine under Node if you just want to play with the math/crypto.
 
 **Two import surfaces:**
 
@@ -30,10 +30,11 @@ const {
 const ring = require('hyperwave-engine/lib/ring');
 const sweep = require('hyperwave-engine/lib/sweep');
 const attest = require('hyperwave-engine/lib/attest');
+const messages = require('hyperwave-engine/lib/messages');
 const { Flood } = require('hyperwave-engine/lib/flood');
 const gallery = require('hyperwave-engine/lib/gallery');
 
-// 3. The stateful classes wave.js composes (also subpath imports — see §10):
+// 3. The stateful classes wave.js composes (also subpath imports — see §11):
 const { PeerTable } = require('hyperwave-engine/lib/peer-table');
 const { SelfiePipeline } = require('hyperwave-engine/lib/selfie');
 const { CrdtGallery } = require('hyperwave-engine/lib/gallery-crdt');
@@ -41,9 +42,9 @@ const { CrdtGallery } = require('hyperwave-engine/lib/gallery-crdt');
 
 Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it headless](#2-drive-a-wave-headless-createwave) ·
 [ring.js](#3-ringjs--seats--the-ring) · [sweep.js](#4-sweepjs--the-deterministic-schedule) · [attest.js](#5-attestjs--attestations) ·
-[flood.js](#6-floodjs--the-flood-graph) · [gallery.js](#7-galleryjs--the-multicore-crdt-gallery) ·
-[payments](#8-payments--walletjs) · [seeds & bootstrap](#9-seed--bootstrap-helpers) ·
-[stateful classes](#10-the-stateful-classes-wavejs-composes)
+[messages.js](#6-messagesjs--the-gossip-message-seam) · [flood.js](#7-floodjs--the-flood-graph) · [gallery.js](#8-galleryjs--the-multicore-crdt-gallery) ·
+[payments](#9-payments--walletjs) · [seeds & bootstrap](#10-seed--bootstrap-helpers) ·
+[stateful classes](#11-the-stateful-classes-wavejs-composes)
 
 ---
 
@@ -126,7 +127,7 @@ const wave = createWave({
   },
   onEvent: (ev) => console.log('event', ev.event, ev.waveId),
   onGallery: (items) => console.log('gallery', items.length)
-  // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see §9)
+  // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see §10)
 });
 
 console.log('my seat:', wave.me); // { id, angle, country }
@@ -138,7 +139,7 @@ await wave.close();
 
 `createWave` returns: `{ me, startWave, join, setCountry, stageSelfie, setWallet, announcePaid,
 recordBurn, close }`. There is no routing surface — the wave is a deterministic sweep.
-The payment methods (`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §8.
+The payment methods (`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §9.
 
 ---
 
@@ -250,7 +251,37 @@ verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed t
 
 ---
 
-## 6. `flood.js` — the flood graph
+## 6. `messages.js` — the gossip message seam
+
+The single definition point for the five on-wire message kinds (`docs/protocol.md` §5): one
+`make*` factory per kind (every send site builds through it, so a shape can't drift per call
+site) and one shape validator per kind, run once at the receive edge via `validGossip` before
+any signature or state work. Validation is shape only — signatures and the paid gate stay in
+`attest.js` / the handlers. `FLOODED_KINDS` is the flooded/direct classification the relay
+decision uses.
+
+```js
+const {
+  FLOODED_KINDS,
+  validGossip,
+  makeHeartbeat,
+  makeWaveJoin
+} = require('hyperwave-engine/lib/messages');
+
+const heartbeat = makeHeartbeat({ id: peerId, country: 'BR' });
+validGossip(heartbeat); // → true (direct kind — no mid needed)
+
+const join = makeWaveJoin({ waveId, peerId, writerKey, joinSig });
+validGossip(join); // → false: flooded kinds must carry their flood mid...
+validGossip({ ...join, mid: 'ab12cd34ef56ab12' }); // → true (floodGossip stamps it)
+
+FLOODED_KINDS.has('wave-join'); // → true (relayed); heartbeat/wave-sync are one-hop
+validGossip({ kind: 'token', waveId }); // → false — unknown kinds are dropped at the edge
+```
+
+---
+
+## 7. `flood.js` — the flood graph
 
 One rule turns a one-hop broadcast into an epidemic across a partial mesh: relay each message id on
 **first sight only**. Size-capped so the set can't grow unbounded.
@@ -278,7 +309,7 @@ mesh of degree ≈ `maxPeers`, connected with overwhelming probability). Nothing
 
 ---
 
-## 7. `gallery.js` — the multicore CRDT gallery
+## 8. `gallery.js` — the multicore CRDT gallery
 
 The gallery is a multicore CRDT. Each participant
 owns **one** Hypercore and appends its single `wave-selfie` op at block 0; its writer key rides
@@ -286,7 +317,7 @@ that peer's own `wave-join` (self-certified by the join attestation). Every peer
 participant's core, downloads block 0, and folds the bag with the pure **`mergeGallery`** — every
 peer that has replicated the same set of cores computes a **byte-identical** gallery. No indexer,
 no admission, no consensus, no shared gallery key. The stateful `CrdtGallery` that owns the cores
-is in `gallery-crdt.js` (§10).
+is in `gallery-crdt.js` (§11).
 
 ```js
 const crypto = require('hypercore-crypto');
@@ -321,7 +352,7 @@ buildGallery([op]); // → [op]
 
 ---
 
-## 8. Payments — `wallet.js`
+## 9. Payments — `wallet.js`
 
 `createPayments` is the self-custodial WDK wallet (Tron Nile testnet). It's `async` because WDK is
 ESM-only. The same module composes it into the wave (fee burns + the paid-wave gate).
@@ -382,7 +413,7 @@ until the burn is readable.
 
 ---
 
-## 9. Seed & bootstrap helpers
+## 10. Seed & bootstrap helpers
 
 ```js
 const { parseBootstrap, loadOrCreateSwarmSeed } = require('hyperwave-engine');
@@ -403,10 +434,10 @@ an identity (e.g. from mobile secure storage). It is a **separate** seed from th
 
 ---
 
-## 10. The stateful classes wave.js composes
+## 11. The stateful classes wave.js composes
 
 `createWave` is a composition root: the per-concern state machines live in their own classes,
-each subpath-importable and unit-tested. `Flood` is shown in §6; the others:
+each subpath-importable and unit-tested. `Flood` is shown in §7; the others:
 
 - **`PeerTable`** (`lib/peer-table.js`) — live peer bookkeeping: ring seats (angle always
   derived from the id, never the wire) and direct-send channels; a direct disconnect drops
@@ -420,7 +451,7 @@ each subpath-importable and unit-tested. `Flood` is shown in §6; the others:
   `addWriter(waveId, peerId, writerKey)` opens a participant's core (from its flooded
   `wave-join`) and downloads its one entry, `postSelfie(entry)` appends my single op, and
   `tick()` pulls replication + repaints the merged view. No admission, no indexer, no
-  retention — every peer holds every core and merges locally with `mergeGallery` (§7).
+  retention — every peer holds every core and merges locally with `mergeGallery` (§8).
 
 ---
 

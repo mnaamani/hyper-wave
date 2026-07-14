@@ -149,6 +149,9 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
     ring.js          pure ring geometry (angleOf, angleOfId, liveRing)
     sweep.js         pure sweep slot math (sweepSchedule, mySlot): the identical angle-ordered
                      schedule every peer derives from the flooded (roster, t0, lapMs)
+    messages.js      the gossip message seam: one factory + one shape validator per message
+                     kind (send sites build through the factories; the receive edge validates
+                     before any signature/state work) + the flooded/direct classification
     flood.js         Flood class: gossip-flood dedup (firstSight, oldest-first eviction) for
                      relayed lifecycle messages
     peer-table.js    PeerTable class: seats + direct channels (angle always derived

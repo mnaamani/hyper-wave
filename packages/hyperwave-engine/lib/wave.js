@@ -21,6 +21,15 @@ const fs = require('bare-fs');
 
 const { angleOf, angleOfId } = require('./ring');
 const { sweepSchedule, mySlot } = require('./sweep');
+const {
+  FLOODED_KINDS,
+  validGossip,
+  makeHeartbeat,
+  makeWaveAnnounce,
+  makeWaveJoin,
+  makeWaveStart,
+  makeWaveSync
+} = require('./messages');
 const { Flood } = require('./flood');
 const { CrdtGallery } = require('./gallery-crdt');
 const { PeerTable } = require('./peer-table');
@@ -51,13 +60,6 @@ const SLOT_MS = 400; // per-roster-member slot spacing target
 const MIN_LAP_MS = 4000;
 const MAX_LAP_MS = 60000;
 const END_GRACE_MS = 2000; // after the last slot, before every peer returns to idle
-// Wave lifecycle control messages that must reach *every* peer (not just direct
-// neighbours). At scale Hyperswarm is only a partial random mesh, so these are
-// flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1).
-// wave-join floods because it publishes a participant's gallery core (writer key + join
-// attestation + burn) to EVERY peer, which ingests it to open that core; authenticity is
-// the carried join signature (attest.js verifyJoin), not the hop.
-const RELAYED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start']);
 // Cap on remembered message ids (flood dedup); the oldest ids are evicted first
 // (flood.js), so a straggling duplicate of a very old message might re-flood once —
 // harmless and very rare.
@@ -292,20 +294,21 @@ function createWave({
   // sweep needs no successors.
   /** @returns {Object} A `heartbeat` gossip message: my id + country (pure liveness). */
   function myHeartbeat() {
-    return {
-      kind: 'heartbeat',
-      id: me.id,
-      country: me.country
-    };
+    return makeHeartbeat({ id: me.id, country: me.country });
   }
 
   /**
-   * Central inbound-gossip dispatcher: identity-binds, floods relayable control messages,
-   * then routes each message kind to its handler (wave-*, heartbeat).
+   * Central inbound-gossip dispatcher: shape-validates, identity-binds, floods relayable
+   * control messages, then routes each message kind to its handler (wave-*, heartbeat).
    * @param {Object} msg Parsed gossip message (has a `kind`).
    * @param {string} fromId Hex id of the Noise-authenticated connection it arrived on.
    */
   function handleGossip(msg, fromId) {
+    // Shape gate (messages.js): unknown kinds and malformed messages are dropped here,
+    // before any signature or state work — every handler below trusts the shape.
+    if (!validGossip(msg)) {
+      return;
+    }
     // Identity binding: the heartbeat is the only direct message that describes its own
     // sender, so its claimed id must equal the Noise-authenticated connection id it
     // arrived on — otherwise a modified client could fake other peers' liveness (ring
@@ -318,8 +321,9 @@ function createWave({
     }
 
     // Flood relayable control messages across the partial mesh: process each exactly
-    // once, and on first sight re-broadcast to my other neighbours (dedup by `mid`).
-    if (msg.mid && RELAYED_KINDS.has(msg.kind)) {
+    // once, and on first sight re-broadcast to my other neighbours (dedup by `mid`;
+    // the shape gate guarantees flooded kinds carry one).
+    if (FLOODED_KINDS.has(msg.kind)) {
       if (!flood.firstSight(msg.mid)) {
         return; // already seen -> drop (stops loops)
       }
@@ -327,7 +331,7 @@ function createWave({
     }
     if (msg.kind === 'wave-sync') {
       // a peer told us the wave state when we joined mid-lobby / mid-race
-      if (!msg.waveId || !shouldAdopt(msg.waveId)) {
+      if (!shouldAdopt(msg.waveId)) {
         return;
       }
       // anti-spam: adopt a synced wave (lobby OR racing) only with a valid kick-off proof.
@@ -410,7 +414,7 @@ function createWave({
       if (enforcePaid && !validKickoff(msg.paid, msg.waveId, msg.by)) {
         return;
       }
-      if (msg.waveId && shouldAdopt(msg.waveId)) {
+      if (shouldAdopt(msg.waveId)) {
         if (!wave || wave.id !== msg.waveId) {
           enterLobby({ waveId: msg.waveId, by: msg.by });
         }
@@ -512,10 +516,9 @@ function createWave({
    * @param {string} cred.joinSig The join attestation over (waveId, peerId, writerKey).
    */
   function ingestWriter(cred) {
-    if (!wave || !cred || wave.writers.has(cred.peerId)) {
-      return;
-    }
-    if (!cred.peerId || !cred.writerKey || !cred.joinSig) {
+    // shape is guaranteed upstream (messages.js validates wave-join fields and every
+    // writers[] entry); only the signature and duplicate checks remain here
+    if (!wave || wave.writers.has(cred.peerId)) {
       return;
     }
     if (
@@ -721,14 +724,15 @@ function createWave({
         }
         // remember myself so my own wave-sync shares my core with newcomers
         wave.writers.set(me.id, { writerKey, joinSig: wave.joinSig });
-        floodGossip({
-          kind: 'wave-join',
-          waveId,
-          peerId: me.id,
-          writerKey,
-          joinSig: wave.joinSig,
-          burn: selfie.burnProof || undefined
-        });
+        floodGossip(
+          makeWaveJoin({
+            waveId,
+            peerId: me.id,
+            writerKey,
+            joinSig: wave.joinSig,
+            burn: selfie.burnProof
+          })
+        );
       })
       .catch(() => {});
   }
@@ -941,13 +945,9 @@ function createWave({
    */
   function doAnnounce(waveId, paidProof) {
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '');
-    floodGossip({
-      kind: 'wave-announce',
-      waveId,
-      by: me.id,
-      lobbyMs,
-      paid: paidProof || undefined
-    });
+    floodGossip(
+      makeWaveAnnounce({ waveId, by: me.id, lobbyMs, paid: paidProof })
+    );
     floodMyGalleryCore(waveId); // the initiator is a participant too — share its core
     clearTimeout(lobbyTimer);
     lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs);
@@ -1059,15 +1059,16 @@ function createWave({
       joinSig: cred.joinSig
     }));
     log('starting wave', shortId(waveId), 'writers', writers.length);
-    floodGossip({
-      kind: 'wave-start',
-      waveId,
-      by: me.id,
-      writers,
-      t0,
-      lapMs,
-      paid: wave.kickoffProof || undefined // so peers adopting via start can re-sync newcomers
-    });
+    floodGossip(
+      makeWaveStart({
+        waveId,
+        by: me.id,
+        writers,
+        t0,
+        lapMs,
+        paid: wave.kickoffProof // so peers adopting via start can re-sync newcomers
+      })
+    );
     onEvent({ event: 'started', waveId, by: me.id });
     beginSweep({ rosterIds, t0, lapMs });
   }
@@ -1105,23 +1106,24 @@ function createWave({
     // start a competing one (broadcasts they missed won't reach them otherwise)
     if (wave) {
       send(
-        JSON.stringify({
-          kind: 'wave-sync',
-          waveId: wave.id,
-          phase: wave.phase,
-          by: wave.by,
-          // every participant's gallery-core credential, so a newcomer is self-contained
-          writers: [...wave.writers.entries()].map(([peerId, cred]) => ({
-            peerId,
-            writerKey: cred.writerKey,
-            joinSig: cred.joinSig
-          })),
-          t0: wave.t0 || undefined, // sweep timing, so a mid-race newcomer animates + ends right
-          lapMs: wave.lapMs || undefined,
-          paid: wave.kickoffProof || undefined, // so a mid-lobby newcomer can verify + join
-          lobbyMsLeft:
-            wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
-        })
+        JSON.stringify(
+          makeWaveSync({
+            waveId: wave.id,
+            phase: wave.phase,
+            by: wave.by,
+            // every participant's gallery-core credential, so a newcomer is self-contained
+            writers: [...wave.writers.entries()].map(([peerId, cred]) => ({
+              peerId,
+              writerKey: cred.writerKey,
+              joinSig: cred.joinSig
+            })),
+            t0: wave.t0, // sweep timing, so a mid-race newcomer animates + ends right
+            lapMs: wave.lapMs,
+            paid: wave.kickoffProof, // so a mid-lobby newcomer can verify + join
+            lobbyMsLeft:
+              wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
+          })
+        )
       );
     }
     emit();
