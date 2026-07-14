@@ -565,16 +565,11 @@ sweep and ends at the same moment.)
 
 - **Originator:** the peer that called `startWave` — sends `wave-announce`, publishes its own
   gallery core (`floodMyGalleryCore`), runs the lobby timer, and sends `wave-start` with the
-  roster, `writers`, and sweep parameters. It is an **ordinary participant** otherwise (its
-  slot is wherever its angle falls, it posts its own selfie); its only asymmetry is retaining
-  its held cores after the wave (§8) — exactly like the K archivists. There is no indexer and
-  no admission step to run.
-- **Archivists:** the initiator plus `ARCHIVIST_COUNT` (3) roster members, chosen
-  **deterministically** from the frozen roster (evenly spread by ring angle, `sweep.js
-archivists`), keep their held cores open after moving on so the gallery survives the
-  initiator leaving. Every peer derives the same set from the roster, so no message names
-  them. With the CRDT gallery every participant already holds every core (§8), so retention
-  is just "don't close on move-on" — there is no checkpoint or index to preserve.
+  roster, `writers`, and sweep parameters. It is otherwise an **ordinary participant** with no
+  lasting asymmetry: its slot is wherever its angle falls, it posts its own selfie, and there
+  is no indexer, admission, or retention role. (Every participant already holds every core
+  during the wave — §8 — so a departing peer's selfie survives in everyone's view; the gallery
+  is ephemeral once superseded, so nobody keeps cores open across waves.)
 - **Joiner (roster):** opted in during the lobby (`wave-join` publishes its gallery core);
   gets a selfie prompt and a slot in the schedule.
 - **Spectator:** engaged with the wave but not in the roster — it opens its own (empty) core

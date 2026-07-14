@@ -131,17 +131,11 @@ keyed by the random `waveId`, nothing persists across runs.
 
 The gallery is a **multicore CRDT** — one Hypercore per participant, merged locally (no
 indexer, no coordinator; see `protocol.md` §8) — so every participant already holds every
-core and could serve the whole gallery. The only asymmetries are **per-wave** and are just
-about who keeps cores open longest:
-
-- The wave's **initiator** retains its held cores for the life of the process (so the gallery
-  survives for latecomers and replication). It is otherwise an ordinary participant — it posts
-  its own selfie and publishes its own core exactly like everyone else.
-- Plus **`ARCHIVIST_COUNT` (3) roster peers**, chosen deterministically from the frozen
-  roster (evenly spread by ring angle, `sweep.js archivists` — no message names them),
-  also keep their held cores open, so extra copies survive the initiator leaving. With the
-  CRDT gallery "retain" just means "don't close on move-on" — there is no checkpoint or index
-  to preserve.
+core and could serve the whole gallery. There is not even a per-wave asymmetry: the initiator
+is an ordinary participant (posts its own selfie, publishes its own core, no indexer/admission
+/retention role). A departing peer's selfie survives in everyone's view because they already
+replicated it; the gallery is ephemeral once a new wave supersedes it, so nobody keeps cores
+open across waves.
 
 ## Module map
 
@@ -173,7 +167,7 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
                      galleryConfig/readGallery remain as the Autobase A/B benchmark baseline only
     gallery-crdt.js  CrdtGallery class: the multicore CRDT gallery — per-participant cores,
                      addWriter (open + download block 0 of a peer's core), postSelfie (append
-                     my one op to my own core), retain (archivist), tick/merge into the view
+                     my one op to my own core), tick/merge into the view
     wallet.js        WDK wallet (Tron Nile, native TRX) + shared fee flow (burn memo,
                      payFee, confirmBurn, wireWallet): send, burn(+memo), verifyBurnTx,
                      transactions (on-chain history via TronGrid, both directions)

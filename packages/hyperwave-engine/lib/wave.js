@@ -20,7 +20,7 @@ const b4a = require('b4a');
 const fs = require('bare-fs');
 
 const { angleOf, angleOfId, nextClockwise } = require('./ring');
-const { sweepSchedule, mySlot, archivists } = require('./sweep');
+const { sweepSchedule, mySlot } = require('./sweep');
 const { topUpPins } = require('./pins');
 const { Flood } = require('./flood');
 const { CrdtGallery } = require('./gallery-crdt');
@@ -58,11 +58,6 @@ const END_GRACE_MS = 2000; // after the last slot, before every peer returns to 
 // pinning entirely — the A/B knob for testing whether the incidental topic mesh
 // alone carries the flood at scale).
 const PIN_BUDGET = 7;
-// How many roster peers (spread around the ring, deterministic from the frozen roster)
-// retain each wave's gallery so it survives churn — not just the initiator. With the CRDT
-// gallery every participant already holds every core, so retention just means "keep the
-// cores open after moving on" (no indexer to preserve — gallery-crdt.js).
-const ARCHIVIST_COUNT = 3;
 // Wave lifecycle control messages that must reach *every* peer (not just direct
 // neighbours). At scale Hyperswarm is only a partial random mesh, so these are
 // flooded — relayed hop-to-hop with per-message dedup (protocol.md §3.1).
@@ -607,7 +602,7 @@ function createWave({
   }
 
   // --- gallery (multicore CRDT) ---------------------------------------------
-  // The open/retain/merge machinery lives in gallery-crdt.js; wave.js drives it by
+  // The open/merge machinery lives in gallery-crdt.js; wave.js drives it by
   // ingesting each participant's gallery-core credential (from wave-join / wave-start /
   // wave-sync) — no shared gallery key, no admission.
 
@@ -884,13 +879,6 @@ function createWave({
       wave.roster.add(id);
     }
     const schedule = sweepSchedule({ rosterIds: ids, t0, lapMs: cappedLapMs });
-    // K deterministic archivists (spread around the ring) retain the gallery so it
-    // survives the initiator leaving. Every peer derives the same set from the frozen
-    // roster, so no extra message is needed. (The initiator always retains too, from
-    // startWave — the effective archivist set is {initiator} ∪ these K.)
-    if (archivists(schedule, ARCHIVIST_COUNT).has(me.id)) {
-      session.retain(wave.id);
-    }
     clearTimeout(lobbyTimer);
     armSweepTimers(schedule);
     // the deterministic end: EVERY peer observes t0 + lap + grace locally — there is
@@ -1050,7 +1038,6 @@ function createWave({
       return null;
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
-    session.retain(waveId); // I own this wave: I keep its gallery open (archivist)
     enterLobby({ waveId, by: me.id, mine: true }); // initiator auto-joins (marks its own lobby)
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the kick-off fee and
@@ -1321,7 +1308,7 @@ function createWave({
     // re-pin ring edges from current discovery even if no 'update' fired
     maintainNeighbours();
     emit(); // also re-evaluate staleness pruning
-    // Pull replicated gallery writes for every gallery held (current + retained) and repaint.
+    // Pull replicated gallery writes for every gallery held and repaint.
     session.tick();
     tRing = setTimeout(ringTick, RINGUPDATE_MS);
   }

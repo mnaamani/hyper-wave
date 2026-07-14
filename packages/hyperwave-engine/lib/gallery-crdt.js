@@ -66,8 +66,7 @@ class CrdtGallery {
   #joinProof;
   #log;
   #waveId = null; // the CURRENT wave
-  #waves = new Map(); // waveId -> WaveCores (current + retained)
-  #retained = new Set(); // waveIds I keep open after moving on (archivist)
+  #waves = new Map(); // waveId -> WaveCores
 
   /**
    * @param {CrdtGalleryCtx} ctx - Store + host callbacks + live accessors.
@@ -112,30 +111,17 @@ class CrdtGallery {
   }
 
   /**
-   * Mark a wave as mine to keep (archivist): its cores stay open when I move on, so the
-   * gallery survives for latecomers. Not exclusive to the initiator — K roster
-   * archivists retain too (wave.js).
-   * @param {string} waveId - The wave to retain.
-   * @returns {void}
-   */
-  retain(waveId) {
-    this.#retained.add(waveId);
-  }
-
-  /**
-   * Open (create) MY writable core for `waveId` and make it current. Closes the previous
-   * wave's cores unless retained. Awaits my core's readiness so writerKey is available.
+   * Open (create) MY writable core for `waveId` and make it current, closing the previous
+   * wave's cores (the gallery is ephemeral — nothing to keep once a new wave supersedes
+   * it; a departing peer's selfie is already replicated into everyone's view). Awaits my
+   * core's readiness so writerKey is available.
    * @param {string} waveId - The wave whose gallery to open.
    * @returns {Promise<string>} My writer core key (hex) for this wave.
    */
   open(waveId) {
     // Set the current wave + its record SYNCHRONOUSLY, so addWriter/emitView work
     // immediately; only my core's readiness (for the writer key) is awaited.
-    if (
-      this.#waveId !== waveId &&
-      this.#waveId !== null &&
-      !this.#retained.has(this.#waveId)
-    ) {
+    if (this.#waveId !== waveId && this.#waveId !== null) {
       this.#closeWave(this.#waveId).catch(() => {}); // background-close the previous wave
     }
     this.#waveId = waveId;
@@ -242,7 +228,7 @@ class CrdtGallery {
   }
 
   /**
-   * Pull replicated entries for every held wave (current + retained), then repaint the
+   * Pull replicated entries for every held wave, then repaint the
    * current one. Called periodically by wave.js so a gallery keeps converging even when
    * no `append` event fires locally.
    * @returns {void}
@@ -280,7 +266,7 @@ class CrdtGallery {
   }
 
   /**
-   * Close every core of a wave and forget it (unless it's being retained).
+   * Close every core of a wave and forget it.
    * @param {(string|null)} waveId - The wave to close.
    * @returns {Promise<void>}
    */

@@ -5,7 +5,7 @@
 const test = require('brittle');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const { sweepSchedule, mySlot, archivists } = require('./sweep');
+const { sweepSchedule, mySlot } = require('./sweep');
 const { angleOfId } = require('./ring');
 
 const T0 = 1_800_000_000_000;
@@ -66,34 +66,4 @@ test('mySlot finds my slot; spectators (not in the roster) get null', (t) => {
   t.ok(mine, 'roster member has a slot');
   t.is(mine.id, rosterIds[2]);
   t.is(mySlot(schedule, 'ff'.repeat(32)), null, 'spectator has none');
-});
-
-test('archivists: K spread around the ring, deterministic, same for every peer', (t) => {
-  const rosterIds = randomIds(30);
-  const scheduleA = sweepSchedule({ rosterIds, t0: T0, lapMs: LAP_MS });
-  // a different peer with the roster in wire-shuffled order derives the same schedule…
-  const scheduleB = sweepSchedule({
-    rosterIds: [...rosterIds].reverse(),
-    t0: T0,
-    lapMs: LAP_MS
-  });
-  const setA = archivists(scheduleA, 3);
-  const setB = archivists(scheduleB, 3);
-  t.is(setA.size, 3, 'picks exactly K');
-  t.alike([...setA].sort(), [...setB].sort(), 'every peer agrees on the set');
-  // spread: chosen ranks are ~evenly spaced (0, 10, 20 for N=30, K=3)
-  const ranks = scheduleA
-    .map((slot, rank) => (setA.has(slot.id) ? rank : -1))
-    .filter((rank) => rank >= 0);
-  t.alike(ranks, [0, 10, 20], 'ranks are evenly spaced around the ring');
-});
-
-test('archivists: a roster smaller than K makes everyone an archivist', (t) => {
-  const rosterIds = randomIds(2);
-  const schedule = sweepSchedule({ rosterIds, t0: T0, lapMs: LAP_MS });
-  const set = archivists(schedule, 3);
-  t.is(set.size, 2, 'clamped to the roster size');
-  for (const id of rosterIds) {
-    t.ok(set.has(id), 'every member archives when the roster is tiny');
-  }
 });

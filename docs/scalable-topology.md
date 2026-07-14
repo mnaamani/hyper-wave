@@ -188,16 +188,13 @@ the underlying transitive property directly: over A—B—C wired A↔B and B↔
 writes converge to A **purely through B**. So Hypercore/Corestore forwards cores along
 connected (ring/finger) paths when intermediates keep them open — no full mesh required.
 
-**Persistence — retention by the initiator plus K archivists.** There are **no peer roles**
-(no validator/seed archivist hub). Every peer is equal and wipes its store per run, so a
-gallery only survives as long as _some_ peer keeps its cores open. Because the CRDT already
-has every participant holding every core, retention is just **not closing them on move-on**:
-the wave's **initiator** and `ARCHIVIST_COUNT` (3) roster peers chosen deterministically from
-the frozen roster (spread by ring angle, `sweep.js archivists`) keep their held cores open, so
-the gallery survives the initiator leaving, not just other participants — any archivist can
-serve the whole thing (there is no checkpoint or index to preserve). **Accepted
-simplification:** if _all_ archivists go offline the wave's gallery isn't archived anywhere
-else, and nothing persists across runs. (Convergence _lag_ at large depth remains unmeasured.)
+**Persistence — none needed (the gallery is a CRDT).** There are **no peer roles** (no
+validator/seed archivist hub). Every peer is equal and wipes its store per run, so a gallery
+only lives while its wave's cores are open. With the multicore CRDT gallery every participant
+already replicates every participant's core during the wave, so a departing peer's selfie
+survives in everyone's view and any peer could serve the whole gallery — there is no indexer,
+no archivist, and nothing to retain. Once a new wave supersedes the old one, its cores are
+closed (galleries are ephemeral — no "past waves" feature).
 
 ## 5. Migration behind the seam
 
@@ -277,7 +274,7 @@ gallery cores replicating.
   within a ≤ 20-round bound; a disconnected component is correctly _not_ reached).
 - **Line-topology gallery replication + initiator persistence** (`gallery.replication.test.js`):
   real Corestores/Autobases with no swarm. (1) A↔B, B↔C (no A↔C) — the gallery replicates
-  _transitively_ (C converges to A's writes through B). (2) the wave initiator retains its own
+  _transitively_ (C converges to A's writes through B). (2) with the CRDT gallery every participant holds every
   gallery, other participants leave, a latecomer connected _only_ to the initiator still gets
   the full gallery. The §4.7 reach + persistence tests (on the Autobase baseline).
 - **Gallery CRDT** (`gallery-crdt.test.js`) + **the A/B replication benchmark**
