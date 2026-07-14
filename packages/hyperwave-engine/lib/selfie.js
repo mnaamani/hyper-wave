@@ -5,7 +5,6 @@
 // in one place:
 //   - post exactly once per wave (#posted guard);
 //   - only for the CURRENT wave (a stale slot from a superseded wave never posts);
-//   - only when opted in (ctx.canSelfie — roster members, not spectators);
 //   - the burn proof survives reset() — the wave ends quickly but a joiner's
 //     fee burn can confirm later, and the proof rides the (already-posted or late)
 //     entry as its tip-address binding (it's bound to its waveId).
@@ -21,7 +20,6 @@
 /**
  * The callbacks the pipeline is wired with (all supplied by wave.js).
  * @typedef {Object} SelfiePipelineCtx
- * @property {function(): boolean} canSelfie - Am I opted into the current wave (roster member)?
  * @property {function(): (string|null)} currentWaveId - The engaged wave's id, or null when idle.
  * @property {function(Object): void} post - Post the combined entry (slot + image + caption)
  *   to the gallery (the writable wait + append happen inside; fire-and-forget here).
@@ -35,15 +33,13 @@ class SelfiePipeline {
   #slot = null; // my sweep slot once it fires, awaiting the selfie
   #posted = false; // guard: post my selfie exactly once per wave
   #burnProof = null; // my signed fee-burn attestation — the entry's tip-address binding
-  #canSelfie;
   #currentWaveId;
   #post;
 
   /**
    * @param {SelfiePipelineCtx} ctx - The wave.js callbacks (see typedef).
    */
-  constructor({ canSelfie, currentWaveId, post }) {
-    this.#canSelfie = canSelfie;
+  constructor({ currentWaveId, post }) {
     this.#currentWaveId = currentWaveId;
     this.#post = post;
   }
@@ -61,15 +57,12 @@ class SelfiePipeline {
   }
 
   /**
-   * Record my sweep slot when it fires. Ignored unless I'm an opted-in roster member
-   * (spectators never selfie).
+   * Record my sweep slot when it fires (wave.js only arms the slot timer for a joined
+   * roster member — spectators never reach here).
    * @param {SelfieSlot} slot - My sweep slot.
    * @returns {void}
    */
   recordSlot(slot) {
-    if (!this.#canSelfie()) {
-      return;
-    }
     this.#slot = slot;
     this.#tryPost();
   }

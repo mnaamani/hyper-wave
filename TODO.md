@@ -1,7 +1,7 @@
 # HyperWave — task list
 
 Refinement backlog, roughly prioritized. Design context in `docs/idea.md`;
-docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEMO.md`.
+docs in `docs/` (architecture, protocol); demo script in `DEMO.md`.
 
 ## Done
 
@@ -32,7 +32,7 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       inject a hex seed (mobile secure storage) — used verbatim, never written. A missing/corrupt
       file regenerates rather than bricking startup. Suite: `swarm.seed.test.js`.
 
-### Scalable topology (Chord over Hyperswarm) — `docs/scalable-topology.md`
+### Scalable topology (Chord over Hyperswarm — since simplified away entirely)
 
 - [x] Phase 1: ring membership seeded from DHT discovery (`swarm.peers`), liveness-gated
       (no phantom seats from stale announces)
@@ -88,14 +88,22 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
       `PIN_BUDGET = 7` sticky random pins (`pins.js` `topUpPins` — keep live pins, top up
       on churn, never reshuffle), `chord.js` + its suite deleted (~300 lines). Downside
       (accepted): connectivity is probabilistic, not proven; escape hatch = raise
-      `PIN_BUDGET` or resurrect the ring rule from git history. The 128-peer public-DHT
-      run remains the real-world validation (consider A/B with pinning disabled to test
-      whether the incidental mesh alone suffices — the no-pinning endgame).
+      `PIN_BUDGET` or resurrect the ring rule from git history. **Superseded (2026-07-14):
+      the no-pinning endgame was taken — pinning was removed entirely (see below).**
 - [x] **Topology diet for the sweep** (sweep Phase 4): deleted `chord-routing.js` (the
       distributed `find-succ` RPC/placement/repair — successor _precision_ is unneeded;
       only flood connectivity matters); `pinTargets` now pins successor-list (k=3) +
       predecessor + the **capped far fingers** (`FAR_FINGERS`=3 longest edges) → constant
       pin budget ≈7; flood dedup evicts **oldest-first** instead of wholesale-clearing.
+- [x] **Peer pinning removed entirely (2026-07-14).** The final simplification step:
+      `pins.js` + `topUpPins` + `maintainNeighbours` + the pin/churn-cooldown bookkeeping
+      in `PeerTable` + the `pinBudget` option / `HYPERWAVE_PIN_BUDGET` knob are all
+      deleted. The topology is now just Hyperswarm's incidental topic mesh (degree ≈
+      `maxPeers`); the flood rides it unaided. Justified by the pins-off 128-peer run
+      (full lobby gathered over the local DHT with pinning disabled) and the 8-peer e2e
+      (convergence + mid-race kills) passing without pins. Accepted trade-off: flood
+      connectivity is entirely the transport's mesh quality — if a real deployment shows
+      ragged flood reach, resurrect `pins.js` + its wiring from git history.
 
 ### Payment layer (WDK, Tron Nile testnet, native TRX) — burned fees + tips, no rewards
 
@@ -170,47 +178,43 @@ docs in `docs/` (architecture, protocol, scalable-topology); demo script in `DEM
 ### Propagation at extreme scale (Phase 5 — DECIDED: the sweep is built)
 
 The deterministic angular sweep replaced the serial token entirely (see the Done
-section above and `docs/scalable-topology.md` §3B). Remaining scale work:
+section above and `docs/protocol.md` §6). Remaining scale work:
 
-- [ ] **Roster field scales O(N) — `wave-start`/`wave-sync` get huge for large waves.** The
-      `roster` is a JSON array of full 64-char hex peer ids, carried in the **flooded** `wave-start`
-      (and unicast `wave-sync`). At N participants that's ~N×70 bytes of JSON: ~70KB at N=1k,
-      ~700KB at N=10k — in a **single** `compact-encoding` `string` frame that every peer must
-      buffer, parse, and re-flood. Large frames strain the parser, balloon flood bandwidth (O(edges
-      × frame size)), and risk hitting Protomux/stream size limits. What each peer actually needs
-      from the roster is narrow: **"am I in it?"** (the selfie/spectate gate, `canSelfieNow`) and a
-      **count** for the UI — not the full id list. Options, roughly in effort order: (1) **raw-byte
-      ids** instead of hex (halve it — folds into the compact-encoding item); (2) **cap roster
-      size** per wave (bounded product decision) and/or **chunk** the roster across multiple frames;
-      (3) **compressed membership** — ship a **Bloom filter** (or compact bitset) of roster ids
-      instead of the list: each peer tests its own id for membership (a false positive just lets a
-      non-joiner selfie, already bounded downstream by the receipt + burn gates), size is ~1.2
-      bytes/entry at 1% FPR regardless of id length, and the UI count ships as a separate integer;
-      (4) **drop the explicit roster entirely** and make participation **emergent** — anyone
-      presenting a valid receipt + burn attestation may selfie, so the roster never travels
-      (largest change; loses the pre-race "who's in" UI). Likely direction: raw-byte ids + a size
-      cap now, Bloom-filter membership if waves grow past the cap. Update `docs/protocol.md` §5
-      (`wave-start`/`wave-sync`) + §7.2 when chosen.
+- [x] **Duplicate `roster` field dropped from the wire (2026-07-14).** `wave-start`/`wave-sync`
+      no longer carry a `roster` array — it was always the same set as `{by} ∪ writers[].peerId`,
+      so every receiver now derives the canonical roster from the `writers` credentials
+      (`canonicalRoster` in `wave.js`). The local `wave.roster` set is gone too: the `writers`
+      map IS the roster (a participant without a credential can't fill a sweep slot — counting
+      anything else was the source of two 128-peer scale bugs).
+- [ ] **`writers` still scales O(N) — `wave-start`/`wave-sync` get huge for very large waves.**
+      Each entry is ~200 bytes of JSON (hex peerId + writerKey + joinSig), carried in a
+      **single** `compact-encoding` `string` frame every peer must buffer, parse, and re-flood:
+      ~200KB at N=1k. Unlike the deleted `roster`, this payload is irreducible in kind — every
+      peer genuinely needs every credential to open every gallery core. Options if waves grow:
+      (1) **raw-byte fields** instead of hex (halves it — folds into the compact-encoding
+      backlog item); (2) **cap roster size** per wave (bounded product decision) and/or chunk
+      `writers` across frames; (3) rely on `wave-join` floods for credential spread and let
+      `wave-start` carry only ids the receiver back-fills (loses self-containedness — a start
+      adopter would need a follow-up sync). Measure before doing any of it.
 
 ### Adversarial hardening still open (`docs/protocol.md` §11.3)
 
-- [ ] **Automated coverage for the paid gate + late gallery admission (currently a test gap).**
-      The whole burn/attestation/admission path — `enforcePaid`, `recordBurn`, the gallery
-      session's admission flow → `admitWriter` (`burnAuthorizes`, `gallery-session.js`) — has
-      **no automated test with a wallet**: the unit
-      suites don't wire a wallet and the `e2e/` harness runs wallet-less (`enforcePaid` off,
-      receipt-only admission), so this path is exercised only by manual two-peer runs. That's how
-      the zero-dwell regression slipped in: the token races at network speed, so a wave ends before a joiner's
-      fee burn confirms, and two bugs dropped the admission ticket — `recordBurn` refused once
-      `wave` was null, and the selfie reset nulled the burn proof on `goIdle` (fixed by threading
-      `waveId` into `recordBurn` so a late burn still records into the persisted gallery, and by
-      keeping the waveId-bound proof alive across `goIdle`, clearing it only in `enterLobby`).
-      Add a **wallet-mocked engine test** (stub `payments` with a controllable `burn`/`verifyBurnTx`
-      whose confirmation can be delayed past wave completion) asserting: (a) a joiner whose burn
-      confirms AFTER the wave ends still gets admitted and its selfie lands (late admission); (b) an
-      unpaid/unconfirmed joiner is refused with `gallery-error` reason `fee-unpaid`; (c) a stale
-      burn for a superseded wave is dropped (the `recordBurn` guard). Optionally extend `e2e/` with
-      a mock-payments mode so the paid gate gets end-to-end coverage too.
+- [ ] **Automated coverage for the paid gate (currently a test gap).** The
+      burn/attestation path — `enforcePaid`, `recordBurn`, `validKickoff`/`verifyKickoff`,
+      the per-peer `burnAuthorizes` check on `wave-join` ingest — has **no automated test
+      with a wallet**: the unit suites don't wire a wallet and the `e2e/` harness runs
+      wallet-less (`enforcePaid` off, join-attestation-only ingest), so this path is
+      exercised only by the manual/nightly on-chain e2e tier and two-peer runs. A fast wave
+      can end before a joiner's fee burn confirms, and the burn proof must survive that
+      (`recordBurn` accepts a late burn for its own waveId; the proof survives `goIdle` and
+      is cleared only in `enterLobby`). Add a **wallet-mocked engine test** (stub `payments`
+      with a controllable `burn`/`verifyBurnTx` whose confirmation can be delayed past wave
+      completion) asserting: (a) a joiner whose burn confirms mid-lobby re-floods its join
+      and gets seated; (b) an enforcing peer ignores a burn-less join and an unpaid
+      announce; (c) a stale burn for a superseded wave is dropped (the `recordBurn` guard);
+      (d) a burn confirming after the wave ends still binds the tip address on the posted
+      entry. Optionally extend `e2e/` with a mock-payments mode so the paid gate gets
+      end-to-end coverage too.
 - [ ] **Reject a wave whose kick-off burn is stale (replay-attack prevention).** `shouldAdopt()`
       only refuses a `waveId` already in `endedWaves`, and `validKickoff()` checks the burn
       attestation's `reason`/`waveId`/`peerId`/signature but **not its age**. So an attacker can
@@ -225,10 +229,11 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       self-reported `burnTs`. Allow generous clock-skew (peers aren't synchronized). Ties into the
       envelope `ts` item (§5.0) — a per-message timestamp would let the same freshness check apply
       to every flooded message, not just the kick-off.
-- [ ] Per-connection rate limiting (token buckets per message kind) + bounds on auxiliary maps
-      (`seen`/`endedWaves`/`routed`/`lookupRoute`/the churn-cooldown map). More important now that
-      admission is optimistic (gallery seats are cheap) — the token bucket caps how many
-      add-writer/selfie one peer can push. (Per-entry byte cap already done.)
+- [ ] Per-connection rate limiting (token buckets per message kind) + bounds on the
+      auxiliary sets (the flood `seen` set is capped; `endedWaves` grows unbounded over a
+      long session). A gallery seat costs only a signature check, so the rate limit caps
+      how many `wave-join` floods one connection can push. (Per-entry byte cap already
+      done.)
 - [ ] Ban peers by IP for invalid protocol messages: track per-connection violations (bad
       JSON, failed signature/identity-binding checks, forged gallery keys, spoofed sender ids)
       and, past a threshold, drop + block the peer at the transport layer (Hyperswarm `ban` /
@@ -239,27 +244,9 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       (N reads of 1 immutable tx). Not a concentration bottleneck (distributed, 1 read/joiner)
       and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
       the anti-_wave_-spam gate; making it optimistic would re-open free wave-spam).
-- [ ] **Loop guard: a peer must never forward a token for the same `waveId` twice (wave can't
-      circle past the originator).** Today the safety against a runaway loop is (a) the originator's
-      completion check in `processToken` (`token.originator === me.id && hopCount > 0` → `wave-end`,
-      stop) and (b) the `seen` set keyed by **`waveId|hopCount`** (a re-received _exact hop_ is
-      dropped). That relies on the originator being alive and correctly recognizing its own token;
-      if the originator dropped/misbehaved, a token could in principle keep advancing hopCount and
-      re-entering peers (bounded only by `MAX_HOPS`). Add a stricter defensive guard: a peer
-      **processes/forwards an incoming token for a given `waveId` at most once**, independent of
-      `hopCount`. Simplest: track a per-wave `forwardedWave` set (or key `seen` by `waveId` for the
-      forward path) and drop a second token for a `waveId` I've already relayed. **Caveat to get
-      right:** the originator legitimately touches its own wave's token twice — hop 0 at kickoff
-      (it originates, doesn't "receive") and again at completion (`hopCount === hops`, where it
-      must still fire `wave-end`) — so the guard must exempt the completion path (or only apply to
-      the _non-originator forward_ path), else it would suppress the very `wave-end` that ends the
-      wave. Net effect: the wave deterministically dies after one lap even if the originator is
-      gone, instead of leaning on `MAX_HOPS` as the only backstop. Clear the set per wave (as
-      `seen` already is in `goIdle`). **Documented** in `docs/protocol.md` §6 (marked planned);
-      implementation still to do.
 - [ ] **Uniform gossip message envelope: `origin` + `sig` + `ts` on every message.** Today the
-      originator field is named inconsistently across kinds — `peerId` (`add-writer`, `wave-join`),
-      `by` (`wave-end`), `holder` (`wave-pos`), `id` (`pointers`), `staller` (stall) — and only
+      originator field is named inconsistently across kinds — `peerId` (`wave-join`),
+      `by` (`wave-announce`/`wave-start`/`wave-sync`), `id` (`heartbeat`) — and only
       some messages carry a signature. Standardize a common envelope on **every** gossip message:
       (1) **`origin`** — one convention everywhere for who authored the message (replace
       `peerId`/`by`/`holder`/`id`); (2) **`sig`** — an Ed25519 signature by `origin`'s ring key
@@ -272,9 +259,9 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       amplification — a message simply dies once it's older than the TTL regardless of `mid`
       dedup state. Note the trade-offs: `ts` needs loose clock-skew tolerance (peers aren't
       synchronized — allow a generous window), and signing every message adds a verify on the
-      hot path (`wave-pos` is emitted every hop) — pair with the compact-encoding item (raw-byte
-      sig) and per-connection rate limiting above. **Schema documented** in `docs/protocol.md`
-      §5.0 (marked planned); implementation still to do.
+      hot path (the heartbeat fires every `HEARTBEAT_MS` per connection) — pair with the
+      compact-encoding item (raw-byte sig) and per-connection rate limiting above. **Schema
+      documented** in `docs/protocol.md` §5.0 (marked planned); implementation still to do.
 - [ ] **Harden `pay.send` to report failed transactions** (`wallet.js`). The returned `hash` is the
       txID computed client-side from the signed bytes (`sha256(raw_data)`), so `send` resolves
       `{ hash }` even when the broadcast is rejected or the tx later fails on-chain — e.g. sending
@@ -327,20 +314,20 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       provably-unspendable script (`OP_RETURN` itself is unspendable, or a known burn address);
       `verifyBurnTx` becomes a chain-specific check of the tx's outputs + `OP_RETURN` data.
       Keep the ring-key attestation chain-agnostic; make the verifier pluggable per chain.
-- [ ] **More compact wire encoding for gossip messages.** Today every gossip message _and_ the
-      token are `JSON.stringify`'d over a single `compact-encoding` `string` Protomux frame (the
+- [ ] **More compact wire encoding for gossip messages.** Today every gossip message is
+      `JSON.stringify`'d over a single `compact-encoding` `string` Protomux frame (the
       "one wire encoding (JSON)" design rule — chosen for debuggability + zero schema ceremony at
       MVP speed). JSON is verbose: hex-string ids/sigs/hashes are 2× their bytes, field names
-      repeat on every message, and the heartbeat `pointers` (succ-list + pred, every
-      `HEARTBEAT_MS`) is the steady-state bandwidth floor — so a tighter codec mostly pays off
-      _there_ and on high-frequency `wave-pos`. Options: **protobuf** (mature, cross-language, but
+      repeat on every message, and the `heartbeat` (every `HEARTBEAT_MS` per connection) is the
+      steady-state bandwidth floor — so a tighter codec mostly pays off there and on the
+      O(N) `writers` payload of `wave-start`/`wave-sync`. Options: **protobuf** (mature, cross-language, but
       needs `.proto` + a codegen step), **SCALE** (Polkadot's — compact, no field tags, but
       schema-position-coupled and JS tooling is thinner), or **staying in the Holepunch stack with
       `compact-encoding`** (already a dep; hand-write per-message struct encoders — binary ids/sigs
       as raw 32/64B buffers instead of hex, enum `kind` byte). Likely the best fit: it's already
       the frame layer, avoids a new dependency/codegen, and the win is mostly from raw-byte
       ids/sigs. Keep JSON available behind a version byte for debug/interop. Measure first — the
-      lifecycle floods are infrequent; the real target is `pointers` + `wave-pos` at scale.
+      lifecycle floods are infrequent; the real target is the heartbeat + `writers` at scale.
 - [ ] **Bloom filter to minimize selfie re-use.** A peer can re-post the same image across
       waves (or lift someone else's). Maintain a space-efficient bloom filter of seen
       selfie-image hashes (per-peer, and/or gossiped) and reject a `wave-selfie`
@@ -352,17 +339,19 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       an inline image any admitted participant can post, so a peer could post something NSFW or
       abusive. Add a **report/downvote** signal that propagates so each peer can **choose not to
       display** a flagged entry (client-side moderation, not censorship — the entry stays in the
-      log; hiding it is a local decision). Design: a signed `downvote` op appended to the same
-      per-wave gallery Autobase, referencing the target entry (`waveId` + `peerId`, or its image
-      hash), **receipt-gated + one-per-reporter** exactly like a selfie (so `apply()` tallies at
-      most one downvote per reporter — a sybil can't brigade, and the whole tally is deterministic + replicated so every peer converges on the same counts). The renderer hides an entry whose
-      downvote count crosses a threshold (with a per-user "show anyway" toggle, and a default that
-      errs toward hiding). Prefer an Autobase op over gossip so counts persist with the gallery and
-      converge; keep the report bytes tiny (no image). Pairs with the perceptual-hash / bloom
+      log; hiding it is a local decision). Design: a signed `downvote` op appended to the
+      reporter's own per-wave gallery core (block 1+ — would need relaxing the block-0-only
+      download for tiny non-image ops), referencing the target entry (`waveId` + `peerId`, or its
+      image hash), **join-attested + one-per-reporter** exactly like a selfie (so `mergeGallery`
+      tallies at most one downvote per reporter — a sybil can't brigade, and the whole tally is
+      deterministic + replicated so every peer converges on the same counts). The renderer hides
+      an entry whose downvote count crosses a threshold (with a per-user "show anyway" toggle, and
+      a default that errs toward hiding). Prefer a gallery-core op over gossip so counts persist
+      with the gallery and converge; keep the report bytes tiny (no image). Pairs with the perceptual-hash / bloom
       item (auto-detection) — this is the human-report half. Note the moderation is inherently
       subjective + decentralized: it's advisory per-peer, not a global takedown.
 
-### Remaining hardening (scalable-topology §8)
+### Remaining hardening (scale validation)
 
 - [x] **Gallery-as-CRDT: DONE (2026-07-14, commits cd7f6e0 + 7d9b271).** Dropped the
       single Autobase indexer for a multicore CRDT gallery — removes the O(N) funnel + the
@@ -394,7 +383,8 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       deliberately escaped, for only partial relief (Autobase's multi-indexer needs a
       strict MAJORITY of indexers reachable — `consensus.js: (n>>>1)+1` — to advance the
       indexed view; single-indexer is majority-of-1, trivially met).
-      **De-risked (2026-07-14) — `gallery.replication.bench.test.js`** compares both
+      **De-risked (2026-07-14) — the A/B replication bench** (since deleted along with the
+      whole Autobase baseline + the `autobase` dep, its job done — git history has it) compared both
       strategies over the SAME synthetic partial mesh (real Corestore/Autobase/Hypercore,
       degree-capped graph = maxPeers). Measured N=64, degree=16: both reach 64/64, but
       the multicore CRDT converges in ~13.3s vs the single-indexer Autobase's ~18.4s
@@ -409,13 +399,6 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       (no WAN latency) — the real-swarm absolute-latency complement is the
       HYPERWAVE_MAX_PEERS-limited e2e (knob now plumbed; run E2E_MAX_PEERS=16 E2E_PEERS=64).
 
-- [ ] **Bounded neighbour count needs unpin hysteresis.** The capped far-finger set is
-      built (Done above), but the "never unpin a live channel" rule in
-      `maintainNeighbours` still folds all of `senderIds()` back into the pin set, so
-      pins ratchet toward every live connection. A truly bounded count needs a grace
-      period / hysteresis on unpinning instead of never-unpin. Related: Hyperswarm
-      explicit pins bypass `maxPeers` while shrinking the topic-dial budget (÷4 at ≥4
-      explicit peers), so a low `maxPeers` makes the pinned graph ≈ the whole topology.
 - [ ] **128-peer scale validation — DONE locally (2026-07-13); public-DHT variant needs
       multi-machine.** The local-testnet 128-peer run now PASSES end-to-end (130/130
       asserts: 102-peer lobby, batch admission in ~0.6-3s, sweep completed on schedule,
@@ -424,10 +407,10 @@ section above and `docs/scalable-topology.md` §3B). Remaining scale work:
       fixed seven real scale bugs (see the Done entry). Still open here:
       (a) the PUBLIC-DHT variant is impossible from one home IP (128 same-IP peers
       managed 6 connections in 9 min — NAT hairpin/conntrack/per-IP DHT limits; needs
-      peers spread across real machines, e.g. a cloud dispatch); (b) the pins-off A/B
-      endgame is still open — pins-off DID gather a full 128-peer lobby over the local
-      DHT (flood reach without pins confirmed at 128), but a like-for-like convergence
-      A/B on clean runs hasn't happened; (c) churn-during-sweep at scale untested.
+      peers spread across real machines, e.g. a cloud dispatch); (b) a clean 128-peer
+      convergence run on the now-pinless build (pins-off DID gather a full 128-peer
+      lobby over the local DHT before removal, but a full-convergence run on the final
+      build hasn't happened); (c) churn-during-sweep at scale untested.
 - [ ] Measure gallery replication lag at depth
 - [ ] **Late/reactive admission fallback (deliberately dropped).** A peer whose join
       misses the lobby window is a spectator — the reactive `add-writer` path was

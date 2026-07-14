@@ -1,8 +1,8 @@
 // Lobby selfie capture (shown in the centre of the ring while the wave is forming).
 // Opted-in peers frame their selfie during the lobby countdown; the frame is captured
 // — automatically at kickoff, or manually earlier — and STAGED to the worker, which
-// posts it to the gallery when the token reaches this peer. This decouples the human
-// moment (leisurely, synchronized) from the fast token race.
+// posts it to the gallery when this peer's sweep slot fires. This decouples the human
+// moment (leisurely, synchronized) from the fast sweep.
 import { stageSelfie } from './ipc.js';
 
 const proofEl = document.getElementById('proof');

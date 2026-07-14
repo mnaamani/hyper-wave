@@ -1,6 +1,6 @@
 // SelfiePipeline: pairing the lobby-captured selfie with my sweep slot, posting exactly
 // once per wave, and the burn-ticket lifetime (survives reset, dropped on a new wave —
-// the "fast wave ends mid-post" gotcha). Pure — no swarm, no Autobase. Runs under
+// the "fast wave ends mid-post" gotcha). Pure — no swarm. Runs under
 // Bare:  bare lib/selfie.test.js   (or `npm test`)
 const test = require('brittle');
 const { SelfiePipeline } = require('./selfie');
@@ -9,11 +9,10 @@ const SLOT = { waveId: 'w1', hopCount: 2 };
 
 // A pipeline wired to a controllable fake wave: flip `state` fields to simulate the
 // engine; `posts` collects every entry the pipeline pushed to the gallery.
-function makePipeline({ canSelfie = true, waveId = 'w1' } = {}) {
-  const state = { canSelfie, waveId };
+function makePipeline({ waveId = 'w1' } = {}) {
+  const state = { waveId };
   const posts = [];
   const pipeline = new SelfiePipeline({
-    canSelfie: () => state.canSelfie,
     currentWaveId: () => state.waveId,
     post: (entry) => posts.push(entry)
   });
@@ -59,16 +58,6 @@ test('a slot for a superseded wave never posts', (t) => {
     0,
     'never posts into another wave'
   );
-});
-
-test('slots are ignored unless opted in (relays never selfie)', (t) => {
-  const { pipeline, posts, state } = makePipeline({ canSelfie: false });
-  pipeline.stage({ image: 'data:jpeg' });
-  pipeline.recordSlot(SLOT);
-  t.is(posts.length, 0, 'a non-roster relay holds the ball but never posts');
-  state.canSelfie = true;
-  pipeline.recordSlot(SLOT);
-  t.is(posts.length, 1, 'an opted-in peer posts as usual');
 });
 
 test('reset clears staging/slot/posted so the next wave starts fresh', (t) => {

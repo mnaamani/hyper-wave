@@ -1,36 +1,20 @@
-// Transitive gallery replication over a PARTIAL mesh (line topology), no swarm —
-// answers scalable-topology.md §4.7. Peers are wired A<->B and B<->C but NOT A<->C, so
-// A and C are never directly connected. We assert the selfie-gallery Autobase replicates
-// *transitively*: C learns it's a writer and converges to A's writes purely by forwarding
-// through B, and A likewise receives C's write through B. This is the exact case the
-// full-mesh spike (spike/multiwriter) never exercised.
-// Runs under Bare:  bare workers/lib/gallery.replication.test.js   (or `npm test`)
+// Transitive gallery replication over a PARTIAL mesh (line topology), no swarm,
+// for the multicore CRDT gallery (protocol.md §8). Peers are wired
+// A<->B and B<->C but NOT A<->C, so A and C are never directly connected. We assert the
+// per-participant cores replicate *transitively*: C converges to A's selfie purely by
+// forwarding through B, and A likewise receives C's — Corestore serves any core it
+// replicates, so the middle peer relays blocks it merely holds. Also proves gallery
+// persistence: a peer that stays online serves the full gallery to a latecomer.
+// Runs under Bare:  bare lib/gallery.replication.test.js   (or `npm test`)
 const test = require('brittle');
 const fs = require('bare-fs');
 const Corestore = require('corestore');
-const Autobase = require('autobase');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const { galleryConfig, readGallery } = require('./gallery');
+const { CrdtGallery } = require('./gallery-crdt');
 const { signJoin } = require('./attest');
 
 const WAVE = 'w';
-
-// a wave-selfie op with a valid join attestation signed by keyPair over the writer core
-// it posts from (apply() drops invalid ones)
-function selfie({ keyPair, base, hopCount, caption }) {
-  const writerKey = b4a.toString(base.local.key, 'hex');
-  return {
-    type: 'wave-selfie',
-    waveId: WAVE,
-    peerId: b4a.toString(keyPair.publicKey, 'hex'),
-    hopCount,
-    writerKey,
-    joinSig: signJoin(keyPair, { waveId: WAVE, writerKey }),
-    caption,
-    timestamp: hopCount
-  };
-}
 
 // wire two stores together with a single replication stream pair (one direct edge)
 function link(store1, store2) {
@@ -50,12 +34,8 @@ function until(pred, timeoutMs = 20000) {
       try {
         ok = await pred();
       } catch {}
-      if (ok) {
-        resolve(true);
-        return;
-      }
-      if (Date.now() - started > timeoutMs) {
-        resolve(false);
+      if (ok || Date.now() - started > timeoutMs) {
+        resolve(ok);
         return;
       }
       setTimeout(tick, 120);
@@ -64,188 +44,140 @@ function until(pred, timeoutMs = 20000) {
   });
 }
 
-async function captions(base) {
-  await base.update();
-  const entries = await readGallery(base);
-  return entries.map((entry) => entry.caption).sort();
+// One CRDT gallery peer: its own store + keypair + session, tracking the latest
+// merged view (what wave.js's onGallery would push to the renderer).
+function makePeer(dir) {
+  const peer = {
+    dir,
+    store: new Corestore(dir),
+    keyPair: crypto.keyPair(),
+    joinSig: null,
+    view: []
+  };
+  peer.id = b4a.toString(peer.keyPair.publicKey, 'hex');
+  peer.session = new CrdtGallery({
+    store: peer.store,
+    me: { id: peer.id, country: null },
+    onGallery: (items) => {
+      peer.view = items;
+    },
+    walletAddress: () => null,
+    burnProof: () => null,
+    joinProof: () => peer.joinSig,
+    log: () => {}
+  });
+  return peer;
+}
+
+// open the peer's own core for WAVE and sign its join credential over the writer key
+// (what floodMyGalleryCore does in wave.js)
+async function openAndSign(peer) {
+  peer.writerKey = await peer.session.open(WAVE);
+  peer.joinSig = signJoin(peer.keyPair, {
+    waveId: WAVE,
+    writerKey: peer.writerKey
+  });
+}
+
+// every peer ingests every other peer's credential (what the flooded wave-joins do)
+function shareWriters(peers) {
+  for (const peer of peers) {
+    for (const other of peers) {
+      if (other !== peer) {
+        peer.session.addWriter(WAVE, other.id, other.writerKey);
+      }
+    }
+  }
+}
+
+function captions(peer) {
+  peer.session.tick();
+  return peer.view.map((entry) => entry.caption).sort();
 }
 
 test('gallery replicates transitively across a line A—B—C (no A<->C link)', async (t) => {
   const dirs = ['a', 'b', 'c'].map(
     (name) => `/tmp/hyperwave-repl-${name}-${Date.now()}`
   );
-  const [storeA, storeB, storeC] = dirs.map((dir) => new Corestore(dir));
-
-  // A creates the gallery; B and C open it from A's bootstrap key.
-  const baseA = new Autobase(
-    storeA.namespace('wave-gallery:' + WAVE),
-    null,
-    galleryConfig()
-  );
-  await baseA.ready();
-  const key = baseA.key;
-  const baseB = new Autobase(
-    storeB.namespace('wave-gallery:' + WAVE),
-    key,
-    galleryConfig()
-  );
-  const baseC = new Autobase(
-    storeC.namespace('wave-gallery:' + WAVE),
-    key,
-    galleryConfig()
-  );
-  await baseB.ready();
-  await baseC.ready();
+  const peers = dirs.map(makePeer);
+  const [peerA, peerB, peerC] = peers;
 
   // LINE topology: A<->B and B<->C only. B is the sole bridge between A and C.
-  const streams = [...link(storeA, storeB), ...link(storeB, storeC)];
+  const streams = [
+    ...link(peerA.store, peerB.store),
+    ...link(peerB.store, peerC.store)
+  ];
 
   t.teardown(async () => {
     for (const stream of streams) {
       stream.destroy();
     }
-    await baseA.close();
-    await baseB.close();
-    await baseC.close();
-    await storeA.close();
-    await storeB.close();
-    await storeC.close();
-    for (const dir of dirs) {
-      fs.rmSync(dir, { recursive: true, force: true });
+    for (const peer of peers) {
+      await peer.session.close();
+      await peer.store.close().catch(() => {});
+      fs.rmSync(peer.dir, { recursive: true, force: true });
     }
   });
 
-  const keyPairA = crypto.keyPair();
-  const keyPairB = crypto.keyPair();
-  const keyPairC = crypto.keyPair();
+  for (const peer of peers) {
+    await openAndSign(peer);
+  }
+  // credentials reach everyone via the flooded wave-joins (control plane, simulated
+  // directly — this test is about the *data* plane)
+  shareWriters(peers);
 
-  // A admits B and C as writers (in the app this is the add-writer gossip; applied
-  // directly here — this test is about the *data* plane, not the control plane).
-  await baseA.append({
-    type: 'add-writer',
-    key: b4a.toString(baseB.local.key, 'hex')
-  });
-  await baseA.append({
-    type: 'add-writer',
-    key: b4a.toString(baseC.local.key, 'hex')
-  });
+  // each peer posts one selfie to its OWN core (no admission, no writable-wait)
+  await peerA.session.postSelfie({ waveId: WAVE, hopCount: 0, caption: 'A' });
+  await peerB.session.postSelfie({ waveId: WAVE, hopCount: 1, caption: 'B' });
+  await peerC.session.postSelfie({ waveId: WAVE, hopCount: 2, caption: 'C' });
 
-  // C becoming writable already proves A's membership/system core reached it THROUGH B.
-  t.ok(
-    await until(async () => {
-      await baseB.update();
-      return baseB.writable;
-    }),
-    'B admitted as writer (A<->B direct)'
-  );
-  t.ok(
-    await until(async () => {
-      await baseC.update();
-      return baseC.writable;
-    }),
-    'C admitted as writer — system core forwarded A→B→C'
-  );
-
-  // each peer writes one selfie into its own input core
-  await baseA.append(
-    selfie({ keyPair: keyPairA, base: baseA, hopCount: 0, caption: 'A' })
-  );
-  await baseB.append(
-    selfie({ keyPair: keyPairB, base: baseB, hopCount: 1, caption: 'B' })
-  );
-  await baseC.append(
-    selfie({ keyPair: keyPairC, base: baseC, hopCount: 2, caption: 'C' })
-  );
-
-  // C must converge to all three — crucially A's, which reaches C only by forwarding
-  // through B (A and C share no direct connection).
-  t.ok(
-    await until(async () => (await captions(baseC)).length === 3),
-    'C converged to all 3'
-  );
+  // C must converge to all three — crucially A's, whose blocks reach C only by
+  // forwarding through B (A and C share no direct connection).
+  t.ok(await until(() => captions(peerC).length === 3), 'C converged to all 3');
   t.alike(
-    await captions(baseC),
+    captions(peerC),
     ['A', 'B', 'C'],
     'C has A (transitive via B), B (direct), C (own)'
   );
 
   // …and A receives C's selfie, which likewise only reaches A through B.
-  t.ok(
-    await until(async () => (await captions(baseA)).length === 3),
-    'A converged to all 3'
-  );
-  t.alike(await captions(baseA), ['A', 'B', 'C'], 'A has C (transitive via B)');
+  t.ok(await until(() => captions(peerA).length === 3), 'A converged to all 3');
+  t.alike(captions(peerA), ['A', 'B', 'C'], 'A has C (transitive via B)');
 });
 
-// No roles: a wave's INITIATOR is its own gallery archivist — it retains the gallery it created
-// so a peer that shows up later still gets it. The originator creates the gallery and posts; it
-// STAYS ONLINE (the retained source); a latecomer connects to it afterwards and converges to the
-// full gallery. (If the initiator itself goes offline, the gallery isn't archived by anyone
-// else — the accepted simplification of dropping the standalone seed role.)
-test('the initiator retains its gallery and serves a latecomer', async (t) => {
+// Persistence: any peer that stays online can serve the whole gallery — with the CRDT
+// every participant holds every participant's core, so there is no designated archivist.
+// A peer posts and STAYS ONLINE; a latecomer connects to it afterwards (learning the
+// credentials from a wave-sync, simulated directly) and converges to the full gallery.
+test('a peer that stays online serves the gallery to a latecomer', async (t) => {
   const dirs = ['orig', 'late'].map(
     (name) => `/tmp/hyperwave-retain-${name}-${Date.now()}`
   );
-  const [storeA, storeC] = dirs.map((dir) => new Corestore(dir));
+  const [origin, latecomer] = dirs.map(makePeer);
   const streams = [];
-  const closed = new Set();
-  const shut = async (resource) => {
-    if (resource && !closed.has(resource)) {
-      closed.add(resource);
-      await resource.close().catch(() => {});
-    }
-  };
-
-  // the initiator creates the gallery and keeps it open (it's the archivist for its own wave)
-  const baseA = new Autobase(
-    storeA.namespace('wave-gallery:' + WAVE),
-    null,
-    galleryConfig()
-  );
-  await baseA.ready();
-  const key = baseA.key;
-  let baseC = null;
 
   t.teardown(async () => {
     for (const stream of streams) {
-      try {
-        stream.destroy();
-      } catch {}
+      stream.destroy();
     }
-    await shut(baseA);
-    await shut(baseC);
-    await shut(storeA);
-    await shut(storeC);
-    for (const dir of dirs) {
-      fs.rmSync(dir, { recursive: true, force: true });
+    for (const peer of [origin, latecomer]) {
+      await peer.session.close();
+      await peer.store.close().catch(() => {});
+      fs.rmSync(peer.dir, { recursive: true, force: true });
     }
   });
 
-  await baseA.append(
-    selfie({
-      keyPair: crypto.keyPair(),
-      base: baseA,
-      hopCount: 0,
-      caption: 'A'
-    })
-  );
+  await openAndSign(origin);
+  await origin.session.postSelfie({ waveId: WAVE, hopCount: 0, caption: 'A' });
 
-  // a latecomer shows up AFTER the post and connects only to the retained initiator
-  baseC = new Autobase(
-    storeC.namespace('wave-gallery:' + WAVE),
-    key,
-    galleryConfig()
-  );
-  await baseC.ready();
-  streams.push(...link(storeA, storeC));
+  // the latecomer shows up AFTER the post and connects only to the online peer
+  await openAndSign(latecomer);
+  latecomer.session.addWriter(WAVE, origin.id, origin.writerKey);
+  streams.push(...link(origin.store, latecomer.store));
 
   t.ok(
-    await until(async () => (await captions(baseC)).length === 1),
-    'latecomer got the gallery from the initiator that retained it'
+    await until(() => captions(latecomer).length === 1),
+    'latecomer converged from the online peer'
   );
-  t.alike(
-    await captions(baseC),
-    ['A'],
-    'the initiator served its retained gallery'
-  );
+  t.alike(captions(latecomer), ['A'], 'the held gallery was served');
 });

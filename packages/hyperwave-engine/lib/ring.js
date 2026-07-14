@@ -44,22 +44,4 @@ function liveRing(entries, now, staleMs) {
     .sort((a, b) => a.angle - b.angle);
 }
 
-/**
- * Next peer clockwise from myAngle (smallest angle > mine), wrapping to the first.
- * @param {number} myAngle - My own seat angle in degrees.
- * @param {RingPeer[]} sortedRing - Live peers already sorted clockwise by angle.
- * @returns {RingPeer | null} The successor peer, or null if the ring is empty.
- */
-function nextClockwise(myAngle, sortedRing) {
-  if (sortedRing.length === 0) {
-    return null;
-  }
-  for (const peer of sortedRing) {
-    if (peer.angle > myAngle) {
-      return peer;
-    }
-  }
-  return sortedRing[0];
-}
-
-module.exports = { angleOf, angleOfId, liveRing, nextClockwise };
+module.exports = { angleOf, angleOfId, liveRing };

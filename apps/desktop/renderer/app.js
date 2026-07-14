@@ -210,9 +210,7 @@ const EVENT_HANDLERS = {
   // (network speed); the visible ⚽ roll is the completion replay below, not this event.
   holding: (evt) => {
     hud.waveStatus(
-      evt.canSelfie
-        ? `📸 your selfie joins the wave! - hop ${evt.hopCount ?? ''}`
-        : `wave passing you - hop ${evt.hopCount ?? ''}`
+      `📸 your selfie joins the wave! - hop ${evt.hopCount ?? ''}`
     );
   },
 

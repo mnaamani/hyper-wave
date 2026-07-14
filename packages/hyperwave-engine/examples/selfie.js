@@ -5,9 +5,8 @@
 // Run:  bare examples/selfie.js
 const { SelfiePipeline } = require('hyperwave-engine/lib/selfie');
 
-const state = { canSelfie: true, waveId: 'w1' };
+const state = { waveId: 'w1' };
 const pipeline = new SelfiePipeline({
-  canSelfie: () => state.canSelfie,
   currentWaveId: () => state.waveId,
   post: (entry) =>
     console.log('POST →', entry.caption, '(slot', entry.hopCount + ')')

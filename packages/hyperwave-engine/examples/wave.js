@@ -13,16 +13,14 @@ async function main() {
     storageDir: dir,
     matchId: 'example-' + Date.now(),
     bootstrap: parseBootstrap(env.HYPERWAVE_BOOTSTRAP), // host:port → local DHT, else public
-    onState: ({ me, peers, successor }) => {
+    onState: ({ me, peers }) => {
       console.log(
         'state: peers',
         peers.length,
         'me',
         me.id.slice(0, 8),
         '@',
-        me.angle.toFixed(1),
-        'succ',
-        successor ? successor.id.slice(0, 8) : 'none'
+        me.angle.toFixed(1)
       );
     },
     onEvent: (ev) => console.log('event:', ev.event, ev.waveId || ''),

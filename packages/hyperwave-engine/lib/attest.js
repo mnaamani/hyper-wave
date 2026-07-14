@@ -1,7 +1,7 @@
 // Pure attestation crypto for the wave protocol: Ed25519 signatures binding a peer's
-// ring identity to its fee burn (the paid-wave gate + tip-address binding), the
-// originator's gallery key (so a relay can't swap it), and its wave join (the gallery
-// write/admission credential). No state, no I/O — unit-tested in attest.test.js.
+// ring identity to its fee burn (the paid-wave gate + tip-address binding) and to its
+// wave join (the gallery write credential). No state, no I/O — unit-tested in
+// attest.test.js.
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
 
@@ -109,9 +109,9 @@ function burnAuthorizes(burn, peerId, waveId) {
 
 // --- join attestation --------------------------------------------------------
 // A peer's signed opt-in to a wave, binding its identity to the gallery writer
-// core it wants admitted. Carried on `wave-join` (the join IS the admission
-// request — the initiator batch-admits the roster at lobby close) and on every
-// gallery entry (apply()'s write-gate: no valid join attestation = no write).
+// core it publishes. Carried on `wave-join` (the join IS the write credential —
+// self-certifying, no admission) and on every gallery entry (mergeGallery's
+// write-gate: no valid join attestation = no write).
 // Covering the writerKey matters: without it, a relay could swap in its own
 // writer key under someone else's peerId and steal that peer's one gallery seat.
 /**

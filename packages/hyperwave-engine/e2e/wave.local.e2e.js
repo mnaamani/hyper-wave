@@ -71,10 +71,6 @@ async function launchWave(cluster) {
       cluster.launch('p' + i, {
         AUTOJOIN: '1',
         AUTOSELFIE: '1',
-        // A/B knob: E2E_PIN_BUDGET=0 runs the whole cluster with pinning off
-        ...(process.env.E2E_PIN_BUDGET
-          ? { HYPERWAVE_PIN_BUDGET: process.env.E2E_PIN_BUDGET }
-          : {}),
         // force a partial mesh below the peer count (E2E_MAX_PEERS=16 at N=64)
         ...(process.env.E2E_MAX_PEERS
           ? { HYPERWAVE_MAX_PEERS: process.env.E2E_MAX_PEERS }

@@ -91,7 +91,7 @@ A desktop app (mobile version running the very same engine still under developme
 
 The wave is a _crowd_ moment — it belongs to the crowd. Here that's literal: discovery,
 messaging, the shared gallery, and the payments all happen directly between
-participants (Hyperswarm for networking, Autobase for the shared gallery, WDK for
+participants (Hyperswarm for networking, Hypercore for the shared gallery, WDK for
 wallets). Kill any single machine and the wave carries on without it. There is no backend
 to shut down, throttle, or monetise the crowd through.
 
@@ -115,5 +115,5 @@ very large rings.
 
 - How it's put together: [`architecture.md`](./architecture.md)
 - The exact wire protocol and crypto: [`protocol.md`](./protocol.md)
-- Scaling the ring to large crowds: [`scalable-topology.md`](./scalable-topology.md)
+- Process/layer structure and the module map: [`architecture.md`](./architecture.md)
 - Run it yourself: the [repo README](../README.md)

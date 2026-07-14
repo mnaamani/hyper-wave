@@ -8,7 +8,6 @@
 //   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
 //   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted at my sweep slot, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
-//   env HYPERWAVE_PIN_BUDGET=<n>       -> sticky random pins to hold (0 = pinning off)
 //   env HYPERWAVE_MAX_PEERS=<n>        -> Hyperswarm connection cap (lower to force a partial mesh)
 const env = require('bare-env');
 const path = require('bare-path');
@@ -55,23 +54,19 @@ const wave = createWave({
   bootstrap,
   matchId: env.HYPERWAVE_MATCH || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
-  pinBudget: env.HYPERWAVE_PIN_BUDGET
-    ? Number(env.HYPERWAVE_PIN_BUDGET)
-    : undefined,
   maxPeers: env.HYPERWAVE_MAX_PEERS
     ? Number(env.HYPERWAVE_MAX_PEERS)
     : undefined,
   onState: (state) => {
     console.log(
-      `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)} ` +
-        `succ=${state.successor ? state.successor.id.slice(0, 8) + '@' + state.successor.angle.toFixed(1) : 'none'}`
+      `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)}`
     );
     // Kick off once the whole roster is DISCOVERED and we're CONNECTED to min(START,
     // CONNECTED_FLOOR) of them, held for SETTLE_MS. At small N that means the full mesh (the
     // strictest condition — discovery alone races ahead of the Protomux gossip channels the
     // flood rides, and racing a half-wired mesh dropped peers); at
-    // large N a full mesh can't exist (Hyperswarm maxPeers, see CONNECTED_FLOOR) and the pinned
-    // Chord ring edges are what carry the lap.
+    // large N a full mesh can't exist (Hyperswarm maxPeers, see CONNECTED_FLOOR) and the
+    // flood over the topic mesh is what carries the lifecycle.
     if (!env.START || started) {
       return;
     }
@@ -122,13 +117,15 @@ const wave = createWave({
         )
         .join(', ')}]`
     ),
-  log: (...args) => console.log(`[]`, ...args)
+  log: (...args) => console.log(`[${name}]`, ...args)
 });
 
 // Burn the participation fee (wallet.js: memo + ring attestation), logging the result.
 async function burnFee(waveId, reason) {
   const result = await payFee({ wave, payments, waveId, reason });
-  console.log(`[${name}] ${reason.toUpperCase()}-BURNED ${FEE_TRX} TRX hash=`);
+  console.log(
+    `[${name}] ${reason.toUpperCase()}-BURNED ${FEE_TRX} TRX hash=${result.hash}`
+  );
   return result;
 }
 
@@ -151,21 +148,13 @@ async function kickOff() {
   }
 }
 
-// Joiner: join() gates on the kick-off being verified (null otherwise), so we only pay for
-// a proven-paid wave. Guarded so a double event (announce + verified) burns once.
-let joining = false;
+// Joiner: join() gates on the kick-off being verified (null otherwise) and returns null
+// once already joined, so a double event (announce + verified) burns once.
 async function joinAndBurn() {
-  if (joining) {
-    return;
-  }
   const waveId = wave.join();
-  if (!waveId) {
+  if (!waveId || !payments) {
     return;
   }
-  if (!payments) {
-    return;
-  }
-  joining = true;
   try {
     await burnFee(waveId, 'join');
   } catch (err) {
@@ -179,7 +168,7 @@ if (env.WALLET) {
   const { createPayments } = require('../lib/wallet.js');
   createPayments({
     storageDir,
-    log: (...args) => console.log(`[] wallet`, ...args)
+    log: (...args) => console.log(`[${name}] wallet`, ...args)
   })
     .then(async (pay) => {
       payments = pay;
@@ -191,7 +180,9 @@ if (env.WALLET) {
       if (env.WALLET_SEND) {
         const [to, amt] = env.WALLET_SEND.split(':');
         const result = await pay.send(to, Number(amt));
-        console.log(`[${name}] WALLET SENT ${amt} -> ${to} hash=`);
+        console.log(
+          `[${name}] WALLET SENT ${amt} -> ${to} hash=${result.hash}`
+        );
       }
     })
     .catch((err) => console.log(`[${name}] wallet FAIL`, err.message));

@@ -132,23 +132,30 @@ function createEngine({
   //   burned     — confirmed on-chain (kick-off) or broadcast (join, fire-and-forget)
   //   failed     — couldn't burn / never confirmed
 
+  // Fail fast on a fee action from an unfunded wallet: it would broadcast a burn that never
+  // confirms — the wave would stall (kick-off) or no peer would seat the join — so refuse up
+  // front with a clear message. Only when we could actually read the balance; a failed read
+  // returns true and lets the burn try. `action` words the error ('kick off' / 'join').
+  // Callers guard on `payments` so the wallet-less path stays fully synchronous.
+  async function fundedForFee(reason, action) {
+    const bal = await payments.balances().catch(() => null);
+    if (bal && bal.trx < FEE_TRX) {
+      notify({
+        type: 'burn-result',
+        stage: 'failed',
+        reason,
+        error: `wallet unfunded (${bal.trx} TRX) — fund it to ${action}`
+      });
+      return false;
+    }
+    return true;
+  }
+
   // Kick-off: the wave is NOT announced until the initiator's burn is CONFIRMED on-chain, so
   // peers can verify it and won't join an unpaid (spam) wave.
   async function handleStartWave() {
-    // Fail fast: a wallet that can't cover the fee would broadcast a burn that never confirms —
-    // the wave would just stall until PAY_TIMEOUT. Refuse up front with a clear message. Only when
-    // we could actually read the balance; a failed read falls through and lets the burn try.
-    if (payments) {
-      const bal = await payments.balances().catch(() => null);
-      if (bal && bal.trx < FEE_TRX) {
-        notify({
-          type: 'burn-result',
-          stage: 'failed',
-          reason: 'kickoff',
-          error: `wallet unfunded (${bal.trx} TRX) — fund it to kick off a wave`
-        });
-        return;
-      }
+    if (payments && !(await fundedForFee('kickoff', 'kick off a wave'))) {
+      return;
     }
     const waveId = wave.startWave();
     if (!waveId || !payments) {
@@ -203,20 +210,8 @@ function createEngine({
   // burn the join fee for a wave that's proven paid. The join burn is fire-and-forget (no on-chain
   // confirmation), so it's reported as burned on broadcast.
   async function handleJoin() {
-    // Fail fast, like kick-off: an unfunded joiner would broadcast a burn that never confirms,
-    // so (when enforcing) no peer would count its join into the roster — confusing. Refuse the
-    // join up front with a clear message instead. Only when we could actually read the balance.
-    if (payments) {
-      const bal = await payments.balances().catch(() => null);
-      if (bal && bal.trx < FEE_TRX) {
-        notify({
-          type: 'burn-result',
-          stage: 'failed',
-          reason: 'join',
-          error: `wallet unfunded (${bal.trx} TRX) — fund it to join the wave`
-        });
-        return;
-      }
+    if (payments && !(await fundedForFee('join', 'join the wave'))) {
+      return;
     }
     const waveId = wave.join();
     if (!waveId || !payments) {

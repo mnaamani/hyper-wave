@@ -1,4 +1,4 @@
-// The deterministic angular sweep (scalable-topology.md §3B / Phase 5): pure slot
+// The deterministic angular sweep (protocol.md §6): pure slot
 // math, no transport. A wave-start carries the canonical roster plus `t0` (epoch ms)
 // and `lapMs`; every peer derives the SAME schedule locally — roster sorted by ring
 // angle, one slot per member, evenly spread across the lap — and self-triggers at its

@@ -5,7 +5,7 @@ they interact, see [`docs/architecture.md`](../../docs/architecture.md) and
 [`docs/protocol.md`](../../docs/protocol.md); this file is all _how do I call it_.
 
 > **Runs under [Bare](https://github.com/holepunchto/bare), not Node.** Examples assume `bare`.
-> The pure submodules (`ring`/`sweep`/`attest`/`flood`/`pins`/`gallery`) do no I/O and also run
+> The pure submodules (`ring`/`sweep`/`attest`/`flood`/`gallery`) do no I/O and also run
 > fine under Node if you just want to play with the math/crypto.
 
 **Two import surfaces:**
@@ -30,7 +30,6 @@ const {
 const ring = require('hyperwave-engine/lib/ring');
 const sweep = require('hyperwave-engine/lib/sweep');
 const attest = require('hyperwave-engine/lib/attest');
-const { topUpPins } = require('hyperwave-engine/lib/pins');
 const { Flood } = require('hyperwave-engine/lib/flood');
 const gallery = require('hyperwave-engine/lib/gallery');
 
@@ -42,7 +41,7 @@ const { CrdtGallery } = require('hyperwave-engine/lib/gallery-crdt');
 
 Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it headless](#2-drive-a-wave-headless-createwave) ·
 [ring.js](#3-ringjs--seats--the-ring) · [sweep.js](#4-sweepjs--the-deterministic-schedule) · [attest.js](#5-attestjs--attestations) ·
-[flood.js & pins.js](#6-floodjs--pinsjs--the-flood-graph) · [gallery.js](#7-galleryjs--the-multicore-crdt-gallery) ·
+[flood.js](#6-floodjs--the-flood-graph) · [gallery.js](#7-galleryjs--the-multicore-crdt-gallery) ·
 [payments](#8-payments--walletjs) · [seeds & bootstrap](#9-seed--bootstrap-helpers) ·
 [stateful classes](#10-the-stateful-classes-wavejs-composes)
 
@@ -113,6 +112,8 @@ const wave = createWave({
   storageDir: '/tmp/hw/a',
   matchId: 'demo',
   bootstrap: parseBootstrap('127.0.0.1:49737'), // or null for the public DHT
+  // state: { me, peers, connected, discovered } — the live ring, the direct-connection
+  // count, and the DHT-discovered count (hosts gate start triggers on `discovered`)
   onState: ({ me, peers }) => {
     console.log(
       'me',
@@ -136,9 +137,8 @@ await wave.close();
 ```
 
 `createWave` returns: `{ me, startWave, join, setCountry, stageSelfie, setWallet, announcePaid,
-recordBurn, close }`. There is no `findSuccessor` / routing surface — the wave is a
-deterministic sweep, not a routed token. The payment methods
-(`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §8.
+recordBurn, close }`. There is no routing surface — the wave is a deterministic sweep.
+The payment methods (`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §8.
 
 ---
 
@@ -146,17 +146,12 @@ deterministic sweep, not a routed token. The payment methods
 
 Pure geometry: a peer's key deterministically maps to a **seat angle**; the ring is the live peers
 sorted clockwise. It defines the wave's semantics (sweep order, gallery order) — it is **not** the
-connection topology (that's random-K pinning, §6). No state, no I/O.
+connection topology (that's Hyperswarm's own topic mesh). No state, no I/O.
 
 ```js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const {
-  angleOf,
-  angleOfId,
-  liveRing,
-  nextClockwise
-} = require('hyperwave-engine/lib/ring');
+const { angleOf, angleOfId, liveRing } = require('hyperwave-engine/lib/ring');
 
 // a seat angle is derived from the public key — never trusted from the wire
 const me = crypto.keyPair();
@@ -172,15 +167,13 @@ const entries = [
 ];
 const STALE_MS = 30_000;
 const live = liveRing(entries, now, STALE_MS); // drops the stale peer, sorts by angle
-
-const successor = nextClockwise(myAngle, live); // next seat clockwise (wraps to the first)
 ```
 
 ---
 
 ## 4. `sweep.js` — the deterministic schedule
 
-The wave, since the token was removed. A `wave-start` carries the canonical roster plus the sweep
+The wave itself. A `wave-start` carries the canonical roster plus the sweep
 parameters `t0` (epoch ms) and `lapMs`; every peer derives the **same** angle-ordered schedule
 locally and self-triggers its selfie at its own slot. A dead peer's slot simply passes — no
 routing, no healing. Pure math, no transport.
@@ -214,8 +207,7 @@ message.
 ## 5. `attest.js` — attestations
 
 The pure Ed25519 crypto behind the paid-wave gate and the gallery write credential. Every function
-is stateless. (Renamed from the old `token.js`; the token receipts + the blake2b chain accumulator
-were deleted with the token.)
+is stateless.
 
 **Burn attestation** — bridges a peer's ring identity to its on-chain fee burn; authorizes a
 gallery write and binds the tip address:
@@ -258,7 +250,7 @@ verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed t
 
 ---
 
-## 6. `flood.js` & `pins.js` — the flood graph
+## 6. `flood.js` — the flood graph
 
 One rule turns a one-hop broadcast into an epidemic across a partial mesh: relay each message id on
 **first sight only**. Size-capped so the set can't grow unbounded.
@@ -281,30 +273,14 @@ function onGossip(msg, fromPeer) {
 flood.size; // current number of remembered ids
 ```
 
-Flood reach needs a connected graph, and Hyperswarm's incidental topic mesh is only
-_approximately_ one. `pins.js` puts a floor under it: each peer holds `PIN_BUDGET` (7) **sticky
-random** `swarm.joinPeer` edges (dialed with priority, bypassing `maxPeers`). This replaced the
-old structured Chord ring — random K=7 floods with equal-or-better reach and a shorter diameter,
-and deletes all successor/predecessor topology.
-
-```js
-const { topUpPins } = require('hyperwave-engine/lib/pins');
-
-// keep every still-valid current pin, then add uniform-random candidates up to the budget.
-// Sticky: a live pin is never re-rolled (churning pins would flap connections).
-const targets = topUpPins({
-  current: new Set(['aa…', 'bb…']), // currently pinned ids
-  candidates: ['aa…', 'cc…', 'dd…', 'ee…'], // discovered ∪ connected ∪ known, minus self
-  budget: 7 // PIN_BUDGET
-});
-// wave.js diffs this against the live pins (via PeerTable) and joinPeer/leavePeer accordingly.
-```
+Flood reach needs a connected graph; the graph is Hyperswarm's own topic mesh (a random
+mesh of degree ≈ `maxPeers`, connected with overwhelming probability). Nothing is pinned.
 
 ---
 
 ## 7. `gallery.js` — the multicore CRDT gallery
 
-The product gallery is **not** a single shared Autobase — it's a multicore CRDT. Each participant
+The gallery is a multicore CRDT. Each participant
 owns **one** Hypercore and appends its single `wave-selfie` op at block 0; its writer key rides
 that peer's own `wave-join` (self-certified by the join attestation). Every peer opens every
 participant's core, downloads block 0, and folds the bag with the pure **`mergeGallery`** — every
@@ -342,10 +318,6 @@ mergeGallery([op]); // → [op] (one entry per peer, hop order; tip address kept
 // buildGallery(entries) is the same ordering/dedup once you already have gated entries
 buildGallery([op]); // → [op]
 ```
-
-> `galleryConfig()` / `readGallery(base)` also live in `gallery.js`, but they are the **Autobase
-> baseline** used only by the A/B replication benchmark (`gallery.replication.bench.test.js`) — not
-> the product gallery.
 
 ---
 
@@ -390,14 +362,20 @@ wireWallet(wave, pay); // sets the wallet address (tips) + the on-chain burn ver
 
 // kick-off: start → burn the fee → wait for on-chain confirmation → announce the (now-paid) wave
 const waveId = wave.startWave();
-const { hash, proof } = await payFee(wave, pay, waveId, 'kickoff'); // FEE_TRX burned + attestation signed
+const { hash, proof } = await payFee({
+  wave,
+  payments: pay,
+  waveId,
+  reason: 'kickoff'
+}); // FEE_TRX burned + attestation signed
 if (await confirmBurn(pay, waveId, hash)) {
   wave.announcePaid(proof); // peers verify this before they'll join
 }
 ```
 
-`FEE_TRX` is the fixed participation fee (1 TRX). `payFee(wave, payments, waveId, reason)` burns it
-and returns `{ hash, proof }`; `confirmBurn` polls the chain until the burn is readable.
+`FEE_TRX` is the fixed participation fee (1 TRX). `payFee({ wave, payments, waveId, reason })`
+burns it and returns `{ hash, proof }`; `confirmBurn(payments, waveId, hash)` polls the chain
+until the burn is readable.
 
 > `engine.js` already composes exactly this (`handleStartWave`/`handleJoin`) — read it for the
 > reference wiring, including the fail-fast balance checks and the `burn-result` staging.
@@ -431,9 +409,8 @@ an identity (e.g. from mobile secure storage). It is a **separate** seed from th
 each subpath-importable and unit-tested. `Flood` is shown in §6; the others:
 
 - **`PeerTable`** (`lib/peer-table.js`) — live peer bookkeeping: ring seats (angle always
-  derived from the id), direct-send channels, pinned ring edges (returned as a mirrorable
-  `{added, removed}` diff for `swarm.joinPeer`/`leavePeer`), and churn cooldowns that stop a
-  just-disconnected peer being resurrected as a ghost seat. `bare examples/peer-table.js`
+  derived from the id, never the wire) and direct-send channels; a direct disconnect drops
+  the seat immediately. `bare examples/peer-table.js`
 - **`SelfiePipeline`** (`lib/selfie.js`) — pairs the lobby-staged selfie with my sweep slot
   (either order — the renderer can stage before or after my slot fires), posts exactly once
   per wave and only for the current wave, and owns the burn-proof ticket lifetime (survives

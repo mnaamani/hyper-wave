@@ -1,7 +1,7 @@
 {
   "name": "hyperwave-engine",
   "version": "0.2.0",
-  "description": "HyperWave engine: P2P stadium wave over Hyperswarm/Autobase with WDK payments, host-agnostic, runs under Bare.",
+  "description": "HyperWave engine: P2P stadium wave over Hyperswarm/Hypercore with WDK payments, host-agnostic, runs under Bare.",
   "license": "Apache-2.0",
   "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
   "repository": {
@@ -12,20 +12,21 @@
   "type": "commonjs",
   "main": "index.js",
   "bin": {
-    "hyper-wave": "bin/wave.run.js",
-    "hyper-wave-dev-dht": "bin/dht-local.js"
+    "hyper-wave": "bin/wave.run.js"
   },
   "scripts": {
     "test": "bare test.js",
     "test:e2e:local": "node e2e/wave.local.e2e.js",
     "test:e2e:onchain": "node e2e/wave.onchain.e2e.js",
-    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/sweep.js lib/gallery.js lib/gallery-crdt.js lib/flood.js lib/peer-table.js lib/selfie.js lib/wave.js lib/wallet.js lib/engine.js lib/pins.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/sweep.js lib/gallery.js lib/gallery-crdt.js lib/flood.js lib/peer-table.js lib/selfie.js lib/wave.js lib/wallet.js lib/engine.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
   },
   "dependencies": {
     "@tetherto/wdk": "^1.0.0-beta.13",
     "@tetherto/wdk-wallet-tron": "^1.0.0-beta.8",
-    "autobase": "^7.28.1",
     "b4a": "^1.8.1",
+    "bare-env": "^3.0.1",
+    "bare-fs": "^4.7.4",
+    "bare-os": "^3.9.3",
     "bare-path": "^3.0.1",
     "compact-encoding": "^3.3.0",
     "corestore": "^7.9.1",

@@ -26,8 +26,8 @@ Reference implementation:
   the lobby (the **roster**) — each `wave-join` **publishes that peer's own gallery core**
   (its writer key, self-certified by a join attestation). Every peer ingests every join it
   sees, so there is no admission and no coordinator. At lobby close the originator floods
-  `wave-start` carrying the roster **and every participant's core credential** (`writers`)
-  plus the sweep parameters (`t0`, `lapMs`); then the wave **sweeps**: every peer derives the
+  `wave-start` carrying **every participant's core credential** (`writers` — the roster is
+  derived from it) plus the sweep parameters (`t0`, `lapMs`); then the wave **sweeps**: every peer derives the
   identical angle-ordered schedule locally and self-triggers at its own slot. There is no
   passed token — the wave is choreography, not an object — and the wave ends
   **deterministically** on every peer at `t0 + lapMs + END_GRACE_MS`, with no end message.
@@ -59,10 +59,6 @@ Given a 32-byte public key `K`:
 n     = K[0]*256^5 + K[1]*256^4 + K[2]*256^3 + K[3]*256^2 + K[4]*256 + K[5]   // top 6 bytes, big-endian
 angle = (n / 2^48) * 360      // degrees in [0, 360)
 ```
-
-**Successor** = the next live peer clockwise: among live peers sorted by ascending angle,
-the first with `angle > myAngle`, wrapping to the smallest if none is greater. (A peer's
-own angle is not in the set.)
 
 Angle is **always derived locally** from a peer's id; it is never trusted from the wire.
 
@@ -130,7 +126,7 @@ propagated differently to match what each needs:
 | Class                       | Messages                                   | Fanout                                     |
 | --------------------------- | ------------------------------------------ | ------------------------------------------ |
 | **Flood (relayed + dedup)** | `wave-announce`, `wave-join`, `wave-start` | every peer                                 |
-| **Neighbour-scoped**        | `heartbeat`                                | pinned ring neighbours (constant, §4)      |
+| **One-hop broadcast**       | `heartbeat`                                | every direct connection (no relay)         |
 | **Unicast**                 | `wave-sync`                                | one specific peer (a newcomer, on connect) |
 
 **Flood (epidemic broadcast).** The wave _lifecycle_ messages must reach every seat, so they
@@ -154,26 +150,23 @@ are relayed hop-to-hop:
 catch-up path for a peer that joins after a flood has already passed.
 
 **Membership** is **DHT-discovered but liveness-gated.** `swarm.peers` (Hyperswarm's PeerInfo
-set on the topic) drives _which peers we dial_ (pinning), not the visible ring — a DHT
-announcement alone is just "this key advertised the topic once", so a stale announce from a
-since-closed instance is never shown as a seat. A **seat requires real liveness**: a live
-connection or direct gossip. The only membership gossip is the **`heartbeat`** (a peer's
-own `id` + `country`, sent to its pinned neighbours every `HEARTBEAT_MS`): it refreshes
-`lastSeen` and carries the cosmetic country — nothing else. There is **no pointer
-exchange**: peers do not gossip ring structure (successor/predecessor adverts and the
-Chord stabilize step were removed with the token walk — the sweep needs no successor
-precision, so pins are recomputed purely from DHT discovery + live connections).
+set on the topic) drives the host's start gating (the `discovered` count), not the visible
+ring — a DHT announcement alone is just "this key advertised the topic once", so a stale
+announce from a since-closed instance is never shown as a seat. A **seat requires real
+liveness**: a live connection or direct gossip. The only membership gossip is the
+**`heartbeat`** (a peer's own `id` + `country`, sent one hop to every direct connection
+every `HEARTBEAT_MS`): it refreshes `lastSeen` and carries the cosmetic country — nothing
+else. There is **no pointer exchange**: peers do not gossip ring structure — the sweep
+needs no successor precision.
 
-Each peer deliberately `swarm.joinPeer`s **`PIN_BUDGET` sticky random peers** (random-K
-pinning, see `pins.js` and [`scalable-topology.md`](./scalable-topology.md) §4.3): pins are
-edges the peer _chose_ — dialed with priority and immune to `maxPeers` — so the flood graph
-has a floor that does not depend on the quality of Hyperswarm's incidental topic mesh. The
-sweep needs only a **connected flood graph** with small diameter; measured at N=128, random
-K=7 pinning floods with full reach (even with 10% of peers killed) in ≤4 relay rounds.
-Pins are topped up, never reshuffled (a stable pin set keeps channels alive), and a dead
-pin is replaced on the next topology refresh. The structured Chord ring pinning this
-replaced is retired — nothing routes, so nothing needs a successor. **`wave-sync`** on
-connect remains the catch-up path.
+**The topology is Hyperswarm's own topic mesh — nothing is pinned.** Peers dial whoever
+the DHT surfaces for the topic (up to `maxPeers`), and the flood rides those incidental
+connections. The sweep needs only a **connected flood graph** with small diameter, and a
+random mesh of degree ≈ `maxPeers` has one with overwhelming probability (validated at
+128 peers over a local DHT: the incidental mesh alone gathered the full lobby). The
+accepted trade-off: flood connectivity depends entirely on the transport's mesh quality.
+**`wave-sync`** on connect is the catch-up path for a peer that connects after a flood
+has passed.
 
 ## 4. Peer map (membership & liveness)
 
@@ -203,14 +196,13 @@ upsert(id, lastSeen, country):
 So `lastSeen` is **monotonic per peer** (only advances) and `angle` is always recomputed
 from the id.
 
-**Liveness, ring, successor.** A peer is **live** if `now − lastSeen < PEER_STALE_MS`. The **ring**
-is the live peers sorted by angle; the **successor** is the next live peer clockwise
-(§2.1). A direct disconnect removes a peer immediately (and cools it down against DHT
-re-seeding); the TTL only expires peers known _indirectly_ (a `swarm.peers` entry that has
+**Liveness and the ring.** A peer is **live** if `now − lastSeen < PEER_STALE_MS`. The
+**ring** is the live peers sorted by angle. A direct disconnect removes a peer
+immediately; the TTL expires peers known _indirectly_ (a `swarm.peers` entry that has
 since gone) once they stop being refreshed.
 
 Note the peer map serves **topology and display**, not the sweep: the sweep's schedule is
-derived from the canonical roster flooded on `wave-start` (§6), so all peers agree on it even
+derived from the flooded `wave-start`'s `by`/`writers` (§6), so all peers agree on it even
 if their live-ring views differ.
 
 ```mermaid
@@ -221,9 +213,8 @@ flowchart LR
   U0 --> M[("peer map")]
   U --> M
   U3 --> M
-  Close["connection close"] -->|delete + cooldown| M
+  Close["connection close"] -->|delete| M
   M --> L["live = now minus lastSeen &lt; TTL, sorted by angle"]
-  L --> S["successor = next clockwise"]
 ```
 
 On connect, a peer **greets** the newcomer with its `heartbeat` and — if a wave is active —
@@ -276,7 +267,7 @@ Every message will carry these three envelope fields in addition to its `kind` a
 
 Until implemented, treat the individual schemas below as authoritative.
 
-### heartbeat — to pinned neighbours, every `HEARTBEAT_MS`
+### heartbeat — one hop to every connection, every `HEARTBEAT_MS`
 
 ```json
 {
@@ -286,13 +277,11 @@ Until implemented, treat the individual schemas below as authoritative.
 }
 ```
 
-Pure liveness + cosmetic country, sent only to pinned peers (the random-K floor), not
-every connection. Receiver upserts the sender
-(`lastSeen = now`, `country`). It carries **no ring structure** — the old `pointers`
-succ/pred advert and its Chord stabilize step were removed with the token walk (the sweep
-needs no successor precision). Every peer is equal — the heartbeat carries no role and no
-peer is pinned specially. Primary membership comes from DHT discovery (`swarm.peers`); the
-heartbeat is liveness, not the authoritative peer set.
+Pure liveness + cosmetic country, sent one hop to every direct connection (not relayed).
+Receiver upserts the sender (`lastSeen = now`, `country`). It carries **no ring
+structure** — the sweep needs no successor precision. Every peer is equal
+— the heartbeat carries no role and no peer is special. Primary membership comes from DHT
+discovery (`swarm.peers`); the heartbeat is liveness, not the authoritative peer set.
 
 The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carries a unique
 `mid` (random hex id); receivers relay on first sight and drop repeats.
@@ -314,8 +303,8 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
 
 Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`.
 
-**No shared gallery key.** There is no per-wave Autobase and no gallery key to carry or sign
-— each participant owns its own gallery core (§8). The originator is a participant too: right
+**No shared gallery key.** There is no shared per-wave gallery core and no gallery key to
+carry or sign — each participant owns its own gallery core (§8). The originator is a participant too: right
 after announcing it floods **its own** `wave-join` publishing its core (`floodMyGalleryCore`),
 exactly as every joiner does.
 
@@ -348,11 +337,11 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
 **The join publishes the peer's gallery core.** `writerKey` is the joiner's own Hypercore key
 for this wave's gallery (§8), and `joinSig` is its join attestation over
 `(waveId, peerId, writerKey)` (§2.2). **Every peer** that sees the join (during the lobby)
-verifies `joinSig`, adds `peerId` to the roster + `writers` map, and opens+downloads that
-core (block 0 only, §8.2) — there is no admission and no coordinator. A joiner whose join fee
+verifies `joinSig`, adds `peerId` to the `writers` map, and opens+downloads that core
+(block 0 only, §8.2) — there is no admission and no coordinator. A joiner whose join fee
 confirms mid-lobby **re-floods** its `wave-join` with the `burn` attestation attached (paid
-gate). A join without a credential still counts as a roster opt-in (that peer just can't
-post).
+gate). A join without a credential is ignored — the `writers` map is the roster, so a seat
+that can never post would only stretch the schedule with a guaranteed-empty slot.
 
 Flooded so it reaches every peer (and the initiator, which assembles the roster) even across
 a partial mesh. `wave-join` is authenticated by its carried `joinSig` (bound to `peerId` +
@@ -369,7 +358,6 @@ third party. **Paid gate:** when enforced, **every peer** ignores a direct `wave
   "mid": "<hex8>",
   "waveId": "<hex16>",
   "by": "<peerId>",
-  "roster": ["<peerId>", ...],
   "writers": [{ "peerId": "<peerId>", "writerKey": "<coreKeyHex>", "joinSig": "<hex64>" }, ...],
   "t0": 1719705612080,
   "lapMs": 8000,
@@ -377,11 +365,14 @@ third party. **Paid gate:** when enforced, **every peer** ignores a direct `wave
 }
 ```
 
-Finalizes the roster and starts the sweep. `t0` is the epoch-ms moment the sweep begins
+Finalizes the roster and starts the sweep. The **canonical roster is derived, not carried**:
+`{by} ∪ writers[].peerId` — the initiator plus every credentialed joiner (no separate
+roster field travels; `writers` is the single membership source).
+`t0` is the epoch-ms moment the sweep begins
 (`now + SWEEP_LEAD_MS` at the initiator — a short lead so the flooded start blankets the
 swarm before the first slot fires); `lapMs` is the lap duration,
 `clamp(rosterSize × SLOT_MS, MIN_LAP_MS, MAX_LAP_MS)`. Every receiver derives the identical
-schedule from `(roster, t0, lapMs)` (§6). Receivers clamp hostile values: `lapMs` is capped
+schedule from `(by + writers, t0, lapMs)` (§6). Receivers clamp hostile values: `lapMs` is capped
 at `MAX_LAP_MS`, and a start whose `t0` is more than `MAX_LAP_MS` in the future is ignored
 (§11.2).
 
@@ -396,10 +387,11 @@ concern. When the paid-wave gate is enforced, `wave-start` also carries the kick
 proof and is gated on it (§11); carrying it also lets a peer that adopted via `wave-start`
 re-authenticate a later `wave-sync` to a newcomer. Receivers transition `lobby → racing`.
 
-The `roster` is the initiator-finalized answer to "who is actually in this wave?" — flooded so
-(a) everyone agrees on membership despite the lobby's flooded, partial-mesh joins (the roster
-is the **canonical input to the schedule**: all peers must compute the same slots), and (b)
-each peer knows whether it has a slot (roster member) or merely watches (spectator).
+The derived roster is the initiator-finalized answer to "who is actually in this wave?" —
+flooded (inside `writers`) so (a) everyone agrees on membership despite the lobby's flooded,
+partial-mesh joins (it is the **canonical input to the schedule**: all peers must compute the
+same slots), and (b) each peer knows whether it has a slot (roster member) or merely watches
+(spectator).
 
 ### wave-sync — DIRECT to a newly-connected peer (join-time state)
 
@@ -409,7 +401,6 @@ each peer knows whether it has a slot (roster member) or merely watches (spectat
   "waveId": "<hex16>",
   "phase": "lobby" | "racing",
   "by": "<peerId>",
-  "roster": ["<peerId>", ...],
   "writers": [{ "peerId": "<peerId>", "writerKey": "<coreKeyHex>", "joinSig": "<hex64>" }, ...],
   "t0": 1719705612080,
   "lapMs": 8000,
@@ -434,7 +425,8 @@ the flooded `wave-start`, no per-hop messages, no passed object.
 
 ### 6.1 Schedule derivation
 
-Every peer computes the identical schedule from the canonical `(roster, t0, lapMs)`:
+Every peer computes the identical schedule from the canonical inputs — the derived roster
+(`{by} ∪ writers[].peerId`) plus `(t0, lapMs)`:
 
 ```
 seats  = dedupe(rosterIds), each with angle = angleOf(id)            // §2.1
@@ -444,7 +436,7 @@ slot[rank] = { id, angle, rank, at: t0 + round((rank / count) × lapMs) }
 ```
 
 `rank` (0-based, angle order) is the entry's **`hopCount`** — still the gallery ordering key
-(§8.3). Because the inputs are the flooded canonical roster and two integers, all honest
+(§8.3). Because the inputs are the flooded `by`/`writers` and two integers, all honest
 peers derive byte-identical schedules; nothing about the sweep depends on any peer's local
 ring view.
 
@@ -511,7 +503,7 @@ flowchart TD
 
 ## 7. Wave lifecycle state machine
 
-Each peer holds at most one `wave = { id, phase, by, roster:Set, joined:bool }` (or
+Each peer holds at most one `wave = { id, phase, by, writers:Map, joined:bool }` (or
 `null` = **idle**), plus `endedWaves:Set` (finished ids).
 
 ```mermaid
@@ -541,7 +533,7 @@ sequenceDiagram
   Note over O,C: lobby — every peer ingests each join: opens that participant's core
   Note over O,C: roster O and B
   Note right of O: lobby timer fires
-  O-)B: wave-start (roster, writers, t0, lapMs)
+  O-)B: wave-start (writers, t0, lapMs)
   O-)C: wave-start
   Note over O,C: racing — every peer derives the same schedule
   Note over O: t = t0 — O's slot fires, posts staged selfie
@@ -564,8 +556,8 @@ sweep and ends at the same moment.)
 ### 7.2 Roles in a wave
 
 - **Originator:** the peer that called `startWave` — sends `wave-announce`, publishes its own
-  gallery core (`floodMyGalleryCore`), runs the lobby timer, and sends `wave-start` with the
-  roster, `writers`, and sweep parameters. It is otherwise an **ordinary participant** with no
+  gallery core (`floodMyGalleryCore`), runs the lobby timer, and sends `wave-start` with
+  `writers` and the sweep parameters. It is otherwise an **ordinary participant** with no
   lasting asymmetry: its slot is wherever its angle falls, it posts its own selfie, and there
   is no indexer, admission, or retention role. (Every participant already holds every core
   during the wave — §8 — so a departing peer's selfie survives in everyone's view; the gallery
@@ -583,10 +575,10 @@ Lifecycle floods fire once, so a peer connecting mid-wave would miss them. On ea
 connection, existing peers send a **direct** `wave-sync`. The newcomer:
 
 - `phase: lobby` → enter the lobby (join window with `lobbyMsLeft` remaining), ingest every
-  credential in `writers` (open each participant's core), merge roster — then it can flood its
-  own `wave-join` and join.
+  credential in `writers` (open each participant's core) — then it can flood its own
+  `wave-join` and join.
 - `phase: racing` → ingest `writers` (open every participant's core), derive the schedule from
-  `(roster, t0, lapMs)`, and go straight to `racing` as a spectator — animating from the
+  `(by + writers, t0, lapMs)`, and go straight to `racing` as a spectator — animating from the
   current point and ending at the same deterministic moment.
   Either way it's now engaged, so it can't start a competing wave.
 
@@ -601,7 +593,7 @@ can't revive a finished wave.
 
 Each wave has its own gallery: a **conflict-free replicated data type** built from many
 single-writer Hypercores — **one per participant** — merged locally into one ordered view.
-There is **no Autobase, no indexer, no linearizer, and no shared "gallery key"**: the same set
+There is **no indexer, no linearizer, and no shared "gallery key"**: the same set
 of cores produces a byte-identical gallery on every peer, so convergence is purely epidemic
 ("have I replicated core X?"). (`gallery-crdt.js` `CrdtGallery` + the pure `mergeGallery()` in
 `gallery.js`.)
@@ -635,8 +627,8 @@ There is no admission: a peer doesn't grant writers, it just **learns and replic
   entry per peer** — extra blocks a malicious writer appends are never fetched. `wave-start` /
   `wave-sync` carry the same credentials in `writers`, so a late adopter is self-contained.
 - **Paid gate, per peer.** When enforced, every peer checks `burnAuthorizes(burn, peerId,
-waveId)` (§9.2) on a **direct** `wave-join` before ingesting it — the signature-only check
-  the initiator alone used to run at admission, now run by everyone. (The `writers` on
+waveId)` (§9.2) on a **direct** `wave-join` before ingesting it — a signature-only
+  check, run identically by everyone. (The `writers` on
   `wave-start`/`wave-sync` omit the burn: they were pre-vetted by the initiator during the
   lobby, and the wave as a whole is gated by the kick-off `paid` proof.) No on-chain call is on
   the ingest path — that would be O(N) REST reads per peer. The burn is verified where it has
@@ -644,8 +636,7 @@ waveId)` (§9.2) on a **direct** `wave-join` before ingesting it — the signatu
 - **Posting is local and immediate.** A participant appends its one op at block 0 of **its
   own** core (`postSelfie`) when its sweep slot fires — no admission, no writable-wait.
 - **The view is a pure merge.** `mergeGallery(rawEntries)` folds the block-0 op of every held
-  core into the ordered gallery with the same deterministic gate the old Autobase `apply()`
-  ran, but over the whole bag at once:
+  core into the ordered gallery with one deterministic gate over the whole bag at once:
   - drop any op whose `joinSig` doesn't verify over `(waveId, peerId, writerKey)` by `peerId`
     (§2.2), or that exceeds the byte caps (image ≤ `MAX_IMAGE_BYTES`, caption ≤
     `MAX_CAPTION_BYTES`; oversized dropped);
@@ -656,10 +647,6 @@ waveId)` (§9.2) on a **direct** `wave-join` before ingesting it — the signatu
 
   Same set of ops in → byte-identical gallery out on every peer. That determinism (no
   consensus, no indexer) is what makes the gallery a CRDT.
-
-> `galleryConfig` / `readGallery` (the old single-indexer Autobase reducer) **still exist** in
-> `gallery.js` but are no longer the product gallery — they survive only as the "Path A"
-> baseline in the A/B replication benchmark (`gallery.replication.bench.test.js`).
 
 ```mermaid
 sequenceDiagram
@@ -809,7 +796,7 @@ the gate (waves announce immediately, unpaid).
 | Constant            | Value  | Meaning                                                                |
 | ------------------- | ------ | ---------------------------------------------------------------------- |
 | `HEARTBEAT_MS`      | 2000   | heartbeat cadence (liveness + country)                                 |
-| `RINGUPDATE_MS`     | 4000   | re-pin + gallery-pull maintenance cadence                              |
+| `RINGUPDATE_MS`     | 4000   | seat-staleness + gallery-pull maintenance cadence                      |
 | `PEER_STALE_MS`     | 12000  | a peer with no heartbeat within this window is stale (dropped)         |
 | `LOBBY_MS`          | 15000  | lobby / opt-in window                                                  |
 | `SWEEP_LEAD_MS`     | 3000   | wave-start lead: `t0 = now + lead`, so the flooded start beats slot 0  |
@@ -818,7 +805,6 @@ the gate (waves announce immediately, unpaid).
 | `MAX_LAP_MS`        | 60000  | lap cap; also the receiver's `t0` horizon clamp (§6.6)                 |
 | `END_GRACE_MS`      | 2000   | after the last slot, before every peer returns to idle                 |
 | `PAY_TIMEOUT_MS`    | 60000  | initiator abandons the wave if its kick-off burn never confirms        |
-| `PIN_BUDGET`        | 7      | sticky random pins held (the flood graph's chosen floor)               |
 | `GOSSIP_SEEN_CAP`   | 4096   | flood-dedup id cap (oldest evicted first)                              |
 | `MAX_IMAGE_BYTES`   | 262144 | per-selfie image cap (bounds writes under optimistic ingest, §8.2)     |
 | `MAX_CAPTION_BYTES` | 512    | per-selfie caption cap                                                 |
@@ -835,16 +821,14 @@ tuning.
 - **Angle/seat** is bound to the public key and can't be forged without grinding keys.
 - **Join attestations** authenticate each gallery entry to a peer identity and to the writer
   core it posted from (§2.2); the **schedule** is derived by every peer from the same flooded
-  canonical roster, so all honest peers agree on who fires when without trusting each other.
+  `by`/`writers`, so all honest peers agree on who fires when without trusting each other.
 - The **gallery write-gate** is authenticity, not proof-of-participation (§8.2). A malicious
   fork can drop/ignore anything locally (open P2P); the protocol keeps _honest_ peers
   consistent. There are **no sponsor rewards**, so there is nothing to steal by faking
   participation — the only money flows are burned fees (nobody profits) and voluntary tips
   (paid directly, peer to peer). This removes the whole class of reward-gaming attacks.
 - **Completion needs no trust.** The wave ends on every peer's own timer at
-  `t0 + lapMs + END_GRACE_MS` — there is no end message to forge, lose, or suppress. (The
-  token-era hardening around signed `wave-end`, receipt-carrying stalls, and heal-ACK
-  precision is **not applicable**: there is no token to stall and no heal to suppress.)
+  `t0 + lapMs + END_GRACE_MS` — there is no end message to forge, lose, or suppress.
 - Country is cosmetic and self-reported.
 
 ### 11.2 Adversarial hardening (against a modified client)
@@ -868,8 +852,8 @@ following guards keep a hostile peer running a modified app from disrupting hone
   whose `t0` is more than `MAX_LAP_MS` in the future (§6.6), so a forged/buggy start can't
   wedge a wave open indefinitely — the deterministic end always arrives.
 - **Canonical-roster schedule.** The sweep schedule is a pure function of the flooded
-  `(roster, t0, lapMs)`, so no peer can shift its own (or anyone's) slot without producing a
-  different `wave-start` — which the paid-gate + lower-id tie-break already constrain.
+  `(by + writers, t0, lapMs)`, so no peer can shift its own (or anyone's) slot without
+  producing a different `wave-start` — which the paid-gate + lower-id tie-break already constrain.
 - **Paid-gate on every adoption path.** When enforced, `wave-announce`, `wave-start`, and
   `wave-sync` (both lobby **and** racing) are all gated on a valid kick-off burn-proof, so no
   single message shape can push a peer into an unpaid/forged wave.
@@ -916,7 +900,7 @@ only §3–§8 are the interop surface.
 the peer's sweep slot and posts it when the slot fires), `tip {to, amount}` (send a real TRX
 tip to a selfie owner's wallet), `refresh-wallet` (manual balance re-check after funding).
 
-**Worker → renderer (events):** `state {me,peers,successor}`; `gallery {items}`;
+**Worker → renderer (events):** `state {me,peers,connected,discovered}`; `gallery {items}`;
 `wallet {address, trx}` (self-custodial TRX wallet); `tip-result {hash?, error?}`;
 `burn-result {stage: 'confirming'|'burned'|'failed', hash?, amount?, error?, waveId?, reason}`
 (a **participation fee** — 1 TRX burned
@@ -928,7 +912,7 @@ party. `reason: 'kickoff'` for the initiator on `start-wave`, `'join'` for each 
 announcing), `wave-verified` (kick-off burn proven — join is now allowed), `wave-unpaid`
 (kick-off failed verification — wave abandoned), `join-blocked {reason}` (tried to join
 before the kick-off is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
-`started`, `holding {canSelfie,angle,hopCount,...}` (my sweep slot fired — my staged selfie
+`started`, `holding {angle,hopCount,...}` (my sweep slot fired — my staged selfie
 posts now), `position {holder,angle,hopCount}` (locally generated from the schedule as each
 slot passes — this is what animates the ⚽; there is no position gossip), `completed
-{waveId,hops,angle}` (fires on **every** peer at the deterministic end), `gallery-error`.
+{waveId,hops,angle}` (fires on **every** peer at the deterministic end).

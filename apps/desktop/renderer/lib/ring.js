@@ -12,7 +12,7 @@ const FLOURISH_MS = 1500; // completion flourish duration (ring pulses + confett
 
 // Module state — all declared up front (CLAUDE.md Code Style); each group's behaviour is
 // documented at the section that drives it below.
-let state = { me: null, peers: [], successor: null };
+let state = { me: null, peers: [] };
 let center = null; // gallery item shown in the centre (or null)
 const imgCache = new Map(); // dataURL -> HTMLImageElement
 // replay sweep (see "the football" section)
@@ -372,7 +372,6 @@ function drawCenterSelfie(centerX, centerY) {
 function render() {
   const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
-  const successorId = state.successor?.id;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   ctx.beginPath();
@@ -381,27 +380,8 @@ function render() {
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // baton direction: line from me to my successor
-  if (state.me && state.successor) {
-    const [myX, myY] = pointOn(state.me.angle, RING_RADIUS);
-    const [succX, succY] = pointOn(state.successor.angle, RING_RADIUS);
-    ctx.beginPath();
-    ctx.moveTo(myX, myY);
-    ctx.lineTo(succX, succY);
-    ctx.strokeStyle = 'rgba(255,209,102,0.5)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-
   for (const peer of state.peers) {
-    const isSuccessor = peer.id === successorId;
-    dot(
-      peer.angle,
-      RING_RADIUS,
-      isSuccessor ? '#ff8c42' : '#39d98a',
-      isSuccessor ? 8 : 6,
-      isSuccessor ? 'next ▸ ' + peer.id.slice(0, 6) : peer.id.slice(0, 6)
-    );
+    dot(peer.angle, RING_RADIUS, '#39d98a', 6, peer.id.slice(0, 6));
     drawFlagAt(peer.angle, RING_RADIUS + 20, 22, flagOf(peer.country));
   }
   if (state.me) {

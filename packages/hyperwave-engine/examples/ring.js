@@ -2,12 +2,7 @@
 // peers sorted clockwise. No I/O. Run:  bare examples/ring.js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const {
-  angleOf,
-  angleOfId,
-  liveRing,
-  nextClockwise
-} = require('hyperwave-engine/lib/ring');
+const { angleOf, angleOfId, liveRing } = require('hyperwave-engine/lib/ring');
 
 // A seat angle is DERIVED from the public key — never trusted from the wire.
 const me = crypto.keyPair();
@@ -29,8 +24,5 @@ console.log(
   'live ring angles:',
   live.map((peer) => peer.angle)
 );
-
-// The next seat clockwise from me (wraps to the first). The seat/angle drives the sweep
-// order + the gallery order; the sweep visits every roster member by angle, no routing.
-const successor = nextClockwise(myAngle, live);
-console.log('next clockwise seat:', successor ? successor.angle : null);
+// The seat/angle drives the sweep order + the gallery order; the sweep visits every
+// roster member by angle, no routing.

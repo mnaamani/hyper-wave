@@ -286,12 +286,9 @@ class CrdtGallery {
    * @returns {Promise<void>}
    */
   async close() {
-    for (const wave of this.#waves.values()) {
-      for (const core of [wave.own, ...wave.foreign.values()]) {
-        await core.close().catch(() => {});
-      }
+    for (const waveId of [...this.#waves.keys()]) {
+      await this.#closeWave(waveId);
     }
-    this.#waves.clear();
   }
 }
 

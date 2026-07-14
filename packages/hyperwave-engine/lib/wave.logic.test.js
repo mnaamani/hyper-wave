@@ -1,14 +1,19 @@
-// Ring geometry: successor, liveness, and healing selection. Runs under Bare:
-//   bare workers/lib/wave.logic.test.js   (or `npm test`)
+// Ring geometry: seat angles + liveness. Runs under Bare:
+//   bare lib/wave.logic.test.js   (or `npm test`)
 const test = require('brittle');
 const b4a = require('b4a');
-const { angleOf, liveRing, nextClockwise } = require('./ring');
+const { angleOf, angleOfId, liveRing } = require('./ring');
 
 test('angleOf maps a key into [0,360)', (t) => {
   t.is(angleOf(b4a.alloc(8)), 0);
   const high = angleOf(b4a.alloc(8).fill(0xff));
   t.ok(high >= 0 && high < 360, 'in range');
   t.ok(high > 359, 'all-0xff near 360');
+});
+
+test('angleOfId matches angleOf over the hex form of the same key', (t) => {
+  const key = b4a.from('a1b2c3d4e5f60708', 'hex');
+  t.is(angleOfId(b4a.toString(key, 'hex')), angleOf(key));
 });
 
 test('liveRing drops stale peers and sorts clockwise', (t) => {
@@ -24,29 +29,4 @@ test('liveRing drops stale peers and sorts clockwise', (t) => {
     ['b', 'a'],
     'c pruned, sorted by angle'
   );
-});
-
-test('nextClockwise picks smallest angle greater than mine', (t) => {
-  const ring = [
-    { id: 'b', angle: 10 },
-    { id: 'a', angle: 300 }
-  ];
-  t.is(nextClockwise(150, ring).id, 'a');
-  t.is(nextClockwise(5, ring).id, 'b');
-});
-
-test('nextClockwise wraps around past the top of the ring', (t) => {
-  const ring = [
-    { id: 'b', angle: 10 },
-    { id: 'a', angle: 300 }
-  ];
-  t.is(nextClockwise(350, ring).id, 'b');
-});
-
-test('nextClockwise returns null on an empty ring', (t) => {
-  t.is(nextClockwise(42, []), null);
-});
-
-test('single-peer ring: successor is always that peer (even if behind me)', (t) => {
-  t.is(nextClockwise(200, [{ id: 'only', angle: 5 }]).id, 'only');
 });

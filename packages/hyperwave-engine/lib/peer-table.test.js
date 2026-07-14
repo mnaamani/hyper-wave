@@ -1,7 +1,6 @@
-// PeerTable: the consistency rules across seats / channels / pins / churn cooldowns —
-// wire-supplied angles are never trusted, fresher sightings win, a direct disconnect is
-// authoritative (immediate drop + cooldown so ghosts can't be resurrected), and pin
-// updates come back as a mirrorable diff. Pure — no swarm. Runs under Bare:
+// PeerTable: the consistency rules across seats / channels — wire-supplied angles are
+// never trusted, fresher sightings win, and a direct disconnect is authoritative
+// (immediate seat + channel drop). Pure — no swarm. Runs under Bare:
 //   bare lib/peer-table.test.js   (or `npm test`)
 const test = require('brittle');
 const { PeerTable } = require('./peer-table');
@@ -15,6 +14,10 @@ const NOOP_SEND = () => {};
 
 function makeTable() {
   return new PeerTable({ meId: ME, staleMs: STALE_MS });
+}
+
+function channelOf(table, id) {
+  return new Map(table.senderEntries()).get(id);
 }
 
 test('upsert derives the angle from the id and never seats me', (t) => {
@@ -69,52 +72,19 @@ test('liveRing drops stale seats and sorts clockwise by angle', (t) => {
   );
 });
 
-test('onConnect seats the peer, stores its channel, and lifts the cooldown', (t) => {
+test('onConnect seats the peer and stores its channel', (t) => {
   const table = makeTable();
-  table.onDisconnect(PEER_A); // puts A in cooldown
-  t.ok(table.coolingDown(PEER_A), 'disconnect starts the churn cooldown');
   table.onConnect(PEER_A, NOOP_SEND);
-  t.absent(table.coolingDown(PEER_A), 'reconnect lifts it');
-  t.is(table.send(PEER_A), NOOP_SEND);
+  t.is(channelOf(table, PEER_A), NOOP_SEND);
   t.is(table.liveRing().length, 1, 'connected peer is seated');
 });
 
-test('onDisconnect is authoritative: seat + channel drop at once, cooldown starts', (t) => {
+test('onDisconnect is authoritative: seat + channel drop at once', (t) => {
   const table = makeTable();
   table.onConnect(PEER_A, NOOP_SEND);
   table.onConnect(PEER_B, NOOP_SEND);
-  const first = table.onDisconnect(PEER_A);
-  t.alike(first, { wasPinned: false });
-  t.absent(table.send(PEER_A), 'channel dropped');
-  t.is(table.liveRing().length, 1, 'the seat dropped immediately');
-  t.ok(table.coolingDown(PEER_A), 'ghost-resurrection guard armed');
-});
-
-test('the cooldown expires (and self-prunes) after staleMs', (t) => {
-  const table = makeTable();
   table.onDisconnect(PEER_A);
-  const now = Date.now();
-  t.ok(table.coolingDown(PEER_A, now), 'active within the window');
-  t.absent(table.coolingDown(PEER_A, now + STALE_MS + 1), 'expired after it');
-  t.absent(table.coolingDown(PEER_A, now), 'expired check pruned the entry');
-});
-
-test('updatePins diffs against the desired targets and reports the churn', (t) => {
-  const table = makeTable();
-  const first = table.updatePins(new Set([PEER_A, PEER_B]));
-  t.alike(
-    first.added.sort(),
-    [PEER_A, PEER_B].sort(),
-    'all new targets pinned'
-  );
-  t.alike(first.removed, []);
-  const second = table.updatePins(new Set([PEER_B]));
-  t.alike(second.added, []);
-  t.alike(second.removed, [PEER_A], 'a dropped target is unpinned');
-  t.alike([...table.pinnedIds()], [PEER_B]);
-  t.is(
-    table.onDisconnect(PEER_B).wasPinned,
-    true,
-    'pin state feeds the churn repair'
-  );
+  t.absent(channelOf(table, PEER_A), 'channel dropped');
+  t.is(table.liveRing().length, 1, 'the seat dropped immediately');
+  t.alike([...table.senderIds()], [PEER_B], 'only the live channel remains');
 });

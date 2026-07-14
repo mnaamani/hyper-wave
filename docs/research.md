@@ -1,35 +1,35 @@
 # HyperWave — Research & Inspiration
 
 The papers, protocols, and projects HyperWave draws on, with a note on what each one
-contributed to the design. Deeper context for the choices documented in
-[`protocol.md`](./protocol.md) and [`scalable-topology.md`](./scalable-topology.md).
+contributes to the design. Deeper context for the choices documented in
+[`protocol.md`](./protocol.md).
 
 ## Distributed systems / topology
+
+- **Consistent Hashing and Random Trees** — Karger et al. (STOC 1997).
+  <https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf>
+  The idea under the ring: hashing participants onto a circle so membership changes only
+  perturb neighbours. It's why a peer's seat is stable and permissionless — "seat on the
+  ring derived from your key" is a hash-to-circle node id, doubling as the stadium
+  seating chart.
 
 - **Chord: A Scalable Peer-to-peer Lookup Service for Internet Applications** — Stoica,
   Morris, Karger, Kaashoek, Balakrishnan (SIGCOMM 2001).
   <https://pdos.csail.mit.edu/papers/chord:sigcomm01/chord_sigcomm.pdf>
-  The backbone of our scalable topology: the identifier ring, successor lists,
-  predecessor, O(log N) finger tables, `findSuccessor` routing, and the
-  stabilize/fixFingers maintenance loop are implemented (adapted) in `lib/chord.js` +
-  `lib/chord-routing.js`. Our "seat on the ring derived from your key" is Chord's node id
-  — doubling as the stadium seating chart.
-
-- **Consistent Hashing and Random Trees** — Karger et al. (STOC 1997).
-  <https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf>
-  The idea underneath Chord's id space: hashing participants onto a circle so membership
-  changes only perturb neighbours. It's why a peer's seat is stable and permissionless.
+  The canonical identifier-ring design. HyperWave keeps Chord's id space (the angle-sorted
+  ring of key-derived seats) but none of its routing — the deterministic sweep needs no
+  successor lookup, so nothing routes.
 
 - **Epidemic Algorithms for Replicated Database Maintenance** — Demers et al. (PODC 1987).
   <https://dl.acm.org/doi/10.1145/41840.41841>
-  The classic gossip paper. Our control-plane **flood** (`lib/flood.js`: relay on first
+  The classic gossip paper. The control-plane **flood** (`lib/flood.js`: relay on first
   sight of a `mid`, drop repeats) is textbook rumor mongering — it's how `wave-announce`
-  / `wave-start` / `wave-end` blanket a partial mesh in a few rounds.
+  / `wave-join` / `wave-start` blanket a partial mesh in a few rounds.
 
 - **Epidemic Broadcast Trees (Plumtree)** — Leitão, Pereira, Rodrigues (SRDS 2007).
   <https://www.dpss.inesc-id.pt/~ler/reports/srds07.pdf>
-  The refinement path for our flooding: prune the redundant flood edges into a spanning
-  tree with gossip repair. Not implemented (plain flood is fine at our scale), but it's
+  The refinement path for the flooding: prune the redundant flood edges into a spanning
+  tree with gossip repair. Not implemented (plain flood is fine at this scale), but it's
   the known answer if flood traffic ever matters.
 
 - **Kademlia: A Peer-to-peer Information System Based on the XOR Metric** — Maymounkov,
@@ -38,16 +38,20 @@ contributed to the design. Deeper context for the choices documented in
   The DHT design family behind Hyperswarm's HyperDHT, which gives us discovery ("who is
   on this match topic?") and NAT hole-punching for free.
 
+- **CRDTs: Conflict-free Replicated Data Types** — Shapiro, Preguiça, Baquero, Zawirski
+  (SSS 2011). <https://hal.inria.fr/inria-00609399/document>
+  The convergence model of the gallery: each participant's single selfie op is
+  self-authenticating, idempotent, and commutative, so `mergeGallery` over any set of
+  replicated cores yields a byte-identical view on every peer — no indexer, no consensus.
+
 ## The Holepunch / Pear stack (the platform)
 
 - **Hyperswarm** — <https://github.com/holepunchto/hyperswarm> — topic-based peer
-  discovery over HyperDHT + Noise-encrypted duplex streams. All our networking.
+  discovery over HyperDHT + Noise-encrypted duplex streams. All our networking, and the
+  topic mesh the flood rides.
 - **Hypercore / Corestore** — <https://github.com/holepunchto/hypercore> — signed
-  append-only logs + replication; the storage/replication substrate under the gallery.
-- **Autobase** — <https://github.com/holepunchto/autobase> — multi-writer: many peers'
-  logs deterministically merged into one view. The selfie gallery is one Autobase per
-  wave, with our own deterministic `apply()` gates (signature check, one entry per peer,
-  byte caps).
+  append-only logs + replication. The gallery is one Hypercore per participant, replicated
+  and merged locally.
 - **Protomux / compact-encoding** — <https://github.com/holepunchto/protomux> — channel
   multiplexing over one stream; our single JSON-over-`c.string` gossip channel rides it.
 - **Bare** — <https://github.com/holepunchto/bare> — the small JS runtime the engine runs
@@ -64,10 +68,10 @@ contributed to the design. Deeper context for the choices documented in
   the swarm. Seed phrase → per-chain accounts; we use `@tetherto/wdk-wallet-tron`.
 - **Tron** — <https://tron.network/> (Nile testnet: <https://nileex.io/>) — the chain the
   MVP pays on: fast, cheap, and native-TRX transfers pay their own fee from the same
-  balance (why we dropped TRC-20 USDT for the MVP).
+  balance.
 - **Proof-of-Burn** — Karantias, Kiayias, Zindros (Financial Cryptography 2020).
   <https://eprint.iacr.org/2019/1096>
-  Formalizes "destroying coins as a verifiable, beneficiary-less commitment". Our
+  Formalizes "destroying coins as a verifiable, beneficiary-less commitment". The
   participation fees are exactly this: a transfer to Tron's unspendable black-hole
   address, memo-tagged to the wave, verifiable by anyone — skin in the game that enriches
   nobody.
@@ -76,19 +80,14 @@ contributed to the design. Deeper context for the choices documented in
 
 - **Ed25519: high-speed high-security signatures** — Bernstein, Duif, Lange, Schwabe,
   Yang (CHES 2011). <https://ed25519.cr.yp.to/ed25519-20110926.pdf>
-  Every identity, hop receipt, attestation, and gallery entry is Ed25519-signed
+  Every identity, attestation, and gallery entry is Ed25519-signed
   (via `hypercore-crypto` / libsodium).
 - **BLAKE2: simpler, smaller, fast as MD5** — Aumasson, Neves, Wilcox-O'Hearn, Winnerlein
   (2013). <https://www.blake2.net/blake2.pdf>
-  Our hash everywhere: ring topics, receipt hashes, and the chain accumulator.
+  Our hash everywhere: ring topics and attestation digests.
 - **The Noise Protocol Framework** — Perrin. <https://noiseprotocol.org/noise.html>
   The handshake/encryption under every Hyperswarm connection; also what gives us an
-  authenticated remote identity per connection (the basis of our identity-binding checks).
-- **Hash chains** (Lamport, "Password Authentication with Insecure Communication", 1981).
-  <https://lamport.azurewebsites.net/pubs/password.pdf>
-  The ancestor of our constant-size **chain accumulator**: folding each hop's signature
-  into a rolling hash so the token stays tiny while still committing to the full hop
-  history.
+  authenticated remote identity per connection (the basis of the identity-binding check).
 
 ## The game itself
 
@@ -97,5 +96,5 @@ contributed to the design. Deeper context for the choices documented in
   <https://www.nature.com/articles/419131a>
   A lovely aside: stadium waves really are a self-organising relay in an excitable
   medium, needing only ~25–35 people to trigger and travelling at a characteristic speed
-  — no conductor. HyperWave is that phenomenon, moved onto a network: local rule
-  ("react to your predecessor, pass to your successor"), global spectacle.
+  — no conductor. HyperWave is that phenomenon, moved onto a network: everyone fires at
+  their own moment of a shared schedule, global spectacle.
