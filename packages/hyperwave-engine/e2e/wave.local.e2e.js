@@ -6,7 +6,7 @@
 // A companion on-chain suite (funded wallets + Nile) covers the paid-wave gate, burns, and
 // tips — that one needs secrets + costs testnet TRX, so it runs gated/nightly.
 const test = require('brittle');
-const { Cluster, sleep, waitForAnyGallery } = require('./harness');
+const { Cluster, sleep, waitForAnyFeed } = require('./harness');
 
 // 8 is a good default: enough peers that the sweep really covers a ring and gossip really floods
 // a small mesh, but light enough for a 2-core CI runner. Turn it down on a constrained box, or up
@@ -14,7 +14,7 @@ const { Cluster, sleep, waitForAnyGallery } = require('./harness');
 const PEER_COUNT = Number(process.env.E2E_PEERS || 8);
 
 // Time windows scale with the peer count so a large-N dispatch isn't strangled by budgets sized
-// for 8: launch alone staggers 400ms per peer, and convergence replicates N selfies to N nodes.
+// for 8: launch alone staggers 400ms per peer, and convergence replicates N entrys to N nodes.
 // (The sweep itself is a chosen constant — lapMs is clamped in the engine — so the wave's own
 // duration no longer scales with N.) At the default 8 these come out a whisker above the
 // historical fixed values (90s wait / 150s test), so small runs behave as before.
@@ -60,9 +60,9 @@ function gatheredRoster(initiator) {
   return maxCount;
 }
 
-// Launch PEER_COUNT equal peers, all auto-joining and auto-selfie-ing (no roles). p1 initiates: it
+// Launch PEER_COUNT equal peers, all auto-joining and auto-entry-ing (no roles). p1 initiates: it
 // kicks off once its ring reaches START_TARGET, and — as the initiator — it archives its wave's
-// gallery. Launches are staggered — the other half of
+// feed. Launches are staggered — the other half of
 // reliable DHT discovery (see harness.start's warm-up). Returns { peers } (peers[0] is p1).
 async function launchWave(cluster) {
   const peers = [];
@@ -70,7 +70,7 @@ async function launchWave(cluster) {
     peers.push(
       cluster.launch('p' + i, {
         AUTOJOIN: '1',
-        AUTOSELFIE: '1',
+        AUTOENTRY: '1',
         // force a partial mesh below the peer count (E2E_MAX_PEERS=16 at N=64)
         ...(process.env.E2E_MAX_PEERS
           ? { HYPERWAVE_MAX_PEERS: process.env.E2E_MAX_PEERS }
@@ -84,7 +84,7 @@ async function launchWave(cluster) {
 }
 
 test(
-  `a ${PEER_COUNT}-peer wave converges the gallery on every node`,
+  `a ${PEER_COUNT}-peer wave converges the feed on every node`,
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const cluster = await new Cluster({
@@ -95,7 +95,7 @@ test(
     const { peers } = await launchWave(cluster);
 
     // The convergence target. At small N (STRICT_FULL_ROSTER): the FULL peer count — churn-free,
-    // every peer joins the lobby, posts, and every node converges on all PEER_COUNT selfies. (This
+    // every peer joins the lobby, posts, and every node converges on all PEER_COUNT entrys. (This
     // was briefly relaxed during the July 2026 regression hunt; the culprit was hyperdht 6.33.0 —
     // see TODO.md "Dependency watch" — and on the pinned hyperdht strict passes. Keep it strict:
     // it's the sharpest detector for that class of regression.) At scale: the roster the lobby
@@ -112,7 +112,7 @@ test(
     }
     for (const peer of peers) {
       t.ok(
-        await peer.waitForGallery(target, WAIT_MS),
+        await peer.waitForFeed(target, WAIT_MS),
         `${peer.name} converged to ${target}`
       );
     }
@@ -138,7 +138,7 @@ test(
     const { peers } = await launchWave(cluster);
 
     // once the sweep is scheduled, kill two mid-ring peers (not the initiator p1 — it
-    // archives the gallery)
+    // archives the feed)
     await peers[0].waitForEvent('started', WAIT_MS);
     // like test 1: full count at small N, the lobby-gathered roster at scale
     const target = STRICT_FULL_ROSTER ? PEER_COUNT : gatheredRoster(peers[0]);
@@ -152,12 +152,12 @@ test(
       await peers[1].waitForEvent('completed', WAIT_MS),
       'wave completed despite 2 peers dying mid-wave'
     );
-    // The survivors' selfies converge into the shared gallery. The ONLY loss is the two
+    // The survivors' entrys converge into the shared feed. The ONLY loss is the two
     // killed peers' own slots (they died before posting): everyone else posts and
     // converges, so the bound is exact.
     t.ok(
-      await waitForAnyGallery(survivors, target - 2, WAIT_MS),
-      `the sweep still populated the gallery (≥ ${target - 2} survivor selfies converged)`
+      await waitForAnyFeed(survivors, target - 2, WAIT_MS),
+      `the sweep still populated the feed (≥ ${target - 2} survivor entrys converged)`
     );
   }
 );

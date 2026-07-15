@@ -49,7 +49,7 @@ pipe.on('data', (data) => {
   } catch {
     return;
   }
-  // First message from the RN host should be the init: storageDir + config (matchId, seed, ...)
+  // First message from the RN host should be the init: storageDir + config (topicId, seed, ...)
   if (msg.type === 'init' && !engine) {
     engine = createEngine({
       storageDir: resolveStorage(msg.storageDir),

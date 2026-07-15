@@ -1,10 +1,10 @@
 // Wallet domain (WDK layer + fee flows). A self-custodial Tron wallet per instance — used for
-// the burned participation fees and gallery tips (no sponsor rewards) — plus the participation-fee
+// the burned participation fees and feed tips (no sponsor rewards) — plus the participation-fee
 // flows shared by the engine hosts (the GUI worker and the headless harness): one home for the
 // fee amount and the on-chain memo format, so a format drift between hosts can't silently break
 // verification. WDK is ESM-only, so this CJS module bridges to it via dynamic import(); it does
 // real Tron Nile-testnet transfers (the spike/wdk de-risk confirmed this runs under Bare). No
-// swarm here — the worker (hyperwave.js) / wave.js wire it in, mirroring ring/gallery as
+// swarm here — the worker (hyperwave.js) / wave.js wire it in, mirroring ring/feed as
 // its own module.
 //
 // MVP uses **native TRX** as the payment currency (not TRC-20 USDT): no token contract, and
@@ -34,11 +34,11 @@ const NILE_PROVIDER = 'https://nile.trongrid.io';
 const SUN = 1_000_000; // 1 TRX = 1e6 sun
 // Tron's black hole (base58check of the all-zero EVM address, 41 + 20×00): no key exists,
 // so TRX sent here is provably unspendable — the canonical burn. Used for the initiator's
-// kick-off fee. (Zero-amount transfers are rejected by TransferContract, so a burn is a
+// start fee. (Zero-amount transfers are rejected by TransferContract, so a burn is a
 // real small transfer; Tron also burns tx fees at the protocol level.)
 const BURN_ADDRESS = 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb';
 
-/** @type {number} Kick-off/join fee in whole TRX, burned to the black hole (BURN_ADDRESS). */
+/** @type {number} Start/join fee in whole TRX, burned to the black hole (BURN_ADDRESS). */
 const FEE_TRX = 1;
 // On-chain read-back poll (confirmBurn): getTransaction reflects a broadcast tx within
 // seconds on Nile, but allow for lag. Total budget must stay under wave.js PAY_TIMEOUT_MS.
@@ -59,7 +59,7 @@ const toSun = (trx) => BigInt(Math.round(Number(trx) * SUN));
 const fromSun = (raw) => Number(raw) / SUN;
 
 /**
- * Create a self-custodial Tron wallet (WDK layer) for burned fees and gallery tips. WDK is
+ * Create a self-custodial Tron wallet (WDK layer) for burned fees and feed tips. WDK is
  * ESM-only, so this bridges via dynamic import(). Seed precedence: injected -> file -> generate
  * and persist (a mobile host injects from secure storage; desktop persists to `wallet.seed`).
  * @param {Object} [options] - Wallet options.
@@ -145,7 +145,7 @@ async function createPayments({
       return { hash: res.hash, fee: res.fee };
     },
     // Verify (on-chain) that `txHash` is a burn matching expectations — the anti-spam gate a
-    // peer runs before joining a wave: the kick-off fee must really be paid. Checks (via
+    // peer runs before joining a wave: the start fee must really be paid. Checks (via
     // `getTransaction`, which reflects a broadcast tx within seconds — `getTransactionInfo`'s
     // block confirmation lags badly on Nile): TransferContract to the black hole, from
     // `expect.from`, amount ≥ `expect.minTrx`, and the memo commits `expect.waveId`. The tx
@@ -263,13 +263,13 @@ function burnMemo(waveId, peerId) {
 
 /**
  * Burn the participation fee for `waveId` and sign the ring attestation. Returns
- * { hash, proof }; throws if the burn fails. `proof` is the kick-off gate credential for the
+ * { hash, proof }; throws if the burn fails. `proof` is the start gate credential for the
  * initiator (announcePaid); a joiner's burn is its own anti-spam cost and ignores `proof`.
  * @param {Object} opts The fee to burn.
  * @param {Object} opts.wave - The createWave engine handle (provides `me.id` and `recordBurn`).
  * @param {Object} opts.payments - The Payments object from createPayments (provides `burn`).
  * @param {string} opts.waveId - The wave the fee is being burned for.
- * @param {string} opts.reason - Fee reason, e.g. `'kickoff'` or `'join'`.
+ * @param {string} opts.reason - Fee reason, e.g. `'start'` or `'join'`.
  * @returns {Promise<{hash: string, proof: Object}>} The burn tx hash and the signed burn proof.
  */
 async function payFee({ wave, payments, waveId, reason }) {
@@ -309,7 +309,7 @@ async function confirmBurn(payments, waveId, hash) {
 }
 
 /**
- * Wire a ready wallet into the engine: my address (gallery tips / attestations) and the on-chain
+ * Wire a ready wallet into the engine: my address (feed tips / attestations) and the on-chain
  * burn verifier (enables the paid-wave anti-spam gate).
  * @param {Object} wave - The createWave engine handle (provides `setWallet`).
  * @param {Object} payments - The Payments object from createPayments (address + `verifyBurnTx`).

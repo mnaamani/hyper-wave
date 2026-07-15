@@ -1,21 +1,22 @@
-// selfie.js — the SelfiePipeline pairs the lobby-captured selfie with my sweep slot
-// (arriving in either order) and posts the combined gallery entry exactly once per wave.
-// The burn proof survives reset() (it rides the entry as the tip-address binding) and
-// drops only when a genuinely new wave begins. Stateless demo (the post callback logs).
-// Run:  bare examples/selfie.js
-const { SelfiePipeline } = require('hyperwave-engine/lib/selfie');
+// entry.js — the EntryPipeline pairs the host-staged entry payload with my sweep slot
+// (arriving in either order) and posts the combined feed entry exactly once per wave.
+// The payload is opaque to the engine — the host owns its shape. The burn proof survives
+// reset() (it rides the entry as the tip-address binding) and drops only when a genuinely
+// new wave begins. Stateless demo (the post callback logs). Run:  bare examples/entry.js
+const { EntryPipeline } = require('hyperwave-engine/lib/entry');
 
 const state = { waveId: 'w1' };
-const pipeline = new SelfiePipeline({
+const pipeline = new EntryPipeline({
   currentWaveId: () => state.waveId,
   post: (entry) =>
-    console.log('POST →', entry.caption, '(slot', entry.hopCount + ')')
+    console.log('POST →', entry.payload, '(slot', entry.hopCount + ')')
 });
 
 const slot = { waveId: 'w1', hopCount: 3 }; // my rank in the angle-ordered sweep
 
 // Either half can land first; whichever arrives second fires the post — exactly once.
-pipeline.stage({ image: '<jpeg-data-url>', caption: 'goal!' });
+// The payload is arbitrary JSON the host owns (here a {label}).
+pipeline.stage({ payload: { label: 'hello' } });
 console.log('staged (no post yet — waiting for my sweep slot)');
 pipeline.recordSlot(slot); // → POST
 pipeline.recordSlot(slot); // duplicate — the once-per-wave guard drops it

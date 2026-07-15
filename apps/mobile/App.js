@@ -16,12 +16,12 @@ import {
 import { useEngine } from './src/useEngine';
 
 // Isolate this build's ring so multiple test devices don't collide on the public DHT.
-const MATCH = 'hyperwave-mobile-demo';
+const TOPIC = 'hyperwave-mobile-demo';
 
 export default function App() {
   // wallet on — testing WDK under the worklet (the chip populates on success; a failure
   // surfaces as a ⚠ wallet toast). Flip to wallet:false to run the engine wallet-less.
-  const engine = useEngine({ matchId: MATCH });
+  const engine = useEngine({ topicId: TOPIC });
   const { me, peers, phase, gallery, wallet, toast } = engine;
   const [joined, setJoined] = useState(false);
 

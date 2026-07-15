@@ -5,7 +5,7 @@
 // the same binary the app ships. Used by e2e/*.e2e.js, run with `npm run test:e2e:local`.
 //
 // Design notes:
-//  - No fixed sleeps. `waitForEvent` / `waitForLine` / `waitForGallery` resolve the instant the
+//  - No fixed sleeps. `waitForEvent` / `waitForLine` / `waitForFeed` resolve the instant the
 //    condition is met, or resolve `false` (logging the output tail as a diagnostic) on timeout —
 //    fast AND non-flaky. Resolving falsy (not rejecting) means a timed-out `t.ok(await …)` fails
 //    just its own assertion instead of crashing the whole run with an unhandled rejection.
@@ -168,17 +168,17 @@ class Proc {
     return this.#wait(() => !!find(), find, ms, `event ${name}`);
   }
 
-  // Resolve when the gallery has reached at least `min` entries (robust to batched updates,
+  // Resolve when the feed has reached at least `min` entries (robust to batched updates,
   // which can skip intermediate sizes). Returns the max size seen.
-  waitForGallery(min, ms = 60000) {
+  waitForFeed(min, ms = 60000) {
     const max = () => {
       let maxSize = -1;
-      for (const match of this.out.matchAll(/GALLERY size=(\d+)/g)) {
+      for (const match of this.out.matchAll(/FEED size=(\d+)/g)) {
         maxSize = Math.max(maxSize, Number(match[1]));
       }
       return maxSize;
     };
-    return this.#wait(() => max() >= min, max, ms, `gallery >= ${min}`);
+    return this.#wait(() => max() >= min, max, ms, `feed >= ${min}`);
   }
 
   tail(chars = 1200) {
@@ -229,7 +229,7 @@ class Cluster {
     return this;
   }
 
-  // Launch a peer with its own storage dir. `env` overrides (START, AUTOJOIN, AUTOSELFIE,
+  // Launch a peer with its own storage dir. `env` overrides (START, AUTOJOIN, AUTOENTRY,
   // WALLET, …). `seed` (a BIP39 mnemonic) is written to the storage dir's
   // `wallet.seed` so the wallet is a specific FUNDED one (for the on-chain tier); omit it for
   // the local no-wallet tier. Returns the Proc.
@@ -261,14 +261,14 @@ class Cluster {
   }
 }
 
-// Resolve true when ANY of `procs` reaches `min` gallery entries, else false within `ms`. Use
-// when the assertion is "the writes converged into a shared gallery" and no single peer is a
+// Resolve true when ANY of `procs` reaches `min` feed entries, else false within `ms`. Use
+// when the assertion is "the writes converged into a shared feed" and no single peer is a
 // guaranteed hub — e.g. under churn, the slowest node to converge shouldn't fail the test.
-// (waitForGallery only ever settles truthy on success / false on timeout, so racing is sound.)
-function waitForAnyGallery(procs, min, ms = 60000) {
-  return Promise.race(procs.map((proc) => proc.waitForGallery(min, ms))).then(
+// (waitForFeed only ever settles truthy on success / false on timeout, so racing is sound.)
+function waitForAnyFeed(procs, min, ms = 60000) {
+  return Promise.race(procs.map((proc) => proc.waitForFeed(min, ms))).then(
     Boolean
   );
 }
 
-module.exports = { Cluster, Proc, sleep, waitForAnyGallery };
+module.exports = { Cluster, Proc, sleep, waitForAnyFeed };

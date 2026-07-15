@@ -1,6 +1,6 @@
 // wave.js — drive the engine at a lower level with createWave() (what init() wraps,
 // minus the wallet). It builds the Hyperswarm/Corestore transport and returns the wave
-// controls. This example prints its identity, kicks off a (solo) wave, then closes.
+// controls. This example prints its identity, starts a (solo) wave, then closes.
 // Run:  bare examples/wave.js
 const fs = require('bare-fs');
 const env = require('bare-env');
@@ -11,7 +11,7 @@ async function main() {
 
   const wave = createWave({
     storageDir: dir,
-    matchId: 'example-' + Date.now(),
+    topicId: 'example-' + Date.now(),
     bootstrap: parseBootstrap(env.HYPERWAVE_BOOTSTRAP), // host:port → local DHT, else public
     onState: ({ me, peers }) => {
       console.log(
@@ -24,16 +24,16 @@ async function main() {
       );
     },
     onEvent: (ev) => console.log('event:', ev.event, ev.waveId || ''),
-    onGallery: (items) => console.log('gallery:', items.length)
+    onFeed: (items) => console.log('feed:', items.length)
     // swarmSeed: '<hex>'  // inject an identity; else <storage>/swarm.seed (stable across runs)
   });
 
-  console.log('my seat:', wave.me); // { id, angle, country }
+  console.log('my seat:', wave.me); // { id, angle, tag }
 
-  wave.setCountry('BR');
+  wave.setTag('BR');
   const waveId = wave.startWave(); // announce + open the lobby; null if busy
-  console.log('kicked off wave:', waveId);
-  wave.stageSelfie({ image: '<jpeg-data-url>', caption: 'me' }); // posts when the ball arrives
+  console.log('started wave:', waveId);
+  wave.stageEntry({ payload: { label: 'me' } }); // opaque; posts at my sweep slot
 
   await new Promise((resolve) => setTimeout(resolve, 1500));
   await wave.close();

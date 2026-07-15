@@ -7,7 +7,7 @@ const test = require('brittle');
 const { createEngine } = require('./engine');
 
 // A fake wave that records the calls the engine makes on it, and hands the engine the option
-// callbacks so the test can fire wave events (onState/onEvent/onGallery) itself.
+// callbacks so the test can fire wave events (onState/onEvent/onFeed) itself.
 function fakeWave() {
   const calls = [];
   const wave = {
@@ -23,8 +23,8 @@ function fakeWave() {
       return 'wave-1';
     },
     announcePaid: (paid) => calls.push(['announcePaid', paid]),
-    setCountry: (country) => calls.push(['setCountry', country]),
-    stageSelfie: (selfie) => calls.push(['stageSelfie', selfie]),
+    setTag: (tag) => calls.push(['setTag', tag]),
+    stageEntry: (entry) => calls.push(['stageEntry', entry]),
     setWallet: (addr) => calls.push(['setWallet', addr]),
     close: async () => calls.push('close')
   };
@@ -38,7 +38,7 @@ test('the engine routes commands to the wave protocol and forwards its events to
   const wave = fakeWave();
   const engine = createEngine({
     storageDir: '/tmp/e',
-    config: { matchId: 'm', bootstrap: '' },
+    config: { topicId: 'm', bootstrap: '' },
     notify: (msg) => sent.push(msg),
     log: () => {},
     deps: {
@@ -56,26 +56,26 @@ test('the engine routes commands to the wave protocol and forwards its events to
   // engine callbacks are wired through to notify with the right envelope
   wave.opts.onState({ me: wave.me, peers: [] });
   wave.opts.onEvent({ event: 'started', waveId: 'wave-1' });
-  wave.opts.onGallery([{ caption: 'hi' }]);
+  wave.opts.onFeed([{ caption: 'hi' }]);
   t.ok(
     sent.find((msg) => msg.type === 'state') &&
       sent.find((msg) => msg.type === 'event' && msg.event === 'started') &&
-      sent.find((msg) => msg.type === 'gallery' && msg.items.length === 1),
-    'state / token / gallery events forwarded with type envelopes'
+      sent.find((msg) => msg.type === 'feed' && msg.items.length === 1),
+    'state / token / feed events forwarded with type envelopes'
   );
 
   // plain commands are dispatched to the engine
-  engine.exec({ type: 'set-country', country: 'JP' });
-  engine.exec({ type: 'stage-selfie', selfie: 'data:image/jpeg;base64,xxx' });
+  engine.exec({ type: 'set-tag', tag: 'JP' });
+  engine.exec({ type: 'stage-entry', entry: 'data:image/jpeg;base64,xxx' });
   engine.exec({ type: 'start-wave' });
   t.alike(
     wave.calls,
     [
-      ['setCountry', 'JP'],
-      ['stageSelfie', 'data:image/jpeg;base64,xxx'],
+      ['setTag', 'JP'],
+      ['stageEntry', 'data:image/jpeg;base64,xxx'],
       'startWave'
     ],
-    'set-country / stage-selfie / start-wave routed to the wave protocol'
+    'set-tag / stage-entry / start-wave routed to the wave protocol'
   );
 
   await flush();

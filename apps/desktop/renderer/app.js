@@ -67,18 +67,38 @@ function updateHud() {
   hud.dockStart(gallery.count() > 0);
 }
 
+// The engine is theme-agnostic: a peer's cosmetic `tag` is this app's country code, and a
+// feed entry carries an opaque `payload` this app fills with a {image, caption} selfie.
+// Map the engine's generic shape back to the football UI's shape right here at the inbound
+// boundary, so the rest of the UI keeps reading `.country` / `.image` / `.caption`.
+function asFootballPeer(peer) {
+  return { ...peer, country: peer.tag };
+}
+function asSelfie(item) {
+  return {
+    ...item,
+    image: item.payload?.image || '',
+    caption: item.payload?.caption || '',
+    country: item.tag
+  };
+}
+
 ipc.on('state', (msg) => {
   if (!state.countrySent) {
     setState({ countrySent: true });
     hud.sendCountry(); // worker is up - tell it the nation we support
   }
-  ring.setState(msg);
+  ring.setState({
+    ...msg,
+    me: asFootballPeer(msg.me),
+    peers: msg.peers.map(asFootballPeer)
+  });
   setState({ peers: msg.peers.length });
   updateHud();
 });
 
-ipc.on('gallery', (msg) => {
-  gallery.handle(msg.items);
+ipc.on('feed', (msg) => {
+  gallery.handle(msg.items.map(asSelfie));
   updateHud(); // dock the kick-off button below a non-empty gallery (when idle)
 });
 

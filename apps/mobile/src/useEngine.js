@@ -53,8 +53,18 @@ export function useEngine(config = {}) {
             setPhase('idle');
           }
           break;
-        case 'gallery':
-          setGallery(msg.items || []);
+        case 'feed':
+          // The engine is theme-agnostic: an entry carries an opaque `payload` this app
+          // fills with a {image, caption} selfie, and a peer's cosmetic `tag` is its
+          // country. Map back to the football shape at the boundary so the UI stays simple.
+          setGallery(
+            (msg.items || []).map((item) => ({
+              ...item,
+              image: item.payload?.image || '',
+              caption: item.payload?.caption || '',
+              country: item.tag
+            }))
+          );
           break;
         case 'wallet':
           if (msg.error) {
@@ -74,7 +84,7 @@ export function useEngine(config = {}) {
       }
     });
 
-    // one-time init: storageDir + config (matchId, bootstrap, seed)
+    // one-time init: storageDir + config (topicId, bootstrap, seed)
     pipe.write(
       JSON.stringify({ type: 'init', storageDir: STORAGE_DIR, config })
     );
@@ -118,8 +128,11 @@ export function useEngine(config = {}) {
     toast,
     startWave: () => send({ type: 'start-wave' }),
     joinWave: () => send({ type: 'join-wave' }),
-    setCountry: (country) => send({ type: 'set-country', country }),
-    stageSelfie: (selfie) => send({ type: 'stage-selfie', selfie }),
+    // the app's "country" is the engine's cosmetic peer `tag`; a selfie {image, caption}
+    // is just the engine entry's opaque `payload`
+    setCountry: (country) => send({ type: 'set-tag', tag: country }),
+    stageSelfie: (selfie) =>
+      send({ type: 'stage-entry', entry: { payload: selfie } }),
     tip: (to, amount) => send({ type: 'tip', to, amount })
   };
 }

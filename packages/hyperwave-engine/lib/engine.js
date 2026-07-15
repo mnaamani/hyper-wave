@@ -20,7 +20,7 @@ const {
  * Host-supplied engine configuration (only these fields are read).
  * @typedef {Object} EngineConfig
  * @property {string} [bootstrap] - Bootstrap peer(s) for the swarm DHT (parsed by parseBootstrap).
- * @property {string} [matchId] - Match-specific swarm topic id (isolates rings).
+ * @property {string} [topicId] - Swarm topic id (isolates rings).
  * @property {boolean} [wallet] - Set `false` to run wallet-less (no burns/paid-gate/tips).
  * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by wallet.js).
  * @property {string} [swarmSeed] - Injected hex swarm-identity seed (else persisted at <storage>/swarm.seed).
@@ -66,13 +66,13 @@ function createEngine({
   const wave = makeWave({
     storageDir,
     bootstrap: config.bootstrap ? parseBootstrap(config.bootstrap) : undefined,
-    matchId: config.matchId,
+    topicId: config.topicId,
     // host-injected swarm identity seed (secure-seed-storage.md: the host owns the
     // secret store; the engine never persists an injected seed)
     swarmSeed: config.swarmSeed,
     onState: (state) => notify({ type: 'state', ...state }),
     onEvent: (event) => notify({ type: 'event', ...event }),
-    onGallery: (items) => notify({ type: 'gallery', items }),
+    onFeed: (items) => notify({ type: 'feed', items }),
     log
   });
   log(
@@ -82,11 +82,11 @@ function createEngine({
     wave.me.angle.toFixed(1)
   );
 
-  // Self-custodial WDK wallet (Tron testnet TRX) for fee burns + gallery tips. Async ESM init;
+  // Self-custodial WDK wallet (Tron testnet TRX) for fee burns + feed tips. Async ESM init;
   // emits `wallet` {address,trx} on ready + every 15s, and wires into the engine (address for
   // tips/attestations + the on-chain burn verifier = the paid-wave anti-spam gate). A host can
   // opt out with `config.wallet: false` — the
-  // engine then runs wallet-less (join-attestation gallery, no burns/paid-gate/tips).
+  // engine then runs wallet-less (join-attestation feed, no burns/paid-gate/tips).
   let payments = null;
   let tBalance = null;
   let pushBalance = null; // re-fetch the balance + send a `wallet` msg; set once the wallet is up
@@ -128,14 +128,14 @@ function createEngine({
 
   // Participation fee (wallet.js), burned to the black hole. The `burn-result` message carries a
   // `stage` so the UI never says "burned" prematurely:
-  //   confirming — tx broadcast, awaiting on-chain confirmation (kick-off only)
-  //   burned     — confirmed on-chain (kick-off) or broadcast (join, fire-and-forget)
+  //   confirming — tx broadcast, awaiting on-chain confirmation (start only)
+  //   burned     — confirmed on-chain (start) or broadcast (join, fire-and-forget)
   //   failed     — couldn't burn / never confirmed
 
   // Fail fast on a fee action from an unfunded wallet: it would broadcast a burn that never
-  // confirms — the wave would stall (kick-off) or no peer would seat the join — so refuse up
+  // confirms — the wave would stall (start) or no peer would seat the join — so refuse up
   // front with a clear message. Only when we could actually read the balance; a failed read
-  // returns true and lets the burn try. `action` words the error ('kick off' / 'join').
+  // returns true and lets the burn try. `action` words the error ('start' / 'join').
   // Callers guard on `payments` so the wallet-less path stays fully synchronous.
   async function fundedForFee(reason, action) {
     const bal = await payments.balances().catch(() => null);
@@ -151,10 +151,10 @@ function createEngine({
     return true;
   }
 
-  // Kick-off: the wave is NOT announced until the initiator's burn is CONFIRMED on-chain, so
+  // Start: the wave is NOT announced until the initiator's burn is CONFIRMED on-chain, so
   // peers can verify it and won't join an unpaid (spam) wave.
   async function handleStartWave() {
-    if (payments && !(await fundedForFee('kickoff', 'kick off a wave'))) {
+    if (payments && !(await fundedForFee('start', 'start a wave'))) {
       return;
     }
     const waveId = wave.startWave();
@@ -166,14 +166,14 @@ function createEngine({
         wave,
         payments,
         waveId,
-        reason: 'kickoff'
+        reason: 'start'
       });
       notify({
         type: 'burn-result',
         stage: 'confirming',
         hash,
         waveId,
-        reason: 'kickoff'
+        reason: 'start'
       });
       if (await confirmBurn(payments, waveId, hash)) {
         notify({
@@ -182,7 +182,7 @@ function createEngine({
           hash,
           amount: FEE_TRX,
           waveId,
-          reason: 'kickoff'
+          reason: 'start'
         });
         wave.announcePaid(proof);
       } else {
@@ -192,7 +192,7 @@ function createEngine({
           stage: 'failed',
           error,
           waveId,
-          reason: 'kickoff'
+          reason: 'start'
         });
       }
     } catch (err) {
@@ -201,12 +201,12 @@ function createEngine({
         stage: 'failed',
         error: err.message,
         waveId,
-        reason: 'kickoff'
+        reason: 'start'
       });
     }
   }
 
-  // Join: wave.join() is gated on the kick-off being verified (returns null otherwise), so we only
+  // Join: wave.join() is gated on the start being verified (returns null otherwise), so we only
   // burn the join fee for a wave that's proven paid. The join burn is fire-and-forget (no on-chain
   // confirmation), so it's reported as burned on broadcast.
   async function handleJoin() {
@@ -238,7 +238,7 @@ function createEngine({
     }
   }
 
-  // Gallery tip: a real testnet TRX transfer to the selfie owner's wallet.
+  // Feed tip: a real testnet TRX transfer to the entry owner's wallet.
   async function handleTip({ to, amount }) {
     if (!payments) {
       notify({ type: 'tip-result', error: 'wallet not ready' });
@@ -299,10 +299,10 @@ function createEngine({
       handleStartWave();
     } else if (command.type === 'join-wave') {
       handleJoin();
-    } else if (command.type === 'set-country') {
-      wave.setCountry(command.country);
-    } else if (command.type === 'stage-selfie') {
-      wave.stageSelfie(command.selfie);
+    } else if (command.type === 'set-tag') {
+      wave.setTag(command.tag);
+    } else if (command.type === 'stage-entry') {
+      wave.stageEntry(command.entry);
     } else if (command.type === 'tip') {
       handleTip(command);
     } else if (command.type === 'send-trx') {

@@ -33,21 +33,17 @@ test('upsert derives the angle from the id and never seats me', (t) => {
   );
 });
 
-test('a fresher sighting wins; a staler one may still contribute its country', (t) => {
+test('a fresher sighting wins; a staler one may still contribute its tag', (t) => {
   const table = makeTable();
   const now = Date.now();
   table.upsert(PEER_A, now, 'BR');
-  table.upsert(PEER_A, now - 500); // staler, no country
+  table.upsert(PEER_A, now - 500); // staler, no tag
   let seat = table.liveRing(now)[0];
   t.is(seat.lastSeen, now, 'staler sighting does not roll lastSeen back');
-  t.is(seat.country, 'BR', 'known country survives a country-less refresh');
-  table.upsert(PEER_A, now - 500, 'AR'); // staler but carries a country
+  t.is(seat.tag, 'BR', 'known tag survives a tag-less refresh');
+  table.upsert(PEER_A, now - 500, 'AR'); // staler but carries a tag
   seat = table.liveRing(now)[0];
-  t.is(
-    seat.country,
-    'AR',
-    'a stale sighting can still update the cosmetic country'
-  );
+  t.is(seat.tag, 'AR', 'a stale sighting can still update the cosmetic tag');
 });
 
 test('liveRing drops stale seats and sorts clockwise by angle', (t) => {

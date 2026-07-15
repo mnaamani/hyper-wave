@@ -1,6 +1,11 @@
 // Worker IPC: one channel to the hyperwave Bare worker. Decodes/routes incoming
-// messages by type (state / event / gallery / …) to registered listeners, and exposes
+// messages by type (state / event / feed / …) to registered listeners, and exposes
 // typed command senders. The rest of the renderer talks to the worker only via this.
+//
+// This is the theme boundary: the engine is theme-agnostic (it speaks entries / feed /
+// tag / opaque payload), while this football app UI speaks selfies / gallery / country.
+// The senders below translate the app's vocabulary into the engine's generic commands
+// (a selfie is just an opaque {image, caption} payload; a country is just a tag).
 const bridge = window.bridge;
 const decoder = new TextDecoder('utf-8');
 const HYPERWAVE = '/workers/hyperwave.js';
@@ -45,8 +50,11 @@ function send(type, extra = {}) {
 
 export const startWave = () => send('start-wave');
 export const joinWave = () => send('join-wave');
-export const setCountry = (country) => send('set-country', { country });
-export const stageSelfie = (selfie) => send('stage-selfie', { selfie });
+// the app's "country" is the engine's cosmetic peer `tag`
+export const setCountry = (country) => send('set-tag', { tag: country });
+// the app's selfie {image, caption} is just the engine entry's opaque `payload`
+export const stageSelfie = (selfie) =>
+  send('stage-entry', { entry: { payload: selfie } });
 export const tip = (to, amount, peerId) => send('tip', { to, amount, peerId });
 export const sendTrx = (to, amount) => send('send-trx', { to, amount });
 export const refreshWallet = () => send('refresh-wallet');

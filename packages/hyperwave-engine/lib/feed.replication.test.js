@@ -1,17 +1,17 @@
-// Transitive gallery replication over a PARTIAL mesh (line topology), no swarm,
-// for the multicore CRDT gallery (protocol.md §8). Peers are wired
+// Transitive feed replication over a PARTIAL mesh (line topology), no swarm,
+// for the multicore CRDT feed (protocol.md §8). Peers are wired
 // A<->B and B<->C but NOT A<->C, so A and C are never directly connected. We assert the
-// per-participant cores replicate *transitively*: C converges to A's selfie purely by
+// per-participant cores replicate *transitively*: C converges to A's entry purely by
 // forwarding through B, and A likewise receives C's — Corestore serves any core it
-// replicates, so the middle peer relays blocks it merely holds. Also proves gallery
-// persistence: a peer that stays online serves the full gallery to a latecomer.
-// Runs under Bare:  bare lib/gallery.replication.test.js   (or `npm test`)
+// replicates, so the middle peer relays blocks it merely holds. Also proves feed
+// persistence: a peer that stays online serves the full feed to a latecomer.
+// Runs under Bare:  bare lib/feed.replication.test.js   (or `npm test`)
 const test = require('brittle');
 const fs = require('bare-fs');
 const Corestore = require('corestore');
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const { CrdtGallery } = require('./gallery-crdt');
+const { CrdtFeed } = require('./feed-crdt');
 const { signJoin } = require('./attest');
 
 const WAVE = 'w';
@@ -44,8 +44,8 @@ function until(pred, timeoutMs = 20000) {
   });
 }
 
-// One CRDT gallery peer: its own store + keypair + session, tracking the latest
-// merged view (what wave.js's onGallery would push to the renderer).
+// One CRDT feed peer: its own store + keypair + session, tracking the latest
+// merged view (what wave.js's onFeed would push to the renderer).
 function makePeer(dir) {
   const peer = {
     dir,
@@ -55,10 +55,10 @@ function makePeer(dir) {
     view: []
   };
   peer.id = b4a.toString(peer.keyPair.publicKey, 'hex');
-  peer.session = new CrdtGallery({
+  peer.session = new CrdtFeed({
     store: peer.store,
-    me: { id: peer.id, country: null },
-    onGallery: (items) => {
+    me: { id: peer.id, tag: null },
+    onFeed: (items) => {
       peer.view = items;
     },
     walletAddress: () => null,
@@ -70,7 +70,7 @@ function makePeer(dir) {
 }
 
 // open the peer's own core for WAVE and sign its join credential over the writer key
-// (what floodMyGalleryCore does in wave.js)
+// (what floodMyFeedCore does in wave.js)
 async function openAndSign(peer) {
   peer.writerKey = await peer.session.open(WAVE);
   peer.joinSig = signJoin(peer.keyPair, {
@@ -90,12 +90,13 @@ function shareWriters(peers) {
   }
 }
 
-function captions(peer) {
+// each entry's opaque payload is just its label ('A'/'B'/'C') in this fixture
+function labels(peer) {
   peer.session.tick();
-  return peer.view.map((entry) => entry.caption).sort();
+  return peer.view.map((entry) => entry.payload).sort();
 }
 
-test('gallery replicates transitively across a line A—B—C (no A<->C link)', async (t) => {
+test('feed replicates transitively across a line A—B—C (no A<->C link)', async (t) => {
   const dirs = ['a', 'b', 'c'].map(
     (name) => `/tmp/hyperwave-repl-${name}-${Date.now()}`
   );
@@ -126,30 +127,30 @@ test('gallery replicates transitively across a line A—B—C (no A<->C link)', 
   // directly — this test is about the *data* plane)
   shareWriters(peers);
 
-  // each peer posts one selfie to its OWN core (no admission, no writable-wait)
-  await peerA.session.postSelfie({ waveId: WAVE, hopCount: 0, caption: 'A' });
-  await peerB.session.postSelfie({ waveId: WAVE, hopCount: 1, caption: 'B' });
-  await peerC.session.postSelfie({ waveId: WAVE, hopCount: 2, caption: 'C' });
+  // each peer posts one entry to its OWN core (no admission, no writable-wait)
+  await peerA.session.postEntry({ waveId: WAVE, hopCount: 0, payload: 'A' });
+  await peerB.session.postEntry({ waveId: WAVE, hopCount: 1, payload: 'B' });
+  await peerC.session.postEntry({ waveId: WAVE, hopCount: 2, payload: 'C' });
 
   // C must converge to all three — crucially A's, whose blocks reach C only by
   // forwarding through B (A and C share no direct connection).
-  t.ok(await until(() => captions(peerC).length === 3), 'C converged to all 3');
+  t.ok(await until(() => labels(peerC).length === 3), 'C converged to all 3');
   t.alike(
-    captions(peerC),
+    labels(peerC),
     ['A', 'B', 'C'],
     'C has A (transitive via B), B (direct), C (own)'
   );
 
-  // …and A receives C's selfie, which likewise only reaches A through B.
-  t.ok(await until(() => captions(peerA).length === 3), 'A converged to all 3');
-  t.alike(captions(peerA), ['A', 'B', 'C'], 'A has C (transitive via B)');
+  // …and A receives C's entry, which likewise only reaches A through B.
+  t.ok(await until(() => labels(peerA).length === 3), 'A converged to all 3');
+  t.alike(labels(peerA), ['A', 'B', 'C'], 'A has C (transitive via B)');
 });
 
-// Persistence: any peer that stays online can serve the whole gallery — with the CRDT
+// Persistence: any peer that stays online can serve the whole feed — with the CRDT
 // every participant holds every participant's core, so there is no designated archivist.
 // A peer posts and STAYS ONLINE; a latecomer connects to it afterwards (learning the
-// credentials from a wave-sync, simulated directly) and converges to the full gallery.
-test('a peer that stays online serves the gallery to a latecomer', async (t) => {
+// credentials from a wave-sync, simulated directly) and converges to the full feed.
+test('a peer that stays online serves the feed to a latecomer', async (t) => {
   const dirs = ['orig', 'late'].map(
     (name) => `/tmp/hyperwave-retain-${name}-${Date.now()}`
   );
@@ -168,7 +169,7 @@ test('a peer that stays online serves the gallery to a latecomer', async (t) => 
   });
 
   await openAndSign(origin);
-  await origin.session.postSelfie({ waveId: WAVE, hopCount: 0, caption: 'A' });
+  await origin.session.postEntry({ waveId: WAVE, hopCount: 0, payload: 'A' });
 
   // the latecomer shows up AFTER the post and connects only to the online peer
   await openAndSign(latecomer);
@@ -176,8 +177,8 @@ test('a peer that stays online serves the gallery to a latecomer', async (t) => 
   streams.push(...link(origin.store, latecomer.store));
 
   t.ok(
-    await until(() => captions(latecomer).length === 1),
+    await until(() => labels(latecomer).length === 1),
     'latecomer converged from the online peer'
   );
-  t.alike(captions(latecomer), ['A'], 'the held gallery was served');
+  t.alike(labels(latecomer), ['A'], 'the held feed was served');
 });

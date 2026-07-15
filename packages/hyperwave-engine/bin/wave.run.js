@@ -3,10 +3,10 @@
 // Runs under Bare:  bare bin/wave.run.js <name> <storageDir>  (or, if installed: hyper-wave)
 // Needs `bare` on PATH — it's a separate runtime, not an npm dependency.
 //   env HYPERWAVE_BOOTSTRAP=host:port  -> local DHT (fast same-machine discovery)
-//   env HYPERWAVE_MATCH=<id>           -> isolated match topic
+//   env HYPERWAVE_TOPIC=<id>           -> isolated topic
 //   env START=<n>                      -> announce a wave once >= n peers are present
 //   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
-//   env AUTOSELFIE=1                   -> stage a fake selfie in the lobby (posted at my sweep slot, if joined)
+//   env AUTOENTRY=1                   -> stage a fake entry in the lobby (posted at my sweep slot, if joined)
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 //   env HYPERWAVE_MAX_PEERS=<n>        -> Hyperswarm connection cap (lower to force a partial mesh)
 const env = require('bare-env');
@@ -34,16 +34,16 @@ console.log(`[${name}] storage dir: ${absStorageDir}`);
 const bootstrap = parseBootstrap(env.HYPERWAVE_BOOTSTRAP);
 
 let started = false;
-let settleTimer = null; // armed when connected to START peers; fires kickoff once it holds SETTLE_MS
+let settleTimer = null; // armed when connected to START peers; fires start once it holds SETTLE_MS
 let payments = null; // set by the WALLET=1 block below (if enabled)
 
-// Hold the kickoff gate this long before firing. Reaching the gate means *I* (the initiator)
+// Hold the start gate this long before firing. Reaching the gate means *I* (the initiator)
 // finished meshing, but the other peers' gossip channels may still be forming — flooding the
 // announce the instant I hit the gate could miss a peer whose channels aren't wired yet,
 // dropping it from the wave (seen on a constrained runner: initiator fully connected, yet 2 of
 // 5 peers never joined). A brief settle lets the rest of the mesh finish wiring.
 const SETTLE_MS = 4000;
-// Connectivity floor for the kickoff gate. At small N a full mesh forms naturally and we wait
+// Connectivity floor for the start gate. At small N a full mesh forms naturally and we wait
 // for all of it — the strictest start condition. But a full mesh is IMPOSSIBLE at scale
 // (Hyperswarm caps connections at maxPeers, and the protocol only needs the flood graph), so
 // require full connectivity only up to this floor; past it, `discovered >= START` (the whole
@@ -52,7 +52,7 @@ const CONNECTED_FLOOR = 16;
 const wave = createWave({
   storageDir,
   bootstrap,
-  matchId: env.HYPERWAVE_MATCH || undefined,
+  topicId: env.HYPERWAVE_TOPIC || undefined,
   lobbyMs: env.HYPERWAVE_LOBBY_MS ? Number(env.HYPERWAVE_LOBBY_MS) : undefined,
   maxPeers: env.HYPERWAVE_MAX_PEERS
     ? Number(env.HYPERWAVE_MAX_PEERS)
@@ -61,7 +61,7 @@ const wave = createWave({
     console.log(
       `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)}`
     );
-    // Kick off once the whole roster is DISCOVERED and we're CONNECTED to min(START,
+    // Start once the whole roster is DISCOVERED and we're CONNECTED to min(START,
     // CONNECTED_FLOOR) of them, held for SETTLE_MS. At small N that means the full mesh (the
     // strictest condition — discovery alone races ahead of the Protomux gossip channels the
     // flood rides, and racing a half-wired mesh dropped peers); at
@@ -81,7 +81,7 @@ const wave = createWave({
     if (ready && settleTimer === null) {
       settleTimer = setTimeout(() => {
         started = true;
-        kickOff();
+        startWaveFlow();
       }, SETTLE_MS);
     } else if (!ready && settleTimer !== null) {
       clearTimeout(settleTimer); // connectivity regressed before settling — re-arm on the next full
@@ -91,7 +91,7 @@ const wave = createWave({
   onEvent: (evt) => {
     console.log(`[${name}] EVENT`, JSON.stringify(evt));
     // AUTOJOIN: try on announce (no-wallet path: already 'verified') and on wave-verified
-    // (wallet path: after the kick-off burn confirms). join() dedupes + gates on paid.
+    // (wallet path: after the start burn confirms). join() dedupes + gates on paid.
     if (
       env.AUTOJOIN &&
       !evt.mine &&
@@ -99,21 +99,20 @@ const wave = createWave({
     ) {
       joinAndBurn();
     }
-    // stage a (fake) selfie during the lobby, exactly like the renderer does at kickoff;
-    // the worker posts it to the gallery when this peer's sweep slot fires.
-    if (env.AUTOSELFIE && evt.event === 'wave-active' && evt.joined) {
-      wave.stageSelfie({
-        caption: `${name} was here`,
-        image: `fake-image-${name}`
-      });
+    // stage a (fake) entry payload during the lobby, exactly like a host does at start;
+    // the engine posts it to the feed when this peer's sweep slot fires. The payload is
+    // opaque to the engine — this CLI puts a {caption} object in it.
+    if (env.AUTOENTRY && evt.event === 'wave-active' && evt.joined) {
+      wave.stageEntry({ payload: { caption: `${name} was here` } });
     }
   },
-  onGallery: (items) =>
+  onFeed: (items) =>
     console.log(
-      `[${name}] GALLERY size=${items.length} [${items
+      `[${name}] FEED size=${items.length} [${items
         .map(
           (item) =>
-            item.caption + (item.address ? ' $' + item.address.slice(0, 5) : '')
+            (item.payload?.caption ?? '') +
+            (item.address ? ' $' + item.address.slice(0, 5) : '')
         )
         .join(', ')}]`
     ),
@@ -131,24 +130,24 @@ async function burnFee(waveId, reason) {
 
 // Initiator: start (deferred announce when enforcing), pay, wait for the burn to confirm
 // on-chain, then announce. Without a wallet, startWave announces immediately (unpaid path).
-async function kickOff() {
+async function startWaveFlow() {
   const waveId = wave.startWave();
   if (!waveId || !payments) {
     return;
   }
   try {
-    const { hash, proof } = await burnFee(waveId, 'kickoff');
+    const { hash, proof } = await burnFee(waveId, 'start');
     if (await confirmBurn(payments, waveId, hash)) {
       wave.announcePaid(proof);
     } else {
-      console.log(`[${name}] kick-off burn not confirmed`);
+      console.log(`[${name}] start burn not confirmed`);
     }
   } catch (err) {
-    console.log(`[${name}] kickoff FAIL`, err.message);
+    console.log(`[${name}] start FAIL`, err.message);
   }
 }
 
-// Joiner: join() gates on the kick-off being verified (null otherwise) and returns null
+// Joiner: join() gates on the start being verified (null otherwise) and returns null
 // once already joined, so a double event (announce + verified) burns once.
 async function joinAndBurn() {
   const waveId = wave.join();

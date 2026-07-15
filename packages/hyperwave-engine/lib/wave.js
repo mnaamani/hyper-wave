@@ -1,13 +1,13 @@
 // HyperWave orchestrator — the composition root. Wires the transport (Hyperswarm +
 // Protomux gossip) to the pure domains — ring geometry (ring.js), attestation crypto
-// (attest.js), gallery ordering (gallery.js), sweep slot math (sweep.js) — and composes
+// (attest.js), feed ordering (feed.js), sweep slot math (sweep.js) — and composes
 // the stateful machines: PeerTable (seats/channels),
-// Flood (gossip dedup), SelfiePipeline (stage+slot pairing), and CrdtGallery
-// (per-wave multicore CRDT gallery). What remains here is the wave
+// Flood (gossip dedup), EntryPipeline (stage+slot pairing), and CrdtFeed
+// (per-wave multicore CRDT feed). What remains here is the wave
 // lifecycle FSM, the deterministic sweep, and the gossip dispatch that binds them.
 // The payment layer (wallet.js, WDK) is injected by the worker via setWallet(): wallet
-// address (for gallery tips) + the on-chain burn verifier (the paid-wave anti-spam gate).
-// Money model: burned fees (skin in the game) + gallery tips; there are no sponsor rewards.
+// address (for feed tips) + the on-chain burn verifier (the paid-wave anti-spam gate).
+// Money model: burned fees (skin in the game) + feed tips; there are no sponsor rewards.
 // Runs under Bare (the worker) or a Node harness. The Bare worker (hyperwave.js) bridges
 // this to the renderer; wave.run.js drives it headlessly.
 
@@ -31,9 +31,9 @@ const {
   makeWaveSync
 } = require('./messages');
 const { Flood } = require('./flood');
-const { CrdtGallery } = require('./gallery-crdt');
+const { CrdtFeed } = require('./feed-crdt');
 const { PeerTable } = require('./peer-table');
-const { SelfiePipeline } = require('./selfie');
+const { EntryPipeline } = require('./entry');
 const {
   signBurn,
   verifyBurn,
@@ -42,12 +42,12 @@ const {
   burnAuthorizes
 } = require('./attest');
 
-const MATCH = 'hyperwave:demo-match:v1';
-const HEARTBEAT_MS = 2000; // heartbeat cadence (liveness + country)
-const RINGUPDATE_MS = 4000; // seat-staleness + gallery-pull maintenance cadence
+const DEFAULT_TOPIC = 'hyperwave:demo:v1';
+const HEARTBEAT_MS = 2000; // heartbeat cadence (liveness + tag)
+const RINGUPDATE_MS = 4000; // seat-staleness + feed-pull maintenance cadence
 const PEER_STALE_MS = 12000; // a peer whose last heartbeat is older than this is stale (dropped)
-// Lobby: after "kick off", the wave is announced and peers get this long to opt in
-// (get ready / choose to selfie) before the sweep starts.
+// Lobby: after "start", the wave is announced and peers get this long to opt in
+// (get ready / opt in) before the sweep starts.
 const LOBBY_MS = 15000;
 // The sweep (protocol.md §6): the initiator's wave-start carries `t0` (epoch
 // ms, a short lead so the flooded start reaches everyone before the first slot fires)
@@ -64,7 +64,7 @@ const END_GRACE_MS = 2000; // after the last slot, before every peer returns to 
 // (flood.js), so a straggling duplicate of a very old message might re-flood once —
 // harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096;
-// How long the initiator waits for its kick-off burn to confirm + announce before aborting
+// How long the initiator waits for its start burn to confirm + announce before aborting
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000;
@@ -155,10 +155,10 @@ function loadOrCreateSwarmSeed(
  * @property {string} storageDir Instance storage dir (per-run hyperwave store + persisted swarm.seed).
  * @property {(state: Object) => void} onState Called with `{ me, peers, connected, discovered }` whenever the ring changes.
  * @property {(event: Object) => void} [onEvent] Lifecycle/UI event sink (wave-announce, holding, position, completed…).
- * @property {(items: Object[]) => void} [onGallery] Called with the ordered gallery entries whenever it updates.
+ * @property {(items: Object[]) => void} [onFeed] Called with the ordered feed entries whenever it updates.
  * @property {(...args: any[]) => void} [log] Logger.
  * @property {Array<{host: string, port: number}>|null} [bootstrap] Local-DHT bootstrap nodes, or null for the public DHT.
- * @property {string} [matchId] Match topic string (all peers on the same id share one ring).
+ * @property {string} [topicId] Topic string (all peers on the same id share one ring).
  * @property {number} [lobbyMs] Lobby window length in ms (opt-in window before the race).
  * @property {number} [maxPeers] Hyperswarm connection cap (default 64; lower to force a partial mesh).
  * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments).
@@ -166,20 +166,20 @@ function loadOrCreateSwarmSeed(
 
 /**
  * @typedef {Object} WaveHandle
- * @property {{id: string, angle: number, country: string|null}} me This peer's ring identity.
+ * @property {{id: string, angle: number, tag: string|null}} me This peer's ring identity.
  * @property {() => string|null} startWave Announce a wave + open the lobby; returns the new waveId, or null if busy.
  * @property {() => string|null} join Opt into the current lobby; returns the joined waveId, or null on a no-op.
- * @property {(country: string) => void} setCountry Set the supported nation (cosmetic, rides the heartbeat).
- * @property {(selfie: {image: string, caption?: string}) => void} stageSelfie Stage the lobby selfie to post at my sweep slot.
+ * @property {(tag: string) => void} setTag Set the tag (cosmetic, rides the heartbeat).
+ * @property {(entry: {payload?: *}) => void} stageEntry Stage my opaque entry payload to post at my sweep slot.
  * @property {(address: string|null, verifier?: Function) => void} setWallet Wire the payment layer (address + on-chain burn verifier).
- * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed kick-off proof and announce.
+ * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed start proof and announce.
  * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket).
  * @property {() => Promise<void>} close Tear down timers, swarm, galleries, and the store.
  */
 
 /**
- * Create the HyperWave orchestrator: joins the match swarm, runs the wave lifecycle
- * (lobby → sweep → gallery) over the topic mesh, and exposes the command
+ * Create the HyperWave orchestrator: joins the topic swarm, runs the wave lifecycle
+ * (lobby → sweep → feed) over the topic mesh, and exposes the command
  * surface the host (worker/harness) drives.
  * @param {CreateWaveOptions} options
  * @returns {WaveHandle} The command + identity surface for this peer.
@@ -188,10 +188,10 @@ function createWave({
   storageDir,
   onState,
   onEvent = () => {},
-  onGallery = () => {},
+  onFeed = () => {},
   log = () => {},
   bootstrap = null,
-  matchId = MATCH,
+  topicId = DEFAULT_TOPIC,
   lobbyMs = LOBBY_MS,
   // Hyperswarm's connection cap. 64 is Hyperswarm's own default; lower it (e.g. 16) to
   // force a genuine partial mesh below the peer count — the condition the flood is
@@ -224,46 +224,46 @@ function createWave({
   const me = {
     id: b4a.toString(meKey, 'hex'),
     angle: angleOf(meKey),
-    country: null
+    tag: null
   };
   let walletAddress = null; // my TRX wallet address (set by the worker once WDK is ready)
-  let enforcePaid = false; // gate waves on a proven kick-off burn (enabled once wallet is up)
+  let enforcePaid = false; // gate waves on a proven start burn (enabled once wallet is up)
   let verifyBurnOnChain = null; // on-chain burn check (set once the wallet is up, via setWallet)
   // Live peer bookkeeping (peer-table.js): seats + direct channels.
   const table = new PeerTable({ meId: me.id, staleMs: PEER_STALE_MS });
   const endedWaves = new Set(); // waves that finished — never re-adopt (prevents revival)
   const flood = new Flood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
 
-  // Per-wave gallery (gallery-crdt.js): each participant owns one Hypercore and appends
-  // its one selfie; every peer opens the roster's cores (keys ride wave-join) and merges
+  // Per-wave feed (feed-crdt.js): each participant owns one Hypercore and appends
+  // its one entry; every peer opens the roster's cores (keys ride wave-join) and merges
   // locally — no indexer, no admission. The accessors read live wave.js state.
-  const session = new CrdtGallery({
+  const session = new CrdtFeed({
     store,
     me,
-    onGallery,
+    onFeed,
     walletAddress: () => walletAddress,
-    burnProof: () => selfie.burnProof,
+    burnProof: () => entryPipeline.burnProof,
     joinProof: () => (wave ? wave.joinSig : null),
     log
   });
 
   // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
   // concurrent starts resolve deterministically (lower waveId wins). During the lobby,
-  // peers opt in; only the roster gets a selfie slot — everyone renders the sweep.
+  // peers opt in; only the roster gets a entry slot — everyone renders the sweep.
   let wave = null;
   let lobbyEndsAt = 0; // ~when the lobby closes (for syncing a late joiner's countdown)
   let lobbyTimer = null; // fires the sweep (initiator) or a fallback to idle (others)
   let waveTimer = null; // the deterministic end of the sweep (t0 + lapMs + grace)
-  let sweepTimers = []; // my-slot + ball-position timers for the running sweep
+  let sweepTimers = []; // my-slot + position timers for the running sweep
   let tHeartbeat = null; // heartbeat timer (self-rescheduling, see the timers section)
   let tRing = null; // ring-maintenance timer
 
-  // Selfie is captured up-front during the lobby (renderer stages it into the pipeline),
-  // then posted to the gallery when my sweep slot fires. The pipeline (selfie.js) owns
+  // Entry is captured up-front during the lobby (renderer stages it into the pipeline),
+  // then posted to the feed when my sweep slot fires. The pipeline (entry.js) owns
   // the pairing/once-per-wave/burn-ticket invariants.
-  const selfie = new SelfiePipeline({
+  const entryPipeline = new EntryPipeline({
     currentWaveId: () => (wave ? wave.id : null),
-    post: (entry) => session.postSelfie(entry)
+    post: (entry) => session.postEntry(entry)
   });
 
   // --- ring / peer table -----------------------------------------------------
@@ -281,20 +281,20 @@ function createWave({
   }
 
   /**
-   * Set the nation this peer supports; rides the heartbeat + selfie entries (cosmetic).
-   * @param {string} code Supported-nation code (falsy clears it).
+   * Set the tag this peer supports; rides the heartbeat + entry entries (cosmetic).
+   * @param {string} code Supported-tag code (falsy clears it).
    */
-  function setCountry(code) {
-    me.country = code || null;
+  function setTag(code) {
+    me.tag = code || null;
     emit();
   }
 
-  // The heartbeat: pure liveness + country, one hop to every connection (tiny ×
+  // The heartbeat: pure liveness + tag, one hop to every connection (tiny ×
   // ≤maxPeers every HEARTBEAT_MS is noise). Peers don't gossip ring structure — the
   // sweep needs no successors.
-  /** @returns {Object} A `heartbeat` gossip message: my id + country (pure liveness). */
+  /** @returns {Object} A `heartbeat` gossip message: my id + tag (pure liveness). */
   function myHeartbeat() {
-    return makeHeartbeat({ id: me.id, country: me.country });
+    return makeHeartbeat({ id: me.id, tag: me.tag });
   }
 
   /**
@@ -314,7 +314,7 @@ function createWave({
     // arrived on — otherwise a modified client could fake other peers' liveness (ring
     // pollution). Cheap string compare, before any other work. Flooded messages (wave-*)
     // can't be bound this way — at relay hops their `by`/`peerId` is a third party — so
-    // they're authenticated by their carried signatures (kick-off burn proof, join
+    // they're authenticated by their carried signatures (start burn proof, join
     // attestations) instead.
     if (msg.kind === 'heartbeat' && msg.id !== fromId) {
       return;
@@ -334,11 +334,11 @@ function createWave({
       if (!shouldAdopt(msg.waveId)) {
         return;
       }
-      // anti-spam: adopt a synced wave (lobby OR racing) only with a valid kick-off proof.
+      // anti-spam: adopt a synced wave (lobby OR racing) only with a valid start proof.
       // Previously a *racing* sync skipped this — a hostile peer could unicast a fabricated
       // racing wave-sync on connect to force a newcomer into a bogus wave, bypassing the
       // paid gate. The signed burn-proof can't be forged for a key the attacker lacks.
-      if (enforcePaid && !validKickoff(msg.paid, msg.waveId, msg.by)) {
+      if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
         return;
       }
       if (msg.phase === 'racing') {
@@ -346,10 +346,10 @@ function createWave({
           enterLobby({ waveId: msg.waveId, by: msg.by, dur: 0, silent: true });
         }
         if (msg.paid) {
-          wave.kickoffProof = msg.paid;
+          wave.startProof = msg.paid;
         }
         wave.paid = 'verified';
-        // learn every participant's gallery core (self-contained: the sync carries the
+        // learn every participant's feed core (self-contained: the sync carries the
         // writers, so a mid-race newcomer doesn't depend on having seen the wave-joins)
         for (const cred of msg.writers || []) {
           ingestWriter(cred);
@@ -363,9 +363,9 @@ function createWave({
         if (!wave || wave.id !== msg.waveId) {
           enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMsLeft });
         }
-        if (enforcePaid && msg.paid && !wave.kickoffProof) {
-          wave.kickoffProof = msg.paid;
-          verifyKickoff(msg.waveId, msg.paid);
+        if (enforcePaid && msg.paid && !wave.startProof) {
+          wave.startProof = msg.paid;
+          verifyStartProof(msg.waveId, msg.paid);
         }
         for (const cred of msg.writers || []) {
           ingestWriter(cred);
@@ -375,9 +375,9 @@ function createWave({
       return;
     }
     if (msg.kind === 'wave-announce') {
-      // anti-spam: an enforced peer ignores any announce lacking a validly-signed kick-off
+      // anti-spam: an enforced peer ignores any announce lacking a validly-signed start
       // proof (unpaid/spam waves are invisible). Then it verifies the burn on-chain.
-      if (enforcePaid && !validKickoff(msg.paid, msg.waveId, msg.by)) {
+      if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
         return;
       }
       if (!shouldAdopt(msg.waveId)) {
@@ -385,13 +385,13 @@ function createWave({
       }
       enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMs });
       if (enforcePaid && msg.paid) {
-        wave.kickoffProof = msg.paid;
-        verifyKickoff(msg.waveId, msg.paid);
+        wave.startProof = msg.paid;
+        verifyStartProof(msg.waveId, msg.paid);
       }
       return;
     }
     if (msg.kind === 'wave-join') {
-      // Every peer ingests every wave-join: learn the participant's gallery core (its key
+      // Every peer ingests every wave-join: learn the participant's feed core (its key
       // rides the join, self-certified by joinSig) + count it into the roster. Only DURING
       // THE LOBBY — the roster freezes into the schedule at lobby close, so a late join
       // can't take a seat it can never fill. When enforcing, the join must present a valid
@@ -409,9 +409,9 @@ function createWave({
       return;
     }
     if (msg.kind === 'wave-start') {
-      // initiator finalized the roster and kicked off the sweep. Gate on the same kick-off
+      // initiator finalized the roster and started the sweep. Gate on the same start
       // proof as the announce, so a forged wave-start can't conjure a race.
-      if (enforcePaid && !validKickoff(msg.paid, msg.waveId, msg.by)) {
+      if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
         return;
       }
       if (shouldAdopt(msg.waveId)) {
@@ -419,10 +419,10 @@ function createWave({
           enterLobby({ waveId: msg.waveId, by: msg.by });
         }
         if (msg.paid) {
-          wave.kickoffProof = msg.paid; // carry it so we can re-sync newcomers
+          wave.startProof = msg.paid; // carry it so we can re-sync newcomers
         }
         // the flooded writers make wave-start self-contained: a peer adopting here (that
-        // missed the wave-joins) still learns every participant's gallery core
+        // missed the wave-joins) still learns every participant's feed core
         for (const cred of msg.writers || []) {
           ingestWriter(cred);
         }
@@ -437,8 +437,8 @@ function createWave({
     if (msg.kind !== 'heartbeat') {
       return;
     }
-    // sender is a live neighbour (direct channel): refresh its seat + country
-    table.upsert(msg.id, Date.now(), msg.country);
+    // sender is a live neighbour (direct channel): refresh its seat + tag
+    table.upsert(msg.id, Date.now(), msg.tag);
     emit();
   }
 
@@ -486,10 +486,10 @@ function createWave({
     }
   }
 
-  // --- gallery (multicore CRDT) ---------------------------------------------
-  // The open/merge machinery lives in gallery-crdt.js; wave.js drives it by
-  // ingesting each participant's gallery-core credential (from wave-join / wave-start /
-  // wave-sync) — no shared gallery key, no admission.
+  // --- feed (multicore CRDT) ---------------------------------------------
+  // The open/merge machinery lives in feed-crdt.js; wave.js drives it by
+  // ingesting each participant's feed-core credential (from wave-join / wave-start /
+  // wave-sync) — no shared feed key, no admission.
 
   /**
    * The canonical schedule input carried by a wave-start/wave-sync: the initiator plus
@@ -504,15 +504,15 @@ function createWave({
     return [msg.by, ...ids];
   }
 
-  // Learn a participant's gallery core: verify its join attestation (binds peerId →
+  // Learn a participant's feed core: verify its join attestation (binds peerId →
   // writerKey, so a relayed credential can't be forged or substituted), then count it
-  // into the writers map (the roster) and open its core (gallery-crdt.js). Idempotent;
+  // into the writers map (the roster) and open its core (feed-crdt.js). Idempotent;
   // the paid gate for direct wave-joins is enforced by the caller (wave-start/sync
-  // writers carry no burn — the wave itself is gated by the kick-off proof).
+  // writers carry no burn — the wave itself is gated by the start proof).
   /**
-   * @param {Object} cred A gallery-core credential.
+   * @param {Object} cred A feed-core credential.
    * @param {string} cred.peerId The participant's ring id.
-   * @param {string} cred.writerKey The participant's gallery core key (hex).
+   * @param {string} cred.writerKey The participant's feed core key (hex).
    * @param {string} cred.joinSig The join attestation over (waveId, peerId, writerKey).
    */
   function ingestWriter(cred) {
@@ -539,12 +539,12 @@ function createWave({
 
   // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
   // identity to the on-chain tx), stash it, and return it. Two consumers: the initiator
-  // attaches its KICK-OFF proof to the wave-announce (the paid-wave gate, announcePaid);
-  // a joiner's proof rides its wave-join (the per-peer paid gate) and its gallery entry
+  // attaches its START proof to the wave-announce (the paid-wave gate, announcePaid);
+  // a joiner's proof rides its wave-join (the per-peer paid gate) and its feed entry
   // (the tip-address binding).
   /**
    * @param {Object} fields The confirmed on-chain burn.
-   * @param {string} fields.reason 'kickoff' (initiator) or 'join' (participant).
+   * @param {string} fields.reason 'start' (initiator) or 'join' (participant).
    * @param {number} fields.amount TRX amount burned.
    * @param {string} fields.txHash On-chain transaction hash.
    * @param {string} [fields.waveId] Wave the burn is for (falls back to the current wave).
@@ -567,7 +567,7 @@ function createWave({
       burnTs: Date.now()
     };
     const proof = { ...fields, sig: signBurn(swarm.keyPair, fields) };
-    selfie.setBurnProof(proof);
+    entryPipeline.setBurnProof(proof);
     // My join fee just confirmed while the lobby is still open: re-flood my wave-join with
     // the burn attached — enforcing peers dropped the earlier burn-less join (per-peer paid
     // gate), so this flood is the one that actually seats me.
@@ -578,7 +578,7 @@ function createWave({
       wave.joined &&
       wave.phase === 'lobby'
     ) {
-      floodMyGalleryCore(wid);
+      floodMyFeedCore(wid);
     }
     return proof;
   }
@@ -637,9 +637,9 @@ function createWave({
       endedWaves.add(wave.id);
       teardown();
     }
-    selfie.reset(); // fresh wave — clear any staged selfie/slot from a prior one
-    selfie.clearBurnProof(); // a genuinely new wave (guarded above): drop the previous wave's burn ticket
-    // paid: 'verified' when the kick-off burn is confirmed (or enforcement is off);
+    entryPipeline.reset(); // fresh wave — clear any staged entry/slot from a prior one
+    entryPipeline.clearBurnProof(); // a genuinely new wave (guarded above): drop the previous wave's burn ticket
+    // paid: 'verified' when the start burn is confirmed (or enforcement is off);
     // 'pending' while a peer verifies it on-chain; 'rejected' if it isn't a real burn.
     wave = {
       id: waveId,
@@ -647,15 +647,15 @@ function createWave({
       by,
       joined: !!mine,
       paid: enforcePaid ? 'pending' : 'verified',
-      kickoffProof: null,
-      joinSig: null, // MY join attestation (attest.js signJoin) — every gallery entry carries it
-      // peerId -> {writerKey, joinSig}: every participant's gallery core. This IS the
+      startProof: null,
+      joinSig: null, // MY join attestation (attest.js signJoin) — every feed entry carries it
+      // peerId -> {writerKey, joinSig}: every participant's feed core. This IS the
       // roster — the single source of truth (a participant without a credential can't
       // fill a sweep slot, so counting anything else invents seats; two scale bugs came
       // from exactly that divergence).
       writers: new Map()
     };
-    // engage the wave's gallery for viewing (create my own core; foreign cores arrive via
+    // engage the wave's feed for viewing (create my own core; foreign cores arrive via
     // ingestWriter). Fire-and-forget — the writer key is awaited where it's needed.
     session.open(waveId).catch(() => {});
     // Re-adopting a wave I joined, then abandoned on a revivable lobby-timeout (a late
@@ -693,26 +693,26 @@ function createWave({
     if (!wave || wave.phase !== 'lobby' || wave.joined) {
       return null;
     }
-    // anti-spam: never join (and pay) a wave whose kick-off fee isn't proven paid
+    // anti-spam: never join (and pay) a wave whose start fee isn't proven paid
     if (wave.paid !== 'verified') {
       onEvent({ event: 'join-blocked', waveId: wave.id, reason: wave.paid });
       return null;
     }
     wave.joined = true;
-    floodMyGalleryCore(wave.id);
+    floodMyFeedCore(wave.id);
     onEvent({ event: 'joined', waveId: wave.id, count: rosterCount() });
     return wave.id;
   }
 
   /**
-   * Publish MY gallery core: open it (its key is my writer key), sign my join attestation
+   * Publish MY feed core: open it (its key is my writer key), sign my join attestation
    * over it, remember myself in `writers`, and flood a wave-join carrying (writerKey,
-   * joinSig, burn). Every peer ingests it → opens my core → sees my selfie. The core key
+   * joinSig, burn). Every peer ingests it → opens my core → sees my entry. The core key
    * needs my core ready, so the flood is async. Called by joiners (from join()) and the
    * initiator (from doAnnounce); recordBurn re-floods once a late join burn confirms.
    * @param {string} waveId The wave whose core to publish.
    */
-  function floodMyGalleryCore(waveId) {
+  function floodMyFeedCore(waveId) {
     session
       .open(waveId)
       .then((writerKey) => {
@@ -730,7 +730,7 @@ function createWave({
             peerId: me.id,
             writerKey,
             joinSig: wave.joinSig,
-            burn: selfie.burnProof
+            burn: entryPipeline.burnProof
           })
         );
       })
@@ -740,7 +740,7 @@ function createWave({
   /**
    * Transition the current wave from lobby to the racing sweep: derive the schedule
    * from the CANONICAL roster (the ids flooded on wave-start — every peer must compute
-   * the identical schedule), arm my slot + the ball ticker + the deterministic end.
+   * the identical schedule), arm my slot + the position ticker + the deterministic end.
    * Receiver-side clamps stop a hostile start from wedging a wave open.
    * @param {Object} opts The sweep parameters (from wave-start / wave-sync / my own start).
    * @param {string[]} opts.rosterIds The canonical roster ids.
@@ -784,9 +784,9 @@ function createWave({
   }
 
   /**
-   * Arm the running sweep's timers: my own slot (records it into the selfie pipeline —
-   * pairing with the staged lobby frame posts the gallery entry — and tells the renderer
-   * I'm holding) and the ball ticker (every screen walks the schedule locally and emits
+   * Arm the running sweep's timers: my own slot (records it into the entry pipeline —
+   * pairing with the staged lobby frame posts the feed entry — and tells the renderer
+   * I'm holding) and the position ticker (every screen walks the schedule locally and emits
    * `position` events — there is no wave-pos gossip; already-past slots flush at once so
    * a mid-race joiner catches up).
    * @param {import('./sweep').SweepSlot[]} schedule The derived sweep schedule.
@@ -800,7 +800,7 @@ function createWave({
           if (!wave || wave.id !== waveId) {
             return;
           }
-          selfie.recordSlot({ waveId, hopCount: mine.rank });
+          entryPipeline.recordSlot({ waveId, hopCount: mine.rank });
           onEvent({
             event: 'holding',
             waveId,
@@ -848,8 +848,8 @@ function createWave({
   const REVIVABLE_IDLE_REASONS = new Set(['lobby-timeout']);
   // When a revivable idle abandons a wave I had JOINED, remember my join state: a late
   // wave-start re-adopts the wave through enterLobby, which builds fresh state — without
-  // this memo the re-adopted wave would have joined=false (my slot never arms, my selfie
-  // never posts) and a blank joinSig (my entry would fail mergeGallery's write-gate).
+  // this memo the re-adopted wave would have joined=false (my slot never arms, my entry
+  // never posts) and a blank joinSig (my entry would fail mergeFeed's write-gate).
   // Single slot: only one wave is ever engaged at a time. (Found at N=128: one peer per
   // ~100 hit exactly this path.)
   let abandonedJoin = null; // { waveId, joinSig } | null
@@ -871,7 +871,7 @@ function createWave({
       abandonedJoin = { waveId, joinSig: wave.joinSig };
     }
     wave = null;
-    selfie.reset(); // drop any staged selfie / slot for the next wave
+    entryPipeline.reset(); // drop any staged entry / slot for the next wave
     teardown();
     onEvent({ event: 'wave-idle', waveId, reason });
   }
@@ -922,9 +922,9 @@ function createWave({
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
     enterLobby({ waveId, by: me.id, mine: true }); // initiator auto-joins (marks its own lobby)
     if (enforcePaid) {
-      // Anti-spam: don't announce yet. Wait for the worker to burn the kick-off fee and
+      // Anti-spam: don't announce yet. Wait for the worker to burn the start fee and
       // prove it (announcePaid). Fall back to idle if that never happens.
-      log('wave', shortId(waveId), '— awaiting kick-off payment');
+      log('wave', shortId(waveId), '— awaiting start payment');
       clearTimeout(lobbyTimer);
       lobbyTimer = setTimeout(() => goIdle('unpaid'), PAY_TIMEOUT_MS);
       onEvent({ event: 'paying', waveId });
@@ -936,53 +936,53 @@ function createWave({
   }
 
   /**
-   * Flood the wave-announce (carrying the kick-off `paid` proof when present), publish the
-   * initiator's own gallery core (floodMyGalleryCore), and start the lobby→sweep timer.
-   * There is no shared gallery key any more — each participant contributes its own
+   * Flood the wave-announce (carrying the start `paid` proof when present), publish the
+   * initiator's own feed core (floodMyFeedCore), and start the lobby→sweep timer.
+   * There is no shared feed key any more — each participant contributes its own
    * self-certified core. Shared by the paid and unpaid paths.
    * @param {string} waveId The wave being announced.
-   * @param {Object|null} paidProof The signed kick-off burn proof, or null (unpaid path).
+   * @param {Object|null} paidProof The signed start burn proof, or null (unpaid path).
    */
   function doAnnounce(waveId, paidProof) {
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '');
     floodGossip(
       makeWaveAnnounce({ waveId, by: me.id, lobbyMs, paid: paidProof })
     );
-    floodMyGalleryCore(waveId); // the initiator is a participant too — share its core
+    floodMyFeedCore(waveId); // the initiator is a participant too — share its core
     clearTimeout(lobbyTimer);
     lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs);
   }
 
   /**
-   * The worker proved the kick-off burn (after it confirmed on-chain) — attach the proof
+   * The worker proved the start burn (after it confirmed on-chain) — attach the proof
    * and NOW announce. The initiator trusts its own confirmed burn (paid = 'verified').
-   * @param {Object} proof The signed kick-off burn attestation.
+   * @param {Object} proof The signed start burn attestation.
    */
   function announcePaid(proof) {
     if (!wave || wave.phase !== 'lobby' || !enforcePaid) {
       return;
     }
-    if (!validKickoff(proof, wave.id, me.id)) {
+    if (!validStartProof(proof, wave.id, me.id)) {
       return;
     }
-    wave.kickoffProof = proof;
+    wave.startProof = proof;
     wave.paid = 'verified';
     doAnnounce(wave.id, proof);
     onEvent({ event: 'wave-verified', waveId: wave.id, mine: true });
   }
 
   /**
-   * A kick-off proof is structurally valid: signed (Ed25519) by the initiator over a
-   * kick-off burn for this wave. (On-chain reality is checked separately, async.)
-   * @param {Object} proof The kick-off burn attestation to check.
+   * A start proof is structurally valid: signed (Ed25519) by the initiator over a
+   * start burn for this wave. (On-chain reality is checked separately, async.)
+   * @param {Object} proof The start burn attestation to check.
    * @param {string} waveId The wave it must name.
    * @param {string} byId Hex id of the initiator it must be signed by.
    * @returns {boolean} True if structurally valid and correctly signed.
    */
-  function validKickoff(proof, waveId, byId) {
+  function validStartProof(proof, waveId, byId) {
     return !!(
       proof &&
-      proof.reason === 'kickoff' &&
+      proof.reason === 'start' &&
       proof.waveId === waveId &&
       proof.peerId === byId &&
       verifyBurn(proof, proof.sig)
@@ -990,12 +990,12 @@ function createWave({
   }
 
   /**
-   * Verify a wave's kick-off burn ON-CHAIN, then settle wave.paid. Abandons the wave if the
+   * Verify a wave's start burn ON-CHAIN, then settle wave.paid. Abandons the wave if the
    * burn isn't real (anti-spam). No-op if enforcement is off or no verifier is wired.
-   * @param {string} waveId The wave whose kick-off burn to verify.
-   * @param {Object} proof The kick-off burn attestation (carries txHash / tronAddress / amount).
+   * @param {string} waveId The wave whose start burn to verify.
+   * @param {Object} proof The start burn attestation (carries txHash / tronAddress / amount).
    */
-  function verifyKickoff(waveId, proof) {
+  function verifyStartProof(waveId, proof) {
     if (!enforcePaid || !verifyBurnOnChain) {
       return;
     }
@@ -1023,7 +1023,7 @@ function createWave({
   /**
    * Lobby closed: freeze the roster + writers and flood wave-start with them and the sweep
    * parameters, then begin the sweep. The wave-start is self-contained — its `writers`
-   * carry every participant's gallery-core credential, so a peer adopting via wave-start
+   * carry every participant's feed-core credential, so a peer adopting via wave-start
    * (that missed the wave-joins) still learns every core.
    * @param {string} waveId The wave to finalize and start.
    */
@@ -1031,7 +1031,7 @@ function createWave({
     if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
       return;
     }
-    // safety net: make sure my own credential is in `writers` (floodMyGalleryCore set it
+    // safety net: make sure my own credential is in `writers` (floodMyFeedCore set it
     // at announce, but the async open may have raced the lobby close)
     if (!wave.joinSig && session.writerKey) {
       wave.joinSig = signJoin(swarm.keyPair, {
@@ -1066,7 +1066,7 @@ function createWave({
         writers,
         t0,
         lapMs,
-        paid: wave.kickoffProof // so peers adopting via start can re-sync newcomers
+        paid: wave.startProof // so peers adopting via start can re-sync newcomers
       })
     );
     onEvent({ event: 'started', waveId, by: me.id });
@@ -1075,7 +1075,7 @@ function createWave({
 
   // --- connections -----------------------------------------------------------
   swarm.on('connection', (conn) => {
-    store.replicate(conn); // carries gossip mux + gallery-core replication
+    store.replicate(conn); // carries gossip mux + feed-core replication
 
     const id = b4a.toString(conn.remotePublicKey, 'hex');
     log('peer connected', shortId(id));
@@ -1099,7 +1099,7 @@ function createWave({
     const send = (str) => message.send(str);
     table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
 
-    // greet: my heartbeat (liveness + country), so the newcomer seats me immediately.
+    // greet: my heartbeat (liveness + tag), so the newcomer seats me immediately.
     // Membership converges via DHT discovery (swarm.peers) + direct connections.
     send(JSON.stringify(myHeartbeat()));
     // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
@@ -1111,7 +1111,7 @@ function createWave({
             waveId: wave.id,
             phase: wave.phase,
             by: wave.by,
-            // every participant's gallery-core credential, so a newcomer is self-contained
+            // every participant's feed-core credential, so a newcomer is self-contained
             writers: [...wave.writers.entries()].map(([peerId, cred]) => ({
               peerId,
               writerKey: cred.writerKey,
@@ -1119,7 +1119,7 @@ function createWave({
             })),
             t0: wave.t0, // sweep timing, so a mid-race newcomer animates + ends right
             lapMs: wave.lapMs,
-            paid: wave.kickoffProof, // so a mid-lobby newcomer can verify + join
+            paid: wave.startProof, // so a mid-lobby newcomer can verify + join
             lobbyMsLeft:
               wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
           })
@@ -1141,12 +1141,12 @@ function createWave({
   // `discovered` count feeds host start-gating).
   swarm.on('update', emit);
 
-  const topic = crypto.hash(b4a.from(matchId));
+  const topic = crypto.hash(b4a.from(topicId));
   const discovery = swarm.join(topic, { server: true, client: true });
   discovery.flushed().then(() => {
     log(
-      'joined match',
-      matchId,
+      'joined topic',
+      topicId,
       'topic',
       shortId(b4a.toString(topic, 'hex')),
       'as',
@@ -1165,10 +1165,10 @@ function createWave({
   }
   tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
 
-  /** Maintenance tick: prune stale seats, pull gallery updates, then re-arm. */
+  /** Maintenance tick: prune stale seats, pull feed updates, then re-arm. */
   function ringTick() {
     emit(); // re-evaluate staleness pruning
-    // Pull replicated gallery writes for every gallery held and repaint.
+    // Pull replicated feed writes for every feed held and repaint.
     session.tick();
     tRing = setTimeout(ringTick, RINGUPDATE_MS);
   }
@@ -1178,9 +1178,9 @@ function createWave({
     me,
     startWave,
     join,
-    setCountry,
-    stageSelfie: (input) => selfie.stage(input),
-    // Wire the payment layer once the wallet is up: my address (for gallery tips /
+    setTag,
+    stageEntry: (input) => entryPipeline.stage(input),
+    // Wire the payment layer once the wallet is up: my address (for feed tips /
     // attestations) and the on-chain burn verifier (enables the paid-wave anti-spam gate).
     setWallet: (address, verifier) => {
       walletAddress = address || null;
@@ -1189,8 +1189,8 @@ function createWave({
         enforcePaid = true;
       }
     },
-    announcePaid, // initiator: attach the confirmed kick-off proof + announce the wave
-    recordBurn, // sign a fee-burn attestation (the kick-off proof for the paid-wave gate)
+    announcePaid, // initiator: attach the confirmed start proof + announce the wave
+    recordBurn, // sign a fee-burn attestation (the start proof for the paid-wave gate)
     async close() {
       clearTimeout(tHeartbeat);
       clearTimeout(tRing);

@@ -19,7 +19,7 @@ const enabled = process.env.E2E_ONCHAIN === '1' && !!(P1_SEED && P2_SEED);
 const opts = { timeout: 300000, skip: !enabled };
 
 test(
-  'enforced wave on Nile: paid gate → paid join → gallery convergence',
+  'enforced wave on Nile: paid gate → paid join → feed convergence',
   opts,
   async (t) => {
     // 20s lobby: room for P2 to verify the kick-off burn on-chain and burn its own join fee.
@@ -31,13 +31,13 @@ test(
     // the initiator P1 (which kicks off once it sees P2).
     const p2 = cluster.launch(
       'p2',
-      { AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' },
+      { AUTOJOIN: '1', AUTOENTRY: '1', WALLET: '1' },
       P2_SEED
     );
     await sleep(600);
     const p1 = cluster.launch(
       'p1',
-      { START: '1', AUTOJOIN: '1', AUTOSELFIE: '1', WALLET: '1' },
+      { START: '1', AUTOJOIN: '1', AUTOENTRY: '1', WALLET: '1' },
       P1_SEED
     );
 
@@ -62,10 +62,10 @@ test(
     // per-peer paid gate: P1 only ingests P2's join once it carries the burn attestation
     // (signature check only — no on-chain call on the ingest path); it then opens P2's core
     t.ok(
-      await p1.waitForLine(/gallery: learned writer/, 120000),
+      await p1.waitForLine(/feed: learned writer/, 120000),
       'P1 ingested P2 (burn-attested join)'
     );
-    // both selfies converge (tip addresses bound to the burn wallets)
-    t.ok(await p1.waitForGallery(2, 150000), 'the gallery converged to 2');
+    // both entrys converge (tip addresses bound to the burn wallets)
+    t.ok(await p1.waitForFeed(2, 150000), 'the feed converged to 2');
   }
 );

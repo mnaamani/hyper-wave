@@ -11,8 +11,8 @@ async function main() {
   const engine = createEngine({
     storageDir: dir,
     config: {
-      matchId: 'example-' + Date.now(), // isolate this run's ring
-      wallet: false // wallet-less: no fees/tips, receipt-only gallery (keeps the example offline)
+      topicId: 'example-' + Date.now(), // isolate this run's ring
+      wallet: false // wallet-less: no fees/tips, receipt-only feed (keeps the example offline)
     },
     notify: (msg) => {
       if (msg.type === 'state') {
@@ -38,7 +38,7 @@ async function main() {
   );
 
   // Commands a host sends (no peers here, so start-wave just announces to an empty ring):
-  engine.exec({ type: 'set-country', country: 'BR' });
+  engine.exec({ type: 'set-tag', tag: 'BR' });
   engine.exec({ type: 'start-wave' });
 
   // Let a state/event tick or two fire, then shut down cleanly.

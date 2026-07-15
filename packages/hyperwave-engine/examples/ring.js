@@ -24,5 +24,5 @@ console.log(
   'live ring angles:',
   live.map((peer) => peer.angle)
 );
-// The seat/angle drives the sweep order + the gallery order; the sweep visits every
+// The seat/angle drives the sweep order + the feed order; the sweep visits every
 // roster member by angle, no routing.

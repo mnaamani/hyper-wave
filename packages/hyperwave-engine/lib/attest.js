@@ -1,6 +1,6 @@
 // Pure attestation crypto for the wave protocol: Ed25519 signatures binding a peer's
 // ring identity to its fee burn (the paid-wave gate + tip-address binding) and to its
-// wave join (the gallery write credential). No state, no I/O — unit-tested in
+// wave join (the feed write credential). No state, no I/O — unit-tested in
 // attest.test.js.
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
@@ -15,7 +15,7 @@ const b4a = require('b4a');
  * @typedef {Object} BurnFields
  * @property {string} waveId - The wave the burn is for.
  * @property {string} peerId - The ring peer id (hex) that signs the attestation.
- * @property {string} reason - Why the fee was burned (e.g. 'kickoff', 'join').
+ * @property {string} reason - Why the fee was burned (e.g. 'start', 'join').
  * @property {number} amount - The burned amount.
  * @property {string} txHash - The on-chain burn transaction hash.
  * @property {string} tronAddress - The Tron wallet that funded the burn.
@@ -32,7 +32,7 @@ const b4a = require('b4a');
 // its ring key, a statement binding (waveId, peerId, reason, amount, txHash, tronAddress).
 // The Tron key that signed the burn is a *different* keypair, so this ring-key signature is
 // what ties the burn to the ring participant. Used for the paid-wave anti-spam gate: the
-// initiator's kick-off proof rides `wave-announce`, and peers cross-check its txHash on-chain
+// initiator's start proof rides `wave-announce`, and peers cross-check its txHash on-chain
 // (to==black hole, amount, memo commits waveId) before joining. (§ protocol.md §9)
 /**
  * Hash the burn attestation tuple that the peer signs with its ring key.
@@ -85,13 +85,13 @@ function verifyBurn(fields, sigHex) {
   }
 }
 
-// Does this burn attestation authorize `peerId` to write to `waveId`'s gallery? Checks the
+// Does this burn attestation authorize `peerId` to write to `waveId`'s feed? Checks the
 // signature and that the burn is bound to this exact peer + wave (so a burn can't be replayed
-// for another identity or wave). This is the gallery-admission gate: presence in the gallery
-// requires a real fee burn, which makes every tippable selfie one from a peer who paid in.
+// for another identity or wave). This is the feed-admission gate: presence in the feed
+// requires a real fee burn, which makes every tippable entry one from a peer who paid in.
 // The on-chain reality of the txHash is verified separately by the admitter (network I/O).
 /**
- * Does this burn attestation authorize `peerId` to write to `waveId`'s gallery?
+ * Does this burn attestation authorize `peerId` to write to `waveId`'s feed?
  * Checks the signature and that the burn is bound to this exact peer + wave.
  * @param {BurnProof} burn - The signed burn proof to check.
  * @param {string} peerId - The peer id the burn must be bound to.
@@ -108,17 +108,17 @@ function burnAuthorizes(burn, peerId, waveId) {
 }
 
 // --- join attestation --------------------------------------------------------
-// A peer's signed opt-in to a wave, binding its identity to the gallery writer
+// A peer's signed opt-in to a wave, binding its identity to the feed writer
 // core it publishes. Carried on `wave-join` (the join IS the write credential —
-// self-certifying, no admission) and on every gallery entry (mergeGallery's
+// self-certifying, no admission) and on every feed entry (mergeFeed's
 // write-gate: no valid join attestation = no write).
 // Covering the writerKey matters: without it, a relay could swap in its own
-// writer key under someone else's peerId and steal that peer's one gallery seat.
+// writer key under someone else's peerId and steal that peer's one feed seat.
 /**
  * Hash the (waveId, peerId, writerKey) tuple a join attestation signs.
  * @param {string} waveId - The wave id.
  * @param {string} peerId - The joining peer's ring id (hex).
- * @param {string} writerKey - The peer's gallery writer core key (hex).
+ * @param {string} writerKey - The peer's feed writer core key (hex).
  * @returns {Buffer} The blake2b hash of the join tuple.
  */
 function joinHash(waveId, peerId, writerKey) {

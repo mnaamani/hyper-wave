@@ -17,7 +17,7 @@ const engine = createEngine({
   storageDir: Bare.argv[2],
   config: {
     bootstrap: env.HYPERWAVE_BOOTSTRAP,
-    matchId: env.HYPERWAVE_MATCH || undefined
+    topicId: env.HYPERWAVE_TOPIC || undefined
   },
   notify: (msg) => {
     // engine -> host: the engine raises messages, we frame them onto the IPC pipe

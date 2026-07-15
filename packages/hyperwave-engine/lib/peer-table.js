@@ -1,7 +1,7 @@
 // The live peer table: who is on the ring and who we can reach directly. Extracted
 // from wave.js so the consistency rules across these collections live in one place:
 //   - a seat's angle is ALWAYS derived from its id (never trusted from the wire);
-//   - a fresher sighting wins; a stale one may still contribute its country;
+//   - a fresher sighting wins; a stale one may still contribute its tag;
 //   - a direct disconnect is authoritative: the seat is dropped immediately (DHT
 //     discovery never seeds a seat, so a stale announce can't resurrect a ghost —
 //     seats come only from live connections and gossip).
@@ -10,7 +10,7 @@ const { angleOfId, liveRing } = require('./ring');
 
 /**
  * A ring seat as tracked by the table (angle derived from the id).
- * @typedef {{id: string, angle: number, lastSeen: number, country: (string|null)}} PeerSeat
+ * @typedef {{id: string, angle: number, lastSeen: number, tag: (string|null)}} PeerSeat
  */
 
 /**
@@ -36,14 +36,14 @@ class PeerTable {
   /**
    * Insert or refresh a peer seat. Angle is always derived from the peer id, never
    * trusted from the wire. A fresher `lastSeen` replaces the seat (keeping a known
-   * country unless the sighting carries one); a staler sighting may still update the
-   * country (self-reported flag, purely cosmetic).
+   * tag unless the sighting carries one); a staler sighting may still update the
+   * tag (self-reported flag, purely cosmetic).
    * @param {string} id - Peer hex id (its Noise public key).
    * @param {number} lastSeen - Epoch ms of this sighting (drives staleness).
-   * @param {string} [country] - Optional supported-nation code.
+   * @param {string} [tag] - Optional tag code.
    * @returns {void}
    */
-  upsert(id, lastSeen, country) {
+  upsert(id, lastSeen, tag) {
     if (id === this.#meId) {
       return;
     }
@@ -53,10 +53,10 @@ class PeerTable {
         id,
         angle: angleOfId(id),
         lastSeen,
-        country: country ?? cur?.country ?? null
+        tag: tag ?? cur?.tag ?? null
       });
-    } else if (country && cur) {
-      cur.country = country;
+    } else if (tag && cur) {
+      cur.tag = tag;
     }
   }
 

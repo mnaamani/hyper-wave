@@ -18,7 +18,7 @@ const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
 const writerKey = b4a.toString(crypto.keyPair().publicKey, 'hex');
 
 // Direct kind: valid straight out of the factory.
-const heartbeat = makeHeartbeat({ id: peerId, country: 'BR' });
+const heartbeat = makeHeartbeat({ id: peerId, tag: 'BR' });
 console.log('heartbeat valid:', validGossip(heartbeat));
 
 // Flooded kind: valid only once the flood mid is stamped (floodGossip does this).

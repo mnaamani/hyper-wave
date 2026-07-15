@@ -27,10 +27,10 @@ function flooded(msg) {
 }
 
 test('every factory builds a message its validator accepts', (t) => {
-  t.ok(validGossip(makeHeartbeat({ id: PEER, country: 'BR' })), 'heartbeat');
+  t.ok(validGossip(makeHeartbeat({ id: PEER, tag: 'BR' })), 'heartbeat');
   t.ok(
     validGossip(makeHeartbeat({ id: PEER })),
-    'heartbeat country defaults to null'
+    'heartbeat tag defaults to null'
   );
   t.ok(
     validGossip(
@@ -109,8 +109,8 @@ test('unknown kinds and non-objects are rejected', (t) => {
 test('missing or mistyped fields are rejected per kind', (t) => {
   t.absent(validGossip({ kind: 'heartbeat', id: 'not-hex' }), 'bad id');
   t.absent(
-    validGossip({ kind: 'heartbeat', id: PEER, country: 'X'.repeat(9) }),
-    'oversized country'
+    validGossip({ kind: 'heartbeat', id: PEER, tag: 'X'.repeat(9) }),
+    'oversized tag'
   );
   t.absent(
     validGossip(makeWaveAnnounce({ waveId: WAVE, by: PEER, lobbyMs: 15000 })),

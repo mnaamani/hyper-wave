@@ -1,5 +1,5 @@
 // Attestation crypto (attest.js): the burn attestation (paid-wave gate + tip-address
-// binding) and the join attestation (the gallery write credential + self-certifying core
+// binding) and the join attestation (the feed write credential + self-certifying core
 // key). Pure — no swarm. Runs under Bare:
 //   bare lib/attest.test.js   (or `npm test`)
 const test = require('brittle');

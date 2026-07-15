@@ -14,10 +14,10 @@
  */
 
 /**
- * A participant's gallery-core credential as carried in `writers` (protocol.md §5).
+ * A participant's feed-core credential as carried in `writers` (protocol.md §5).
  * @typedef {Object} WriterCred
  * @property {string} peerId - The participant's ring id (64 hex chars).
- * @property {string} writerKey - Its gallery core key (64 hex chars).
+ * @property {string} writerKey - Its feed core key (64 hex chars).
  * @property {string} joinSig - Its join attestation signature (hex).
  */
 
@@ -70,8 +70,8 @@ function isOptionalObject(value) {
   return value === undefined || (typeof value === 'object' && value !== null);
 }
 
-/** @param {*} value - Candidate. @returns {boolean} Absent/null, or a short country code. */
-function isCountry(value) {
+/** @param {*} value - Candidate. @returns {boolean} Absent/null, or a short tag code. */
+function isTag(value) {
   return (
     value === null ||
     value === undefined ||
@@ -80,7 +80,7 @@ function isCountry(value) {
 }
 
 /**
- * Is this a well-formed gallery-core credential (a `writers` entry)?
+ * Is this a well-formed feed-core credential (a `writers` entry)?
  * @param {*} entry - The candidate credential.
  * @returns {boolean} True if `{peerId, writerKey, joinSig}` are all well-typed.
  */
@@ -101,7 +101,7 @@ function isWriters(value) {
 // One shape validator per kind. Flooded kinds require their `mid` (so the dedup/relay
 // decision never sees a mid-less flood); direct kinds simply don't check it.
 const VALIDATORS = {
-  heartbeat: (msg) => isId(msg.id) && isCountry(msg.country),
+  heartbeat: (msg) => isId(msg.id) && isTag(msg.tag),
 
   'wave-announce': (msg) =>
     isMid(msg.mid) &&
@@ -157,14 +157,14 @@ function validGossip(msg) {
 // --- factories (one per kind — every send site builds through these) ---------
 
 /**
- * Build a heartbeat: pure liveness + cosmetic country, one hop per connection.
+ * Build a heartbeat: pure liveness + cosmetic tag, one hop per connection.
  * @param {Object} fields - The heartbeat fields.
  * @param {string} fields.id - My ring id (hex).
- * @param {string|null} [fields.country] - My supported-nation code (cosmetic).
+ * @param {string|null} [fields.tag] - My tag code (cosmetic).
  * @returns {GossipMessage} The heartbeat message.
  */
-function makeHeartbeat({ id, country }) {
-  return { kind: 'heartbeat', id, country: country || null };
+function makeHeartbeat({ id, tag }) {
+  return { kind: 'heartbeat', id, tag: tag || null };
 }
 
 /**
@@ -173,7 +173,7 @@ function makeHeartbeat({ id, country }) {
  * @param {string} fields.waveId - The new wave's id.
  * @param {string} fields.by - The initiator's ring id.
  * @param {number} fields.lobbyMs - Lobby window length in ms.
- * @param {Object|null} [fields.paid] - The signed kick-off burn proof (paid path).
+ * @param {Object|null} [fields.paid] - The signed start burn proof (paid path).
  * @returns {GossipMessage} The wave-announce message.
  */
 function makeWaveAnnounce({ waveId, by, lobbyMs, paid }) {
@@ -187,11 +187,11 @@ function makeWaveAnnounce({ waveId, by, lobbyMs, paid }) {
 }
 
 /**
- * Build a wave-join: publishes the joiner's own gallery core (flooded).
+ * Build a wave-join: publishes the joiner's own feed core (flooded).
  * @param {Object} fields - The join fields.
  * @param {string} fields.waveId - The wave being joined.
  * @param {string} fields.peerId - The joiner's ring id.
- * @param {string} fields.writerKey - The joiner's gallery core key (hex).
+ * @param {string} fields.writerKey - The joiner's feed core key (hex).
  * @param {string} fields.joinSig - The join attestation over (waveId, peerId, writerKey).
  * @param {Object|null} [fields.burn] - The joiner's burn attestation (paid gate), if confirmed.
  * @returns {GossipMessage} The wave-join message.
@@ -213,10 +213,10 @@ function makeWaveJoin({ waveId, peerId, writerKey, joinSig, burn }) {
  * @param {Object} fields - The start fields.
  * @param {string} fields.waveId - The starting wave's id.
  * @param {string} fields.by - The initiator's ring id.
- * @param {WriterCred[]} fields.writers - Every participant's gallery-core credential.
+ * @param {WriterCred[]} fields.writers - Every participant's feed-core credential.
  * @param {number} fields.t0 - Epoch ms the sweep starts.
  * @param {number} fields.lapMs - Duration of the full lap.
- * @param {Object|null} [fields.paid] - The kick-off proof (so start-adopters can re-sync).
+ * @param {Object|null} [fields.paid] - The start proof (so start-adopters can re-sync).
  * @returns {GossipMessage} The wave-start message.
  */
 function makeWaveStart({ waveId, by, writers, t0, lapMs, paid }) {
@@ -237,10 +237,10 @@ function makeWaveStart({ waveId, by, writers, t0, lapMs, paid }) {
  * @param {string} fields.waveId - The engaged wave's id.
  * @param {'lobby'|'racing'} fields.phase - The wave's current phase.
  * @param {string} fields.by - The initiator's ring id.
- * @param {WriterCred[]} fields.writers - Every participant's gallery-core credential.
+ * @param {WriterCred[]} fields.writers - Every participant's feed-core credential.
  * @param {number} [fields.t0] - Sweep start (racing), so a newcomer animates + ends right.
  * @param {number} [fields.lapMs] - Lap duration (racing).
- * @param {Object|null} [fields.paid] - The kick-off proof (so the newcomer can verify + join).
+ * @param {Object|null} [fields.paid] - The start proof (so the newcomer can verify + join).
  * @param {number} fields.lobbyMsLeft - Lobby time remaining in ms (0 when racing).
  * @returns {GossipMessage} The wave-sync message.
  */
