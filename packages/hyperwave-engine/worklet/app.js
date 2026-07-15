@@ -3,13 +3,16 @@
 // (lib/engine.js) — the mobile counterpart of workers/hyperwave.js. It is NOT run in this repo
 // (there's no RN host here); it's the bundle target `bare-pack` compiles for iOS/Android, e.g.
 //   bare-pack -p ios --linked --out bundles/app-ios.bundle.js worklet/app.js
-// The RN side boots it with `new Worklet().start('/app.js', bundle)`, then sends one
-// { type:'init', storageDir, config } message; everything after is the same message protocol the
-// desktop renderer speaks. Kept in-repo so the host seam is a single source of truth.
+// The RN side boots it with `new Worklet().start('/app.js', bundle)`, then speaks the bare-rpc
+// host<->UI seam (lib/rpc.js) over the pipe — the same seam the desktop uses. Its first message is
+// an `init` command carrying { storageDir, config }; because the worklet learns its storageDir only
+// then, the engine is built lazily via serveEngine's `onBootstrap` hook. Kept in-repo so the host
+// seam is a single source of truth.
 const os = require('bare-os');
 const path = require('bare-path');
 const FramedStream = require('framed-stream');
 const { createEngine } = require('../lib/engine');
+const { serveEngine } = require('../lib/rpc');
 
 // On mobile the process cwd is the (read-only) app bundle, so a relative storageDir like
 // 'hyperwave' resolves somewhere bare-fs can't write — Corestore then fails with "Corestore is
@@ -24,44 +27,34 @@ function resolveStorage(dir) {
 }
 
 const pipe = new FramedStream(BareKit.IPC); // bare-kit's worklet-side IPC (cf. Bare.IPC on desktop)
-// Sends a message Worker -> Host (React Native app)
-const send = (msg) => pipe.write(JSON.stringify(msg));
+
+// The bare-rpc seam owns the pipe: it routes RN -> engine commands and streams engine -> RN
+// notifications. `onBootstrap` builds the engine the first time a command arrives (the `init`),
+// since the storageDir isn't known before then.
+let engine = null;
+const seam = serveEngine({
+  stream: pipe,
+  onBootstrap: (command) => {
+    if (command.type === 'init' && !engine) {
+      engine = createEngine({
+        storageDir: resolveStorage(command.storageDir),
+        config: command.config || {},
+        emit: seam.emit // engine -> RN: raised over the seam's EVENT channel
+      });
+      seam.attach(engine);
+    }
+  }
+});
 
 // Resilience: a mobile app must not die on a stray async rejection deep in the engine. Bare
-// aborts the process on an unhandled rejection by default — catch them and report instead.
+// aborts the process on an unhandled rejection by default — catch them and report as an event.
 if (typeof Bare !== 'undefined' && Bare.on) {
   Bare.on('unhandledRejection', (err) => {
     try {
-      send({
+      seam.emit({
         type: 'engine-error',
         error: String((err && err.message) || err)
       });
     } catch {}
   });
 }
-
-// RN host -> Worker commands.
-let engine = null;
-pipe.on('data', (data) => {
-  let msg;
-  try {
-    msg = JSON.parse(data.toString());
-  } catch {
-    return;
-  }
-  // First message from the RN host should be the init: storageDir + config (topicId, seed, ...)
-  if (msg.type === 'init' && !engine) {
-    engine = createEngine({
-      storageDir: resolveStorage(msg.storageDir),
-      config: msg.config || {},
-      notify: send // engine -> host: the engine raises messages, we frame them onto the IPC pipe
-    });
-  } else if (engine) {
-    engine.exec(msg);
-  } else {
-    // RN host did not yet send an init message, so whatever this message is, its too early to be sending.
-    console.warn(
-      `Dropped message of type ${msg.type}. Init message not yet received`
-    );
-  }
-});

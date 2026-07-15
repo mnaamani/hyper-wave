@@ -1,13 +1,14 @@
 // useEngine — the mobile host for the shared engine. This is the RN counterpart of the desktop
 // renderer's worker bridge: it boots the Bare worklet (hyperwave-engine's worklet/app.js,
-// bundled by bare-pack), speaks the SAME JSON message protocol over the IPC stream, and exposes
-// engine state + actions to React. The engine itself (the sweep, gallery, WDK wallet) runs
-// unchanged inside the worklet — this file never touches Hyperswarm/Corestore/WDK directly.
+// bundled by bare-pack) and speaks the SAME bare-rpc host<->UI seam (hyperwave-engine/lib/rpc)
+// over the IPC stream that the desktop uses, exposing engine state + actions to React. The engine
+// itself (the sweep, feed, WDK wallet) runs unchanged inside the worklet — this file never touches
+// Hyperswarm/Corestore/WDK directly.
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState } from 'react-native';
 import { Worklet } from 'react-native-bare-kit';
 import FramedStream from 'framed-stream';
-import b4a from 'b4a';
+import { createRpcClient } from 'hyperwave-engine/lib/rpc';
 import bundle from '../bundles/app.bundle.mjs'; // produced by `npm run bundle` (bare-pack)
 
 // Path the worklet's bare-fs writes to (Corestore + the wallet seed, see lib/wallet.js). NOTE:
@@ -16,7 +17,7 @@ import bundle from '../bundles/app.bundle.mjs'; // produced by `npm run bundle` 
 const STORAGE_DIR = 'hyperwave';
 
 export function useEngine(config = {}) {
-  const pipeRef = useRef(null);
+  const clientRef = useRef(null);
   const [me, setMe] = useState(null);
   const [peers, setPeers] = useState(0);
   const [phase, setPhase] = useState('idle');
@@ -28,66 +29,63 @@ export function useEngine(config = {}) {
     const worklet = new Worklet();
     worklet.start('/app.bundle', bundle);
 
-    // Wrap the IPC duplex in the SAME framing the worklet uses (FramedStream(BareKit.IPC)).
+    // Wrap the IPC duplex in the SAME framing the worklet uses (FramedStream(BareKit.IPC)), then
+    // speak the bare-rpc host<->UI seam over it. `onEvent` receives every engine notification (and
+    // request/response replies, e.g. tip-result — see createRpcClient's doc note).
     const pipe = new FramedStream(worklet.IPC);
-    pipeRef.current = pipe;
-
-    pipe.on('data', (data) => {
-      let msg;
-      try {
-        msg = JSON.parse(b4a.toString(data));
-      } catch {
-        return;
-      }
-      switch (msg.type) {
-        case 'state':
-          if (msg.me) {
-            setMe(msg.me);
-          }
-          setPeers((msg.peers || []).length);
-          break;
-        case 'event':
-          if (msg.event === 'started' || msg.event === 'announced') {
-            setPhase('active');
-          } else if (msg.event === 'completed' || msg.event === 'ended') {
-            setPhase('idle');
-          }
-          break;
-        case 'feed':
-          // The engine is theme-agnostic: an entry carries an opaque `payload` this app
-          // fills with a {image, caption} selfie, and a peer's cosmetic `tag` is its
-          // country. Map back to the football shape at the boundary so the UI stays simple.
-          setGallery(
-            (msg.items || []).map((item) => ({
-              ...item,
-              image: item.payload?.image || '',
-              caption: item.payload?.caption || '',
-              country: item.tag
-            }))
-          );
-          break;
-        case 'wallet':
-          if (msg.error) {
-            setToast(`⚠ wallet: ${msg.error}`);
-          } else {
-            setWallet({ address: msg.address, trx: msg.trx });
-          }
-          break;
-        case 'burn-result':
-        case 'tip-result':
-          setToast(
-            msg.error
-              ? `⚠ ${msg.error}`
-              : `✓ ${msg.type} ${msg.hash ? msg.hash.slice(0, 8) : ''}`
-          );
-          break;
+    const client = createRpcClient({
+      stream: pipe,
+      onEvent: (msg) => {
+        switch (msg.type) {
+          case 'state':
+            if (msg.me) {
+              setMe(msg.me);
+            }
+            setPeers((msg.peers || []).length);
+            break;
+          case 'event':
+            if (msg.event === 'started' || msg.event === 'announced') {
+              setPhase('active');
+            } else if (msg.event === 'completed' || msg.event === 'ended') {
+              setPhase('idle');
+            }
+            break;
+          case 'feed':
+            // The engine is theme-agnostic: an entry carries an opaque `payload` this app
+            // fills with a {image, caption} selfie, and a peer's cosmetic `tag` is its
+            // country. Map back to the football shape at the boundary so the UI stays simple.
+            setGallery(
+              (msg.items || []).map((item) => ({
+                ...item,
+                image: item.payload?.image || '',
+                caption: item.payload?.caption || '',
+                country: item.tag
+              }))
+            );
+            break;
+          case 'wallet':
+            if (msg.error) {
+              setToast(`⚠ wallet: ${msg.error}`);
+            } else {
+              setWallet({ address: msg.address, trx: msg.trx });
+            }
+            break;
+          case 'burn-result':
+          case 'tip-result':
+            setToast(
+              msg.error
+                ? `⚠ ${msg.error}`
+                : `✓ ${msg.type} ${msg.hash ? msg.hash.slice(0, 8) : ''}`
+            );
+            break;
+        }
       }
     });
+    clientRef.current = client;
 
-    // one-time init: storageDir + config (topicId, bootstrap, seed)
-    pipe.write(
-      JSON.stringify({ type: 'init', storageDir: STORAGE_DIR, config })
-    );
+    // one-time init command: storageDir + config (topicId, bootstrap, seed). serveEngine's
+    // onBootstrap builds the engine from it (worklet/app.js).
+    client.call('init', { storageDir: STORAGE_DIR, config });
 
     // Cooperate with the OS lifecycle: react-native-bare-kit's Worklet.update() takes an RN
     // AppStateStatus and suspends/resumes the Bare runtime accordingly, so we don't burn battery
@@ -113,10 +111,11 @@ export function useEngine(config = {}) {
     };
   }, []); // boot once on mount
 
-  const send = useCallback((msg) => {
-    if (pipeRef.current) {
-      pipeRef.current.write(JSON.stringify(msg));
+  const call = useCallback((type, args) => {
+    if (clientRef.current) {
+      return clientRef.current.call(type, args);
     }
+    return undefined;
   }, []);
 
   return {
@@ -126,13 +125,14 @@ export function useEngine(config = {}) {
     gallery,
     wallet,
     toast,
-    startWave: () => send({ type: 'start-wave' }),
-    joinWave: () => send({ type: 'join-wave' }),
+    startWave: () => call('start-wave'),
+    joinWave: () => call('join-wave'),
     // the app's "country" is the engine's cosmetic peer `tag`; a selfie {image, caption}
     // is just the engine entry's opaque `payload`
-    setCountry: (country) => send({ type: 'set-tag', tag: country }),
+    setCountry: (country) => call('set-tag', { tag: country }),
     stageSelfie: (selfie) =>
-      send({ type: 'stage-entry', entry: { payload: selfie } }),
-    tip: (to, amount) => send({ type: 'tip', to, amount })
+      call('stage-entry', { entry: { payload: selfie } }),
+    // request/response: resolves with the tip-result (also delivered to onEvent's toast)
+    tip: (to, amount) => call('tip', { to, amount })
   };
 }

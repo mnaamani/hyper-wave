@@ -10,18 +10,15 @@ const bridge = window.bridge;
 const decoder = new TextDecoder('utf-8');
 const HYPERWAVE = '/workers/hyperwave.js';
 
-bridge.startWorker(HYPERWAVE);
-
-// Handlers for worker message events
+// Handlers for engine message events
 const listenersByMessageType = {};
 
-bridge.onWorkerIPC(HYPERWAVE, (data) => {
-  let msg;
-  try {
-    msg = JSON.parse(decoder.decode(data));
-  } catch {
-    return;
-  }
+// engine -> UI events arrive over the bare-rpc seam: Electron main runs the RPC client on the
+// worker pipe and pushes each engine notification here as `hw:event`. Request/response replies
+// (tip-result, send-result, transactions) come through the SAME stream, so the ipc.on(...)
+// handlers below stay the single consumption point — nothing in app.js changed. Attach before
+// starting the worker so no early event is missed.
+bridge.onHwEvent((msg) => {
   const listeners = listenersByMessageType[msg.type];
   if (listeners) {
     for (const fn of listeners) {
@@ -29,6 +26,7 @@ bridge.onWorkerIPC(HYPERWAVE, (data) => {
     }
   }
 });
+bridge.startWorker(HYPERWAVE);
 bridge.onWorkerStdout(HYPERWAVE, (data) =>
   console.log('[hyperwave]', decoder.decode(data))
 );
@@ -43,9 +41,11 @@ export function on(type, fn) {
   listenersByMessageType[type] = handlers;
 }
 
-// Send command message to worker
+// Send a command to the engine over the seam. Request/response commands (tip / send-trx /
+// fetch-transactions) resolve with their result; the rest are fire-and-forget. Results ALSO arrive
+// via onHwEvent, so callers keep consuming them through ipc.on(...).
 function send(type, extra = {}) {
-  bridge.writeWorkerIPC(HYPERWAVE, JSON.stringify({ type, ...extra }));
+  return bridge.hwCall(type, extra);
 }
 
 export const startWave = () => send('start-wave');

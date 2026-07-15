@@ -7,34 +7,25 @@ const FramedStream = require('framed-stream');
 const goodbye = require('graceful-goodbye');
 const env = require('bare-env');
 const { createEngine } = require('hyperwave-engine');
+const { serveEngine } = require('hyperwave-engine/lib/rpc');
 
 const pipe = new FramedStream(Bare.IPC);
 
-// Worker -> Host message
-const send = (msg) => pipe.write(JSON.stringify(msg));
-
+// The bare-rpc host<->UI seam owns the pipe (Electron main runs the matching client). This is an
+// EAGER host: the storage dir arrives synchronously as argv[2], so we build the engine right away
+// and attach — no onBootstrap needed (that's the mobile worklet's lazy-init path).
+const seam = serveEngine({ stream: pipe });
 const engine = createEngine({
   storageDir: Bare.argv[2],
   config: {
     bootstrap: env.HYPERWAVE_BOOTSTRAP,
     topicId: env.HYPERWAVE_TOPIC || undefined
   },
-  notify: (msg) => {
-    // engine -> host: the engine raises messages, we frame them onto the IPC pipe
-    send(msg);
-  }
+  emit: seam.emit // engine -> host: raised over the seam's EVENT channel
 });
+seam.attach(engine);
 
-// Host -> Worker commands
-pipe.on('data', (data) => {
-  let command;
-  try {
-    command = JSON.parse(data.toString());
-  } catch (err) {
-    console.log('Unable to parse command from renderer', err.toString());
-    return;
-  }
-  engine.exec(command);
+goodbye(async () => {
+  seam.close();
+  await engine.close();
 });
-
-goodbye(() => engine.close());

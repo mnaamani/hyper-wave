@@ -48,5 +48,15 @@ contextBridge.exposeInMainWorld('bridge', {
   },
   writeWorkerIPC: (specifier, data) => {
     return ipcRenderer.invoke('pear:worker:writeIPC:' + specifier, data);
+  },
+  // HyperWave app IPC (the bare-rpc host<->UI seam). Electron main runs the bare-rpc client over
+  // the worker pipe; these ride Electron's own IPC. `hwCall` is request/response (invoke resolves
+  // with the reply, or undefined for fire-and-forget commands); `onHwEvent` is the one-way stream
+  // of engine notifications (and request/response replies — see createRpcClient).
+  hwCall: (type, args) => ipcRenderer.invoke('hw:call', { type, args }),
+  onHwEvent: (listener) => {
+    const wrap = (evt, msg) => listener(msg);
+    ipcRenderer.on('hw:event', wrap);
+    return () => ipcRenderer.removeListener('hw:event', wrap);
   }
 });

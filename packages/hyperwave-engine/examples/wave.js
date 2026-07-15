@@ -13,18 +13,23 @@ async function main() {
     storageDir: dir,
     topicId: 'example-' + Date.now(),
     bootstrap: parseBootstrap(env.HYPERWAVE_BOOTSTRAP), // host:port → local DHT, else public
-    onState: ({ me, peers }) => {
-      console.log(
-        'state: peers',
-        peers.length,
-        'me',
-        me.id.slice(0, 8),
-        '@',
-        me.angle.toFixed(1)
-      );
-    },
-    onEvent: (ev) => console.log('event:', ev.event, ev.waveId || ''),
-    onFeed: (items) => console.log('feed:', items.length)
+    // One host sink: the wave emits typed messages; dispatch on the type.
+    emit: (msg) => {
+      if (msg.type === 'state') {
+        console.log(
+          'state: peers',
+          msg.peers.length,
+          'me',
+          msg.me.id.slice(0, 8),
+          '@',
+          msg.me.angle.toFixed(1)
+        );
+      } else if (msg.type === 'event') {
+        console.log('event:', msg.event, msg.waveId || '');
+      } else if (msg.type === 'feed') {
+        console.log('feed:', msg.items.length);
+      }
+    }
     // swarmSeed: '<hex>'  // inject an identity; else <storage>/swarm.seed (stable across runs)
   });
 

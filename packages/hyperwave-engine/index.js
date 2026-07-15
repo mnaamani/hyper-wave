@@ -6,5 +6,6 @@
 module.exports = {
   ...require('./lib/engine'), // createEngine
   ...require('./lib/wave'), // createWave, parseBootstrap
-  ...require('./lib/wallet') // createPayments, FEE_TRX, payFee, confirmBurn, wireWallet
+  ...require('./lib/wallet'), // createPayments, FEE_TRX, payFee, confirmBurn, wireWallet
+  ...require('./lib/rpc') // serveEngine, createRpcClient (the host<->UI IPC seam)
 };

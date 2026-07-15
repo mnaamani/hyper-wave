@@ -1,4 +1,4 @@
-// engine.js — host the whole engine with createEngine(): storageDir + config + a `notify`
+// engine.js — host the whole engine with createEngine(): storageDir + config + an `emit`
 // callback for engine→host events, driven by exec() commands. This is the surface
 // the desktop worker and mobile worklet both use. This example boots wallet-less, prints
 // its identity + any state events, then closes. Run:  bare examples/engine.js
@@ -14,7 +14,7 @@ async function main() {
       topicId: 'example-' + Date.now(), // isolate this run's ring
       wallet: false // wallet-less: no fees/tips, receipt-only feed (keeps the example offline)
     },
-    notify: (msg) => {
+    emit: (msg) => {
       if (msg.type === 'state') {
         console.log(
           'state: peers',
@@ -30,12 +30,9 @@ async function main() {
     }
   });
 
-  console.log(
-    'engine up. my seat:',
-    engine.wave.me.id.slice(0, 8),
-    '@',
-    engine.wave.me.angle.toFixed(1)
-  );
+  // The engine no longer exposes the live wave instance (it can't cross the IPC boundary), so this
+  // peer's ring identity arrives via the first `state` event above — see the "state:" log line.
+  console.log('engine up.');
 
   // Commands a host sends (no peers here, so start-wave just announces to an empty ring):
   engine.exec({ type: 'set-tag', tag: 'BR' });

@@ -18,7 +18,7 @@
     "test": "bare test.js",
     "test:e2e:local": "node e2e/wave.local.e2e.js",
     "test:e2e:onchain": "node e2e/wave.onchain.e2e.js",
-    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/messages.js lib/sweep.js lib/feed.js lib/feed-crdt.js lib/flood.js lib/peer-table.js lib/entry.js lib/wave.js lib/wallet.js lib/engine.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/messages.js lib/sweep.js lib/feed.js lib/feed-crdt.js lib/flood.js lib/peer-table.js lib/entry.js lib/wave.js lib/wallet.js lib/engine.js lib/rpc.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
   },
   "dependencies": {
     "@tetherto/wdk": "^1.0.0-beta.13",
@@ -28,6 +28,7 @@
     "bare-fs": "^4.7.4",
     "bare-os": "^3.9.3",
     "bare-path": "^3.0.1",
+    "bare-rpc": "^1.3.8",
     "compact-encoding": "^3.3.0",
     "corestore": "^7.9.1",
     "framed-stream": "^1.0.1",

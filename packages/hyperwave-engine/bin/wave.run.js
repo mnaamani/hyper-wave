@@ -57,65 +57,69 @@ const wave = createWave({
   maxPeers: env.HYPERWAVE_MAX_PEERS
     ? Number(env.HYPERWAVE_MAX_PEERS)
     : undefined,
-  onState: (state) => {
-    console.log(
-      `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)}`
-    );
-    // Start once the whole roster is DISCOVERED and we're CONNECTED to min(START,
-    // CONNECTED_FLOOR) of them, held for SETTLE_MS. At small N that means the full mesh (the
-    // strictest condition — discovery alone races ahead of the Protomux gossip channels the
-    // flood rides, and racing a half-wired mesh dropped peers); at
-    // large N a full mesh can't exist (Hyperswarm maxPeers, see CONNECTED_FLOOR) and the
-    // flood over the topic mesh is what carries the lifecycle.
-    if (!env.START || started) {
-      return;
-    }
-    // With WALLET=1, wait for the wallet before arming — else startWave runs with the paid-gate
-    // still off and announces an UNPAID wave (races wallet init vs discovery).
-    const startTarget = Number(env.START);
-    const discovered = Math.max(state.discovered || 0, state.peers.length);
-    const ready =
-      discovered >= startTarget &&
-      state.connected >= Math.min(startTarget, CONNECTED_FLOOR) &&
-      !(env.WALLET && !payments);
-    if (ready && settleTimer === null) {
-      settleTimer = setTimeout(() => {
-        started = true;
-        startWaveFlow();
-      }, SETTLE_MS);
-    } else if (!ready && settleTimer !== null) {
-      clearTimeout(settleTimer); // connectivity regressed before settling — re-arm on the next full
-      settleTimer = null;
+  // One host sink: the wave emits typed messages ({type:'state'|'event'|'feed', …}); dispatch on
+  // the type. (Replaces the former onState/onEvent/onFeed trio — see createWave.)
+  emit: (msg) => {
+    if (msg.type === 'state') {
+      const state = msg;
+      console.log(
+        `[${name}] peers=${state.peers.length} connected=${state.connected} me=${state.me.id.slice(0, 8)}@${state.me.angle.toFixed(1)}`
+      );
+      // Start once the whole roster is DISCOVERED and we're CONNECTED to min(START,
+      // CONNECTED_FLOOR) of them, held for SETTLE_MS. At small N that means the full mesh (the
+      // strictest condition — discovery alone races ahead of the Protomux gossip channels the
+      // flood rides, and racing a half-wired mesh dropped peers); at
+      // large N a full mesh can't exist (Hyperswarm maxPeers, see CONNECTED_FLOOR) and the
+      // flood over the topic mesh is what carries the lifecycle.
+      if (!env.START || started) {
+        return;
+      }
+      // With WALLET=1, wait for the wallet before arming — else startWave runs with the paid-gate
+      // still off and announces an UNPAID wave (races wallet init vs discovery).
+      const startTarget = Number(env.START);
+      const discovered = Math.max(state.discovered || 0, state.peers.length);
+      const ready =
+        discovered >= startTarget &&
+        state.connected >= Math.min(startTarget, CONNECTED_FLOOR) &&
+        !(env.WALLET && !payments);
+      if (ready && settleTimer === null) {
+        settleTimer = setTimeout(() => {
+          started = true;
+          startWaveFlow();
+        }, SETTLE_MS);
+      } else if (!ready && settleTimer !== null) {
+        clearTimeout(settleTimer); // connectivity regressed before settling — re-arm on the next
+        settleTimer = null;
+      }
+    } else if (msg.type === 'event') {
+      console.log(`[${name}] EVENT`, JSON.stringify(msg));
+      // AUTOJOIN: try on announce (no-wallet path: already 'verified') and on wave-verified
+      // (wallet path: after the start burn confirms). join() dedupes + gates on paid.
+      if (
+        env.AUTOJOIN &&
+        !msg.mine &&
+        (msg.event === 'wave-announce' || msg.event === 'wave-verified')
+      ) {
+        joinAndBurn();
+      }
+      // stage a (fake) entry payload during the lobby, exactly like a host does at start;
+      // the engine posts it to the feed when this peer's sweep slot fires. The payload is
+      // opaque to the engine — this CLI puts a {caption} object in it.
+      if (env.AUTOENTRY && msg.event === 'wave-active' && msg.joined) {
+        wave.stageEntry({ payload: { caption: `${name} was here` } });
+      }
+    } else if (msg.type === 'feed') {
+      console.log(
+        `[${name}] FEED size=${msg.items.length} [${msg.items
+          .map(
+            (item) =>
+              (item.payload?.caption ?? '') +
+              (item.address ? ' $' + item.address.slice(0, 5) : '')
+          )
+          .join(', ')}]`
+      );
     }
   },
-  onEvent: (evt) => {
-    console.log(`[${name}] EVENT`, JSON.stringify(evt));
-    // AUTOJOIN: try on announce (no-wallet path: already 'verified') and on wave-verified
-    // (wallet path: after the start burn confirms). join() dedupes + gates on paid.
-    if (
-      env.AUTOJOIN &&
-      !evt.mine &&
-      (evt.event === 'wave-announce' || evt.event === 'wave-verified')
-    ) {
-      joinAndBurn();
-    }
-    // stage a (fake) entry payload during the lobby, exactly like a host does at start;
-    // the engine posts it to the feed when this peer's sweep slot fires. The payload is
-    // opaque to the engine — this CLI puts a {caption} object in it.
-    if (env.AUTOENTRY && evt.event === 'wave-active' && evt.joined) {
-      wave.stageEntry({ payload: { caption: `${name} was here` } });
-    }
-  },
-  onFeed: (items) =>
-    console.log(
-      `[${name}] FEED size=${items.length} [${items
-        .map(
-          (item) =>
-            (item.payload?.caption ?? '') +
-            (item.address ? ' $' + item.address.slice(0, 5) : '')
-        )
-        .join(', ')}]`
-    ),
   log: (...args) => console.log(`[${name}]`, ...args)
 });
 

@@ -10,6 +10,9 @@ const os = require('os');
 const path = require('path');
 const PearRuntime = require('pear-runtime');
 const FramedStream = require('framed-stream');
+// The client half of the bare-rpc host<->UI seam. Only lib/rpc is required (not the whole engine),
+// so main doesn't pull Hyperswarm/Corestore into the Electron main process — just bare-rpc + b4a.
+const { createRpcClient } = require('hyperwave-engine/lib/rpc');
 
 const { isMac, isLinux, isWindows } = require('which-runtime');
 const { command, flag } = require('paparam');
@@ -19,6 +22,8 @@ const { name, productName, version, upgrade } = pkg;
 const protocol = name;
 // Should match value of 'UPDATER' in /renderer/updater.js
 const updaterWorkerSpecifier = '/workers/updater.js';
+// The hyperwave worker speaks the bare-rpc seam; must match the renderer's startWorker specifier.
+const hyperwaveWorkerSpecifier = '/workers/hyperwave.js';
 
 const workers = new Map();
 
@@ -149,23 +154,45 @@ function getWorker(specifier) {
   function sendWorkerStderr(data) {
     sendToAll('pear:worker:stderr:' + specifier, data);
   }
-  function sendWorkerIPC(data) {
-    sendToAll('pear:worker:ipc:' + specifier, data);
-  }
   function onBeforeQuit() {
     pipe.destroy();
   }
-  ipcMain.handle('pear:worker:writeIPC:' + specifier, (evt, data) => {
-    return pipe.write(data);
-  });
+
+  // The hyperwave worker speaks the bare-rpc seam; every other worker (the updater) uses the
+  // generic byte relay. For the seam, main IS the RPC client (it holds the worker's FramedStream)
+  // and re-exposes it to the renderer over Electron's own IPC: `hw:call` (invoke -> reply) and a
+  // one-way `hw:event` push stream. So the full request/response chain is two idiomatic hops —
+  // renderer invoke -> main handle -> bare-rpc request -> worker. bare-rpc owns pipe.on('data'),
+  // so we must NOT also attach the generic relay to the same pipe (it would double-consume it).
+  let teardownIPC = null;
+  if (specifier === hyperwaveWorkerSpecifier) {
+    const client = createRpcClient({
+      stream: pipe,
+      onEvent: (msg) => sendToAll('hw:event', msg)
+    });
+    ipcMain.handle('hw:call', (evt, payload) =>
+      client.call(payload.type, payload.args || {})
+    );
+    teardownIPC = () => ipcMain.removeHandler('hw:call');
+  } else {
+    const sendWorkerIPC = (data) =>
+      sendToAll('pear:worker:ipc:' + specifier, data);
+    ipcMain.handle('pear:worker:writeIPC:' + specifier, (evt, data) => {
+      return pipe.write(data);
+    });
+    pipe.on('data', sendWorkerIPC);
+    teardownIPC = () => {
+      ipcMain.removeHandler('pear:worker:writeIPC:' + specifier);
+      pipe.removeListener('data', sendWorkerIPC);
+    };
+  }
+
   workers.set(specifier, pipe);
-  pipe.on('data', sendWorkerIPC);
   worker.stdout.on('data', sendWorkerStdout);
   worker.stderr.on('data', sendWorkerStderr);
   worker.once('exit', (code) => {
     app.removeListener('before-quit', onBeforeQuit);
-    ipcMain.removeHandler('pear:worker:writeIPC:' + specifier);
-    pipe.removeListener('data', sendWorkerIPC);
+    teardownIPC();
     worker.stdout.removeListener('data', sendWorkerStdout);
     worker.stderr.removeListener('data', sendWorkerStderr);
     sendToAll('pear:worker:exit:' + specifier, code);

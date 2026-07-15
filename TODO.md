@@ -272,28 +272,24 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 
 ### Future features / ideas
 
-- [ ] **Typed RPC seam between renderer/host and worker (`hyperschema` + `bare-rpc`).** The
-      renderer↔worker IPC today is hand-rolled and one-directional in both halves: the host sends
-      **fire-and-forget commands** (`exec` in `engine.js`: `start-wave`, `join-wave`,
-      `stage-selfie`, `tip`, `refresh-wallet` — no reply), and the worker pushes a **stream of
-      untyped `type`-tagged events** back (`onEvent → notify({type:'event', …})`, plus one-offs like
-      `wallet`, `tip-result`, `burn-result`). Request/response is **faked by correlation** — e.g. a
-      `tip` command is matched to a later `tip-result` event by its `to` field — which is fragile
-      (no request id, races if two tips share a `to`), and there's no schema, so a typo'd field or a
-      shape drift between the desktop renderer and the RN worklet fails silently. Adopt the **typed
-      RPC seam** from Pears' bare-on-native guide (https://docs.pears.com/explanation/bare-on-native/#the-typed-rpc-seam):
-      define the message shapes once in a **`hyperschema`** and speak **`bare-rpc`** over the
-      existing worker pipe, giving (1) real **request/response** methods (`await tip(...)` resolves
-      with the result or throws — no `tip-result` correlation dance), (2) a typed **events/
-      notification** channel for the genuinely one-way stream (ring/position/wave-state pushes), and
-      (3) a **single source of truth** for the wire shapes shared by `engine.js`, the desktop
-      renderer, and the mobile worklet (kills the "same message shapes both hosts speak" comment
-      that's currently enforced only by convention). Cleans up the renderer command handlers
-      (`app.js`) and the RN `useEngine.js` symmetrically. Scope note: it's an **internal app IPC**
-      seam (Appendix A), not the on-wire gossip protocol — orthogonal to the §5 gossip envelope
-      work, though both move toward schema'd messages. Check the encoding fit under Bare (both
-      modules are Holepunch-native, so they should run in the worker; the desktop side crosses the
-      Electron main↔renderer bridge too — verify bare-rpc rides that or wrap it).
+- [x] **Typed RPC seam between renderer/host and worker (`bare-rpc`).** Done — the host↔UI IPC now
+      speaks **`bare-rpc`** through a single shared seam (`packages/hyperwave-engine/lib/rpc.js`:
+      `serveEngine` host side + `createRpcClient` UI side, JSON-encoded over the existing pipe).
+      Request/response commands (`tip` / `send-trx` / `fetch-transactions`) get **native
+      request↔reply correlation** — two tips in flight no longer race (proven in `lib/rpc.test.js`
+      under out-of-order replies); the one-way stream (state/event/feed/position/wallet…) rides
+      bare-rpc's leak-free `event` primitive; and both hosts import the **one** `REQUEST_REPLY`
+      source of truth. The engine keeps its transport-free `exec/notify` (an opaque correlation `id`
+      is echoed on terminal results so the host can match an async result to its request). **Encoding
+      stayed JSON** — `hyperschema` was intentionally dropped: its payoff is cross-version P2P wire
+      compat, moot for a single-version internal app IPC, and the entry `payload` is opaque so it
+      can't be typed anyway. **Desktop is a main-split** (the renderer is bundler-free ESM and can't
+      load bare-rpc): the worker speaks the seam to **Electron main**, which runs the client and
+      re-exposes it to the renderer over Electron's own `invoke`/event IPC. **Mobile** runs the seam
+      end-to-end (RN JS ↔ worklet). Request/response replies are also surfaced through the event
+      stream, so `app.js` / `useEngine.js` result-handling was unchanged. Remaining runtime check
+      (can't be done headlessly): confirm the desktop app + iOS sim actually round-trip (bare-rpc in
+      Electron main / Hermes — low risk, load-time safe, stream paths unused).
 - [ ] **Secure seed storage on desktop (OS keychain via Electron `safeStorage`).** Today
       `wallet.seed` + `swarm.seed` are **plaintext files**; file permissions only stop other OS
       users, not disk theft / backups / casual inspection. Move desktop secret storage to the OS

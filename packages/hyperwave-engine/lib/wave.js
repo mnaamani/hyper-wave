@@ -153,9 +153,7 @@ function loadOrCreateSwarmSeed(
 /**
  * @typedef {Object} CreateWaveOptions
  * @property {string} storageDir Instance storage dir (per-run hyperwave store + persisted swarm.seed).
- * @property {(state: Object) => void} onState Called with `{ me, peers, connected, discovered }` whenever the ring changes.
- * @property {(event: Object) => void} [onEvent] Lifecycle/UI event sink (wave-announce, holding, position, completed…).
- * @property {(items: Object[]) => void} [onFeed] Called with the ordered feed entries whenever it updates.
+ * @property {(msg: Object) => void} emit The single host sink: every observable change is raised as a typed message — `{ type: 'state', me, peers, connected, discovered }` on a ring change, `{ type: 'event', event, … }` for lifecycle/UI events, `{ type: 'feed', items }` on a feed update.
  * @property {(...args: any[]) => void} [log] Logger.
  * @property {Array<{host: string, port: number}>|null} [bootstrap] Local-DHT bootstrap nodes, or null for the public DHT.
  * @property {string} [topicId] Topic string (all peers on the same id share one ring).
@@ -186,9 +184,7 @@ function loadOrCreateSwarmSeed(
  */
 function createWave({
   storageDir,
-  onState,
-  onEvent = () => {},
-  onFeed = () => {},
+  emit,
   log = () => {},
   bootstrap = null,
   topicId = DEFAULT_TOPIC,
@@ -199,6 +195,13 @@ function createWave({
   maxPeers = 64,
   swarmSeed = null // hex seed for the swarm identity; distinct from the wallet seed (createPayments)
 }) {
+  // One host sink. Every observable change flows to the host through `emit(msg)` as a typed
+  // message; these three build the envelopes the former onState/onEvent/onFeed trio used to. The
+  // engine's `emit` and the seam's are the same single-notifier shape, so a message the wave emits
+  // reaches the UI unwrapped.
+  const emitState = (state) => emit({ type: 'state', ...state });
+  const emitEvent = (event) => emit({ type: 'event', ...event });
+  const emitFeed = (items) => emit({ type: 'feed', items });
   // The store is per-run (galleries are keyed by the random waveId, so nothing persists
   // meaningfully across runs); wipe it on startup to reclaim disk.
   const storePath = storageDir + '/hyperwave';
@@ -240,7 +243,7 @@ function createWave({
   const session = new CrdtFeed({
     store,
     me,
-    onFeed,
+    onFeed: emitFeed,
     walletAddress: () => walletAddress,
     burnProof: () => entryPipeline.burnProof,
     joinProof: () => (wave ? wave.joinSig : null),
@@ -267,9 +270,9 @@ function createWave({
   });
 
   // --- ring / peer table -----------------------------------------------------
-  /** Recompute the live ring and push `{ me, peers, connected, discovered }` to the host (onState). */
-  function emit() {
-    onState({
+  /** Recompute the live ring and push `{ me, peers, connected, discovered }` to the host (emitState). */
+  function pushRingState() {
+    emitState({
       me,
       peers: table.liveRing(),
       connected: [...table.senderIds()].length,
@@ -286,7 +289,7 @@ function createWave({
    */
   function setTag(code) {
     me.tag = code || null;
-    emit();
+    pushRingState();
   }
 
   // The heartbeat: pure liveness + tag, one hop to every connection (tiny ×
@@ -370,7 +373,7 @@ function createWave({
         for (const cred of msg.writers || []) {
           ingestWriter(cred);
         }
-        onEvent({ event: 'roster', waveId: wave.id, count: rosterCount() });
+        emitEvent({ event: 'roster', waveId: wave.id, count: rosterCount() });
       }
       return;
     }
@@ -439,7 +442,7 @@ function createWave({
     }
     // sender is a live neighbour (direct channel): refresh its seat + tag
     table.upsert(msg.id, Date.now(), msg.tag);
-    emit();
+    pushRingState();
   }
 
   /**
@@ -534,7 +537,7 @@ function createWave({
       joinSig: cred.joinSig
     });
     session.addWriter(wave.id, cred.peerId, cred.writerKey);
-    onEvent({ event: 'roster', waveId: wave.id, count: rosterCount() });
+    emitEvent({ event: 'roster', waveId: wave.id, count: rosterCount() });
   }
 
   // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
@@ -672,7 +675,7 @@ function createWave({
     if (silent) {
       return;
     }
-    onEvent({
+    emitEvent({
       event: 'wave-announce',
       waveId,
       by,
@@ -695,12 +698,12 @@ function createWave({
     }
     // anti-spam: never join (and pay) a wave whose start fee isn't proven paid
     if (wave.paid !== 'verified') {
-      onEvent({ event: 'join-blocked', waveId: wave.id, reason: wave.paid });
+      emitEvent({ event: 'join-blocked', waveId: wave.id, reason: wave.paid });
       return null;
     }
     wave.joined = true;
     floodMyFeedCore(wave.id);
-    onEvent({ event: 'joined', waveId: wave.id, count: rosterCount() });
+    emitEvent({ event: 'joined', waveId: wave.id, count: rosterCount() });
     return wave.id;
   }
 
@@ -775,7 +778,7 @@ function createWave({
       () => finishWave(waveId, { hops: schedule.length }),
       Math.max(0, t0 + cappedLapMs + END_GRACE_MS - Date.now())
     );
-    onEvent({
+    emitEvent({
       event: 'wave-active',
       waveId: wave.id,
       joined: wave.joined,
@@ -801,7 +804,7 @@ function createWave({
             return;
           }
           entryPipeline.recordSlot({ waveId, hopCount: mine.rank });
-          onEvent({
+          emitEvent({
             event: 'holding',
             waveId,
             hopCount: mine.rank,
@@ -821,7 +824,7 @@ function createWave({
       const now = Date.now();
       while (index < schedule.length && schedule[index].at <= now) {
         const slot = schedule[index];
-        onEvent({
+        emitEvent({
           event: 'position',
           waveId,
           holder: slot.id,
@@ -873,7 +876,7 @@ function createWave({
     wave = null;
     entryPipeline.reset(); // drop any staged entry / slot for the next wave
     teardown();
-    onEvent({ event: 'wave-idle', waveId, reason });
+    emitEvent({ event: 'wave-idle', waveId, reason });
   }
 
   /**
@@ -888,7 +891,7 @@ function createWave({
     if (!wave || wave.id !== waveId) {
       return;
     }
-    onEvent({
+    emitEvent({
       event: 'completed',
       waveId,
       hops,
@@ -916,7 +919,7 @@ function createWave({
    */
   function startWave() {
     if (wave) {
-      onEvent({ event: 'busy', waveId: wave.id });
+      emitEvent({ event: 'busy', waveId: wave.id });
       return null;
     }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
@@ -927,7 +930,7 @@ function createWave({
       log('wave', shortId(waveId), '— awaiting start payment');
       clearTimeout(lobbyTimer);
       lobbyTimer = setTimeout(() => goIdle('unpaid'), PAY_TIMEOUT_MS);
-      onEvent({ event: 'paying', waveId });
+      emitEvent({ event: 'paying', waveId });
     } else {
       // no-wallet path (tests/headless): announce immediately, unpaid
       doAnnounce(waveId, null);
@@ -968,7 +971,7 @@ function createWave({
     wave.startProof = proof;
     wave.paid = 'verified';
     doAnnounce(wave.id, proof);
-    onEvent({ event: 'wave-verified', waveId: wave.id, mine: true });
+    emitEvent({ event: 'wave-verified', waveId: wave.id, mine: true });
   }
 
   /**
@@ -1010,10 +1013,14 @@ function createWave({
         }
         if (res && res.ok) {
           wave.paid = 'verified';
-          onEvent({ event: 'wave-verified', waveId });
+          emitEvent({ event: 'wave-verified', waveId });
         } else {
           wave.paid = 'rejected';
-          onEvent({ event: 'wave-unpaid', waveId, reason: res && res.reason });
+          emitEvent({
+            event: 'wave-unpaid',
+            waveId,
+            reason: res && res.reason
+          });
           goIdle('unpaid-rejected');
         }
       })
@@ -1069,7 +1076,7 @@ function createWave({
         paid: wave.startProof // so peers adopting via start can re-sync newcomers
       })
     );
-    onEvent({ event: 'started', waveId, by: me.id });
+    emitEvent({ event: 'started', waveId, by: me.id });
     beginSweep({ rosterIds, t0, lapMs });
   }
 
@@ -1126,20 +1133,20 @@ function createWave({
         )
       );
     }
-    emit();
+    pushRingState();
 
     conn.on('close', () => {
       // authoritative disconnect: drop the channel + seat immediately
       table.onDisconnect(id);
       log('peer disconnected', shortId(id));
-      emit();
+      pushRingState();
     });
     conn.on('error', () => {});
   });
 
   // Every time Hyperswarm learns of or drops peers on the topic, repaint (the
   // `discovered` count feeds host start-gating).
-  swarm.on('update', emit);
+  swarm.on('update', pushRingState);
 
   const topic = crypto.hash(b4a.from(topicId));
   const discovery = swarm.join(topic, { server: true, client: true });
@@ -1152,7 +1159,7 @@ function createWave({
       'as',
       shortId(me.id)
     );
-    emit(); // initial repaint once the topic announce/lookup has flushed
+    pushRingState(); // initial repaint once the topic announce/lookup has flushed
   });
 
   // --- timers ----------------------------------------------------------------
@@ -1167,7 +1174,7 @@ function createWave({
 
   /** Maintenance tick: prune stale seats, pull feed updates, then re-arm. */
   function ringTick() {
-    emit(); // re-evaluate staleness pruning
+    pushRingState(); // re-evaluate staleness pruning
     // Pull replicated feed writes for every feed held and repaint.
     session.tick();
     tRing = setTimeout(ringTick, RINGUPDATE_MS);

@@ -1,8 +1,8 @@
 // The HyperWave engine, host-agnostic. Everything the desktop worker (workers/hyperwave.js) and
 // a mobile bare-kit worklet (worklet/app.js) share lives here: it wires the wave protocol
 // (wave.js) + the WDK wallet (wallet.js) together and exposes a tiny message surface. Think of it
-// like a kernel: the host (userspace) supplies { storageDir, config, notify } and feeds it decoded
-// commands via exec() (a syscall); the engine raises events back via notify() (a signal). There's
+// like a kernel: the host (userspace) supplies { storageDir, config, emit } and feeds it decoded
+// commands via exec() (a syscall); the engine raises events back via emit() (a signal). There's
 // no Bare.argv / bare-env / IPC transport in here, so the same engine boots under Electron-spawned
 // Bare and a react-native-bare-kit worklet unchanged. `deps` lets tests inject fake factories
 // (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
@@ -27,29 +27,31 @@ const {
  */
 
 /**
- * The engine handle returned by createEngine.
+ * The engine handle returned by createEngine. Deliberately minimal: the only surface a host
+ * needs across the IPC pipe is exec (host->engine) + emit (engine->host, supplied in options)
+ * + close. The live wave protocol instance is intentionally NOT exposed — it can't cross the
+ * serialization boundary and would leak transport-free internals into the public handle.
  * @typedef {Object} Engine
- * @property {Object} wave - The live createWave instance (the wave protocol).
  * @property {(command: Object) => void} exec - Feed a decoded host->engine command (a syscall).
  * @property {() => Promise<void>} close - Tear down timers, wallet, and the wave protocol.
  */
 
 /**
  * The HyperWave engine, host-agnostic: wires the wave protocol (wave.js) + the WDK wallet (wallet.js)
- * together and exposes a tiny message surface. The host supplies { storageDir, config, notify } and
+ * together and exposes a tiny message surface. The host supplies { storageDir, config, emit } and
  * feeds it decoded commands via exec(). `deps` lets tests inject fake factories.
  * @param {Object} options - Engine options.
  * @param {string} options.storageDir - Corestore/wallet storage directory for this instance.
  * @param {EngineConfig} [options.config] - Host-supplied engine configuration.
- * @param {(msg: Object) => void} options.notify - Callback the engine calls to raise messages to the host.
+ * @param {(msg: Object) => void} options.emit - Callback the engine calls to raise messages to the host.
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
  * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests).
- * @returns {Engine} The engine handle (`wave`, `exec`, `close`).
+ * @returns {Engine} The engine handle (`exec`, `close`).
  */
 function createEngine({
   storageDir,
   config = {},
-  notify,
+  emit,
   log = (...args) => console.log('[hyperwave]', ...args),
   deps = {}
 }) {
@@ -70,9 +72,9 @@ function createEngine({
     // host-injected swarm identity seed (secure-seed-storage.md: the host owns the
     // secret store; the engine never persists an injected seed)
     swarmSeed: config.swarmSeed,
-    onState: (state) => notify({ type: 'state', ...state }),
-    onEvent: (event) => notify({ type: 'event', ...event }),
-    onFeed: (items) => notify({ type: 'feed', items }),
+    // The wave emits typed messages ({type:'state'|'event'|'feed', …}) straight to the host sink —
+    // one notifier end to end, no per-kind wrapping here.
+    emit,
     log
   });
   log(
@@ -102,7 +104,7 @@ function createEngine({
         // Echo the wallet next to its storage dir so "which dir → which wallet" is unambiguous.
         log('wallet', pay.address, 'in storage dir:', absStorageDir);
         pushBalance = async () =>
-          notify({
+          emit({
             type: 'wallet',
             ...(await pay
               .balances()
@@ -122,7 +124,7 @@ function createEngine({
       })
       .catch((err) => {
         log('[wallet] init failed:', err.message);
-        notify({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)
+        emit({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)
       });
   }
 
@@ -140,7 +142,7 @@ function createEngine({
   async function fundedForFee(reason, action) {
     const bal = await payments.balances().catch(() => null);
     if (bal && bal.trx < FEE_TRX) {
-      notify({
+      emit({
         type: 'burn-result',
         stage: 'failed',
         reason,
@@ -168,7 +170,7 @@ function createEngine({
         waveId,
         reason: 'start'
       });
-      notify({
+      emit({
         type: 'burn-result',
         stage: 'confirming',
         hash,
@@ -176,7 +178,7 @@ function createEngine({
         reason: 'start'
       });
       if (await confirmBurn(payments, waveId, hash)) {
-        notify({
+        emit({
           type: 'burn-result',
           stage: 'burned',
           hash,
@@ -187,7 +189,7 @@ function createEngine({
         wave.announcePaid(proof);
       } else {
         const error = 'burn not confirmed on-chain';
-        notify({
+        emit({
           type: 'burn-result',
           stage: 'failed',
           error,
@@ -196,7 +198,7 @@ function createEngine({
         });
       }
     } catch (err) {
-      notify({
+      emit({
         type: 'burn-result',
         stage: 'failed',
         error: err.message,
@@ -219,7 +221,7 @@ function createEngine({
     }
     try {
       const { hash } = await payFee({ wave, payments, waveId, reason: 'join' });
-      notify({
+      emit({
         type: 'burn-result',
         stage: 'burned',
         hash,
@@ -228,7 +230,7 @@ function createEngine({
         reason: 'join'
       });
     } catch (err) {
-      notify({
+      emit({
         type: 'burn-result',
         stage: 'failed',
         error: err.message,
@@ -239,34 +241,44 @@ function createEngine({
   }
 
   // Feed tip: a real testnet TRX transfer to the entry owner's wallet.
-  async function handleTip({ to, amount }) {
+  // `id` is an opaque request-correlation token: a command may carry one, and every terminal
+  // result echoes it back. The engine never interprets it — it just lets a request/response
+  // transport (the bare-rpc IPC seam, lib/rpc.js) match this async tip-result to the exact tip
+  // call that produced it, even with several tips in flight. Undefined when the caller omits it.
+  async function handleTip({ to, amount, id }) {
     if (!payments) {
-      notify({ type: 'tip-result', error: 'wallet not ready' });
+      emit({ type: 'tip-result', id, error: 'wallet not ready' });
       return;
     }
     try {
       const { hash } = await payments.send(to, amount);
-      notify({ type: 'tip-result', hash, to, amount });
+      emit({ type: 'tip-result', id, hash, to, amount });
     } catch (err) {
-      notify({ type: 'tip-result', error: err.message, to });
+      emit({ type: 'tip-result', id, error: err.message, to });
     }
   }
 
-  // Plain wallet transfer: send `amount` TRX to any address
-  async function handleSend({ to, amount }) {
+  // Plain wallet transfer: send `amount` TRX to any address. `id` echoes as in handleTip.
+  async function handleSend({ to, amount, id }) {
     if (!payments) {
-      notify({ type: 'send-result', error: 'wallet not ready', to });
+      emit({ type: 'send-result', id, error: 'wallet not ready', to });
       return;
     }
     const trx = Number(amount);
     if (!to || !(trx > 0)) {
-      notify({ type: 'send-result', error: 'invalid recipient/amount', to });
+      emit({
+        type: 'send-result',
+        id,
+        error: 'invalid recipient/amount',
+        to
+      });
       return;
     }
     const bal = await payments.balances().catch(() => null);
     if (bal && bal.trx < trx) {
-      notify({
+      emit({
         type: 'send-result',
+        id,
         error: `insufficient balance (${bal.trx} TRX)`,
         to
       });
@@ -274,43 +286,70 @@ function createEngine({
     }
     try {
       const { hash } = await payments.send(to, trx);
-      notify({ type: 'send-result', hash, to, amount: trx });
+      emit({ type: 'send-result', id, hash, to, amount: trx });
       pushBalance?.();
     } catch (err) {
-      notify({ type: 'send-result', error: err.message, to });
+      emit({ type: 'send-result', id, error: err.message, to });
     }
   }
 
   // On-chain transaction history for the wallet view — includes funds/tips RECEIVED (which the
   // app never sees as events), not just what we initiated. Read-only; [] without a wallet.
-  async function handleTransactions() {
+  // `id` echoes as in handleTip.
+  async function handleTransactions({ id } = {}) {
     const list = payments ? await payments.transactions().catch(() => []) : [];
-    notify({ type: 'transactions', list });
+    emit({ type: 'transactions', id, list });
   }
 
   // Host -> engine commands, like a syscall: userspace (the host) asks the kernel (this engine)
-  // to act; we dispatch on the command's `type`. Same message shapes the desktop renderer + the
-  // RN UI both speak. The reciprocal engine -> host channel is `notify` (kernel raising events).
+  // to act. One handler per command `type` (a lookup table, not an if/else chain — CLAUDE.md
+  // Code Style). Same message shapes the desktop renderer + the RN UI both speak. The reciprocal
+  // engine -> host channel is `emit` (kernel raising events).
+  const commandHandlers = {
+    'start-wave': () => handleStartWave(),
+    'join-wave': () => handleJoin(),
+    'set-tag': (command) => wave.setTag(command.tag),
+    'stage-entry': (command) => wave.stageEntry(command.entry),
+    tip: (command) => handleTip(command),
+    'send-trx': (command) => handleSend(command),
+    'fetch-transactions': (command) => handleTransactions(command),
+    'refresh-wallet': () => pushBalance?.() // manual balance re-check (after funding)
+  };
+
+  // Surface a malformed / unknown command to the host instead of silently dropping it. A typo'd
+  // `type` used to fall through the if/else chain and no-op invisibly (a whole class of "why
+  // didn't my command do anything?" bugs); now the host gets a { type:'error', scope:'command' }
+  // it can log/toast. We echo only `command.type` (never the full command) so a big payload — a
+  // staged entry's image — can't bloat the error message.
+  function emitBadCommand(error, command) {
+    const isObject = command && typeof command === 'object';
+    const type = isObject ? command.type : command;
+    // Echo the correlation id (if any) so a request/response transport awaiting this command's
+    // result gets an error reply instead of hanging forever (see handleTip's `id` note).
+    const id = isObject ? command.id : undefined;
+    emit({ type: 'error', id, scope: 'command', error, command: type });
+  }
+
   function exec(command) {
-    if (!command || typeof command !== 'object') {
+    if (
+      !command ||
+      typeof command !== 'object' ||
+      typeof command.type !== 'string'
+    ) {
+      emitBadCommand('command must be an object with a string `type`', command);
       return;
     }
-    if (command.type === 'start-wave') {
-      handleStartWave();
-    } else if (command.type === 'join-wave') {
-      handleJoin();
-    } else if (command.type === 'set-tag') {
-      wave.setTag(command.tag);
-    } else if (command.type === 'stage-entry') {
-      wave.stageEntry(command.entry);
-    } else if (command.type === 'tip') {
-      handleTip(command);
-    } else if (command.type === 'send-trx') {
-      handleSend(command);
-    } else if (command.type === 'fetch-transactions') {
-      handleTransactions();
-    } else if (command.type === 'refresh-wallet') {
-      pushBalance?.(); // manual balance re-check (after funding)
+    const handler = commandHandlers[command.type];
+    if (!handler) {
+      emitBadCommand('unknown command type: ' + command.type, command);
+      return;
+    }
+    // Handlers own their own async errors (they emit a *-result); this guard only catches a
+    // synchronous throw (e.g. a bad stage-entry shape) so one bad command can't take down exec.
+    try {
+      handler(command);
+    } catch (err) {
+      emitBadCommand('command handler threw: ' + err.message, command);
     }
   }
 
@@ -325,7 +364,7 @@ function createEngine({
     await wave.close();
   }
 
-  return { wave, exec, close };
+  return { exec, close };
 }
 
 module.exports = { createEngine };

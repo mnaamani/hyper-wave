@@ -25,7 +25,9 @@ const {
   createWave,
   createPayments,
   parseBootstrap,
-  loadOrCreateSwarmSeed
+  loadOrCreateSwarmSeed,
+  serveEngine,
+  createRpcClient // the host<->UI IPC seam (rpc.js) — §12
 } = require('hyperwave-engine');
 const {
   FEE_TRX,
@@ -52,14 +54,15 @@ Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it 
 [ring.js](#3-ringjs--seats--the-ring) · [sweep.js](#4-sweepjs--the-deterministic-schedule) · [attest.js](#5-attestjs--attestations) ·
 [messages.js](#6-messagesjs--the-gossip-message-seam) · [flood.js](#7-floodjs--the-flood-graph) · [feed.js](#8-feedjs--the-multicore-crdt-feed) ·
 [payments](#9-payments--walletjs) · [seeds & bootstrap](#10-seed--bootstrap-helpers) ·
-[stateful classes](#11-the-stateful-classes-wavejs-composes)
+[stateful classes](#11-the-stateful-classes-wavejs-composes) ·
+[rpc.js IPC seam](#12-rpcjs--the-hostui-ipc-seam-bare-rpc)
 
 ---
 
 ## 1. Host the whole engine (`createEngine`)
 
 The host-agnostic entry. Think of it like a kernel: give it a `storageDir`, an optional `config`,
-and a `notify` callback (engine → host events); feed it commands via `exec` (host → engine, like a
+and an `emit` callback (engine → host events); feed it commands via `exec` (host → engine, like a
 syscall). This is the entire surface a host (the desktop worker / mobile worklet) needs.
 
 ```js
@@ -72,7 +75,7 @@ const engine = createEngine({
     bootstrap: '127.0.0.1:49737', // optional host:port → local DHT (instant same-machine discovery)
     wallet: true // default; false → wallet-less (join-attestation feed, no fees/tips)
   },
-  notify: (msg) => {
+  emit: (msg) => {
     // engine → host events, e.g. { type: 'state' | 'event' | 'feed' | 'wallet' | 'burn-result' }
     if (msg.type === 'state') {
       console.log(
@@ -122,20 +125,19 @@ const wave = createWave({
   storageDir: '/tmp/hw/a',
   topicId: 'demo',
   bootstrap: parseBootstrap('127.0.0.1:49737'), // or null for the public DHT
-  // state: { me, peers, connected, discovered } — the live ring, the direct-connection
-  // count, and the DHT-discovered count (hosts gate start triggers on `discovered`)
-  onState: ({ me, peers }) => {
-    console.log(
-      'me',
-      me.id.slice(0, 8),
-      '@',
-      me.angle.toFixed(1),
-      'peers',
-      peers.length
-    );
-  },
-  onEvent: (ev) => console.log('event', ev.event, ev.waveId),
-  onFeed: (items) => console.log('feed', items.length)
+  // One host sink `emit(msg)` — every observable change is a typed message:
+  //   { type: 'state', me, peers, connected, discovered } — the live ring, the direct-connection
+  //     count, and the DHT-discovered count (hosts gate start triggers on `discovered`)
+  //   { type: 'event', event, … } — lifecycle/UI events;  { type: 'feed', items } — feed updates
+  emit: (msg) => {
+    if (msg.type === 'state') {
+      console.log('me', msg.me.id.slice(0, 8), 'peers', msg.peers.length);
+    } else if (msg.type === 'event') {
+      console.log('event', msg.event, msg.waveId);
+    } else if (msg.type === 'feed') {
+      console.log('feed', msg.items.length);
+    }
+  }
   // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see §10)
 });
 
@@ -396,7 +398,7 @@ const {
   wireWallet
 } = require('hyperwave-engine');
 
-const wave = createWave({ storageDir: '/tmp/hw/a', onState() {} });
+const wave = createWave({ storageDir: '/tmp/hw/a', emit() {} });
 wireWallet(wave, pay); // sets the wallet address (tips) + the on-chain burn verifier (paid gate)
 
 // start: start → burn the fee → wait for on-chain confirmation → announce the (now-paid) wave
@@ -460,6 +462,48 @@ each subpath-importable and unit-tested. `Flood` is shown in §7; the others:
   `wave-join`) and downloads its one entry, `postEntry(entry)` appends my single op, and
   `tick()` pulls replication + repaints the merged view. No admission, no indexer, no
   retention — every peer holds every core and merges locally with `mergeFeed` (§8).
+
+---
+
+## 12. `rpc.js` — the host↔UI IPC seam (`bare-rpc`)
+
+`createEngine`'s `exec`/`emit` is a transport-free, in-process contract. When the engine runs in a
+separate process from its UI — the desktop **Bare worker** behind Electron, the mobile **worklet**
+behind RN — that pipe carries JSON, and request/response commands (`tip` / `send-trx` /
+`fetch-transactions`) used to be faked by matching a later result message. `lib/rpc.js` puts
+[`bare-rpc`](https://github.com/holepunchto/librpc) over the pipe so replies correlate natively. It's
+**internal app IPC**, not the on-wire gossip protocol (that stays JSON-over-Protomux between peers).
+
+```js
+const { serveEngine, createRpcClient } = require('hyperwave-engine/lib/rpc');
+const { createEngine } = require('hyperwave-engine');
+
+// HOST side (where createEngine runs — the worker / worklet). Two-step wiring breaks the
+// emit<->engine cycle: build the seam, create the engine with seam.emit, then attach.
+const seam = serveEngine({ stream: framedPipe });
+const engine = createEngine({ storageDir, config, emit: seam.emit });
+seam.attach(engine);
+// A host that can't build its engine until a first message (mobile learns storageDir from `init`)
+// passes onBootstrap instead: serveEngine({ stream, onBootstrap: (cmd) => { …createEngine…; attach } })
+
+// UI side (Electron main / RN JS). `call` awaits request/response, fire-and-forget otherwise.
+const client = createRpcClient({
+  stream: framedPipe,
+  onEvent: (msg) => render(msg)
+});
+client.call('start-wave'); // fire-and-forget
+const result = await client.call('tip', { to: 'T…', amount: 5 }); // resolves with tip-result
+```
+
+`REQUEST_REPLY` (a `Set`) is the single source of truth for which commands await a reply — both ends
+import it, so they can't disagree. Notifications ride bare-rpc's one-way `event` primitive (no reply
+lifecycle, so a high-frequency `position` stream can't leak request state). A request/response reply
+is **also** delivered through `onEvent`, so an event-oriented UI (`ipc.on('tip-result', …)`) needs no
+change. **Desktop is a main-split**: the renderer is bundler-free and can't load bare-rpc, so the
+worker speaks the seam to Electron **main**, which runs the client and re-exposes it to the renderer
+over Electron's own `invoke`/event IPC (`apps/desktop/electron/main.js`). **Mobile** runs it
+end-to-end (`apps/mobile/src/useEngine.js` ↔ `worklet/app.js`). See `lib/rpc.test.js` for the
+full-stack contract (concurrent-reply correlation, the FramedStream transport, lazy bootstrap).
 
 ---
 

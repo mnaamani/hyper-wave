@@ -1,5 +1,5 @@
 // The host-agnostic engine (engine.js): does it route host commands to the wave protocol and
-// forward engine events to `notify`, in both the no-wallet and wallet-ready paths? Runs with
+// forward engine events to `emit`, in both the no-wallet and wallet-ready paths? Runs with
 // FAKE wave + payments factories (injected via `deps`), so no real swarm / no network — this
 // is exactly what the extraction bought: the engine is testable without a host. Runs under Bare:
 //   bare lib/engine.test.js   (or `npm test`)
@@ -7,7 +7,7 @@ const test = require('brittle');
 const { createEngine } = require('./engine');
 
 // A fake wave that records the calls the engine makes on it, and hands the engine the option
-// callbacks so the test can fire wave events (onState/onEvent/onFeed) itself.
+// callback so the test can fire wave events (emit) itself.
 function fakeWave() {
   const calls = [];
   const wave = {
@@ -33,13 +33,13 @@ function fakeWave() {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0)); // let the async wallet init settle
 
-test('the engine routes commands to the wave protocol and forwards its events to notify', async (t) => {
+test('the engine routes commands to the wave protocol and forwards its events to emit', async (t) => {
   const sent = [];
   const wave = fakeWave();
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: { topicId: 'm', bootstrap: '' },
-    notify: (msg) => sent.push(msg),
+    emit: (msg) => sent.push(msg),
     log: () => {},
     deps: {
       createWave: (opts) => {
@@ -53,15 +53,16 @@ test('the engine routes commands to the wave protocol and forwards its events to
   });
   t.teardown(() => engine.close());
 
-  // engine callbacks are wired through to notify with the right envelope
-  wave.opts.onState({ me: wave.me, peers: [] });
-  wave.opts.onEvent({ event: 'started', waveId: 'wave-1' });
-  wave.opts.onFeed([{ caption: 'hi' }]);
+  // the wave now emits fully-formed { type, … } messages straight to `emit` (the engine passes it
+  // through, no per-kind wrapping), so the fake fires them directly
+  wave.opts.emit({ type: 'state', me: wave.me, peers: [] });
+  wave.opts.emit({ type: 'event', event: 'started', waveId: 'wave-1' });
+  wave.opts.emit({ type: 'feed', items: [{ caption: 'hi' }] });
   t.ok(
     sent.find((msg) => msg.type === 'state') &&
       sent.find((msg) => msg.type === 'event' && msg.event === 'started') &&
       sent.find((msg) => msg.type === 'feed' && msg.items.length === 1),
-    'state / token / feed events forwarded with type envelopes'
+    'state / event / feed messages forwarded through emit'
   );
 
   // plain commands are dispatched to the engine
@@ -76,6 +77,28 @@ test('the engine routes commands to the wave protocol and forwards its events to
       'startWave'
     ],
     'set-tag / stage-entry / start-wave routed to the wave protocol'
+  );
+
+  // a typo'd / unknown command surfaces an error instead of silently no-op'ing, and doesn't
+  // reach the wave protocol
+  const callsBefore = wave.calls.length;
+  engine.exec({ type: 'stage-entery', entry: 'oops' }); // typo
+  engine.exec({ type: 42 }); // non-string type
+  engine.exec(null); // not even an object
+  t.is(
+    wave.calls.length,
+    callsBefore,
+    'bad commands never reach the wave protocol'
+  );
+  t.is(
+    sent.filter((msg) => msg.type === 'error' && msg.scope === 'command')
+      .length,
+    3,
+    'each malformed / unknown command raises a { type:error, scope:command }'
+  );
+  t.ok(
+    sent.find((msg) => msg.type === 'error' && msg.command === 'stage-entery'),
+    'the error echoes the offending command type (not the payload)'
   );
 
   await flush();
@@ -123,7 +146,7 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: {},
-    notify: (msg) => sent.push(msg),
+    emit: (msg) => sent.push(msg),
     log: () => {},
     deps: {
       createWave: (opts) => {

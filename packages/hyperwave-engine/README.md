@@ -20,7 +20,7 @@ const { createEngine } = require('hyperwave-engine');
 const engine = createEngine({
   storageDir: '/tmp/hyperwave/a',
   config: { topicId: 'my-topic:v1' },
-  notify: (msg) => console.log(msg) // engine → host events
+  emit: (msg) => console.log(msg) // engine → host events
 });
 
 engine.exec({ type: 'start-wave' }); // host → engine commands
