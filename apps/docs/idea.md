@@ -113,7 +113,7 @@ very large rings.
 
 ## Where to go deeper
 
-- How it's put together: [`architecture.md`](./architecture.md)
-- The exact wire protocol and crypto: [`protocol.md`](./protocol.md)
-- Process/layer structure and the module map: [`architecture.md`](./architecture.md)
-- Run it yourself: the [repo README](../README.md)
+- How it's put together: [`architecture.md`](./hosting.md)
+- The exact wire protocol and crypto: [`protocol.md`](../../packages/hyperwave-engine/docs/protocol.md)
+- Process/layer structure and the module map: [`architecture.md`](./hosting.md)
+- Run it yourself: the [repo README](../../README.md)

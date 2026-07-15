@@ -1,7 +1,10 @@
-# HyperWave — Architecture
+# HyperWave apps — hosting architecture
 
-HyperWave is a peer-to-peer "global stadium wave": peers join a match swarm, a ⚽
-sweeps around a ring of participants (each peer fires its own moment on a shared,
+How the two app hosts (the desktop Electron shell and the mobile bare-kit worklet) wrap the
+theme-agnostic engine, and the seam between the UI and the P2P worker.
+
+HyperWave (the product) is a peer-to-peer "global stadium wave": peers join a match swarm, a
+⚽ sweeps around a ring of participants (each peer fires its own moment on a shared,
 deterministic schedule), each participant takes a selfie into a
 shared gallery, their supported-country flag rides along — and real (testnet) money
 flows through it: participation fees are **burned** on-chain (anti-spam, no beneficiary),
@@ -9,13 +12,20 @@ and viewers **tip** selfies directly. No sponsor rewards. No servers — discove
 state, and storage are all peer-to-peer (Hyperswarm + Corestore/Hypercore), and payments are
 self-custodial (WDK, Tron Nile testnet).
 
-This document covers the **process/layer structure**. For the wire protocol and state
-machine (enough to build a compatible client), see [`protocol.md`](./protocol.md).
+This document covers the **process/layer structure** of the apps. For the wire protocol and
+state machine (the engine, enough to build a compatible client), see
+[`protocol.md`](../../packages/hyperwave-engine/docs/protocol.md).
 
 The repo is an **npm-workspaces monorepo**: the reusable Bare engine lives in
 `packages/hyperwave-engine/` and boots unchanged under two hosts — the desktop Electron
 app (`apps/desktop/`) and an Expo + react-native-bare-kit mobile app (`apps/mobile/`). Each
 host is a ~20–40-line shim over the engine's host-agnostic entry, `lib/engine.js` `createEngine()`.
+
+The engine is **theme-agnostic** — it knows only generic concepts (a **wave** that
+**sweeps** a **ring**, an **entry** with an opaque **payload** in a per-wave **feed**, a
+cosmetic **tag**). The football "stadium wave" is entirely in the desktop app's UI, which
+maps its selfies/countries onto the engine's entries/tags at the IPC boundary. The engine
+could host any turn-taking / coordinated-snapshot application unchanged.
 
 ## Processes & layers
 
@@ -29,7 +39,7 @@ flowchart TB
       R["renderer/app.js + lib/*<br/>ring canvas · lobby · webcam ·<br/>gallery · hud · country picker"]
     end
     subgraph Worker["Bare worker (per --storage)"]
-      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + wallet.js)<br/>discovery · gossip · the sweep ·<br/>lifecycle · CRDT gallery ·<br/>WDK wallet · fee burns · tips"]
+      W["workers/hyperwave.js → hyperwave createEngine()<br/>(engine.js → wave.js + wallet.js)<br/>discovery · gossip · the sweep ·<br/>lifecycle · CRDT feed ·<br/>WDK wallet · fee burns · tips"]
     end
     subgraph Updater["Bare worker (OTA, template)"]
       U["workers/updater.js<br/>pear-runtime auto-update"]
@@ -54,12 +64,12 @@ mobile the same `hyperwave` boots as a single Bare **worklet**
 `bare-pack`), driven by the React Native UI over the identical JSON IPC surface
 (`apps/mobile/src/useEngine.js`) — no Electron main, no separate updater.
 
-| Layer                                            | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------------ | ------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                            |
-| **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                     |
-| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, gossip, the deterministic sweep, attestations, lifecycle, the CRDT gallery, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
-| **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                   |
+| Layer                                            | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------ | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                         |
+| **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                  |
+| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, gossip, the deterministic sweep, attestations, lifecycle, the CRDT feed, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
+| **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
 
@@ -68,13 +78,18 @@ mobile the same `hyperwave` boots as a single Bare **worklet**
 Everything crosses a single boundary — the IPC bridge. The worker emits **events**; the
 renderer sends **commands**. The renderer never touches the network or keys.
 
+The engine is **theme-agnostic**, so these messages use its generic vocabulary — an
+`entry` with an opaque `payload`, a cosmetic `tag`, a `feed`. The football UI maps its
+own concepts to these at the boundary (`renderer/lib/ipc.js` + `app.js`): a selfie
+`{image, caption}` is just the entry payload; a country is just the tag.
+
 ```
 renderer  ──(commands)──▶  worker
-  { type: 'start-wave' }                              // burn kick-off fee → announce + lobby
+  { type: 'start-wave' }                              // burn start fee → announce + lobby
   { type: 'join-wave' }                               // verify wave paid → opt in + burn join fee
-  { type: 'set-country', country }
-  { type: 'stage-selfie', selfie: { image, caption } }  // lobby-captured; posts at my sweep slot
-  { type: 'tip', to, amount }                         // real TRX to a selfie owner
+  { type: 'set-tag', tag }                            // cosmetic per-peer tag (app: country)
+  { type: 'stage-entry', entry: { payload } }         // opaque payload (app: a {image, caption} selfie)
+  { type: 'tip', to, amount }                         // real TRX to an entry owner
   { type: 'send-trx', to, amount }                    // plain transfer to any address (wallet Send form)
   { type: 'refresh-wallet' }                          // manual balance re-check (after funding)
   { type: 'fetch-transactions' }                      // pull the on-chain tx history (wallet view)
@@ -82,7 +97,7 @@ renderer  ──(commands)──▶  worker
 worker  ──(events)──▶  renderer
   { type: 'state',   me, peers[], connected, discovered }  // ring membership (every change)
   { type: 'event',   event, ... }                     // lifecycle + race events (protocol.md)
-  { type: 'gallery', items[] }                        // ordered selfies (every change)
+  { type: 'feed',    items[] }                        // ordered entries (every change)
   { type: 'wallet',  address, trx }                   // wallet chip (on ready + every 15s; { error } on init failure)
   { type: 'burn-result' | 'tip-result' | 'send-result', ... }  // fee/tip/send outcomes (toasts)
   { type: 'transactions', list[] }                    // on-chain history, both directions, newest first
@@ -141,7 +156,7 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
   index.js           package entry: re-exports createEngine (engine), wave, pay, fees
   lib/
     engine.js        createEngine(): the host-agnostic engine — wires wave.js + wallet.js,
-                     owns the command dispatch (start/join/tip/send-trx/stage-selfie/
+                     owns the command dispatch (start/join/tip/send-trx/stage-entry/set-tag/
                      refresh-wallet/fetch-transactions) and the fee flow; both hosts are
                      thin shims over this
     wave.js          orchestrator (composition root): transport + gossip dispatch + wave
@@ -156,14 +171,14 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
                      relayed lifecycle messages
     peer-table.js    PeerTable class: seats + direct channels (angle always derived
                      from the id; disconnects are authoritative)
-    selfie.js        SelfiePipeline class: pairs the staged lobby selfie with my sweep slot,
-                     posts exactly once per wave, owns the burn-ticket lifetime
+    entry.js         EntryPipeline class: pairs the host-staged entry payload with my sweep
+                     slot, posts exactly once per wave, owns the burn-ticket lifetime
     attest.js        pure attestation crypto (burn + join attestations:
                      signBurn/burnAuthorizes, signJoin/verifyJoin)
-    gallery.js       the pure CRDT merge (mergeGallery) + buildGallery ordering, applying the
-                     join-attestation write-gate + byte caps + one-per-peer over a bag of ops
-    gallery-crdt.js  CrdtGallery class: the multicore CRDT gallery — per-participant cores,
-                     addWriter (open + download block 0 of a peer's core), postSelfie (append
+    feed.js          the pure CRDT merge (mergeFeed) + buildFeed ordering, applying the
+                     join-attestation write-gate + payload byte cap + one-per-peer over a bag of ops
+    feed-crdt.js     CrdtFeed class: the multicore CRDT feed — per-participant cores,
+                     addWriter (open + download block 0 of a peer's core), postEntry (append
                      my one op to my own core), tick/merge into the view
     wallet.js        WDK wallet (Tron Nile, native TRX) + shared fee flow (burn memo,
                      payFee, confirmBurn, wireWallet): send, burn(+memo), verifyBurnTx,
@@ -186,7 +201,7 @@ apps/desktop/        the Electron shell (npm workspace)
     app.js           orchestrator: wire ipc events → views
     updater.js       OTA-updater renderer half (template)
     lib/
-      ipc.js         worker channel: route state/event/gallery/wallet/tip/burn/send/
+      ipc.js         worker channel: route state/event/feed/wallet/tip/burn/send/
                      transactions + command senders
       ring.js        all <canvas> drawing (ring, dots, flags, football, centre selfie)
       gallery.js     centre-selfie slideshow + collection progress + 💵 tip button

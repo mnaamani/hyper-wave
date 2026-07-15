@@ -7,9 +7,9 @@ This package is only the **shell**: window, renderer UI, and a thin Bare worker 
 the shared engine (`hyperwave-engine`). Everything general lives in the docs:
 
 - Project overview + quickstart: [`../../README.md`](../../README.md)
-- Architecture (processes, IPC surface, module map): [`../../docs/architecture.md`](../../docs/architecture.md)
-- On-wire protocol & state machine: [`../../docs/protocol.md`](../../docs/protocol.md)
-- The idea, in plain language: [`../../docs/idea.md`](../../docs/idea.md)
+- Architecture (processes, IPC surface, module map): [`../docs/hosting.md`](../docs/hosting.md)
+- On-wire protocol & state machine: [`../../docs/protocol.md`](../../packages/hyperwave-engine/docs/protocol.md)
+- The idea, in plain language: [`../docs/idea.md`](../docs/idea.md)
 
 ## Run
 
@@ -50,7 +50,7 @@ README.
 - **`workers/updater.js`** — the template's OTA updater worker, left intact.
 
 The IPC message surface (commands/events between renderer and engine) is documented in
-[`../../docs/architecture.md`](../../docs/architecture.md) — it's shared with the mobile
+[`../docs/hosting.md`](../docs/hosting.md) — it's shared with the mobile
 host, not desktop-specific.
 
 ## The UI
@@ -74,8 +74,8 @@ its owner.
   `node_modules`.
 - Engine behavior (per-wave galleries, storage wipe on startup, wallet seed persistence,
   match topics, no peer roles) is engine-level, not desktop-specific — see
-  [`../../docs/architecture.md`](../../docs/architecture.md) and
-  [`../../docs/protocol.md`](../../docs/protocol.md).
+  [`../docs/hosting.md`](../docs/hosting.md) and
+  [`../../docs/protocol.md`](../../packages/hyperwave-engine/docs/protocol.md).
 
 ## Tests
 

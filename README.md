@@ -35,12 +35,12 @@ Built for the [Tether Developers Cup](https://dorahacks.io/hackathon/tether-deve
 
 ## Repo layout
 
-| Path                                                       | What                                                                                                                                                |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`packages/hyperwave-engine/`](packages/hyperwave-engine/) | The reusable Bare engine: ring geometry, the deterministic sweep, flooded gossip, multicore CRDT gallery, WDK wallet, fees. Unit + e2e tests.       |
-| [`apps/desktop/`](apps/desktop/)                           | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                      |
-| [`apps/mobile/`](apps/mobile/)                             | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                             |
-| [`docs/`](docs/)                                           | [`architecture.md`](docs/architecture.md) · [`protocol.md`](docs/protocol.md) (on-wire spec) · [`idea.md`](docs/idea.md) (the idea, plain language) |
+| Path                                                       | What                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`packages/hyperwave-engine/`](packages/hyperwave-engine/) | The reusable Bare engine: ring geometry, the deterministic sweep, flooded gossip, multicore CRDT gallery, WDK wallet, fees. Unit + e2e tests.                                                                                                                                                                                      |
+| [`apps/desktop/`](apps/desktop/)                           | Electron shell (forked from hello-pear-electron): ring UI, webcam lobby, gallery, wallet chip.                                                                                                                                                                                                                                     |
+| [`apps/mobile/`](apps/mobile/)                             | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                                                                                                                            |
+| Docs                                                       | Engine: [`protocol.md`](packages/hyperwave-engine/docs/protocol.md) (on-wire spec) · [`usage.md`](packages/hyperwave-engine/docs/usage.md) (API). Apps: [`idea.md`](apps/docs/idea.md) (the Mexican wave, plain language) · [`hosting.md`](apps/docs/hosting.md) (app architecture). Project: [`docs/`](docs/) (index + research). |
 
 ## Quickstart
 

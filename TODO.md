@@ -1,7 +1,7 @@
 # HyperWave — task list
 
-Refinement backlog, roughly prioritized. Design context in `docs/idea.md`;
-docs in `docs/` (architecture, protocol); demo script in `DEMO.md`.
+Refinement backlog, roughly prioritized. Design context in `apps/docs/idea.md`;
+engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `apps/docs/`; demo script in `DEMO.md`.
 
 ## Done
 
@@ -146,7 +146,7 @@ docs in `docs/` (architecture, protocol); demo script in `DEMO.md`.
       on-chain kick-off verification → optimistic admission. Gated on funded-wallet secrets, runs manual/nightly
       (`.github/workflows/e2e-onchain.yml`). Verified live (8/8 asserts, ~38s).
 
-### Adversarial hardening (against a modified client) — `docs/protocol.md` §11.2
+### Adversarial hardening (against a modified client) — `packages/hyperwave-engine/docs/protocol.md` §11.2
 
 - [x] Identity binding: a self-describing gossip field (`pointers.id`, `wave-pos.holder`,
       `token.senderPeerId`, `add-writer.peerId`) must match the authenticated connection id
@@ -178,7 +178,7 @@ docs in `docs/` (architecture, protocol); demo script in `DEMO.md`.
 ### Propagation at extreme scale (Phase 5 — DECIDED: the sweep is built)
 
 The deterministic angular sweep replaced the serial token entirely (see the Done
-section above and `docs/protocol.md` §6). Remaining scale work:
+section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining scale work:
 
 - [x] **Duplicate `roster` field dropped from the wire (2026-07-14).** `wave-start`/`wave-sync`
       no longer carry a `roster` array — it was always the same set as `{by} ∪ writers[].peerId`,
@@ -197,7 +197,7 @@ section above and `docs/protocol.md` §6). Remaining scale work:
       `wave-start` carry only ids the receiver back-fills (loses self-containedness — a start
       adopter would need a follow-up sync). Measure before doing any of it.
 
-### Adversarial hardening still open (`docs/protocol.md` §11.3)
+### Adversarial hardening still open (`packages/hyperwave-engine/docs/protocol.md` §11.3)
 
 - [ ] **Automated coverage for the paid gate (currently a test gap).** The
       burn/attestation path — `enforcePaid`, `recordBurn`, `validKickoff`/`verifyKickoff`,
@@ -261,7 +261,7 @@ section above and `docs/protocol.md` §6). Remaining scale work:
       synchronized — allow a generous window), and signing every message adds a verify on the
       hot path (the heartbeat fires every `HEARTBEAT_MS` per connection) — pair with the
       compact-encoding item (raw-byte sig) and per-connection rate limiting above. **Schema
-      documented** in `docs/protocol.md` §5.0 (marked planned); implementation still to do.
+      documented** in `packages/hyperwave-engine/docs/protocol.md` §5.0 (marked planned); implementation still to do.
 - [ ] **Harden `pay.send` to report failed transactions** (`wallet.js`). The returned `hash` is the
       txID computed client-side from the signed bytes (`sha256(raw_data)`), so `send` resolves
       `{ hash }` even when the broadcast is rejected or the tx later fails on-chain — e.g. sending
@@ -306,7 +306,7 @@ section above and `docs/protocol.md` §6). Remaining scale work:
       `basic_text` fallback (warn, don't imply false security) + plaintext→`.enc` migration. Honest
       ceiling: protects at-rest / cross-user, **not** same-user malware (needs a signed build +
       keychain ACL, ultimately hardware wallet). Low urgency (testnet, no real value) but the right
-      foundation for mainnet. **Full design: [`docs/secure-seed-storage.md`](docs/secure-seed-storage.md).**
+      foundation for mainnet. **Full design: [`apps/docs/secure-seed-storage.md`](apps/docs/secure-seed-storage.md).**
 - [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
       `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
       commit `hyperwave:<waveId>:<peerId>` in an **`OP_RETURN`** output (≤ 80 bytes, with the
@@ -330,12 +330,12 @@ section above and `docs/protocol.md` §6). Remaining scale work:
       lifecycle floods are infrequent; the real target is the heartbeat + `writers` at scale.
 - [ ] **Bloom filter to minimize selfie re-use.** A peer can re-post the same image across
       waves (or lift someone else's). Maintain a space-efficient bloom filter of seen
-      selfie-image hashes (per-peer, and/or gossiped) and reject a `wave-selfie`
+      selfie-image hashes (per-peer, and/or gossiped) and reject a `wave-entry`
       whose image hash is probably-already-seen — cheap "have I seen this image?" at scale
       without storing every hash. False positives (rare) just ask the peer to re-shoot; no false
       negatives. Complements the per-entry byte cap + one-per-peer dedup (bounds _content_ reuse,
       not just count). Pairs well with a lightweight perceptual hash to catch near-duplicates.
-- [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) selfies.** A `wave-selfie` is
+- [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) selfies.** A `wave-entry` is
       an inline image any admitted participant can post, so a peer could post something NSFW or
       abusive. Add a **report/downvote** signal that propagates so each peer can **choose not to
       display** a flagged entry (client-side moderation, not censorship — the entry stays in the

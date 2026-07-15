@@ -3,7 +3,7 @@
 **Status:** Proposed — not implemented. Today both secrets are persisted as **plaintext files**
 (`<storage>/wallet.seed`, `<storage>/swarm.seed`). This note designs moving desktop secret storage
 to the OS keychain via Electron `safeStorage`, reusing the seed-injection seam the engine already
-exposes. Read [`architecture.md`](./architecture.md) and [`protocol.md`](./protocol.md) first.
+exposes. Read [`architecture.md`](./hosting.md) and [`protocol.md`](../../packages/hyperwave-engine/docs/protocol.md) first.
 
 ## 1. Problem
 

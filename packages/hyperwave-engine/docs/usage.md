@@ -1,11 +1,19 @@
 # hyperwave-engine — usage & examples
 
 Worked examples for the HyperWave engine and its submodules. For _what_ the pieces are and how
-they interact, see [`docs/architecture.md`](../../docs/architecture.md) and
-[`docs/protocol.md`](../../docs/protocol.md); this file is all _how do I call it_.
+they interact, see [`protocol.md`](./protocol.md) (the engine spec) and the apps'
+[`hosting.md`](../../../apps/docs/hosting.md); this file is all _how do I call it_.
+
+> **The engine is theme-agnostic.** It provides a generic primitive: peers join a shared
+> **topic**, map to seats on a DHT **ring**, and any peer triggers a **wave** that
+> **sweeps** the ring on a deterministic schedule; each participant contributes one
+> **entry** (an opaque `payload` the host owns) to a per-wave CRDT **feed**, optionally
+> gated by proof-of-burn, and carries a cosmetic **tag**. The football "stadium wave" app
+> (`apps/desktop`) is one host over this engine — it fills the payload with a selfie and
+> uses the tag as a country. Build any turn-taking / coordinated-snapshot app the same way.
 
 > **Runs under [Bare](https://github.com/holepunchto/bare), not Node.** Examples assume `bare`.
-> The pure submodules (`ring`/`sweep`/`attest`/`messages`/`flood`/`gallery`) do no I/O and
+> The pure submodules (`ring`/`sweep`/`attest`/`messages`/`flood`/`feed`) do no I/O and
 > also run fine under Node if you just want to play with the math/crypto.
 
 **Two import surfaces:**
@@ -32,17 +40,17 @@ const sweep = require('hyperwave-engine/lib/sweep');
 const attest = require('hyperwave-engine/lib/attest');
 const messages = require('hyperwave-engine/lib/messages');
 const { Flood } = require('hyperwave-engine/lib/flood');
-const gallery = require('hyperwave-engine/lib/gallery');
+const feed = require('hyperwave-engine/lib/feed');
 
 // 3. The stateful classes wave.js composes (also subpath imports — see §11):
 const { PeerTable } = require('hyperwave-engine/lib/peer-table');
-const { SelfiePipeline } = require('hyperwave-engine/lib/selfie');
-const { CrdtGallery } = require('hyperwave-engine/lib/gallery-crdt');
+const { EntryPipeline } = require('hyperwave-engine/lib/entry');
+const { CrdtFeed } = require('hyperwave-engine/lib/feed-crdt');
 ```
 
 Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it headless](#2-drive-a-wave-headless-createwave) ·
 [ring.js](#3-ringjs--seats--the-ring) · [sweep.js](#4-sweepjs--the-deterministic-schedule) · [attest.js](#5-attestjs--attestations) ·
-[messages.js](#6-messagesjs--the-gossip-message-seam) · [flood.js](#7-floodjs--the-flood-graph) · [gallery.js](#8-galleryjs--the-multicore-crdt-gallery) ·
+[messages.js](#6-messagesjs--the-gossip-message-seam) · [flood.js](#7-floodjs--the-flood-graph) · [feed.js](#8-feedjs--the-multicore-crdt-feed) ·
 [payments](#9-payments--walletjs) · [seeds & bootstrap](#10-seed--bootstrap-helpers) ·
 [stateful classes](#11-the-stateful-classes-wavejs-composes)
 
@@ -60,12 +68,12 @@ const { createEngine } = require('hyperwave-engine');
 const engine = createEngine({
   storageDir: '/tmp/hyperwave/a', // one dir per peer (the hyperwave/ store is wiped on startup)
   config: {
-    matchId: 'hyperwave:my-match:v1', // peers on the same matchId share one ring
+    topicId: 'hyperwave:my-match:v1', // peers on the same topicId share one ring
     bootstrap: '127.0.0.1:49737', // optional host:port → local DHT (instant same-machine discovery)
-    wallet: true // default; false → wallet-less (join-attestation gallery, no fees/tips)
+    wallet: true // default; false → wallet-less (join-attestation feed, no fees/tips)
   },
   notify: (msg) => {
-    // engine → host events, e.g. { type: 'state' | 'event' | 'gallery' | 'wallet' | 'burn-result' }
+    // engine → host events, e.g. { type: 'state' | 'event' | 'feed' | 'wallet' | 'burn-result' }
     if (msg.type === 'state') {
       console.log(
         'ring:',
@@ -80,14 +88,15 @@ const engine = createEngine({
 });
 
 // host → engine commands:
-engine.exec({ type: 'set-country', country: 'BR' });
-engine.exec({ type: 'start-wave' }); // burns the kick-off fee, then announces + opens the lobby
+engine.exec({ type: 'set-tag', tag: 'BR' }); // cosmetic per-peer tag
+engine.exec({ type: 'start-wave' }); // burns the start fee, then announces + opens the lobby
 engine.exec({ type: 'join-wave' }); // opt into an announced wave (+ burns the join fee)
 engine.exec({
-  type: 'stage-selfie',
-  selfie: { image: '<jpeg-data-url>', caption: 'hi' }
+  type: 'stage-entry',
+  // payload is opaque application content — the host owns its shape
+  entry: { payload: { image: '<jpeg-data-url>', caption: 'hi' } }
 });
-engine.exec({ type: 'tip', to: 'T...', amount: 5 }); // real testnet TRX to a selfie owner
+engine.exec({ type: 'tip', to: 'T...', amount: 5 }); // real testnet TRX to an entry owner
 engine.exec({ type: 'send-trx', to: 'T...', amount: 10 });
 engine.exec({ type: 'fetch-transactions' }); // → { type:'transactions', list }
 engine.exec({ type: 'refresh-wallet' }); // → a fresh { type:'wallet', address, trx }
@@ -95,7 +104,7 @@ engine.exec({ type: 'refresh-wallet' }); // → a fresh { type:'wallet', address
 await engine.close();
 ```
 
-Command / event reference: `docs/protocol.md` §5; the state-machine `event` names (`started`,
+Command / event reference: `protocol.md` §5; the state-machine `event` names (`started`,
 `joined`, `roster`, `holding`, `position`, `completed`, …) in §5 as well.
 
 ---
@@ -111,7 +120,7 @@ const { createWave, parseBootstrap } = require('hyperwave-engine');
 
 const wave = createWave({
   storageDir: '/tmp/hw/a',
-  matchId: 'demo',
+  topicId: 'demo',
   bootstrap: parseBootstrap('127.0.0.1:49737'), // or null for the public DHT
   // state: { me, peers, connected, discovered } — the live ring, the direct-connection
   // count, and the DHT-discovered count (hosts gate start triggers on `discovered`)
@@ -126,18 +135,18 @@ const wave = createWave({
     );
   },
   onEvent: (ev) => console.log('event', ev.event, ev.waveId),
-  onGallery: (items) => console.log('gallery', items.length)
+  onFeed: (items) => console.log('feed', items.length)
   // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see §10)
 });
 
-console.log('my seat:', wave.me); // { id, angle, country }
+console.log('my seat:', wave.me); // { id, angle, tag }
 const waveId = wave.startWave(); // announce + open the lobby; returns the new waveId (or null if busy)
-wave.setCountry('BR');
-wave.stageSelfie({ image: 'fake', caption: 'me' }); // staged; posts when my sweep slot fires
+wave.setTag('BR');
+wave.stageEntry({ payload: { label: 'me' } }); // opaque payload; posts at my sweep slot
 await wave.close();
 ```
 
-`createWave` returns: `{ me, startWave, join, setCountry, stageSelfie, setWallet, announcePaid,
+`createWave` returns: `{ me, startWave, join, setTag, stageEntry, setWallet, announcePaid,
 recordBurn, close }`. There is no routing surface — the wave is a deterministic sweep.
 The payment methods (`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §9.
 
@@ -146,7 +155,7 @@ The payment methods (`setWallet`/`announcePaid`/`recordBurn`) are wired by `wall
 ## 3. `ring.js` — seats & the ring
 
 Pure geometry: a peer's key deterministically maps to a **seat angle**; the ring is the live peers
-sorted clockwise. It defines the wave's semantics (sweep order, gallery order) — it is **not** the
+sorted clockwise. It defines the wave's semantics (sweep order, feed order) — it is **not** the
 connection topology (that's Hyperswarm's own topic mesh). No state, no I/O.
 
 ```js
@@ -176,7 +185,7 @@ const live = liveRing(entries, now, STALE_MS); // drops the stale peer, sorts by
 
 The wave itself. A `wave-start` carries the canonical roster plus the sweep
 parameters `t0` (epoch ms) and `lapMs`; every peer derives the **same** angle-ordered schedule
-locally and self-triggers its selfie at its own slot. A dead peer's slot simply passes — no
+locally and self-triggers its entry at its own slot. A dead peer's slot simply passes — no
 routing, no healing. Pure math, no transport.
 
 ```js
@@ -196,7 +205,7 @@ const schedule = sweepSchedule({ rosterIds, t0, lapMs });
 
 // my slot (or null if I'm a spectator not in the roster)
 const slot = mySlot(schedule, rosterIds[0]);
-// self-trigger: setTimeout(fireMySelfie, slot.at - Date.now())
+// self-trigger: setTimeout(fireMyEntry, slot.at - Date.now())
 ```
 
 The ⚽ on every screen is rendered from this same schedule (renderer-local, no gossip), and the
@@ -207,11 +216,11 @@ message.
 
 ## 5. `attest.js` — attestations
 
-The pure Ed25519 crypto behind the paid-wave gate and the gallery write credential. Every function
+The pure Ed25519 crypto behind the paid-wave gate and the feed write credential. Every function
 is stateless.
 
 **Burn attestation** — bridges a peer's ring identity to its on-chain fee burn; authorizes a
-gallery write and binds the tip address:
+feed write and binds the tip address:
 
 ```js
 const {
@@ -237,14 +246,14 @@ verifyBurn(fields, proof.sig); // → true
 burnAuthorizes(proof, peerId, waveId); // → true (signature valid AND bound to this peer + wave)
 ```
 
-**Join attestation** — a peer's signed opt-in, binding its identity to the gallery writer core it
+**Join attestation** — a peer's signed opt-in, binding its identity to the feed writer core it
 publishes. It rides `wave-join` (the join IS the write credential — self-certifying, no central
-admission) and every gallery entry carries it (`mergeGallery`'s write-gate):
+admission) and every feed entry carries it (`mergeFeed`'s write-gate):
 
 ```js
 const { signJoin, verifyJoin } = require('hyperwave-engine/lib/attest');
 
-const writerKey = 'ab12…'; // this peer's gallery Hypercore key (hex)
+const writerKey = 'ab12…'; // this peer's feed Hypercore key (hex)
 const joinSig = signJoin(kp, { waveId, writerKey });
 verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed this join)
 ```
@@ -253,7 +262,7 @@ verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed t
 
 ## 6. `messages.js` — the gossip message seam
 
-The single definition point for the five on-wire message kinds (`docs/protocol.md` §5): one
+The single definition point for the five on-wire message kinds (`protocol.md` §5): one
 `make*` factory per kind (every send site builds through it, so a shape can't drift per call
 site) and one shape validator per kind, run once at the receive edge via `validGossip` before
 any signature or state work. Validation is shape only — signatures and the paid gate stay in
@@ -268,7 +277,7 @@ const {
   makeWaveJoin
 } = require('hyperwave-engine/lib/messages');
 
-const heartbeat = makeHeartbeat({ id: peerId, country: 'BR' });
+const heartbeat = makeHeartbeat({ id: peerId, tag: 'BR' });
 validGossip(heartbeat); // → true (direct kind — no mid needed)
 
 const join = makeWaveJoin({ waveId, peerId, writerKey, joinSig });
@@ -309,45 +318,44 @@ mesh of degree ≈ `maxPeers`, connected with overwhelming probability). Nothing
 
 ---
 
-## 8. `gallery.js` — the multicore CRDT gallery
+## 8. `feed.js` — the multicore CRDT feed
 
-The gallery is a multicore CRDT. Each participant
-owns **one** Hypercore and appends its single `wave-selfie` op at block 0; its writer key rides
+The feed is a multicore CRDT. Each participant
+owns **one** Hypercore and appends its single `wave-entry` op at block 0; its writer key rides
 that peer's own `wave-join` (self-certified by the join attestation). Every peer opens every
-participant's core, downloads block 0, and folds the bag with the pure **`mergeGallery`** — every
-peer that has replicated the same set of cores computes a **byte-identical** gallery. No indexer,
-no admission, no consensus, no shared gallery key. The stateful `CrdtGallery` that owns the cores
-is in `gallery-crdt.js` (§11).
+participant's core, downloads block 0, and folds the bag with the pure **`mergeFeed`** — every
+peer that has replicated the same set of cores computes a **byte-identical** feed. No indexer,
+no admission, no consensus, no shared feed key. The stateful `CrdtFeed` that owns the cores
+is in `feed-crdt.js` (§11).
 
 ```js
 const crypto = require('hypercore-crypto');
 const b4a = require('b4a');
-const { mergeGallery, buildGallery } = require('hyperwave-engine/lib/gallery');
+const { mergeFeed, buildFeed } = require('hyperwave-engine/lib/feed');
 const { signJoin } = require('hyperwave-engine/lib/attest');
 
-// a wave-selfie op self-authenticates via its join attestation (an unsigned/invalid one, or one
-// over the byte caps, is silently dropped by mergeGallery)
+// a wave-entry op self-authenticates via its join attestation (an unsigned/invalid one, or one
+// whose serialized payload exceeds the byte cap, is silently dropped by mergeFeed)
 const kp = crypto.keyPair();
 const peerId = b4a.toString(kp.publicKey, 'hex');
 const waveId = 'w1';
-const writerKey = 'ab12…'; // this peer's gallery core key (hex)
+const writerKey = 'ab12…'; // this peer's feed core key (hex)
 const op = {
-  type: 'wave-selfie',
+  type: 'wave-entry',
   waveId,
   peerId,
-  hopCount: 0, // rank in the sweep → gallery order
+  hopCount: 0, // rank in the sweep → feed order
   writerKey,
   joinSig: signJoin(kp, { waveId, writerKey }),
-  image: '<jpeg-data-url>',
-  caption: 'hello',
+  payload: { anything: 'the host owns this shape' }, // opaque to the engine
   timestamp: Date.now()
 };
 
-// fold the bag of ops collected from every participant's core → the ordered gallery
-mergeGallery([op]); // → [op] (one entry per peer, hop order; tip address kept only if a burn backs it)
+// fold the bag of ops collected from every participant's core → the ordered feed
+mergeFeed([op]); // → [op] (one entry per peer, hop order; tip address kept only if a burn backs it)
 
-// buildGallery(entries) is the same ordering/dedup once you already have gated entries
-buildGallery([op]); // → [op]
+// buildFeed(entries) is the same ordering/dedup once you already have gated entries
+buildFeed([op]); // → [op]
 ```
 
 ---
@@ -391,7 +399,7 @@ const {
 const wave = createWave({ storageDir: '/tmp/hw/a', onState() {} });
 wireWallet(wave, pay); // sets the wallet address (tips) + the on-chain burn verifier (paid gate)
 
-// kick-off: start → burn the fee → wait for on-chain confirmation → announce the (now-paid) wave
+// start: start → burn the fee → wait for on-chain confirmation → announce the (now-paid) wave
 const waveId = wave.startWave();
 const { hash, proof } = await payFee({
   wave,
@@ -425,12 +433,12 @@ parseBootstrap('127.0.0.1:49737'); // → [{ host: '127.0.0.1', port: 49737 }]
 // Creates + writes <storage>/swarm.seed on first run; an injected hex seed is used verbatim.
 const seed = loadOrCreateSwarmSeed('/tmp/hw/a'); // Buffer(32)
 const crypto = require('hypercore-crypto');
-const keyPair = crypto.keyPair(seed); // the same identity every run (see docs/protocol.md §1)
+const keyPair = crypto.keyPair(seed); // the same identity every run (see protocol.md §1 (sibling))
 ```
 
 `createWave` calls `loadOrCreateSwarmSeed` for you; pass `createWave({ swarmSeed })` only to inject
 an identity (e.g. from mobile secure storage). It is a **separate** seed from the wallet seed
-(`createPayments({ seed })`) — see [`docs/secure-seed-storage.md`](../../docs/secure-seed-storage.md).
+(`createPayments({ seed })`) — see [`docs/secure-seed-storage.md`](../../../apps/docs/secure-seed-storage.md).
 
 ---
 
@@ -442,16 +450,16 @@ each subpath-importable and unit-tested. `Flood` is shown in §7; the others:
 - **`PeerTable`** (`lib/peer-table.js`) — live peer bookkeeping: ring seats (angle always
   derived from the id, never the wire) and direct-send channels; a direct disconnect drops
   the seat immediately. `bare examples/peer-table.js`
-- **`SelfiePipeline`** (`lib/selfie.js`) — pairs the lobby-staged selfie with my sweep slot
+- **`EntryPipeline`** (`lib/entry.js`) — pairs the lobby-staged entry with my sweep slot
   (either order — the renderer can stage before or after my slot fires), posts exactly once
   per wave and only for the current wave, and owns the burn-proof ticket lifetime (survives
-  `reset()`, dropped by `clearBurnProof()` on a new wave). `bare examples/selfie.js`
-- **`CrdtGallery`** (`lib/gallery-crdt.js`) — the per-wave multicore CRDT gallery over a
+  `reset()`, dropped by `clearBurnProof()` on a new wave). `bare examples/entry.js`
+- **`CrdtFeed`** (`lib/feed-crdt.js`) — the per-wave multicore CRDT feed over a
   Corestore: `open(waveId)` creates MY writable core (its key is my writer key),
   `addWriter(waveId, peerId, writerKey)` opens a participant's core (from its flooded
-  `wave-join`) and downloads its one entry, `postSelfie(entry)` appends my single op, and
+  `wave-join`) and downloads its one entry, `postEntry(entry)` appends my single op, and
   `tick()` pulls replication + repaints the merged view. No admission, no indexer, no
-  retention — every peer holds every core and merges locally with `mergeGallery` (§8).
+  retention — every peer holds every core and merges locally with `mergeFeed` (§8).
 
 ---
 

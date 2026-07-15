@@ -1,25 +1,34 @@
 # hyperwave-engine
 
-The HyperWave engine: a permissionless P2P "stadium wave" — peers on a Hyperswarm
-DHT ring run a deterministic angular **sweep** (every peer derives the same
-angle-ordered schedule from a flooded start time + lap duration and self-triggers
-its own moment — no token), post selfies to a per-wave **multicore CRDT** gallery
-(one Hypercore per participant, merged locally), and pay/tip with self-custodial WDK
-wallets. Host-agnostic; runs under [Bare](https://github.com/holepunchto/bare).
+A permissionless P2P **coordinated-round** primitive. Peers join a shared **topic** and
+map to seats on a Hyperswarm DHT **ring** (angle from the public key). Any peer triggers a
+**wave** that **sweeps** the ring on a deterministic schedule — every peer derives the same
+angle-ordered slots from a flooded start time + lap duration and self-triggers its own
+moment (no token, no coordinator). Each participant contributes one **entry** — an opaque
+`payload` the host owns — to a per-wave **multicore CRDT feed** (one Hypercore per
+participant, merged locally, byte-identical on every peer), optionally gated by
+proof-of-burn, and carries a cosmetic **tag**. Payments (fees, tips) run on self-custodial
+WDK wallets. Host-agnostic; runs under [Bare](https://github.com/holepunchto/bare).
+
+The engine is **theme-agnostic** — it never interprets the entry payload. The "stadium
+Mexican wave" (`apps/`) is one host: it fills each entry with a selfie and uses the tag as
+a country. Any turn-taking / coordinated-snapshot app can host it the same way.
 
 ```js
 const { createEngine } = require('hyperwave-engine');
 
 const engine = createEngine({
   storageDir: '/tmp/hyperwave/a',
-  config: { matchId: 'hyperwave:my-match:v1' },
+  config: { topicId: 'my-topic:v1' },
   notify: (msg) => console.log(msg) // engine → host events
 });
 
 engine.exec({ type: 'start-wave' }); // host → engine commands
+engine.exec({ type: 'stage-entry', entry: { payload: { any: 'json' } } });
 ```
 
-See [`usage.md`](./usage.md) for the full API walkthrough and `examples/` for
+See [`docs/usage.md`](./docs/usage.md) for the full API walkthrough,
+[`docs/protocol.md`](./docs/protocol.md) for the on-wire spec, and `examples/` for
 runnable samples.
 
 License: Apache-2.0

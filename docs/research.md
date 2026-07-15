@@ -2,7 +2,7 @@
 
 The papers, protocols, and projects HyperWave draws on, with a note on what each one
 contributes to the design. Deeper context for the choices documented in
-[`protocol.md`](./protocol.md).
+[`protocol.md`](../packages/hyperwave-engine/docs/protocol.md).
 
 ## Distributed systems / topology
 
@@ -40,8 +40,8 @@ contributes to the design. Deeper context for the choices documented in
 
 - **CRDTs: Conflict-free Replicated Data Types** — Shapiro, Preguiça, Baquero, Zawirski
   (SSS 2011). <https://hal.inria.fr/inria-00609399/document>
-  The convergence model of the gallery: each participant's single selfie op is
-  self-authenticating, idempotent, and commutative, so `mergeGallery` over any set of
+  The convergence model of the feed: each participant's single entry op is
+  self-authenticating, idempotent, and commutative, so `mergeFeed` over any set of
   replicated cores yields a byte-identical view on every peer — no indexer, no consensus.
 
 ## The Holepunch / Pear stack (the platform)
@@ -50,7 +50,7 @@ contributes to the design. Deeper context for the choices documented in
   discovery over HyperDHT + Noise-encrypted duplex streams. All our networking, and the
   topic mesh the flood rides.
 - **Hypercore / Corestore** — <https://github.com/holepunchto/hypercore> — signed
-  append-only logs + replication. The gallery is one Hypercore per participant, replicated
+  append-only logs + replication. The feed is one Hypercore per participant, replicated
   and merged locally.
 - **Protomux / compact-encoding** — <https://github.com/holepunchto/protomux> — channel
   multiplexing over one stream; our single JSON-over-`c.string` gossip channel rides it.
@@ -80,7 +80,7 @@ contributes to the design. Deeper context for the choices documented in
 
 - **Ed25519: high-speed high-security signatures** — Bernstein, Duif, Lange, Schwabe,
   Yang (CHES 2011). <https://ed25519.cr.yp.to/ed25519-20110926.pdf>
-  Every identity, attestation, and gallery entry is Ed25519-signed
+  Every identity, attestation, and feed entry is Ed25519-signed
   (via `hypercore-crypto` / libsodium).
 - **BLAKE2: simpler, smaller, fast as MD5** — Aumasson, Neves, Wilcox-O'Hearn, Winnerlein
   (2013). <https://www.blake2.net/blake2.pdf>
