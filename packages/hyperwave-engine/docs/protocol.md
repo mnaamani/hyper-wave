@@ -121,6 +121,23 @@ sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
 - The gossip channel and the Corestore replication share the same underlying stream
   (Protomux multiplexes them).
 
+**Wire encoding — JSON, and when to revisit.** Gossip messages are JSON (a baked-in design
+rule). This is deliberate and, today, correct: the five kinds are tiny and infrequent (hex ids,
+one signature, a few integers — the only large payload, the selfie, rides a Hypercore block, not
+gossip), so a binary encoding would save almost nothing on the wire; JSON stays trivially
+loggable for debugging a flooded mesh; and signature safety is **independent of the wire** —
+attestations sign a canonical `|`-delimited tuple hash (`attest.js`), never the JSON envelope, so
+JSON's non-canonicity (key order/whitespace) never touches verification. The one benefit a
+versioned binary encoding (e.g. `hyperschema`/`compact-encoding`) would add that JSON lacks is
+**append-only cross-version wire compatibility** — but that only pays off once there is real
+version skew on a shared topic: **independent client implementations, or rolling upgrades across a
+long-lived (non-per-match) topic**. That is the trigger to revisit. Until then the codegen build
+step, the loss of loggability, and reopening the one-encoding rule outweigh it. Even when
+revisited, only the message **envelope** would change encoding; the signed attestation tuple in
+`attest.js` stays its own canonical format regardless. (The internal app IPC made the opposite
+call for the opposite reason — it adopted `bare-rpc` but kept JSON, because a single-build IPC has
+no version skew for a schema to solve; see Appendix A.)
+
 All timing constants are in §10.
 
 ### 3.1 Message propagation & relay rules
@@ -397,7 +414,17 @@ every core and can render the full feed. Each entry is re-verified (`verifyJoin`
 its core is opened. The `burn` is **omitted** here (the writers were pre-vetted by the
 initiator during the lobby; the wave itself is gated by the start `paid` proof). This
 grows `wave-start` to O(N) in the roster — an extension of the existing O(N)-roster scale
-concern. When the paid-wave gate is enforced, `wave-start` also carries the start `paid`
+concern (the broader path to thousands of peers is the **concurrent-waves sharding model** in the
+[scaling design note](./scaling.md), which bounds each wave's roster rather than growing one).
+If ever compressed at large N, it must preserve **both** self-containment and
+determinism: lossless framing (deflate the frame — see §3) does, and roughly halves the
+hex+JSON writers array (~256 B/entry → ~130 B, the crypto-entropy floor of
+peerId+writerKey+joinSig). A lossy scheme that ships only peerId **prefixes** and resolves
+`writerKey`/`joinSig` from each peer's locally-cached `wave-join`s does **not**: it reinstates
+the non-self-containment `writers` exists to remove (a peer that missed a join can't resolve
+its prefix), and prefix resolution against per-peer-divergent id sets is ambiguous and
+grindable (peerIds gate feed writes + tips). Deriving the roster from received `wave-join`s
+instead of carrying `writers` fails for the same determinism reason as below. When the paid-wave gate is enforced, `wave-start` also carries the start `paid`
 proof and is gated on it (§11); carrying it also lets a peer that adopted via `wave-start`
 re-authenticate a later `wave-sync` to a newcomer. Receivers transition `lobby → racing`.
 
@@ -905,8 +932,12 @@ following guards keep a hostile peer running a modified app from disrupting hone
 ## Appendix A — app-internal IPC (informative, not on-wire)
 
 The reference build splits worker (protocol) from renderer (UI); they exchange these over
-a local IPC bridge. A different client would have its own UI and need not match these —
-only §3–§8 are the interop surface.
+a local IPC bridge — the **`bare-rpc` host↔UI seam**, JSON-encoded (request/response for
+`tip`/`send-trx`/`fetch-transactions`, one-way events otherwise; see `usage.md` §12). It kept
+JSON (rather than a schema'd binary encoding) precisely because a single-build IPC has no version
+skew for a schema to solve — the opposite trade-off from the gossip wire in §3, for the opposite
+reason. A different client would have its own UI and need not match these — only §3–§8 are the
+interop surface.
 
 **Renderer → worker (commands):** `start-wave`, `join-wave`, `set-tag {tag}`,
 `stage-entry {entry:{payload}}` (stage the opaque entry payload; the worker pairs it with

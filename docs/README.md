@@ -15,6 +15,10 @@ The reusable, theme-agnostic P2P engine.
   client in another language.
 - [usage.md](../packages/hyperwave-engine/docs/usage.md) — the API walkthrough: `createEngine`
   / `createWave`, the command + event surface, and every pure submodule with runnable snippets.
+- [scaling.md](../packages/hyperwave-engine/docs/scaling.md) — **design note (proposed, not
+  built)**: scaling to thousands of peers via **concurrent waves** as a sharding model
+  (subscription, per-wave sub-topics, and a discovery directory), what breaks in a single wave (the
+  feed's O(N)-cores wall), and a phased migration. Revisits several baked-in assumptions.
 
 ## Apps (`apps/docs/`)
 

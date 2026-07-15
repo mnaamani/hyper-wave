@@ -272,6 +272,23 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 
 ### Future features / ideas
 
+- [ ] **Compress the O(N) gossip messages at scale (`wave-start` / `wave-sync`).** These carry the
+      full `writers` set (`{peerId, writerKey, joinSig}` per participant ≈ 256 B of hex+JSON each),
+      so they grow O(N) in the roster — the one gossip kind that balloons (heartbeat/announce/join
+      are tiny). If large-N ever becomes real (hundreds+ of joiners on one topic), **deflate the
+      frame above a size threshold** — NOT the small/frequent kinds (heartbeat especially: gzip's
+      ~18 B header + framing makes them _bigger_). Lossless deflate roughly halves the writers array
+      (~256 → ~130 B/entry, the crypto-entropy floor). **Keep it lossless.** A prefix-drop scheme
+      (ship only peerId prefixes; resolve `writerKey`/`joinSig` from each peer's cached `wave-join`s)
+      was considered and **rejected**: it breaks the self-containment `writers` exists to provide (a
+      peer that missed a join can't resolve its prefix) and prefix resolution against per-peer-
+      divergent id sets is ambiguous + grindable (peerIds gate feed writes + tips) — see
+      `protocol.md` §5 `wave-start`. Likewise, `writers` can't be dropped in favour of deriving the
+      roster from received `wave-join` floods: flood delivery is racy, so per-peer rosters would
+      diverge and desync the deterministic sweep — the initiator's snapshot is the consensus. Note
+      the bigger byte win at scale is orthogonal to gossip: the feed selfie is a base64 dataURL
+      (raw JPEG bytes would save ~33%), but that rides a Hypercore block, not gossip. **Latent — not
+      worth it at per-match topic sizes (tens of peers).**
 - [x] **Typed RPC seam between renderer/host and worker (`bare-rpc`).** Done — the host↔UI IPC now
       speaks **`bare-rpc`** through a single shared seam (`packages/hyperwave-engine/lib/rpc.js`:
       `serveEngine` host side + `createRpcClient` UI side, JSON-encoded over the existing pipe).
