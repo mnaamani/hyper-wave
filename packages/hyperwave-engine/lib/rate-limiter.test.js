@@ -2,7 +2,7 @@
 // so the refill/burst behaviour is exercised deterministically (no sleeps). Runs under Bare:
 //   bare lib/rate-limiter.test.js   (or `npm test`)
 const test = require('brittle');
-const { RateLimiter } = require('./rate-limiter');
+const { RateLimiter, KeyedRateLimiter } = require('./rate-limiter');
 
 test('starts full: allows a burst up to capacity, then drops', (t) => {
   const limiter = new RateLimiter({ capacity: 5, refillPerSec: 1, now: 0 });
@@ -71,5 +71,46 @@ test('rejects a non-positive config', (t) => {
   t.exception(
     () => new RateLimiter({ capacity: 5, refillPerSec: 0 }),
     /positive/
+  );
+});
+
+test('KeyedRateLimiter: each key gets an independent budget', (t) => {
+  const limiter = new KeyedRateLimiter({
+    capacity: 2,
+    refillPerSec: 1,
+    maxKeys: 10
+  });
+  t.ok(limiter.allow('a', 0), 'a: 1');
+  t.ok(limiter.allow('a', 0), 'a: 2');
+  t.absent(limiter.allow('a', 0), 'a is over budget');
+  // a spammy key does not eat another key's allowance
+  t.ok(limiter.allow('b', 0), 'b still has its own full budget');
+  t.ok(limiter.allow('b', 0), 'b: 2');
+  t.absent(limiter.allow('b', 0), 'b now over budget too');
+});
+
+test('KeyedRateLimiter: LRU-evicts the least-recently-used key past maxKeys', (t) => {
+  const limiter = new KeyedRateLimiter({
+    capacity: 1,
+    refillPerSec: 1,
+    maxKeys: 2
+  });
+  limiter.allow('a', 0); // drains a
+  limiter.allow('b', 0); // drains b
+  t.is(limiter.size, 2, 'two keys tracked');
+  // touch 'a' so 'b' becomes the least-recently-used, then add 'c' → 'b' is evicted
+  t.absent(limiter.allow('a', 0), 'a still drained (touch refreshes recency)');
+  limiter.allow('c', 0); // over maxKeys → evicts the LRU key (b); tracked = {a, c}
+  t.is(limiter.size, 2, 'still bounded at maxKeys');
+  // 'a' was kept, so it stays throttled — assert BEFORE re-adding 'b' (which would evict 'a')
+  t.absent(limiter.allow('a', 0), 'the retained key keeps its throttle state');
+  // 'b' was evicted, so it comes back with a FRESH full bucket
+  t.ok(limiter.allow('b', 0), 'evicted key returns with a fresh budget');
+});
+
+test('KeyedRateLimiter: rejects a non-positive maxKeys', (t) => {
+  t.exception(
+    () => new KeyedRateLimiter({ capacity: 1, refillPerSec: 1, maxKeys: 0 }),
+    /maxKeys/
   );
 });

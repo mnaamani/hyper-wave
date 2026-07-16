@@ -1027,19 +1027,26 @@ following guards keep a hostile peer running a modified app from disrupting hone
   single peer can push at the optimistic-ingest edge (§8.2), pairing with the deterministic feed
   bounds (block-0-only + byte cap) to make a valid-key holder's flood rate-limited as well as
   size-limited.
+- **Per-author flood cap (`rate-limiter.js` `KeyedRateLimiter`).** The per-connection limiter charges
+  whoever _relays_ a frame, but a flooded message's authenticated `origin` is a third party at every
+  relay hop — so without more, one author's floods ride honest relayers outward uncharged, and each
+  distinct signed message (fresh `mid`) triggers a full epidemic flood. A second token bucket, keyed
+  on the (signed, unspoofable) `origin` and checked **after** the `mid` dedup (so it counts genuine
+  originations, not re-sightings) and **before** relay, drops an over-budget author's excess floods —
+  never relayed, never processed. Because the key is the cryptographic `origin`, **every honest peer
+  independently throttles the same spammy author**, so the flood dies instead of amplifying across
+  the subgraph. Sized well above a legitimate author's rate (a wave costs its author ~3 originations
+  — announce + own join + start); the tracked-author set is bounded + LRU-evicted (evicting only
+  resets an author's throttle, which costs the attacker more to force than it saves).
 
 ### 11.3 Known residual risks (hardening backlog)
 
-- **Flood-origination amplification (rate-bounded, not eliminated).** A peer that owns a key can
-  _sign_ many messages with fresh `mid`s; each passes the sig + freshness + first-sight checks and
-  is relayed once to the wave's subscribed subgraph. The per-connection token bucket (§11.2) now
-  caps the _rate_ at which one connection can inject these (so it's no longer unbounded CPU/fan-out),
-  but the relay path has no _per-origin_ origination budget, so a within-rate attacker still
-  amplifies to subscribers. A per-origin cap on relayed originations (or PoW/stake on flooded kinds,
-  as the paid-gate burn already is for announces) would close the remainder.
-- **Frame size.** The token bucket limits message _count_, not bytes; a very large single frame is
-  still decoded by Protomux before the receive edge sees it. A max-frame-size cap at the transport
-  is the complementary bound (backlog).
+- **Frame size.** The token buckets limit message _count_ (per connection and per author), not
+  bytes; a very large single frame is still decoded by Protomux before the receive edge sees it, so
+  the peak allocation is unbounded. A max-frame-size cap at the transport is the complementary bound
+  (backlog) — best done alongside the O(N)-roster scale work (§5 `wave-start`, scaling.md), since the
+  one legitimately large gossip payload is `wave-start`/`wave-sync`'s `writers` set, which sets the
+  cap's floor.
 - **Optimistic ingest is a soft gate.** Since the burn isn't checked on the ingest path
   (§8.2), the feed can hold unpaid entries until they're caught (a tipper / an auditor via
   `burnTx`). They are detectable, but they _do_ consume (bounded) storage. Acceptable for the

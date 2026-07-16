@@ -58,7 +58,7 @@ const {
   makeWaveSync
 } = require('./messages');
 const { Flood } = require('./flood');
-const { RateLimiter } = require('./rate-limiter');
+const { RateLimiter, KeyedRateLimiter } = require('./rate-limiter');
 const { CrdtFeed } = require('./feed-crdt');
 const { PeerTable } = require('./peer-table');
 const { EntryPipeline } = require('./entry');
@@ -111,6 +111,17 @@ const GOSSIP_SEEN_CAP = 4096;
 // the epidemic flood re-delivers a dropped relay from another neighbour.
 const GOSSIP_BURST = 256; // bucket capacity (max burst)
 const GOSSIP_RATE_PER_SEC = 64; // sustained frames/sec per connection
+// Per-AUTHOR flood cap (rate-limiter.js KeyedRateLimiter, protocol.md §11): the complement to the
+// per-connection limiter. A flooded message's authenticated `origin` is a third party at every
+// relay hop, so the per-connection budget charges whoever RELAYS it, not the spammy author —
+// letting one author's floods ride honest relayers outward. Keying a bucket on the (signed,
+// unspoofable) `origin` makes every honest peer independently throttle that author, so an
+// over-budget author's floods die instead of amplifying across the subgraph. Sized well above a
+// legitimate author's flood rate (a wave costs its author ~3 originations — announce + own join +
+// start — and re-floods dedup on `mid` before this is charged), so only a spammer hits it.
+const FLOOD_ORIGIN_BURST = 64; // per-author flood burst
+const FLOOD_ORIGIN_RATE_PER_SEC = 8; // sustained flood-originations/sec per author
+const FLOOD_ORIGIN_MAX_AUTHORS = 4096; // bounded set of tracked authors (LRU-evicted)
 // How long the initiator waits for its start burn to confirm + announce before aborting
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
@@ -329,6 +340,14 @@ function createWave({
   const table = new PeerTable({ meId: me.id, staleMs: PEER_STALE_MS });
   const endedWaves = new Set(); // waves that finished — never re-adopt (prevents revival)
   const flood = new Flood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
+  // Per-author flood budget: caps how many distinct floods a single (authenticated) origin can push
+  // through me before I stop relaying/processing them — the anti-amplification complement to the
+  // per-connection rate limiter (protocol.md §11).
+  const originFlood = new KeyedRateLimiter({
+    capacity: FLOOD_ORIGIN_BURST,
+    refillPerSec: FLOOD_ORIGIN_RATE_PER_SEC,
+    maxKeys: FLOOD_ORIGIN_MAX_AUTHORS
+  });
   // Phase 3 scoping state. neighborSubs: what each connected neighbour told us it's subscribed to
   // (via `subs`) — I forward a wave's join/start/sync only to neighbours whose set contains it.
   const neighborSubs = new Map(); // connId -> Set<waveId>
@@ -491,6 +510,13 @@ function createWave({
     if (FLOODED_KINDS.has(msg.kind)) {
       if (!flood.firstSight(msg.mid)) {
         return; // already seen -> drop (stops loops)
+      }
+      // Per-author flood cap: charge this distinct flood (checked AFTER dedup, so it counts genuine
+      // originations, not re-sightings) against its authenticated `origin`'s budget. An over-budget
+      // author's excess floods are dropped here — never relayed, never processed — so a spammy
+      // author can't amplify across the subgraph on honest relayers' backs (protocol.md §11).
+      if (!originFlood.allow(msg.origin, Date.now())) {
+        return;
       }
       if (msg.kind === 'wave-announce') {
         // the tiny announce floods the whole directory (browse surface). The connect-time catch-up
