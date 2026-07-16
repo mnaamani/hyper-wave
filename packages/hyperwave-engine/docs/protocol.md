@@ -1000,18 +1000,33 @@ following guards keep a hostile peer running a modified app from disrupting hone
   (§8.2) — so tips can't be routed to a non-payer and a seat can't bloat the feed.
 - **Cheap-before-expensive.** Adoption runs the cheap wave-filter (`canAdopt`) and flood
   dedup before any signature verification, limiting the CPU a gossip flood can extract.
+- **Per-connection rate limit (`rate-limiter.js`).** Each connection gets its own token bucket
+  (`GOSSIP_BURST` = 256 frames, `GOSSIP_RATE_PER_SEC` = 64 sustained). An over-budget frame is
+  dropped **before** the JSON parse + `verifyMessage` signature check, so a peer blasting
+  validly-framed junk can't force unbounded parse/verify CPU — the cost per peer is capped at the
+  refill rate (+ a burst). It's per-connection on purpose: the flood is epidemic, so throttling one
+  noisy link never blackholes a message (a dropped relay re-arrives from another neighbour), and one
+  attacker can't drain a budget shared across honest peers. This bounds _how many_ joins/entries a
+  single peer can push at the optimistic-ingest edge (§8.2), pairing with the deterministic feed
+  bounds (block-0-only + byte cap) to make a valid-key holder's flood rate-limited as well as
+  size-limited.
 
 ### 11.3 Known residual risks (hardening backlog)
 
-- **No per-connection rate limiting.** Gossip has flood-dedup, receiver clamps, and the
-  cheap-before-verify ordering, but not yet a per-peer message budget; a peer can still spend a
-  connection's bandwidth/CPU. With optimistic ingest this matters more (feed seats are
-  cheap now — only signatures + one-per-peer + byte cap), so a per-connection token bucket is
-  the natural cap on _how many_ joins/entries a single peer can push.
+- **Flood-origination amplification (rate-bounded, not eliminated).** A peer that owns a key can
+  _sign_ many messages with fresh `mid`s; each passes the sig + freshness + first-sight checks and
+  is relayed once to the wave's subscribed subgraph. The per-connection token bucket (§11.2) now
+  caps the _rate_ at which one connection can inject these (so it's no longer unbounded CPU/fan-out),
+  but the relay path has no _per-origin_ origination budget, so a within-rate attacker still
+  amplifies to subscribers. A per-origin cap on relayed originations (or PoW/stake on flooded kinds,
+  as the paid-gate burn already is for announces) would close the remainder.
+- **Frame size.** The token bucket limits message _count_, not bytes; a very large single frame is
+  still decoded by Protomux before the receive edge sees it. A max-frame-size cap at the transport
+  is the complementary bound (backlog).
 - **Optimistic ingest is a soft gate.** Since the burn isn't checked on the ingest path
   (§8.2), the feed can hold unpaid entries until they're caught (a tipper / an auditor via
   `burnTx`). They are detectable, but they _do_ consume (bounded) storage. Acceptable for the
-  MVP scale; pair with the rate limit above at scale.
+  MVP scale; the per-connection rate limit (§11.2) now caps how fast such entries can be pushed.
 - **Clock skew shifts the choreography.** Slots and the deterministic end are wall-clock
   epoch times; a peer with a badly skewed clock fires early/late (a cosmetic wobble) and ends
   off-beat. `END_GRACE_MS` absorbs ordinary skew; there is no time-sync protocol.

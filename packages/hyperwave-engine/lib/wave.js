@@ -58,6 +58,7 @@ const {
   makeWaveSync
 } = require('./messages');
 const { Flood } = require('./flood');
+const { RateLimiter } = require('./rate-limiter');
 const { CrdtFeed } = require('./feed-crdt');
 const { PeerTable } = require('./peer-table');
 const { EntryPipeline } = require('./entry');
@@ -101,6 +102,15 @@ const END_GRACE_MS = 2000; // after the last slot, before every peer returns to 
 // (flood.js), so a straggling duplicate of a very old message might re-flood once —
 // harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096;
+// Per-connection gossip rate limit (rate-limiter.js, protocol.md §11): a token bucket that drops a
+// connection's over-budget frames BEFORE the parse + signature verify, capping the CPU a single
+// peer can force us to spend on junk. Sized well above real traffic (a connection sees a heartbeat
+// every 2s + bursty flood relays bounded by peers×waves — tens at most) but far below a blast:
+// GOSSIP_BURST absorbs a legitimate spike (incl. the connect-time greeting), GOSSIP_RATE_PER_SEC is
+// the sustained ceiling. Per-connection so throttling one noisy link never blackholes a message —
+// the epidemic flood re-delivers a dropped relay from another neighbour.
+const GOSSIP_BURST = 256; // bucket capacity (max burst)
+const GOSSIP_RATE_PER_SEC = 64; // sustained frames/sec per connection
 // How long the initiator waits for its start burn to confirm + announce before aborting
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
@@ -1621,11 +1631,28 @@ function createWave({
     const id = b4a.toString(conn.remotePublicKey, 'hex');
     log('peer connected', shortId(id));
 
+    // This connection's own token bucket: caps how fast this peer can make us parse + verify. The
+    // check runs FIRST (before JSON.parse + verifyMessage), so over-budget junk is dropped cheaply.
+    const limiter = new RateLimiter({
+      capacity: GOSSIP_BURST,
+      refillPerSec: GOSSIP_RATE_PER_SEC,
+      now: Date.now()
+    });
+    let throttleLogged = false;
+
     const mux = Protomux.from(conn);
     const channel = mux.createChannel({ protocol: GOSSIP_PROTOCOL });
     const message = channel.addMessage({
       encoding: cenc.string,
       onmessage(str) {
+        if (!limiter.allow(Date.now())) {
+          if (!throttleLogged) {
+            throttleLogged = true;
+            log('peer over gossip rate — throttling', shortId(id));
+          }
+          return; // over budget: drop before the parse + signature verify
+        }
+        throttleLogged = false;
         let msg;
         try {
           msg = JSON.parse(str);

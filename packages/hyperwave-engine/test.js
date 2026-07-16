@@ -3,6 +3,7 @@
 require('./lib/wave.logic.test.js');
 require('./lib/swarm.seed.test.js');
 require('./lib/flood.test.js');
+require('./lib/rate-limiter.test.js');
 require('./lib/peer-table.test.js');
 require('./lib/entry.test.js');
 require('./lib/attest.test.js');
