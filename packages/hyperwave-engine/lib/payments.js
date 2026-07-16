@@ -24,14 +24,18 @@ function burnMemo(waveId, peerId) {
  * { hash, proof }; throws if the burn fails. `proof` is the start gate credential for the
  * initiator (announcePaid); a joiner's burn is its own anti-spam cost and ignores `proof`.
  * @param {Object} opts The fee to burn.
- * @param {Object} opts.wave - The createWave engine handle (provides `me.id` and `recordBurn`).
+ * @param {Object} opts.wave - The createWave engine handle (`me.id`, `recordBurn`, `feeFor`).
  * @param {import('./wallet').Wallet} opts.payments - The wallet (provides `fee` + `burn`).
  * @param {string} opts.waveId - The wave the fee is being burned for.
  * @param {string} opts.reason - Fee reason, e.g. `'start'` or `'join'`.
- * @returns {Promise<{hash: string, proof: Object}>} The burn tx hash and the signed burn proof.
+ * @returns {Promise<{hash: string, proof: Object, fee: number}>} The burn tx hash, the signed burn
+ *   proof, and the amount actually burned.
  */
 async function payFee({ wave, payments, waveId, reason }) {
-  const fee = payments.fee; // the wallet owns its fee amount (not a hardcoded engine constant)
+  // Burn the wave's ANNOUNCED fee (set by its initiator) so every participant pays the same amount.
+  // For a wave I initiate, feeFor returns my own wallet fee (I set it); fall back to the wallet fee
+  // when a wave carries no announced fee (wallet-less/unpaid shape).
+  const fee = wave.feeFor(waveId) ?? payments.fee;
   const { hash } = await payments.burn(fee, burnMemo(waveId, wave.me.id));
   // pass waveId so the attestation records even if the (instant) wave already ended — it's the
   // the entry's tip-address binding even when it confirms late (wave.js recordBurn).
@@ -41,7 +45,7 @@ async function payFee({ wave, payments, waveId, reason }) {
     txHash: hash,
     waveId
   });
-  return { hash, proof };
+  return { hash, proof, fee };
 }
 
 /**
@@ -69,17 +73,19 @@ async function confirmBurn(payments, waveId, hash) {
 
 /**
  * Wire a ready wallet into the engine: my address (feed tips / attestations), the on-chain burn
- * verifier (enables the paid-wave anti-spam gate), and the wallet TYPE (put on the wire so joiners
- * can decide whether they support this wave's payment mechanism).
+ * verifier (enables the paid-wave anti-spam gate), the wallet TYPE (put on the wire so joiners can
+ * decide whether they support this wave's payment mechanism), and my FEE (the amount I set on the
+ * waves I initiate — rides their announces so every joiner burns the same).
  * @param {Object} wave - The createWave engine handle (provides `setWallet`).
- * @param {import('./wallet').Wallet} payments - Any Wallet (address + `verifyBurnTx` + `type`).
+ * @param {import('./wallet').Wallet} payments - Any Wallet (address + `verifyBurnTx` + `type` + `fee`).
  * @returns {void}
  */
 function wireWallet(wave, payments) {
   wave.setWallet(
     payments.address,
     (txHash, expect) => payments.verifyBurnTx(txHash, expect),
-    payments.type
+    payments.type,
+    payments.fee // the fee I SET on the waves I initiate (rides their announces)
   );
 }
 

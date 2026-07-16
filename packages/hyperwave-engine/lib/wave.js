@@ -219,6 +219,7 @@ function loadOrCreateSwarmSeed(
  * @property {Array<{host: string, port: number}>|null} [bootstrap] Local-DHT bootstrap nodes, or null for the public DHT.
  * @property {string} [topicId] Topic string (all peers on the same id share one ring).
  * @property {number} [lobbyMs] Lobby window length in ms (opt-in window before the race).
+ * @property {number} [minFee] Local anti-sybil floor (default 0 = accept any): refuse to engage/join a paid wave whose initiator-set `fee` is below this. Only enforced when a wallet is wired (`enforcePaid`).
  * @property {number} [maxPeers] Hyperswarm connection cap (default 64; lower to force a partial mesh). Ignored when `swarm` is supplied.
  * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments). Ignored when `swarm` is supplied.
  * @property {Object} [swarm] An existing Hyperswarm the host owns; the engine shares it (joins its topics + adds listeners) and NEVER destroys it — on close it only leaves those topics + detaches its listeners. Share the host's swarm when the app also uses Hyperswarm (one instance per process). When set, `maxPeers`/`bootstrap`/`swarmSeed` are the host's concern and are ignored.
@@ -233,7 +234,8 @@ function loadOrCreateSwarmSeed(
  * @property {(waveId?: string) => string|null} join Opt into a lobby (the given wave, or the newest joinable one); implies subscribe; returns the joined waveId, or null on a no-op.
  * @property {(tag: string) => void} setTag Set the tag (cosmetic, rides the heartbeat).
  * @property {(entry: {payload?: *, waveId?: string}) => void} stageEntry Stage my opaque entry payload to post at my sweep slot (for the given wave, or the newest one I've joined).
- * @property {(address: string|null, verifier?: Function, walletType?: string) => void} setWallet Wire the payment layer (address + on-chain burn verifier + wallet type, which rides my waves' announces).
+ * @property {(address: string|null, verifier?: Function, walletType?: string, fee?: number) => void} setWallet Wire the payment layer (address + on-chain burn verifier + wallet type + my fee — type and fee ride the waves I initiate).
+ * @property {(waveId: string) => number|null} feeFor The initiator-set participation fee a wave requires (announced), or null if none — the host's fee flow burns exactly this.
  * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed start proof and announce (routed to the proof's waveId).
  * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket) for its waveId.
  * @property {() => Promise<void>} close Tear down timers, swarm, galleries, and the store.
@@ -253,6 +255,10 @@ function createWave({
   bootstrap = null,
   topicId = DEFAULT_TOPIC,
   lobbyMs = LOBBY_MS,
+  // Local anti-sybil floor: refuse to engage/join a paid wave whose initiator-set fee is below
+  // this (0 = accept any). Only meaningful once a wallet is wired (enforcePaid); a per-deployment
+  // policy that stops a hostile initiator advertising fee≈0 to make sybil joins ~free.
+  minFee = 0,
   // Hyperswarm's connection cap. 64 is Hyperswarm's own default; lower it (e.g. 16) to
   // force a genuine partial mesh below the peer count — the condition the flood is
   // designed for, and what a real large swarm looks like.
@@ -316,6 +322,7 @@ function createWave({
   };
   let walletAddress = null; // my wallet address (set by the host once the wallet is ready)
   let myWalletType = null; // my wallet's payment-mechanism id (rides my waves' announces)
+  let myFee = null; // my wallet's fee — the fee I SET on the waves I initiate (rides their announces)
   let enforcePaid = false; // gate waves on a proven start burn (enabled once wallet is up)
   let verifyBurnOnChain = null; // on-chain burn check (set once the wallet is up, via setWallet)
   // Live peer bookkeeping (peer-table.js): seats + direct channels.
@@ -536,6 +543,10 @@ function createWave({
     if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
       return;
     }
+    // local anti-sybil floor: don't engage a wave whose initiator-set fee is below my minimum.
+    if (belowFloor(msg.fee)) {
+      return;
+    }
     if (msg.phase === 'racing') {
       let wave = waves.get(msg.waveId);
       if (!wave) {
@@ -544,12 +555,16 @@ function createWave({
           by: msg.by,
           dur: 0,
           silent: true,
-          walletType: msg.walletType
+          walletType: msg.walletType,
+          fee: msg.fee
         });
         wave = waves.get(msg.waveId);
       }
       if (msg.walletType && !wave.walletType) {
         wave.walletType = msg.walletType;
+      }
+      if (msg.fee && !wave.fee) {
+        wave.fee = msg.fee;
       }
       if (msg.paid) {
         wave.startProof = msg.paid;
@@ -573,12 +588,16 @@ function createWave({
         waveId: msg.waveId,
         by: msg.by,
         dur: msg.lobbyMsLeft,
-        walletType: msg.walletType
+        walletType: msg.walletType,
+        fee: msg.fee
       });
       wave = waves.get(msg.waveId);
     }
     if (msg.walletType && !wave.walletType) {
       wave.walletType = msg.walletType;
+    }
+    if (msg.fee && !wave.fee) {
+      wave.fee = msg.fee;
     }
     if (enforcePaid && msg.paid && !wave.startProof) {
       wave.startProof = msg.paid;
@@ -604,11 +623,17 @@ function createWave({
     if (!canAdopt(msg.waveId)) {
       return;
     }
+    // local anti-sybil floor: ignore a wave whose initiator-set fee is below my minimum. (The
+    // announce still relayed to the directory upstream — I just don't engage it myself.)
+    if (belowFloor(msg.fee)) {
+      return;
+    }
     enterLobby({
       waveId: msg.waveId,
       by: msg.origin,
       dur: msg.lobbyMs,
-      walletType: msg.walletType
+      walletType: msg.walletType,
+      fee: msg.fee
     });
     const wave = waves.get(msg.waveId);
     if (!wave) {
@@ -616,6 +641,9 @@ function createWave({
     }
     if (msg.walletType && !wave.walletType) {
       wave.walletType = msg.walletType;
+    }
+    if (msg.fee && !wave.fee) {
+      wave.fee = msg.fee;
     }
     // remember the signed announce verbatim so I can catch up a peer that connects later (I
     // forward this exact frame — its `mid` dedups any re-flood within one hop)
@@ -662,17 +690,25 @@ function createWave({
     if (!canAdopt(msg.waveId)) {
       return;
     }
+    // local anti-sybil floor: don't adopt a race whose initiator-set fee is below my minimum.
+    if (belowFloor(msg.fee)) {
+      return;
+    }
     let wave = waves.get(msg.waveId);
     if (!wave) {
       enterLobby({
         waveId: msg.waveId,
         by: msg.origin,
-        walletType: msg.walletType
+        walletType: msg.walletType,
+        fee: msg.fee
       });
       wave = waves.get(msg.waveId);
     }
     if (msg.walletType && !wave.walletType) {
       wave.walletType = msg.walletType;
+    }
+    if (msg.fee && !wave.fee) {
+      wave.fee = msg.fee;
     }
     if (msg.paid) {
       wave.startProof = msg.paid; // carry it so we can re-sync newcomers
@@ -835,6 +871,7 @@ function createWave({
             lapMs: wave.lapMs,
             paid: wave.startProof,
             walletType: wave.walletType,
+            fee: wave.fee,
             lobbyMsLeft:
               wave.phase === 'lobby'
                 ? Math.max(0, wave.lobbyEndsAt - Date.now())
@@ -999,6 +1036,21 @@ function createWave({
   }
 
   /**
+   * Is a wave's initiator-set fee below my local anti-sybil floor? A wave I won't engage or join.
+   * Only applies when I enforce payment (a wallet is wired) and I've set a floor; a fee-less wave
+   * on the enforced path is treated as below any positive floor (the initiator must declare a fee
+   * that clears it). With no floor / no wallet this is always false (accept any).
+   * @param {number|undefined} fee The wave's announced fee.
+   * @returns {boolean} True if the wave is below my floor and should be refused.
+   */
+  function belowFloor(fee) {
+    if (!enforcePaid || !(minFee > 0)) {
+      return false;
+    }
+    return !(typeof fee === 'number' && fee >= minFee);
+  }
+
+  /**
    * Clear one wave's lobby/sweep timers (it's ending or being torn down).
    * @param {Object} wave The WaveState whose timers to clear.
    */
@@ -1029,7 +1081,8 @@ function createWave({
     mine = false,
     dur = lobbyMs,
     silent = false,
-    walletType = null
+    walletType = null,
+    fee = null
   }) {
     if (waves.has(waveId)) {
       return;
@@ -1055,6 +1108,10 @@ function createWave({
       // The wave's payment-mechanism id (set on a paid wave — by me if I'm the initiator, else
       // learned from the announce/start/sync). join() blocks if I can't support it (§ join).
       walletType,
+      // The wave's participation fee, SET BY THE INITIATOR (mine → myFee; else learned from the
+      // announce/start/sync). Every joiner burns exactly this (payFee via feeFor), and verifiers
+      // gate the start burn against it. A wave whose fee is below my local floor is refused upstream.
+      fee,
       t0: undefined,
       lapMs: undefined,
       lobbyEndsAt: Date.now() + dur,
@@ -1431,8 +1488,15 @@ function createWave({
    */
   function startWave() {
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
-    // initiator auto-joins (marks its own lobby); my wallet type (if any) rides the wave
-    enterLobby({ waveId, by: me.id, mine: true, walletType: myWalletType });
+    // initiator auto-joins (marks its own lobby); my wallet type + fee (if any) ride the wave — as
+    // the initiator I SET the participation fee every joiner burns (myFee = my wallet's fee).
+    enterLobby({
+      waveId,
+      by: me.id,
+      mine: true,
+      walletType: myWalletType,
+      fee: myFee
+    });
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the start fee and prove it
       // (announcePaid). Fall back to idle if that never happens.
@@ -1473,7 +1537,8 @@ function createWave({
         waveId,
         lobbyMs,
         paid: paidProof,
-        walletType: wave.walletType
+        walletType: wave.walletType,
+        fee: wave.fee
       })
     );
     floodMyFeedCore(waveId); // the initiator is a participant too — share its core
@@ -1532,10 +1597,15 @@ function createWave({
     if (!enforcePaid || !verifyBurnOnChain) {
       return;
     }
+    // Enforce the initiator's ANNOUNCED fee as the on-chain minimum: the start burn must really be
+    // ≥ the fee the wave advertises (catches an initiator that announces a high fee but underpays).
+    // Fall back to the proof's own claimed amount when no fee was announced (older/unpaid-shape).
+    const wave = waves.get(waveId);
+    const minTrx = (wave && wave.fee) || proof.amount;
     verifyBurnOnChain(proof.txHash, {
       waveId,
       from: proof.tronAddress,
-      minTrx: proof.amount
+      minTrx
     })
       .then((res) => {
         const wave = waves.get(waveId);
@@ -1607,7 +1677,8 @@ function createWave({
         t0,
         lapMs,
         paid: wave.startProof, // so peers adopting via start can re-sync newcomers
-        walletType: wave.walletType
+        walletType: wave.walletType,
+        fee: wave.fee
       })
     );
     emitEvent({ event: 'started', waveId, by: me.id });
@@ -1750,13 +1821,20 @@ function createWave({
     // Wire the payment layer once the wallet is up: my address (for feed tips / attestations), the
     // on-chain burn verifier (enables the paid-wave anti-spam gate), and my wallet TYPE (rides my
     // waves' announces so joiners can decide whether they support the payment mechanism).
-    setWallet: (address, verifier, walletType) => {
+    setWallet: (address, verifier, walletType, fee) => {
       walletAddress = address || null;
       myWalletType = walletType || null;
+      myFee = typeof fee === 'number' ? fee : null;
       if (verifier) {
         verifyBurnOnChain = verifier;
         enforcePaid = true;
       }
+    },
+    // The initiator-set fee a wave requires (announced), for the host's fee flow (payFee burns
+    // exactly this). Null for a wave with no announced fee (unpaid/wallet-less path).
+    feeFor: (waveId) => {
+      const wave = waves.get(waveId);
+      return wave && typeof wave.fee === 'number' ? wave.fee : null;
     },
     announcePaid, // initiator: attach the confirmed start proof + announce the wave
     recordBurn, // sign a fee-burn attestation (the start proof for the paid-wave gate)

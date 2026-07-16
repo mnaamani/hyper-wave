@@ -187,6 +187,59 @@ test('walletType is an optional string on the paid-carrying kinds', (t) => {
   );
 });
 
+test('fee is an optional positive number on the paid-carrying kinds', (t) => {
+  const withFee = makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1, fee: 2.5 });
+  t.is(withFee.fee, 2.5, 'the initiator-set fee rides when present');
+  t.absent(
+    'fee' in makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }),
+    'no fee key on the unpaid/wallet-less path'
+  );
+  t.ok(validGossip(flooded(withFee)), 'wave-announce accepts a positive fee');
+  t.ok(
+    validGossip(
+      flooded(
+        makeWaveStart({ waveId: WAVE, writers: [], t0: 1, lapMs: 1, fee: 1 })
+      )
+    ),
+    'wave-start accepts a fee'
+  );
+  t.ok(
+    validGossip(
+      sealed(
+        makeWaveSync({
+          waveId: WAVE,
+          phase: 'lobby',
+          by: PEER,
+          writers: [],
+          lobbyMsLeft: 100,
+          fee: 5
+        })
+      )
+    ),
+    'wave-sync accepts a fee'
+  );
+  // A fee is a burn amount — it can never be zero or negative (Tron rejects zero-amount transfers),
+  // and a bad type must be rejected at the shape gate.
+  t.absent(
+    validGossip(
+      flooded({ ...makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }), fee: 0 })
+    ),
+    'a zero fee is rejected'
+  );
+  t.absent(
+    validGossip(
+      flooded({ ...makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }), fee: -1 })
+    ),
+    'a negative fee is rejected'
+  );
+  t.absent(
+    validGossip(
+      flooded({ ...makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }), fee: '1' })
+    ),
+    'a non-number fee is rejected'
+  );
+});
+
 test('factories carry no author field (origin is the author)', (t) => {
   t.absent('id' in makeHeartbeat({ tag: 'BR' }), 'heartbeat has no id');
   t.absent(

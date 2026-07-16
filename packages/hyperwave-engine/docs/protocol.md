@@ -369,7 +369,8 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
   "paid": {
     /* start attestation, §9.0 — present when the paid-wave gate is enforced */
   },
-  "walletType": "tron-nile" // the payment-mechanism id (paid waves) — see below
+  "walletType": "tron-nile", // the payment-mechanism id (paid waves) — see below
+  "fee": 1 // the initiator-set participation fee every joiner burns (paid waves) — see below
 }
 ```
 
@@ -407,6 +408,19 @@ wallet), emitting `join-blocked` with `reason: "wallet-unsupported"`. Such a pee
 subscribe/spectate (free). A wave with **no** `walletType` (an unpaid / wallet-less initiator)
 imposes no payment mechanism, so any peer may join — the wallet-less default. This lets peers with
 incompatible payment mechanisms coexist on a topic: each joins only the waves it can actually pay.
+
+**Participation fee (`fee`).** The **initiator sets** the fee for its wave (its wallet's own fee),
+and it rides `wave-announce`/`wave-start`/`wave-sync` alongside `walletType`, authenticated by the
+envelope `sig` (§5.0). Every joiner burns **exactly this** amount (`payFee` reads it via `feeFor`, so
+all participants pay the same, initiator-chosen fee — not each their own local fee), and a verifier
+gates the initiator's start burn against it on-chain (`minTrx = fee`, so an initiator that advertises
+a high fee but underpays is rejected). Each peer also enforces a **local anti-sybil floor** (`minFee`,
+default 0 = accept any): it **refuses to engage or join** a wave whose announced `fee` is below its
+floor (dropping the announce/start/sync for itself — it still relays the announce to the directory).
+The floor is what stops a hostile initiator advertising `fee ≈ 0` to make sybil joins nearly free;
+it's a per-deployment policy, only enforced when a wallet is present. A wave with **no** `fee` (the
+unpaid / wallet-less path) imposes none. Because the fee is a real burn amount it is always a
+positive number — the shape gate rejects zero/negative/non-numeric.
 
 ### wave-join — flooded (a peer opting in during lobby)
 
@@ -447,7 +461,9 @@ that was once the initiator's alone at admission.
   "writers": [{ "peerId": "<peerId>", "writerKey": "<coreKeyHex>", "joinSig": "<hex64>" }, ...],
   "t0": 1719705612080,
   "lapMs": 8000,
-  "paid": { /* start attestation, §9.0 — present when the paid-wave gate is enforced */ }
+  "paid": { /* start attestation, §9.0 — present when the paid-wave gate is enforced */ },
+  "walletType": "tron-nile", // the payment-mechanism id (paid waves)
+  "fee": 1 // the initiator-set participation fee (paid waves)
 }
 ```
 
@@ -502,6 +518,7 @@ same slots), and (b) each peer knows whether it has a slot (roster member) or me
   "t0": 1719705612080,
   "lapMs": 8000,
   "lobbyMsLeft": 8000
+  // + "paid" / "walletType" / "fee" on a paid wave (omitted here for brevity)
 }
 ```
 

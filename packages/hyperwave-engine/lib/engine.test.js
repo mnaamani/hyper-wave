@@ -14,6 +14,8 @@ function fakeWave() {
     me: { id: 'ab'.repeat(32), angle: 12.3 },
     calls,
     opts: null,
+    feeValue: null, // the wave's announced (initiator-set) fee; null → payFee falls back to wallet
+    feeFor: () => wave.feeValue,
     startWave: () => {
       calls.push('startWave');
       return 'wave-1';
@@ -391,6 +393,37 @@ test('join-wave burns the join fee for a joinable wave', async (t) => {
     ),
     'the join burn is reported burned (fire-and-forget, no on-chain confirm)'
   );
+});
+
+test('a joiner burns the wave ANNOUNCED fee, not its own wallet fee', async (t) => {
+  const sent = [];
+  const wave = fakeWave();
+  wave.feeValue = 3; // the wave's initiator set a fee of 3 (feeFor)
+  const pay = payMock({ trx: 7 }); // my own wallet fee is 1
+  const engine = createEngine({
+    storageDir: '/tmp/e',
+    config: {},
+    emit: (msg) => sent.push(msg),
+    log: () => {},
+    deps: {
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
+      createPayments: async () => pay
+    }
+  });
+  t.teardown(() => engine.close());
+  await flush();
+
+  engine.exec({ type: 'join-wave' });
+  await settle();
+
+  t.is(pay.calls.burns[0].amount, 3, 'burned the announced fee (3), not my 1');
+  const burned = sent.find(
+    (msg) => msg.type === 'burn-result' && msg.reason === 'join'
+  );
+  t.is(burned.amount, 3, 'the burn-result reports the announced fee');
 });
 
 test('createEngine threads a host-supplied Hyperswarm to the wave protocol', async (t) => {

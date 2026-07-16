@@ -21,6 +21,7 @@ const { payFee, confirmBurn, wireWallet } = require('./payments');
  * @property {Object} [walletOptions] - Opaque config forwarded to the payments factory. The default Tron wallet reads `{ network: 'mainnet' }` (opt into mainnet — testnet by default), `provider`, `fee` (participation fee; default 1), and (USDT) `usdtContract`.
  * @property {string} [swarmSeed] - Injected hex swarm-identity seed (else persisted at <storage>/swarm.seed).
  * @property {boolean} [autoSubscribe] - Set `false` for browse-then-pick: hold cores only for waves the host explicitly subscribes to (scaling.md Phase 2). Default true (auto-engage every announced wave).
+ * @property {number} [minFee] - Local anti-sybil floor (default 0 = accept any): refuse to engage/join a paid wave whose initiator-set fee is below this. Only enforced when a wallet is present.
  */
 
 /**
@@ -73,6 +74,9 @@ function createEngine({
     swarmSeed: config.swarmSeed,
     // subscription policy (Phase 2): undefined → createWave's default (true)
     autoSubscribe: config.autoSubscribe,
+    // local anti-sybil fee floor: refuse paid waves whose initiator-set fee is below this
+    // (undefined → createWave's default 0 = accept any). Only enforced with a wallet.
+    minFee: config.minFee,
     // an existing host-owned Hyperswarm to share (undefined → the engine creates its own).
     // A live object, so it rides the top-level option, not the serializable `config`.
     swarm,
@@ -229,12 +233,17 @@ function createEngine({
       return;
     }
     try {
-      const { hash } = await payFee({ wave, payments, waveId, reason: 'join' });
+      const { hash, fee } = await payFee({
+        wave,
+        payments,
+        waveId,
+        reason: 'join'
+      });
       emit({
         type: 'burn-result',
         stage: 'burned',
         hash,
-        amount: payments.fee,
+        amount: fee, // the wave's announced fee (initiator-set), which may differ from my own
         waveId,
         reason: 'join'
       });

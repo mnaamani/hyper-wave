@@ -516,13 +516,18 @@ Or directly: `createPayments({ storageDir, network: 'mainnet' })` /
 `createTronUsdtWallet({ storageDir, network: 'mainnet', usdtContract })`. The headless CLI
 (`bin/wave.run.js`) takes `TRON_NETWORK` + optional `TRON_PROVIDER` env vars.
 
-**Fee.** The participation fee is a **`fee`** option (default 1 TRX / 1 USDT) — set it per
-deployment (e.g. a smaller mainnet fee, since 1 TRX ≠ 1 USDT in value):
+**Fee.** The participation fee is a **`fee`** option on the wallet (default 1 TRX / 1 USDT) — set it
+per deployment (e.g. a smaller mainnet fee, since 1 TRX ≠ 1 USDT in value):
 `createPayments({ storageDir, fee: 0.5 })`, or via `config.walletOptions.fee` / the CLI's
 `WALLET_FEE`. It must be a positive number (a burn is a real transfer — Tron rejects zero-amount).
-The wallet owns its fee: `payFee` burns `payments.fee`, and `confirmBurn`/the join gate verify a
-peer's burn against the local wallet's `fee` (`minTrx`) — so peers on one wave must agree on it (a
-per-deployment/per-network policy, not per-peer).
+
+**The initiator sets its wave's fee.** A wallet's `fee` is the amount its owner charges on the waves
+**it initiates** — that fee rides `wave-announce`/`wave-start`/`wave-sync` (envelope-signed), and
+**every joiner burns exactly that** (not each their own wallet fee), so a wave has one agreed fee.
+A verifier gates the initiator's start burn against the announced fee on-chain. To defend against an
+initiator advertising a near-zero fee (cheap sybil joins), each peer sets a **local floor**
+`config.minFee` (default 0 = accept any): it refuses to engage or join a wave whose announced fee is
+below it. Only enforced when a wallet is present.
 
 Wire it into a `createWave` instance and run the fee flow:
 

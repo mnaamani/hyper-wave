@@ -90,6 +90,15 @@ function isOptionalWalletType(value) {
   );
 }
 
+/**
+ * @param {*} value - Candidate.
+ * @returns {boolean} Absent, or a positive finite number — the initiator-set participation fee a
+ *   paid wave requires (a burn is a real transfer, so it can't be zero/negative).
+ */
+function isOptionalFee(value) {
+  return value === undefined || (Number.isFinite(value) && value > 0);
+}
+
 /** @param {*} value - Candidate. @returns {boolean} Absent/null, or a short tag code. */
 function isTag(value) {
   return (
@@ -138,7 +147,8 @@ const VALIDATORS = {
     isWaveId(msg.waveId) &&
     isMillis(msg.lobbyMs) &&
     isOptionalObject(msg.paid) &&
-    isOptionalWalletType(msg.walletType),
+    isOptionalWalletType(msg.walletType) &&
+    isOptionalFee(msg.fee),
 
   // origin (the joiner) + writerKey + joinSig are the feed-core credential; origin is the peerId.
   'wave-join': (msg) =>
@@ -153,7 +163,8 @@ const VALIDATORS = {
     isMillis(msg.t0) &&
     isMillis(msg.lapMs) &&
     isOptionalObject(msg.paid) &&
-    isOptionalWalletType(msg.walletType),
+    isOptionalWalletType(msg.walletType) &&
+    isOptionalFee(msg.fee),
 
   'wave-sync': (msg) =>
     isWaveId(msg.waveId) &&
@@ -164,7 +175,8 @@ const VALIDATORS = {
     (msg.lapMs === undefined || isMillis(msg.lapMs)) &&
     isMillis(msg.lobbyMsLeft) &&
     isOptionalObject(msg.paid) &&
-    isOptionalWalletType(msg.walletType)
+    isOptionalWalletType(msg.walletType) &&
+    isOptionalFee(msg.fee)
 };
 
 /**
@@ -237,15 +249,17 @@ function makeSubs({ subs }) {
  * @param {number} fields.lobbyMs - Lobby window length in ms.
  * @param {Object|null} [fields.paid] - The signed start burn proof (paid path).
  * @param {string|null} [fields.walletType] - The payment-mechanism id (paid path), so a joiner can decide whether it supports this wave's payments.
+ * @param {number} [fields.fee] - The initiator-set participation fee (paid path); every joiner burns this exact amount, and a peer refuses a wave whose fee is below its local floor.
  * @returns {GossipMessage} The wave-announce message (pre-envelope).
  */
-function makeWaveAnnounce({ waveId, lobbyMs, paid, walletType }) {
+function makeWaveAnnounce({ waveId, lobbyMs, paid, walletType, fee }) {
   return {
     kind: 'wave-announce',
     waveId,
     lobbyMs,
     ...(paid ? { paid } : {}),
-    ...(walletType ? { walletType } : {})
+    ...(walletType ? { walletType } : {}),
+    ...(fee ? { fee } : {})
   };
 }
 
@@ -279,9 +293,10 @@ function makeWaveJoin({ waveId, writerKey, joinSig, burn }) {
  * @param {number} fields.lapMs - Duration of the full lap.
  * @param {Object|null} [fields.paid] - The start proof (so start-adopters can re-sync).
  * @param {string|null} [fields.walletType] - The payment-mechanism id (paid path).
+ * @param {number} [fields.fee] - The initiator-set participation fee (paid path).
  * @returns {GossipMessage} The wave-start message (pre-envelope).
  */
-function makeWaveStart({ waveId, writers, t0, lapMs, paid, walletType }) {
+function makeWaveStart({ waveId, writers, t0, lapMs, paid, walletType, fee }) {
   return {
     kind: 'wave-start',
     waveId,
@@ -289,7 +304,8 @@ function makeWaveStart({ waveId, writers, t0, lapMs, paid, walletType }) {
     t0,
     lapMs,
     ...(paid ? { paid } : {}),
-    ...(walletType ? { walletType } : {})
+    ...(walletType ? { walletType } : {}),
+    ...(fee ? { fee } : {})
   };
 }
 
@@ -306,6 +322,7 @@ function makeWaveStart({ waveId, writers, t0, lapMs, paid, walletType }) {
  * @param {number} [fields.lapMs] - Lap duration (racing).
  * @param {Object|null} [fields.paid] - The start proof (so the newcomer can verify + join).
  * @param {string|null} [fields.walletType] - The payment-mechanism id (paid path).
+ * @param {number} [fields.fee] - The initiator-set participation fee (paid path).
  * @param {number} fields.lobbyMsLeft - Lobby time remaining in ms (0 when racing).
  * @returns {GossipMessage} The wave-sync message (pre-envelope).
  */
@@ -318,6 +335,7 @@ function makeWaveSync({
   lapMs,
   paid,
   walletType,
+  fee,
   lobbyMsLeft
 }) {
   return {
@@ -330,6 +348,7 @@ function makeWaveSync({
     ...(lapMs !== undefined ? { lapMs } : {}),
     ...(paid ? { paid } : {}),
     ...(walletType ? { walletType } : {}),
+    ...(fee ? { fee } : {}),
     lobbyMsLeft
   };
 }
