@@ -28,9 +28,21 @@ jobs:
 
       # Wallets must stay funded (Nile faucet: https://nileex.io/join/getJoinPage):
       # burn a 1 TRX fee per run, so keep them funded.
-      - name: On-chain e2e (Tron Nile testnet)
+      - name: On-chain e2e — native TRX (Tron Nile testnet)
         run: npm run test:e2e:onchain
         env:
           E2E_ONCHAIN: '1'
+          HYPERWAVE_E2E_SEED_1: ${{ secrets.HYPERWAVE_E2E_SEED_1 }}
+          HYPERWAVE_E2E_SEED_2: ${{ secrets.HYPERWAVE_E2E_SEED_2 }}
+
+      # USDT (TRC-20) lane — same seeds/addresses, but they must also hold USDT for fees (TRX still
+      # pays gas). Skips itself if HYPERWAVE_E2E_USDT_CONTRACT is unset. `if: always()` so it runs
+      # even if the TRX lane above failed (independent payment mechanisms).
+      - name: On-chain e2e — USDT / TRC-20 (Tron Nile testnet)
+        if: always()
+        run: npm run test:e2e:onchain:usdt
+        env:
+          E2E_ONCHAIN_USDT: '1'
+          HYPERWAVE_E2E_USDT_CONTRACT: ${{ secrets.HYPERWAVE_E2E_USDT_CONTRACT }}
           HYPERWAVE_E2E_SEED_1: ${{ secrets.HYPERWAVE_E2E_SEED_1 }}
           HYPERWAVE_E2E_SEED_2: ${{ secrets.HYPERWAVE_E2E_SEED_2 }}

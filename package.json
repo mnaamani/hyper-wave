@@ -11,6 +11,7 @@
     "test": "npm test -w hyperwave-engine",
     "test:e2e:local": "npm run test:e2e:local -w hyperwave-engine",
     "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-engine",
+    "test:e2e:onchain:usdt": "npm run test:e2e:onchain:usdt -w hyperwave-engine",
     "start": "npm start -w hyperwave-desktop --",
     "make": "npm run make -w hyperwave-desktop",
     "lint": "prettier --check . && lunte packages apps/desktop scripts && eslint . && npm run lint:jsdoc -w hyperwave-engine",

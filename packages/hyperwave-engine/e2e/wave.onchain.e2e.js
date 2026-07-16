@@ -50,7 +50,7 @@ test(
 
     // paid-wave gate: P1 burns the kick-off fee and confirms it on-chain BEFORE announcing
     t.ok(
-      await p1.waitForLine(/KICKOFF-BURNED/, 120000),
+      await p1.waitForLine(/START-BURNED/, 120000),
       'P1 burned the kick-off fee'
     );
     // P2 independently verifies that kick-off burn on-chain, then opts in and burns its own fee

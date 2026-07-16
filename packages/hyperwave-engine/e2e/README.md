@@ -13,17 +13,19 @@ The harness runs under **Node** (for ergonomic process orchestration) and uses *
 (the same TAP framework as the unit tests) for assertions. The peers under test are Bare — the
 same binary the app ships.
 
-## Two tiers
+## Tiers
 
-| Suite                     | What it exercises                                                                                                                                                                                           | Deps                                                  | When                    |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------- |
-| **`wave.local.e2e.js`**   | discovery, the deterministic sweep across the roster, gossip flooding, multicore CRDT feed convergence, concurrent waves + subscription scoping, survival when peers die mid-wave (a dead slot just passes) | none — local DHT, **no wallets / no on-chain**        | every push (CI)         |
-| **`wave.onchain.e2e.js`** | paid-wave gate, real fee burns, on-chain kick-off verification, the per-peer join burn gate                                                                                                                 | funded testnet wallets (secrets), Nile RPC, costs TRX | manual / nightly, gated |
+| Suite                          | What it exercises                                                                                                                                                                                           | Deps                                                     | When                    |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------------- |
+| **`wave.local.e2e.js`**        | discovery, the deterministic sweep across the roster, gossip flooding, multicore CRDT feed convergence, concurrent waves + subscription scoping, survival when peers die mid-wave (a dead slot just passes) | none — local DHT, **no wallets / no on-chain**           | every push (CI)         |
+| **`wave.onchain.e2e.js`**      | paid-wave gate, real fee burns (native TRX), on-chain kick-off verification, the per-peer join burn gate                                                                                                    | funded testnet wallets (secrets), Nile RPC, costs TRX    | manual / nightly, gated |
+| **`wave.usdt.onchain.e2e.js`** | the same enforced-wave flow with fees paid in **USDT (TRC-20)** via `TronUsdtWallet` — the lane that exercises the USDT wallet's on-chain burn/verify/balances                                              | funded wallets (USDT + TRX gas) + the Nile USDT contract | manual / nightly, gated |
 
 The local suite is deterministic and secret-free, so it guards every change in CI
-(`.github/workflows/ci.yml`). The on-chain suite is a real external-testnet integration test —
-it needs funded wallet mnemonics as secrets and costs testnet TRX, so it stays gated
-(`.github/workflows/e2e-onchain.yml`: manual dispatch + nightly).
+(`.github/workflows/ci.yml`). The on-chain suites are real external-testnet integration tests —
+they need funded wallet mnemonics as secrets and cost testnet TRX/USDT, so they stay gated
+(`.github/workflows/e2e-onchain.yml`: manual dispatch + nightly; each skips itself if its secrets
+aren't set).
 
 ## Running
 
@@ -37,6 +39,13 @@ E2E_ONCHAIN=1 \
   HYPERWAVE_E2E_SEED_1="word word …" \  # initiator P1 (kick-off burn; well-funded)
   HYPERWAVE_E2E_SEED_2="word word …" \  # joiner P2 (join burn)
   npm run test:e2e:onchain
+
+# USDT (TRC-20) lane — same seeds, but their addresses must also hold USDT (fees) + TRX (gas):
+E2E_ONCHAIN_USDT=1 \
+  HYPERWAVE_E2E_USDT_CONTRACT="T…NileUSDT" \  # the Nile USDT TRC-20 contract
+  HYPERWAVE_E2E_SEED_1="word word …" \
+  HYPERWAVE_E2E_SEED_2="word word …" \
+  npm run test:e2e:onchain:usdt
 ```
 
 Each scenario reads like what it tests, e.g. _"the wave completes when peers die mid-sweep"_.

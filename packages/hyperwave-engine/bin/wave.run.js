@@ -170,19 +170,31 @@ async function joinAndBurn() {
 }
 
 // env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
-// WALLET_SEND=<addr>:<amt> -> also do a one-off TRX transfer (funded wallets only).
+// WALLET_TYPE=usdt (+ USDT_CONTRACT=<addr>) -> use the USDT/TRC-20 wallet instead of native TRX
+// (the same seed/address holds both — USDT for fees, TRX for gas). WALLET_SEND=<addr>:<amt> ->
+// also do a one-off transfer (funded wallets only).
 if (env.WALLET) {
-  const { createPayments } = require('../lib/tron-wallet.js');
-  createPayments({
-    storageDir,
-    log: (...args) => console.log(`[${name}] wallet`, ...args)
-  })
+  const walletLog = (...args) => console.log(`[${name}] wallet`, ...args);
+  const ready =
+    env.WALLET_TYPE === 'usdt'
+      ? require('../lib/tron-usdt-wallet.js').createTronUsdtWallet({
+          storageDir,
+          usdtContract: env.USDT_CONTRACT,
+          log: walletLog
+        })
+      : require('../lib/tron-wallet.js').createPayments({
+          storageDir,
+          log: walletLog
+        });
+  ready
     .then(async (pay) => {
       payments = pay;
       wireWallet(wave, pay); // paid-wave gate (on-chain burn verifier)
       const b = await pay.balances();
+      // Format kept stable (the on-chain e2e matches `WALLET T… trx=`): `trx` is the fee-currency
+      // balance (USDT for the usdt wallet). The `pay.type` disambiguates the payment mechanism.
       console.log(
-        `[${name}] WALLET ${b.address} trx=${b.trx} storage=${absStorageDir}`
+        `[${name}] WALLET ${b.address} trx=${b.trx} type=${pay.type} storage=${absStorageDir}`
       );
       if (env.WALLET_SEND) {
         const [to, amt] = env.WALLET_SEND.split(':');
