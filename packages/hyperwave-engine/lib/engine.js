@@ -8,13 +8,7 @@
 // (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('./wave');
-const {
-  createPayments,
-  FEE_TRX,
-  payFee,
-  confirmBurn,
-  wireWallet
-} = require('./wallet');
+const { createPayments, payFee, confirmBurn, wireWallet } = require('./wallet');
 
 /**
  * Host-supplied engine configuration (only these fields are read).
@@ -46,7 +40,7 @@ const {
  * @param {EngineConfig} [options.config] - Host-supplied engine configuration.
  * @param {(msg: Object) => void} options.emit - Callback the engine calls to raise messages to the host.
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
- * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests).
+ * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests / a custom wallet). `deps.createPayments` is an `async () => Wallet` returning any `Wallet` (wallet.js) subclass — an app supplies its own payment mechanism here.
  * @param {Object} [options.swarm] - An existing Hyperswarm the host already owns; the engine shares it instead of creating one (correct when the app also uses Hyperswarm — one instance per process) and NEVER destroys it. A live object, so it is passed here, not in the JSON `config`.
  * @returns {Engine} The engine handle (`exec`, `close`).
  */
@@ -114,6 +108,7 @@ function createEngine({
         pushBalance = async () =>
           emit({
             type: 'wallet',
+            walletType: pay.type, // the host can label / branch on the payment mechanism
             ...(await pay
               .balances()
               .catch(() => ({ address: pay.address, trx: 0 })))
@@ -149,12 +144,12 @@ function createEngine({
   // Callers guard on `payments` so the wallet-less path stays fully synchronous.
   async function fundedForFee(reason, action) {
     const bal = await payments.balances().catch(() => null);
-    if (bal && bal.trx < FEE_TRX) {
+    if (bal && bal.trx < payments.fee) {
       emit({
         type: 'burn-result',
         stage: 'failed',
         reason,
-        error: `wallet unfunded (${bal.trx} TRX) — fund it to ${action}`
+        error: `wallet unfunded (${bal.trx}) — fund it to ${action}`
       });
       return false;
     }
@@ -190,7 +185,7 @@ function createEngine({
           type: 'burn-result',
           stage: 'burned',
           hash,
-          amount: FEE_TRX,
+          amount: payments.fee,
           waveId,
           reason: 'start'
         });
@@ -233,7 +228,7 @@ function createEngine({
         type: 'burn-result',
         stage: 'burned',
         hash,
-        amount: FEE_TRX,
+        amount: payments.fee,
         waveId,
         reason: 'join'
       });

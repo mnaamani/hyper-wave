@@ -82,6 +82,14 @@ function isOptionalObject(value) {
   return value === undefined || (typeof value === 'object' && value !== null);
 }
 
+/** @param {*} value - Candidate. @returns {boolean} Absent, or a wallet-type id (short string). */
+function isOptionalWalletType(value) {
+  return (
+    value === undefined ||
+    (typeof value === 'string' && value.length >= 1 && value.length <= 64)
+  );
+}
+
 /** @param {*} value - Candidate. @returns {boolean} Absent/null, or a short tag code. */
 function isTag(value) {
   return (
@@ -127,7 +135,10 @@ const VALIDATORS = {
   subs: (msg) => isWaveIdList(msg.subs),
 
   'wave-announce': (msg) =>
-    isWaveId(msg.waveId) && isMillis(msg.lobbyMs) && isOptionalObject(msg.paid),
+    isWaveId(msg.waveId) &&
+    isMillis(msg.lobbyMs) &&
+    isOptionalObject(msg.paid) &&
+    isOptionalWalletType(msg.walletType),
 
   // origin (the joiner) + writerKey + joinSig are the feed-core credential; origin is the peerId.
   'wave-join': (msg) =>
@@ -141,7 +152,8 @@ const VALIDATORS = {
     isWriters(msg.writers) &&
     isMillis(msg.t0) &&
     isMillis(msg.lapMs) &&
-    isOptionalObject(msg.paid),
+    isOptionalObject(msg.paid) &&
+    isOptionalWalletType(msg.walletType),
 
   'wave-sync': (msg) =>
     isWaveId(msg.waveId) &&
@@ -151,7 +163,8 @@ const VALIDATORS = {
     (msg.t0 === undefined || isMillis(msg.t0)) &&
     (msg.lapMs === undefined || isMillis(msg.lapMs)) &&
     isMillis(msg.lobbyMsLeft) &&
-    isOptionalObject(msg.paid)
+    isOptionalObject(msg.paid) &&
+    isOptionalWalletType(msg.walletType)
 };
 
 /**
@@ -223,14 +236,16 @@ function makeSubs({ subs }) {
  * @param {string} fields.waveId - The new wave's id.
  * @param {number} fields.lobbyMs - Lobby window length in ms.
  * @param {Object|null} [fields.paid] - The signed start burn proof (paid path).
+ * @param {string|null} [fields.walletType] - The payment-mechanism id (paid path), so a joiner can decide whether it supports this wave's payments.
  * @returns {GossipMessage} The wave-announce message (pre-envelope).
  */
-function makeWaveAnnounce({ waveId, lobbyMs, paid }) {
+function makeWaveAnnounce({ waveId, lobbyMs, paid, walletType }) {
   return {
     kind: 'wave-announce',
     waveId,
     lobbyMs,
-    ...(paid ? { paid } : {})
+    ...(paid ? { paid } : {}),
+    ...(walletType ? { walletType } : {})
   };
 }
 
@@ -263,16 +278,18 @@ function makeWaveJoin({ waveId, writerKey, joinSig, burn }) {
  * @param {number} fields.t0 - Epoch ms the sweep starts.
  * @param {number} fields.lapMs - Duration of the full lap.
  * @param {Object|null} [fields.paid] - The start proof (so start-adopters can re-sync).
+ * @param {string|null} [fields.walletType] - The payment-mechanism id (paid path).
  * @returns {GossipMessage} The wave-start message (pre-envelope).
  */
-function makeWaveStart({ waveId, writers, t0, lapMs, paid }) {
+function makeWaveStart({ waveId, writers, t0, lapMs, paid, walletType }) {
   return {
     kind: 'wave-start',
     waveId,
     writers,
     t0,
     lapMs,
-    ...(paid ? { paid } : {})
+    ...(paid ? { paid } : {}),
+    ...(walletType ? { walletType } : {})
   };
 }
 
@@ -288,6 +305,7 @@ function makeWaveStart({ waveId, writers, t0, lapMs, paid }) {
  * @param {number} [fields.t0] - Sweep start (racing), so a newcomer animates + ends right.
  * @param {number} [fields.lapMs] - Lap duration (racing).
  * @param {Object|null} [fields.paid] - The start proof (so the newcomer can verify + join).
+ * @param {string|null} [fields.walletType] - The payment-mechanism id (paid path).
  * @param {number} fields.lobbyMsLeft - Lobby time remaining in ms (0 when racing).
  * @returns {GossipMessage} The wave-sync message (pre-envelope).
  */
@@ -299,6 +317,7 @@ function makeWaveSync({
   t0,
   lapMs,
   paid,
+  walletType,
   lobbyMsLeft
 }) {
   return {
@@ -310,6 +329,7 @@ function makeWaveSync({
     ...(t0 !== undefined ? { t0 } : {}),
     ...(lapMs !== undefined ? { lapMs } : {}),
     ...(paid ? { paid } : {}),
+    ...(walletType ? { walletType } : {}),
     lobbyMsLeft
   };
 }

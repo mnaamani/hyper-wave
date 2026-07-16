@@ -368,7 +368,8 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
   "lobbyMs": 15000,
   "paid": {
     /* start attestation, §9.0 — present when the paid-wave gate is enforced */
-  }
+  },
+  "walletType": "tron-nile" // the payment-mechanism id (paid waves) — see below
 }
 ```
 
@@ -394,6 +395,18 @@ it will **join** (and pay its own fee) it verifies the burn **on-chain** (`verif
 start is `verified`. So no peer ever pays into a wave the initiator hasn't paid for. The
 same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Without wallets
 — headless/tests — enforcement is off and waves announce immediately, unpaid.)
+
+**Payment-mechanism type (`walletType`).** The engine talks to payments through an abstract
+`Wallet` interface (a base class in `wallet.js`), so an app can plug in its own wallet — a
+different chain, a custodial service, a mock. Each wallet declares a `type` id (the default Tron
+wallet is `"tron-nile"`). A **paid** wave carries its initiator's `walletType` on `wave-announce`
+(and `wave-start`/`wave-sync`), authenticated by the envelope `sig` (§5.0). A joiner can only pay
+with a wallet of the SAME type — verifying the burn + paying the fee are wallet-specific — so
+`join()` **refuses** a wave whose `walletType` its own wallet doesn't match (or when it has no
+wallet), emitting `join-blocked` with `reason: "wallet-unsupported"`. Such a peer can still
+subscribe/spectate (free). A wave with **no** `walletType` (an unpaid / wallet-less initiator)
+imposes no payment mechanism, so any peer may join — the wallet-less default. This lets peers with
+incompatible payment mechanisms coexist on a topic: each joins only the waves it can actually pay.
 
 ### wave-join — flooded (a peer opting in during lobby)
 

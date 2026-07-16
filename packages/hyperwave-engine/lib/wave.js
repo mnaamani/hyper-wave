@@ -223,7 +223,7 @@ function loadOrCreateSwarmSeed(
  * @property {(waveId?: string) => string|null} join Opt into a lobby (the given wave, or the newest joinable one); implies subscribe; returns the joined waveId, or null on a no-op.
  * @property {(tag: string) => void} setTag Set the tag (cosmetic, rides the heartbeat).
  * @property {(entry: {payload?: *, waveId?: string}) => void} stageEntry Stage my opaque entry payload to post at my sweep slot (for the given wave, or the newest one I've joined).
- * @property {(address: string|null, verifier?: Function) => void} setWallet Wire the payment layer (address + on-chain burn verifier).
+ * @property {(address: string|null, verifier?: Function, walletType?: string) => void} setWallet Wire the payment layer (address + on-chain burn verifier + wallet type, which rides my waves' announces).
  * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed start proof and announce (routed to the proof's waveId).
  * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket) for its waveId.
  * @property {() => Promise<void>} close Tear down timers, swarm, galleries, and the store.
@@ -304,7 +304,8 @@ function createWave({
     angle: angleOf(meKey),
     tag: null
   };
-  let walletAddress = null; // my TRX wallet address (set by the worker once WDK is ready)
+  let walletAddress = null; // my wallet address (set by the host once the wallet is ready)
+  let myWalletType = null; // my wallet's payment-mechanism id (rides my waves' announces)
   let enforcePaid = false; // gate waves on a proven start burn (enabled once wallet is up)
   let verifyBurnOnChain = null; // on-chain burn check (set once the wallet is up, via setWallet)
   // Live peer bookkeeping (peer-table.js): seats + direct channels.
@@ -528,8 +529,17 @@ function createWave({
     if (msg.phase === 'racing') {
       let wave = waves.get(msg.waveId);
       if (!wave) {
-        enterLobby({ waveId: msg.waveId, by: msg.by, dur: 0, silent: true });
+        enterLobby({
+          waveId: msg.waveId,
+          by: msg.by,
+          dur: 0,
+          silent: true,
+          walletType: msg.walletType
+        });
         wave = waves.get(msg.waveId);
+      }
+      if (msg.walletType && !wave.walletType) {
+        wave.walletType = msg.walletType;
       }
       if (msg.paid) {
         wave.startProof = msg.paid;
@@ -549,8 +559,16 @@ function createWave({
     }
     let wave = waves.get(msg.waveId);
     if (!wave) {
-      enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMsLeft });
+      enterLobby({
+        waveId: msg.waveId,
+        by: msg.by,
+        dur: msg.lobbyMsLeft,
+        walletType: msg.walletType
+      });
       wave = waves.get(msg.waveId);
+    }
+    if (msg.walletType && !wave.walletType) {
+      wave.walletType = msg.walletType;
     }
     if (enforcePaid && msg.paid && !wave.startProof) {
       wave.startProof = msg.paid;
@@ -576,10 +594,18 @@ function createWave({
     if (!canAdopt(msg.waveId)) {
       return;
     }
-    enterLobby({ waveId: msg.waveId, by: msg.origin, dur: msg.lobbyMs });
+    enterLobby({
+      waveId: msg.waveId,
+      by: msg.origin,
+      dur: msg.lobbyMs,
+      walletType: msg.walletType
+    });
     const wave = waves.get(msg.waveId);
     if (!wave) {
       return;
+    }
+    if (msg.walletType && !wave.walletType) {
+      wave.walletType = msg.walletType;
     }
     // remember the signed announce verbatim so I can catch up a peer that connects later (I
     // forward this exact frame — its `mid` dedups any re-flood within one hop)
@@ -628,8 +654,15 @@ function createWave({
     }
     let wave = waves.get(msg.waveId);
     if (!wave) {
-      enterLobby({ waveId: msg.waveId, by: msg.origin });
+      enterLobby({
+        waveId: msg.waveId,
+        by: msg.origin,
+        walletType: msg.walletType
+      });
       wave = waves.get(msg.waveId);
+    }
+    if (msg.walletType && !wave.walletType) {
+      wave.walletType = msg.walletType;
     }
     if (msg.paid) {
       wave.startProof = msg.paid; // carry it so we can re-sync newcomers
@@ -791,6 +824,7 @@ function createWave({
             t0: wave.t0,
             lapMs: wave.lapMs,
             paid: wave.startProof,
+            walletType: wave.walletType,
             lobbyMsLeft:
               wave.phase === 'lobby'
                 ? Math.max(0, wave.lobbyEndsAt - Date.now())
@@ -977,13 +1011,15 @@ function createWave({
    * @param {boolean} [opts.mine] True if I'm the initiator.
    * @param {number} [opts.dur] Lobby duration in ms (defaults to lobbyMs).
    * @param {boolean} [opts.silent] Suppress the wave-announce UI event.
+   * @param {string|null} [opts.walletType] The wave's payment-mechanism id (paid waves), so join() can gate on support.
    */
   function enterLobby({
     waveId,
     by,
     mine = false,
     dur = lobbyMs,
-    silent = false
+    silent = false,
+    walletType = null
   }) {
     if (waves.has(waveId)) {
       return;
@@ -1006,6 +1042,9 @@ function createWave({
       // slot, so counting anything else invents seats; two scale bugs came from exactly that
       // divergence).
       writers: new Map(),
+      // The wave's payment-mechanism id (set on a paid wave — by me if I'm the initiator, else
+      // learned from the announce/start/sync). join() blocks if I can't support it (§ join).
+      walletType,
       t0: undefined,
       lapMs: undefined,
       lobbyEndsAt: Date.now() + dur,
@@ -1058,7 +1097,8 @@ function createWave({
       subscribed: wave.subscribed,
       count: rosterCount(wave),
       lobbyMs: dur,
-      paid: wave.paid // 'verified' (enforcement off / already paid) | 'pending' (verifying)
+      paid: wave.paid, // 'verified' (enforcement off / already paid) | 'pending' (verifying)
+      walletType: wave.walletType // the payment mechanism (null on an unpaid/wallet-less wave)
     });
   }
 
@@ -1122,6 +1162,18 @@ function createWave({
   function join(waveId) {
     const wave = waveId ? waves.get(waveId) : newestJoinableLobby();
     if (!wave || wave.phase !== 'lobby' || wave.joined) {
+      return null;
+    }
+    // payment-mechanism support gate: a PAID wave declares its `walletType`; I can only join (and
+    // pay the fee) if my own wallet is of that type. A wrong type OR no wallet (myWalletType null)
+    // means I can't pay — so I don't join (I can still spectate/subscribe, which is free).
+    if (wave.walletType && wave.walletType !== myWalletType) {
+      emitEvent({
+        event: 'join-blocked',
+        waveId: wave.id,
+        reason: 'wallet-unsupported',
+        walletType: wave.walletType
+      });
       return null;
     }
     // anti-spam: never join (and pay) a wave whose start fee isn't proven paid
@@ -1369,7 +1421,8 @@ function createWave({
    */
   function startWave() {
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
-    enterLobby({ waveId, by: me.id, mine: true }); // initiator auto-joins (marks its own lobby)
+    // initiator auto-joins (marks its own lobby); my wallet type (if any) rides the wave
+    enterLobby({ waveId, by: me.id, mine: true, walletType: myWalletType });
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the start fee and prove it
       // (announcePaid). Fall back to idle if that never happens.
@@ -1406,7 +1459,12 @@ function createWave({
     // own feed core rides the wave sub-topic channel (floodMyFeedCore → floodWave). Store the
     // sealed announce so I can catch up peers that connect later (I forward this exact frame).
     wave.announceMsg = floodDir(
-      makeWaveAnnounce({ waveId, lobbyMs, paid: paidProof })
+      makeWaveAnnounce({
+        waveId,
+        lobbyMs,
+        paid: paidProof,
+        walletType: wave.walletType
+      })
     );
     floodMyFeedCore(waveId); // the initiator is a participant too — share its core
     clearTimeout(wave.lobbyTimer);
@@ -1538,7 +1596,8 @@ function createWave({
         writers,
         t0,
         lapMs,
-        paid: wave.startProof // so peers adopting via start can re-sync newcomers
+        paid: wave.startProof, // so peers adopting via start can re-sync newcomers
+        walletType: wave.walletType
       })
     );
     emitEvent({ event: 'started', waveId, by: me.id });
@@ -1661,10 +1720,12 @@ function createWave({
     join,
     setTag,
     stageEntry,
-    // Wire the payment layer once the wallet is up: my address (for feed tips /
-    // attestations) and the on-chain burn verifier (enables the paid-wave anti-spam gate).
-    setWallet: (address, verifier) => {
+    // Wire the payment layer once the wallet is up: my address (for feed tips / attestations), the
+    // on-chain burn verifier (enables the paid-wave anti-spam gate), and my wallet TYPE (rides my
+    // waves' announces so joiners can decide whether they support the payment mechanism).
+    setWallet: (address, verifier, walletType) => {
       walletAddress = address || null;
+      myWalletType = walletType || null;
       if (verifier) {
         verifyBurnOnChain = verifier;
         enforcePaid = true;

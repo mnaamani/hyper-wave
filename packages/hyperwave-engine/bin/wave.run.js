@@ -12,12 +12,7 @@
 const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
-const {
-  FEE_TRX,
-  payFee,
-  confirmBurn,
-  wireWallet
-} = require('../lib/wallet.js');
+const { payFee, confirmBurn, wireWallet } = require('../lib/wallet.js');
 
 const name = Bare.argv[2] || 'peer';
 const storageDir = Bare.argv[3];
@@ -136,7 +131,7 @@ const wave = createWave({
 async function burnFee(waveId, reason) {
   const result = await payFee({ wave, payments, waveId, reason });
   console.log(
-    `[${name}] ${reason.toUpperCase()}-BURNED ${FEE_TRX} TRX hash=${result.hash}`
+    `[${name}] ${reason.toUpperCase()}-BURNED ${payments.fee} hash=${result.hash}`
   );
   return result;
 }

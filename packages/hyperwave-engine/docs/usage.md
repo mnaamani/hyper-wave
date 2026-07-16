@@ -30,6 +30,8 @@ const {
   createRpcClient // the host<->UI IPC seam (rpc.js) — §12
 } = require('hyperwave-engine');
 const {
+  Wallet, // the abstract wallet interface (base class) — extend it for a custom wallet
+  TronWallet, // the default self-custodial Tron wallet (a Wallet subclass)
   FEE_TRX,
   payFee,
   confirmBurn,
@@ -396,8 +398,49 @@ buildFeed([op]); // → [op]
 
 ## 9. Payments — `wallet.js`
 
-`createPayments` is the self-custodial WDK wallet (Tron Nile testnet). It's `async` because WDK is
-ESM-only. The same module composes it into the wave (fee burns + the paid-wave gate).
+The engine talks to payments through the abstract **`Wallet`** base class — the concrete interface
+any wallet must implement (`type`, `fee`, `address`, `balances`, `send`, `burn`, `verifyBurnTx`,
+`transactions`, `dispose`). The default is **`TronWallet`** (self-custodial Tron Nile testnet, WDK),
+built by `createPayments` (`async` because WDK is ESM-only). An app plugs in its **own** payment
+mechanism by injecting a factory returning any `Wallet` subclass — `createEngine({ deps: {
+createPayments: async () => new MyWallet() } })`.
+
+Each wallet declares a **`type`** (e.g. `'tron-nile'`) that travels on the wire (wave-announce/
+start/sync), so a joiner only joins a wave whose payment mechanism its own wallet supports (§ the
+`walletType` gate in `protocol.md` §9). The `fee` is the wallet's own participation-fee amount.
+
+```js
+const { Wallet } = require('hyperwave-engine'); // the base class to extend for a custom wallet
+
+class MyWallet extends Wallet {
+  get type() {
+    return 'my-chain';
+  }
+  get fee() {
+    return 5;
+  }
+  get address() {
+    return this._addr;
+  }
+  async balances() {
+    return { address: this._addr, trx: await this._fetchBalance() };
+  }
+  async send(to, amount) {
+    /* … */
+  }
+  async burn(amount, memo) {
+    /* … */
+  }
+  async verifyBurnTx(txHash, expect) {
+    /* … → { ok, reason? } */
+  }
+  async transactions(limit) {
+    /* … */
+  }
+}
+```
+
+The default `TronWallet` (via `createPayments`):
 
 ```js
 const { createPayments } = require('hyperwave-engine');

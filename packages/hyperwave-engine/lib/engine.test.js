@@ -145,6 +145,8 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   const wave = fakeWave();
   const tipped = [];
   const pay = {
+    type: 'tron-nile',
+    fee: 1,
     address: 'Tmywallet',
     balances: async () => ({ address: 'Tmywallet', trx: 7 }),
     send: async (to, amount) => {
@@ -181,9 +183,12 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   t.ok(
     sent.find(
       (msg) =>
-        msg.type === 'wallet' && msg.address === 'Tmywallet' && msg.trx === 7
+        msg.type === 'wallet' &&
+        msg.address === 'Tmywallet' &&
+        msg.trx === 7 &&
+        msg.walletType === 'tron-nile'
     ),
-    'balance pushed to the host once the wallet is ready'
+    'balance pushed to the host once the wallet is ready (incl. the wallet type)'
   );
   t.ok(
     wave.calls.find(
@@ -235,6 +240,8 @@ function payMock({ trx = 7, confirms = true } = {}) {
   const calls = { burns: [], verifies: [] };
   return {
     calls,
+    type: 'tron-nile', // the wallet's payment-mechanism id (Wallet interface)
+    fee: 1, // the participation fee, in the wallet's units (Wallet interface)
     address: 'TMe',
     balances: async () => ({ address: 'TMe', trx }),
     burn: async (amount, memo) => {

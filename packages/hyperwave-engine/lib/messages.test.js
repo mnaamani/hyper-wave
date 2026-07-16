@@ -135,15 +135,56 @@ test('the uniform envelope is required on every kind', (t) => {
 test('optional attestations ride only when present', (t) => {
   const paid = { waveId: WAVE, sig: SIG };
   const unpaid = makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 });
-  const paidMsg = makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1, paid });
+  const paidMsg = makeWaveAnnounce({
+    waveId: WAVE,
+    lobbyMs: 1,
+    paid,
+    walletType: 'tron-nile'
+  });
   t.absent('paid' in unpaid, 'no paid key on the unpaid path');
+  t.absent(
+    'walletType' in unpaid,
+    'no walletType on an unpaid/wallet-less wave'
+  );
   t.is(paidMsg.paid, paid, 'the proof rides when present');
+  t.is(paidMsg.walletType, 'tron-nile', 'the wallet type rides on a paid wave');
   const burnless = makeWaveJoin({
     waveId: WAVE,
     writerKey: CRED.writerKey,
     joinSig: SIG
   });
   t.absent('burn' in burnless, 'no burn key before the fee confirms');
+});
+
+test('walletType is an optional string on the paid-carrying kinds', (t) => {
+  t.ok(
+    validGossip(
+      flooded(
+        makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1, walletType: 'tron-nile' })
+      )
+    ),
+    'wave-announce accepts a walletType'
+  );
+  t.ok(
+    validGossip(
+      flooded(
+        makeWaveStart({
+          waveId: WAVE,
+          writers: [],
+          t0: 1,
+          lapMs: 1,
+          walletType: 'btc'
+        })
+      )
+    ),
+    'wave-start accepts a walletType'
+  );
+  t.absent(
+    validGossip(
+      flooded(makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1, walletType: 42 }))
+    ),
+    'a non-string walletType is rejected'
+  );
 });
 
 test('factories carry no author field (origin is the author)', (t) => {
