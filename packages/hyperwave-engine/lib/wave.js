@@ -136,6 +136,14 @@ const MAX_ROSTER = MAX_WRITERS;
 // MAX_ROSTER × ~300 B ≈ 77 KB — with margin; matches the feed's MAX_PAYLOAD_BYTES convention. The
 // roster cap is what makes this a safe CONSTANT (an unbounded roster would force an O(N) frame cap).
 const MAX_FRAME_BYTES = 256 * 1024; // 256 KB
+// Transport-level per-message cap, enforced by the vendored @hyperswarm/secret-stream patch
+// (scripts/patch-secret-stream.js) BEFORE its ~16 MB allocUnsafe — the fix the receive-edge frame
+// cap can't do (that runs after the transport already allocated). Applied per connection, but only
+// on an engine-OWNED swarm: it caps every message on the stream (gossip + the shared Hypercore
+// replication channel), and our largest legitimate message is a feed block (≤ MAX_PAYLOAD_BYTES
+// 256 KB + Hypercore framing), so 1 MB is comfortable margin. NOT set on a host-supplied swarm —
+// that swarm's OTHER protocols may use larger messages, so the host owns its cap there.
+const MAX_MESSAGE_BYTES = 1024 * 1024; // 1 MB
 // How long the initiator waits for its start burn to confirm + announce before aborting
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
@@ -248,6 +256,7 @@ function loadOrCreateSwarmSeed(
  * @property {number} [maxPeers] Hyperswarm connection cap (default 64; lower to force a partial mesh). Ignored when `swarm` is supplied.
  * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments). Ignored when `swarm` is supplied.
  * @property {Object} [swarm] An existing Hyperswarm the host owns; the engine shares it (joins its topics + adds listeners) and NEVER destroys it — on close it only leaves those topics + detaches its listeners. Share the host's swarm when the app also uses Hyperswarm (one instance per process). When set, `maxPeers`/`bootstrap`/`swarmSeed` are the host's concern and are ignored.
+ * @property {number} [maxMessageSize] Transport per-message byte cap (the vendored secret-stream patch), applied per connection on an engine-OWNED swarm only (0 disables). Default 1 MB — bounds the transport's ~16 MB allocation. Not applied to a host-supplied swarm (whose other protocols set their own cap).
  */
 
 /**
@@ -296,7 +305,11 @@ function createWave({
   autoSubscribe = true,
   // An existing Hyperswarm the host already owns; share it instead of creating one (correct when
   // the app also uses Hyperswarm — one instance per process). The engine never destroys it.
-  swarm: externalSwarm = null
+  swarm: externalSwarm = null,
+  // Transport per-message byte cap (secret-stream patch), applied per connection on an ENGINE-OWNED
+  // swarm only. 0 disables. Raise it if the host runs another protocol with larger messages on a
+  // swarm the engine owns (uncommon — a shared swarm is the usual reason, and that isn't capped).
+  maxMessageSize = MAX_MESSAGE_BYTES
 }) {
   // One host sink. Every observable change flows to the host through `emit(msg)` as a typed
   // message; these three build the envelopes the former onState/onEvent/onFeed trio used to. The
@@ -1760,6 +1773,15 @@ function createWave({
    * @param {Object} conn The Noise duplex stream from Hyperswarm.
    */
   function onConnection(conn) {
+    // Transport per-message cap (secret-stream patch): set BEFORE replication/data flows, and only
+    // on a swarm we own — the cap applies to every message on the stream (gossip + replication), and
+    // a host-supplied swarm may carry the host's own larger-message protocols (its cap to set, not
+    // ours). The patched secret-stream reads this property per message, so setting it here (before
+    // any data event) takes effect for this connection. Guarded so an unpatched/renamed property is
+    // a harmless no-op rather than a crash.
+    if (ownsSwarm && maxMessageSize > 0 && 'maxMessageSize' in conn) {
+      conn.maxMessageSize = maxMessageSize;
+    }
     store.replicate(conn); // carries the gossip mux + feed-core replication
 
     const id = b4a.toString(conn.remotePublicKey, 'hex');

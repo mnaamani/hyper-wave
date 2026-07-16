@@ -22,6 +22,7 @@ const { payFee, confirmBurn, wireWallet } = require('./payments');
  * @property {string} [swarmSeed] - Injected hex swarm-identity seed (else persisted at <storage>/swarm.seed).
  * @property {boolean} [autoSubscribe] - Set `false` for browse-then-pick: hold cores only for waves the host explicitly subscribes to (scaling.md Phase 2). Default true (auto-engage every announced wave).
  * @property {number} [minFee] - Local anti-sybil floor (default 0 = accept any): refuse to engage/join a paid wave whose initiator-set fee is below this. Only enforced when a wallet is present.
+ * @property {number} [maxMessageSize] - Transport per-message byte cap (secret-stream patch), applied per connection on an engine-owned swarm only. Default 1 MB; 0 disables.
  */
 
 /**
@@ -77,6 +78,9 @@ function createEngine({
     // local anti-sybil fee floor: refuse paid waves whose initiator-set fee is below this
     // (undefined → createWave's default 0 = accept any). Only enforced with a wallet.
     minFee: config.minFee,
+    // transport per-message byte cap (secret-stream patch); undefined → createWave default (1 MB).
+    // Only applied on an engine-owned swarm.
+    maxMessageSize: config.maxMessageSize,
     // an existing host-owned Hyperswarm to share (undefined → the engine creates its own).
     // A live object, so it rides the top-level option, not the serializable `config`.
     swarm,

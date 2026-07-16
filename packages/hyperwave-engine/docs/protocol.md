@@ -1064,21 +1064,21 @@ following guards keep a hostile peer running a modified app from disrupting hone
 
 ### 11.3 Known residual risks (hardening backlog)
 
-- **Frame size — the single transport allocation (needs an upstream fix).** Processing and
-  _sustained_ abuse are bounded (§11.2: the receive edge rejects an over-cap frame before the parse
-  and destroys the connection). What is **not** fully bounded is the _one_ allocation inside the
-  transport: `@hyperswarm/secret-stream` reassembles each message from its own **3-byte length
-  prefix**, so it `allocUnsafe`s up to `MAX_ATOMIC_WRITE` (256³−1 ≈ **16 MB**) for a multi-chunk
-  message _before_ decryption hands the plaintext up to Protomux / our `onmessage` — and it exposes
-  **no lower `maxMessage` option**. So a hostile peer can force one ~16 MB allocation (plus a matching
-  `cenc.string` decode) per frame it manages to push before we disconnect it; the same ceiling
-  applies to the Hypercore **replication** channel, which shares the stream and never reaches our
-  gossip `onmessage`. This is bounded (16 MB is a hard ceiling, not attacker-unbounded) and costs the
-  attacker the bandwidth to send those bytes, and we cap _sustained_ gossip abuse by disconnecting —
-  but the clean fix is a `maxMessage` option **upstreamed to `@hyperswarm/secret-stream`** (reject at
-  the length-prefix read, before `allocUnsafe`), which would let both the gossip and replication
-  paths refuse an oversized frame without allocating it. Severity: a local, recoverable
-  memory/GC spike, further bounded by `maxPeers`; the upstream cap is the real remedy. **Backlog.**
+- **Transport per-message allocation.** Bounded on all three layers now. `@hyperswarm/secret-stream`
+  reassembles each message from a **3-byte on-wire length prefix** and `allocUnsafe`s up to
+  `MAX_ATOMIC_WRITE` (256³−1 ≈ 16 MB) for a multi-chunk message _before_ decryption hands the
+  plaintext to Protomux / our receive edge — and it exposes no such option upstream. A **vendored
+  patch** (`scripts/patch-secret-stream.js`, applied at postinstall + in the desktop bundle) teaches
+  it an opt-in **`maxMessageSize`** that rejects an oversized message **at the length-prefix read,
+  before the allocation**; the engine sets it per connection (`createWave({ maxMessageSize })`,
+  default **1 MB**) on a swarm it **owns**, so both the gossip channel and the shared Hypercore
+  replication channel refuse an oversized frame without allocating it. (On a **host-supplied** swarm
+  it is not set — that swarm's other protocols may use larger messages, so the host owns its cap.)
+  The patch is anchored on exact source lines and idempotent, so a secret-stream upgrade that moves
+  them fails loudly (a build warning + a failing `secret-stream-patch` test) rather than silently
+  dropping the guard. Above this, §11.2's receive-edge frame cap (256 KB, disconnect) still bounds
+  gossip _processing_ + sustained abuse. Residual: the one legitimate-shape allocation up to the
+  configured cap (1 MB) — the price of not forking the wire — recoverable and `maxPeers`-bounded.
 - **Optimistic ingest is a soft gate.** Since the burn isn't checked on the ingest path
   (§8.2), the feed can hold unpaid entries until they're caught (a tipper / an auditor via
   `burnTx`). They are detectable, but they _do_ consume (bounded) storage. Acceptable for the

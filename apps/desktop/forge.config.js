@@ -140,6 +140,13 @@ module.exports = {
         'scripts',
         'fix-bare-engines.js'
       );
+      const secretStreamPatch = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'scripts',
+        'patch-secret-stream.js'
+      );
       const pjPath = path.join(buildPath, 'package.json');
       const packageJson = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
       packageJson.dependencies['hyperwave-engine'] = 'file:' + coreDir;
@@ -153,6 +160,10 @@ module.exports = {
         }
       );
       childProcess.execSync(`node "${shim}" "${buildPath}"`, {
+        stdio: 'inherit'
+      });
+      // Vendored secret-stream security patch (maxMessageSize) must ship in the bundle too.
+      childProcess.execSync(`node "${secretStreamPatch}" "${buildPath}"`, {
         stdio: 'inherit'
       });
     },
