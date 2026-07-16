@@ -1779,16 +1779,21 @@ function createWave({
     const message = channel.addMessage({
       encoding: cenc.string,
       onmessage(str) {
-        // Frame-size cap: drop an oversized frame before the parse + validation (a hostile peer
-        // can't force a big JSON.parse / O(N)-writers walk). Legit frames are bounded by the roster
-        // cap, so this is a safe constant. `.length` is the UTF-16 unit count — gossip is ASCII
-        // (hex + JSON structure; tags are ≤8 chars), so it tracks bytes closely, and the cap has
-        // ample margin either way.
+        // Frame-size cap: no legitimate gossip frame approaches this (the roster cap bounds the
+        // largest, wave-start, to ~77 KB; MAX_FRAME_BYTES is 256 KB), so an over-cap frame is
+        // hostile/corrupt — DESTROY the connection rather than merely drop this one. We can't
+        // prevent the single big allocation (the transport, @hyperswarm/secret-stream, reassembles a
+        // message from its own 3-byte length prefix — up to ~16 MB — before this callback runs, and
+        // exposes no lower cap), but disconnecting stops a peer SUSTAINING it: reconnection is gated
+        // by the peer-table churn cooldown + the DHT. This guards the gossip channel; replication
+        // rides its own protomux channel and is bounded by Hypercore + the transport ceiling (§11.3).
+        // `.length` is UTF-16 units — gossip is ASCII (hex + JSON; tags ≤8 chars), so it tracks bytes.
         if (str.length > MAX_FRAME_BYTES) {
-          if (!throttleLogged) {
-            throttleLogged = true;
-            log('peer sent an oversized gossip frame — dropping', shortId(id));
-          }
+          log(
+            'peer sent an oversized gossip frame — disconnecting',
+            shortId(id)
+          );
+          conn.destroy();
           return;
         }
         if (!limiter.allow(Date.now())) {

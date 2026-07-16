@@ -1051,21 +1051,34 @@ following guards keep a hostile peer running a modified app from disrupting hone
 - **Bounded roster + constant frame cap.** A wave seats at most `MAX_WRITERS` (256) participants, so
   `wave-start`/`wave-sync`'s `writers` — the one O(N) gossip payload — is bounded to a constant; the
   shape gate rejects an over-cap `writers` array before any signature work (`isWriters`), and the
-  receive edge drops any frame larger than `MAX_FRAME_BYTES` (256 KB) **before** the `JSON.parse` +
-  validation, so a hostile peer can't force a large parse or an O(N)-writers walk. The roster cap is
-  what makes the frame cap a safe **constant** rather than an O(N) value that would have to grow with
-  membership — the two are one defense. Determinism is preserved because the sweep derives from the
-  single flooded `wave-start`, not local `writers` (§6).
+  receive edge enforces `MAX_FRAME_BYTES` (256 KB) **before** the `JSON.parse` + validation, so a
+  hostile peer can't force a large parse or an O(N)-writers walk. The roster cap is what makes the
+  frame cap a safe **constant** rather than an O(N) value that would have to grow with membership —
+  the two are one defense. No legitimate gossip frame approaches the cap (the largest, a full
+  `wave-start`, is ~77 KB), so an over-cap frame is hostile/corrupt and the connection is
+  **destroyed**, not merely the frame dropped — bounding a peer to at most one such frame per
+  connection (reconnection is gated by the peer-table churn cooldown + the DHT). Determinism is
+  preserved because the sweep derives from the single flooded `wave-start`, not local `writers` (§6).
+  Caveat (see §11.3): this bounds _processing_ and _sustained_ abuse, not the single transport-level
+  allocation.
 
 ### 11.3 Known residual risks (hardening backlog)
 
-- **Frame size — peak allocation.** The receive-edge frame cap (§11.2) drops an oversized frame
-  before the parse + validation, and the roster cap bounds the one legitimately large payload — so
-  processing is bounded. What remains is the momentary allocation _inside the transport_: Protomux
-  slices from the buffer the stream already delivered (it does not pre-allocate from an
-  attacker-supplied length prefix), so the peak is bounded by the transport's own framing, but a
-  hard transport-level max-frame limit would make that explicit. Low severity (a local, recoverable
-  spike, further bounded by `maxPeers`); backlog.
+- **Frame size — the single transport allocation (needs an upstream fix).** Processing and
+  _sustained_ abuse are bounded (§11.2: the receive edge rejects an over-cap frame before the parse
+  and destroys the connection). What is **not** fully bounded is the _one_ allocation inside the
+  transport: `@hyperswarm/secret-stream` reassembles each message from its own **3-byte length
+  prefix**, so it `allocUnsafe`s up to `MAX_ATOMIC_WRITE` (256³−1 ≈ **16 MB**) for a multi-chunk
+  message _before_ decryption hands the plaintext up to Protomux / our `onmessage` — and it exposes
+  **no lower `maxMessage` option**. So a hostile peer can force one ~16 MB allocation (plus a matching
+  `cenc.string` decode) per frame it manages to push before we disconnect it; the same ceiling
+  applies to the Hypercore **replication** channel, which shares the stream and never reaches our
+  gossip `onmessage`. This is bounded (16 MB is a hard ceiling, not attacker-unbounded) and costs the
+  attacker the bandwidth to send those bytes, and we cap _sustained_ gossip abuse by disconnecting —
+  but the clean fix is a `maxMessage` option **upstreamed to `@hyperswarm/secret-stream`** (reject at
+  the length-prefix read, before `allocUnsafe`), which would let both the gossip and replication
+  paths refuse an oversized frame without allocating it. Severity: a local, recoverable
+  memory/GC spike, further bounded by `maxPeers`; the upstream cap is the real remedy. **Backlog.**
 - **Optimistic ingest is a soft gate.** Since the burn isn't checked on the ingest path
   (§8.2), the feed can hold unpaid entries until they're caught (a tipper / an auditor via
   `burnTx`). They are detectable, but they _do_ consume (bounded) storage. Acceptable for the
