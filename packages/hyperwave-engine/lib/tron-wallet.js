@@ -217,19 +217,18 @@ class TronWallet extends Wallet {
 }
 
 /**
- * Create the default self-custodial Tron wallet (a `TronWallet`, WDK layer) for burned fees and
- * feed tips. WDK is ESM-only, so this bridges via dynamic import(). Seed precedence: injected ->
- * file -> generate and persist (a mobile host injects from secure storage; desktop persists to
- * `wallet.seed`). This is the default the engine uses; an app injects its own `Wallet` subclass
- * via createEngine `deps.createPayments`.
- * @param {Object} [options] - Wallet options.
+ * Bring up the shared Tron/WDK account (seed → account → address → TronWeb) that both the native
+ * `TronWallet` and the TRC-20 `TronUsdtWallet` are constructed from. WDK is ESM-only, so this
+ * bridges via dynamic import(). Seed precedence: injected -> file -> generate and persist (a mobile
+ * host injects from secure storage; desktop persists to `wallet.seed`).
+ * @param {Object} [options] - Init options.
  * @param {string} options.storageDir - Directory holding the persisted `wallet.seed` file.
  * @param {string} [options.seed] - Injected seed phrase (skips the filesystem when provided).
  * @param {string} [options.provider] - Tron JSON-RPC provider URL (defaults to Nile testnet).
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
- * @returns {Promise<TronWallet>} The ready wallet.
+ * @returns {Promise<{wallet: Object, account: Object, tronweb: Object, address: string, log: Function}>} The WDK handles.
  */
-async function createPayments({
+async function initTronAccount({
   storageDir,
   seed: injectedSeed,
   provider = NILE_PROVIDER,
@@ -266,14 +265,27 @@ async function createPayments({
   const tronweb = account._tronWeb || wallet._tronWeb;
   log('wallet ready', address);
 
-  return new TronWallet({ wallet, account, tronweb, address, log });
+  return { wallet, account, tronweb, address, log };
+}
+
+/**
+ * Create the default self-custodial Tron wallet (a `TronWallet`, native TRX). This is the default
+ * the engine uses; an app injects its own `Wallet` subclass (e.g. `createTronUsdtWallet`,
+ * tron-usdt-wallet.js) via createEngine `deps.createPayments`.
+ * @param {Object} [options] - Wallet options (see initTronAccount).
+ * @returns {Promise<TronWallet>} The ready wallet.
+ */
+async function createPayments(options = {}) {
+  return new TronWallet(await initTronAccount(options));
 }
 
 module.exports = {
   TronWallet,
   createPayments,
+  initTronAccount,
   toSun,
   fromSun,
   FEE_TRX,
-  TRON_WALLET_TYPE
+  TRON_WALLET_TYPE,
+  BURN_ADDRESS
 };

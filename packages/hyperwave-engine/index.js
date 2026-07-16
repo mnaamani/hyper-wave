@@ -8,6 +8,7 @@ module.exports = {
   ...require('./lib/wave'), // createWave, parseBootstrap
   ...require('./lib/wallet'), // Wallet (the payment interface / base class)
   ...require('./lib/tron-wallet'), // TronWallet, createPayments, toSun, fromSun, FEE_TRX
+  ...require('./lib/tron-usdt-wallet'), // TronUsdtWallet, createTronUsdtWallet, FEE_USDT
   ...require('./lib/payments'), // payFee, confirmBurn, wireWallet, burnMemo (fee flows)
   ...require('./lib/rpc') // serveEngine, createRpcClient (the host<->UI IPC seam)
 };

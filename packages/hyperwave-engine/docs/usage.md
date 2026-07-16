@@ -444,6 +444,31 @@ class MyWallet extends Wallet {
 }
 ```
 
+**Bundled alternative — `TronUsdtWallet` (USDT / TRC-20).** A second Tron wallet that pays in USDT
+instead of native TRX, **extending `TronWallet`** (it reuses the shared WDK account + address +
+dispose and overrides the currency ops to move USDT via the token contract). Its `type` is
+`'tron-usdt-nile'` — a **distinct** payment mechanism, so a USDT wave and a TRX wave don't mix (a
+TRX-wallet peer can't join a USDT wave, and vice versa). An app opts in by injecting it:
+
+```js
+const { createTronUsdtWallet } = require('hyperwave-engine');
+
+createEngine({
+  storageDir,
+  config,
+  emit,
+  deps: {
+    createPayments: (opts) =>
+      createTronUsdtWallet({ ...opts, usdtContract: 'T…NileUSDT' })
+  }
+});
+```
+
+Two caveats: USDT is a TRC-20 **token, so a transfer costs TRX for gas** — the wallet holds both
+(one seed / one address funds TRX for gas + USDT for fees); and the on-chain TRC-20 ops are
+**pending Nile verification** (like the native path, de-risked by the on-chain tier, not offline
+tests). Supply the real Nile USDT `usdtContract` (there is no safe default).
+
 The default `TronWallet` (via `createPayments`):
 
 ```js

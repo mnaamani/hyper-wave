@@ -13,6 +13,7 @@ require('./lib/feed.replication.test.js');
 require('./lib/feed-crdt.test.js');
 require('./lib/wallet.test.js');
 require('./lib/tron-wallet.test.js');
+require('./lib/tron-usdt-wallet.test.js');
 require('./lib/engine.test.js');
 require('./lib/rpc.test.js');
 require('./lib/swarm.share.test.js');
