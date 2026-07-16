@@ -122,9 +122,21 @@ function isWriterCred(entry) {
   );
 }
 
-/** @param {*} value - Candidate. @returns {boolean} An array of well-formed credentials. */
+// Hard per-wave roster cap (protocol.md §5/§6). A wave holds at most this many participants; the
+// initiator caps its roster here, so `wave-start`/`wave-sync`'s `writers` array — the one O(N)
+// gossip payload — is bounded to a known constant, which in turn lets the receive edge enforce a
+// constant max frame size (wave.js MAX_FRAME_BYTES). Scale comes from MANY concurrent bounded waves,
+// not one unbounded wave (scaling.md). A frame with more writers than this is rejected at the shape
+// gate (an over-cap roster is malformed / hostile), before any signature work or core opening.
+const MAX_WRITERS = 256;
+
+/** @param {*} value - Candidate. @returns {boolean} An array (≤ MAX_WRITERS) of well-formed creds. */
 function isWriters(value) {
-  return Array.isArray(value) && value.every(isWriterCred);
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_WRITERS &&
+    value.every(isWriterCred)
+  );
 }
 
 /** @param {*} value - Candidate. @returns {boolean} An array of wave ids (the `subs` set). */
@@ -355,6 +367,7 @@ function makeWaveSync({
 
 module.exports = {
   FLOODED_KINDS,
+  MAX_WRITERS,
   validGossip,
   makeHeartbeat,
   makeSubs,

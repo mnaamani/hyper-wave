@@ -7,6 +7,7 @@
 const test = require('brittle');
 const {
   FLOODED_KINDS,
+  MAX_WRITERS,
   validGossip,
   makeHeartbeat,
   makeSubs,
@@ -237,6 +238,56 @@ test('fee is an optional positive number on the paid-carrying kinds', (t) => {
       flooded({ ...makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }), fee: '1' })
     ),
     'a non-number fee is rejected'
+  );
+});
+
+test('the writers array is capped at MAX_WRITERS (bounds the O(N) frame)', (t) => {
+  const cred = (i) => ({
+    peerId: i.toString(16).padStart(64, '0'),
+    writerKey: 'ee'.repeat(32),
+    joinSig: SIG
+  });
+  const writers = (count) =>
+    Array.from({ length: count }, (_unused, i) => cred(i));
+  t.ok(
+    validGossip(
+      flooded(
+        makeWaveStart({
+          waveId: WAVE,
+          writers: writers(MAX_WRITERS),
+          t0: 1,
+          lapMs: 1
+        })
+      )
+    ),
+    'a full roster (MAX_WRITERS) is accepted'
+  );
+  t.absent(
+    validGossip(
+      flooded(
+        makeWaveStart({
+          waveId: WAVE,
+          writers: writers(MAX_WRITERS + 1),
+          t0: 1,
+          lapMs: 1
+        })
+      )
+    ),
+    'an over-cap writers array is rejected at the shape gate (before any sig work)'
+  );
+  t.absent(
+    validGossip(
+      sealed(
+        makeWaveSync({
+          waveId: WAVE,
+          phase: 'lobby',
+          by: PEER,
+          writers: writers(MAX_WRITERS + 1),
+          lobbyMsLeft: 1
+        })
+      )
+    ),
+    'the cap applies to wave-sync too'
   );
 });
 

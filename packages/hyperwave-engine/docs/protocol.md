@@ -484,11 +484,21 @@ credential (`{peerId, writerKey, joinSig}` — the same tuple `wave-join` publis
 that adopts via `wave-start` **without having seen the lobby's `wave-join`s** still learns
 every core and can render the full feed. Each entry is re-verified (`verifyJoin`) before
 its core is opened. The `burn` is **omitted** here (the writers were pre-vetted by the
-initiator during the lobby; the wave itself is gated by the start `paid` proof). This
-grows `wave-start` to O(N) in the roster — an extension of the existing O(N)-roster scale
-concern (the broader path to thousands of peers is the **concurrent-waves sharding model** in the
-[scaling design note](./scaling.md), which bounds each wave's roster rather than growing one).
-If ever compressed at large N, it must preserve **both** self-containment and
+initiator during the lobby; the wave itself is gated by the start `paid` proof).
+
+**Bounded roster (`MAX_WRITERS` = 256).** A wave seats at most `MAX_WRITERS` participants — the
+initiator caps its roster (`ingestWriter` stops adding beyond it; a peer arriving once it is full
+spectates, exactly like missing the lobby), so `writers` is **O(1)-bounded, not O(N)**, and the
+receive edge rejects any `wave-start`/`wave-sync` whose `writers` array exceeds the cap at the shape
+gate (before any signature work — `isWriters`). This is the design's scale answer made concrete: a
+wave is a **bounded** unit and thousands of peers spread across **many concurrent waves**
+(the [scaling note](./scaling.md)), never one unbounded wave. The bound also fixes the max
+gossip-frame size, so the transport can reject oversized frames with a constant cap (§11.2).
+Determinism is unaffected: the sweep schedule derives from the single flooded `wave-start`, not any
+peer's local `writers`, so all receivers of a given start compute the identical schedule (§6).
+
+Compression is now an **optional efficiency**, not a scale requirement (the cap already bounds the
+frame). If ever added, it must preserve **both** self-containment and
 determinism: lossless framing (deflate the frame — see §3) does, and roughly halves the
 hex+JSON writers array (~256 B/entry → ~130 B, the crypto-entropy floor of
 peerId+writerKey+joinSig). A lossy scheme that ships only peerId **prefixes** and resolves
@@ -1038,15 +1048,24 @@ following guards keep a hostile peer running a modified app from disrupting hone
   the subgraph. Sized well above a legitimate author's rate (a wave costs its author ~3 originations
   — announce + own join + start); the tracked-author set is bounded + LRU-evicted (evicting only
   resets an author's throttle, which costs the attacker more to force than it saves).
+- **Bounded roster + constant frame cap.** A wave seats at most `MAX_WRITERS` (256) participants, so
+  `wave-start`/`wave-sync`'s `writers` — the one O(N) gossip payload — is bounded to a constant; the
+  shape gate rejects an over-cap `writers` array before any signature work (`isWriters`), and the
+  receive edge drops any frame larger than `MAX_FRAME_BYTES` (256 KB) **before** the `JSON.parse` +
+  validation, so a hostile peer can't force a large parse or an O(N)-writers walk. The roster cap is
+  what makes the frame cap a safe **constant** rather than an O(N) value that would have to grow with
+  membership — the two are one defense. Determinism is preserved because the sweep derives from the
+  single flooded `wave-start`, not local `writers` (§6).
 
 ### 11.3 Known residual risks (hardening backlog)
 
-- **Frame size.** The token buckets limit message _count_ (per connection and per author), not
-  bytes; a very large single frame is still decoded by Protomux before the receive edge sees it, so
-  the peak allocation is unbounded. A max-frame-size cap at the transport is the complementary bound
-  (backlog) — best done alongside the O(N)-roster scale work (§5 `wave-start`, scaling.md), since the
-  one legitimately large gossip payload is `wave-start`/`wave-sync`'s `writers` set, which sets the
-  cap's floor.
+- **Frame size — peak allocation.** The receive-edge frame cap (§11.2) drops an oversized frame
+  before the parse + validation, and the roster cap bounds the one legitimately large payload — so
+  processing is bounded. What remains is the momentary allocation _inside the transport_: Protomux
+  slices from the buffer the stream already delivered (it does not pre-allocate from an
+  attacker-supplied length prefix), so the peak is bounded by the transport's own framing, but a
+  hard transport-level max-frame limit would make that explicit. Low severity (a local, recoverable
+  spike, further bounded by `maxPeers`); backlog.
 - **Optimistic ingest is a soft gate.** Since the burn isn't checked on the ingest path
   (§8.2), the feed can hold unpaid entries until they're caught (a tipper / an auditor via
   `burnTx`). They are detectable, but they _do_ consume (bounded) storage. Acceptable for the

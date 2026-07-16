@@ -22,12 +22,12 @@ byte-identical view. This note establishes what actually breaks at that scale, a
 
 Not every mechanism degrades the same way:
 
-| Mechanism                | At N = thousands  | Why                                                                                                        |
-| ------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------- |
-| **The sweep**            | ✅ fine           | Timed slots from intrinsic angles; a dead peer's slot simply passes. Choreographing thousands is cheap.    |
-| **`wave-start` writers** | ⚠️ large, fixable | O(N) message, but losslessly compressible (deflate — see `protocol.md` §5 and the TODO backlog).           |
-| **Ring / heartbeat**     | ⚠️ O(N) per peer  | Every peer tracks every seat; heartbeat liveness gossip is O(N) churn.                                     |
-| **The feed**             | ❌ **the wall**   | Every peer opens **every** participant's core: **O(N) cores per peer, N×N replication.** Falls over first. |
+| Mechanism                | At N = thousands | Why                                                                                                                          |
+| ------------------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **The sweep**            | ✅ fine          | Timed slots from intrinsic angles; a dead peer's slot simply passes. Choreographing thousands is cheap.                      |
+| **`wave-start` writers** | ✅ capped        | Bounded by `MAX_WRITERS` (256) — a wave seats at most that many; the O(N) payload is now O(1). Deflate is an optional extra. |
+| **Ring / heartbeat**     | ⚠️ O(N) per peer | Every peer tracks every seat; heartbeat liveness gossip is O(N) churn.                                                       |
+| **The feed**             | ❌ **the wall**  | Every peer opens **every** participant's core: **O(N) cores per peer, N×N replication.** Falls over first.                   |
 
 The feed's O(N)-cores-per-peer is the hard ceiling — and it is **the same property that makes it
 elegant** (everyone holds every core → byte-identical, no indexer, no admission). You cannot have a
@@ -161,8 +161,9 @@ where it is cheap.
 - **Global ring**: drop entirely, keep as an opt-in visualization, or regionalize?
 - **Cross-wave identity/reputation**: out of scope — money and credentials stay per-wave, which also
   keeps sybil surface bounded per wave.
-- **`wave-start` compression** still matters if any _single_ wave grows large (see the TODO backlog
-  entry + `protocol.md` §5).
+- **`wave-start` compression** is now optional — the roster cap (`MAX_WRITERS` = 256, `protocol.md`
+  §5) bounds a single wave's `writers` payload to a constant, so deflate is an efficiency nicety, not
+  a scale requirement (TODO backlog).
 
 ---
 

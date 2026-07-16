@@ -49,6 +49,7 @@ const { angleOf, angleOfId } = require('./ring');
 const { sweepSchedule, mySlot } = require('./sweep');
 const {
   FLOODED_KINDS,
+  MAX_WRITERS,
   validGossip,
   makeHeartbeat,
   makeSubs,
@@ -122,6 +123,19 @@ const GOSSIP_RATE_PER_SEC = 64; // sustained frames/sec per connection
 const FLOOD_ORIGIN_BURST = 64; // per-author flood burst
 const FLOOD_ORIGIN_RATE_PER_SEC = 8; // sustained flood-originations/sec per author
 const FLOOD_ORIGIN_MAX_AUTHORS = 4096; // bounded set of tracked authors (LRU-evicted)
+// Hard per-wave roster cap: a wave seats at most this many participants; a peer arriving once the
+// roster is full spectates (same as missing the lobby). It equals the wire cap (messages.MAX_WRITERS)
+// so `wave.writers` never exceeds what a wave-start/wave-sync may legally carry — bounding that O(N)
+// payload to a constant. The SWEEP stays deterministic regardless: its schedule derives from the
+// single flooded wave-start (canonicalRoster of msg.writers), not each peer's local writers set.
+// Scale is MANY concurrent bounded waves, not one unbounded wave (scaling.md).
+const MAX_ROSTER = MAX_WRITERS;
+// Max bytes for a single gossip frame at the receive edge. A frame larger than this is dropped
+// before the JSON.parse + validation (so a hostile peer can't force a big parse / O(N)-writers
+// walk). Sized comfortably above the largest LEGITIMATE frame — a full-roster wave-start is
+// MAX_ROSTER × ~300 B ≈ 77 KB — with margin; matches the feed's MAX_PAYLOAD_BYTES convention. The
+// roster cap is what makes this a safe CONSTANT (an unbounded roster would force an O(N) frame cap).
+const MAX_FRAME_BYTES = 256 * 1024; // 256 KB
 // How long the initiator waits for its start burn to confirm + announce before aborting
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
@@ -985,6 +999,13 @@ function createWave({
     if (!wave || wave.writers.has(cred.peerId)) {
       return;
     }
+    // Roster cap: a wave seats at most MAX_ROSTER participants — a new joiner beyond that is
+    // dropped (it spectates). This bounds `wave.writers`, so any wave-start/wave-sync this peer
+    // floods stays within the wire cap. The sweep is unaffected (it derives from the authoritative
+    // flooded wave-start, not this local set), so common waves (< cap) are byte-identical as before.
+    if (wave.writers.size >= MAX_ROSTER) {
+      return;
+    }
     if (
       !verifyJoin(
         { waveId: wave.id, peerId: cred.peerId, writerKey: cred.writerKey },
@@ -1274,6 +1295,17 @@ function createWave({
       emitEvent({ event: 'join-blocked', waveId: wave.id, reason: wave.paid });
       return null;
     }
+    // roster cap: the wave is full — I can subscribe/spectate (free) but can't take a seat, so I
+    // refuse the join up front (rather than pay a fee and then be dropped at ingest). Bounded waves
+    // are the scale model (scaling.md) — join a different wave, or spectate this one.
+    if (!wave.writers.has(me.id) && wave.writers.size >= MAX_ROSTER) {
+      emitEvent({
+        event: 'join-blocked',
+        waveId: wave.id,
+        reason: 'roster-full'
+      });
+      return null;
+    }
     subscribe(wave.id); // participating implies holding the feed (idempotent)
     wave.joined = true;
     floodMyFeedCore(wave.id);
@@ -1314,6 +1346,11 @@ function createWave({
         }
         if (!wave.joinSig) {
           wave.joinSig = signJoin(swarm.keyPair, { waveId, writerKey });
+        }
+        // roster cap belt-and-suspenders: never push my own seat past MAX_ROSTER (join() already
+        // refuses a full roster; this guards a race where the cap filled between join and here).
+        if (!wave.writers.has(me.id) && wave.writers.size >= MAX_ROSTER) {
+          return;
         }
         // remember myself so my own wave-sync shares my core with newcomers
         wave.writers.set(me.id, { writerKey, joinSig: wave.joinSig });
@@ -1742,6 +1779,18 @@ function createWave({
     const message = channel.addMessage({
       encoding: cenc.string,
       onmessage(str) {
+        // Frame-size cap: drop an oversized frame before the parse + validation (a hostile peer
+        // can't force a big JSON.parse / O(N)-writers walk). Legit frames are bounded by the roster
+        // cap, so this is a safe constant. `.length` is the UTF-16 unit count — gossip is ASCII
+        // (hex + JSON structure; tags are ≤8 chars), so it tracks bytes closely, and the cap has
+        // ample margin either way.
+        if (str.length > MAX_FRAME_BYTES) {
+          if (!throttleLogged) {
+            throttleLogged = true;
+            log('peer sent an oversized gossip frame — dropping', shortId(id));
+          }
+          return;
+        }
         if (!limiter.allow(Date.now())) {
           if (!throttleLogged) {
             throttleLogged = true;
