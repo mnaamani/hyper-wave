@@ -171,21 +171,24 @@ async function joinAndBurn() {
 
 // env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
 // WALLET_TYPE=usdt (+ USDT_CONTRACT=<addr>) -> use the USDT/TRC-20 wallet instead of native TRX
-// (the same seed/address holds both — USDT for fees, TRX for gas). WALLET_SEND=<addr>:<amt> ->
-// also do a one-off transfer (funded wallets only).
+// (the same seed/address holds both — USDT for fees, TRX for gas). TRON_NETWORK=<name> (nile
+// default, mainnet, shasta) + optional TRON_PROVIDER=<url> -> pick the network (mainnet = real
+// funds). WALLET_SEND=<addr>:<amt> -> also do a one-off transfer (funded wallets only).
 if (env.WALLET) {
   const walletLog = (...args) => console.log(`[${name}] wallet`, ...args);
+  const walletOpts = {
+    storageDir,
+    network: env.TRON_NETWORK, // undefined -> the wallet's default (nile)
+    provider: env.TRON_PROVIDER, // undefined -> the network's default RPC
+    log: walletLog
+  };
   const ready =
     env.WALLET_TYPE === 'usdt'
       ? require('../lib/tron-usdt-wallet.js').createTronUsdtWallet({
-          storageDir,
-          usdtContract: env.USDT_CONTRACT,
-          log: walletLog
+          ...walletOpts,
+          usdtContract: env.USDT_CONTRACT
         })
-      : require('../lib/tron-wallet.js').createPayments({
-          storageDir,
-          log: walletLog
-        });
+      : require('../lib/tron-wallet.js').createPayments(walletOpts);
   ready
     .then(async (pay) => {
       payments = pay;

@@ -1,15 +1,40 @@
-// The default `Wallet` implementation: a self-custodial Tron (Nile testnet) wallet over WDK,
-// using native TRX — burned participation fees + feed tips (no sponsor rewards). WDK is ESM-only,
-// so this CJS module bridges to it via dynamic import(); it does real Tron transfers (the
-// spike/wdk de-risk confirmed this runs under Bare). No swarm here — the engine wires it in via
-// the `Wallet` interface (wallet.js). Native TRX (not TRC-20 USDT): no token contract, and a TRX
-// transfer pays its own tiny fee from the same balance — a wallet that received TRX can send it.
+// The default `Wallet` implementation: a self-custodial Tron wallet over WDK, using native TRX —
+// burned participation fees + feed tips (no sponsor rewards). WDK is ESM-only, so this CJS module
+// bridges to it via dynamic import(); it does real Tron transfers (the spike/wdk de-risk confirmed
+// this runs under Bare). No swarm here — the engine wires it in via the `Wallet` interface
+// (wallet.js). Native TRX (not TRC-20 USDT): no token contract, and a TRX transfer pays its own
+// tiny fee from the same balance — a wallet that received TRX can send it. The `network` is a
+// first-class option (nile testnet by default, mainnet opt-in) — it selects the RPC provider AND
+// the on-the-wire wallet `type`, so the same implementation serves testnet and production.
 const fs = require('bare-fs');
 const b4a = require('b4a');
 const { Wallet } = require('./wallet');
 
-const NILE_PROVIDER = 'https://nile.trongrid.io';
-const TRON_WALLET_TYPE = 'tron-nile'; // this wallet's on-the-wire payment-mechanism id
+// Known Tron networks → their default JSON-RPC (TronGrid) endpoint. The network name also forms this
+// wallet's on-the-wire TYPE id (`tron-<network>`; `tron-usdt-<network>` for the USDT variant), so a
+// testnet wave and a mainnet wave are DISTINCT payment mechanisms — a Nile burn is worthless on
+// mainnet, and the join gate (wave.js) keeps a peer off a wave whose network its wallet doesn't
+// match. The default is a TESTNET (Nile): mainnet ('real funds') must be opted into explicitly, so a
+// misconfiguration never spends real money by default. For any other node, pass an explicit
+// `provider` (with a `network` name that labels the wire type).
+const TRON_NETWORKS = {
+  nile: 'https://nile.trongrid.io', // Nile testnet (default)
+  shasta: 'https://api.shasta.trongrid.io', // Shasta testnet
+  mainnet: 'https://api.trongrid.io' // Tron mainnet — real funds
+};
+const DEFAULT_TRON_NETWORK = 'nile';
+
+/**
+ * This wallet's on-the-wire payment-mechanism id for a Tron network — `tron-<network>` (e.g.
+ * `tron-nile`, `tron-mainnet`). Distinct per network so cross-network waves never mix.
+ * @param {string} network - The Tron network name (e.g. 'nile', 'mainnet').
+ * @returns {string} The wallet type id.
+ */
+const tronWalletType = (network) => 'tron-' + network;
+
+// The default-network ('nile') native-TRX type id — exported for reference; the live value comes
+// from `wallet.type` (network-derived), so a mainnet wallet advertises `tron-mainnet`.
+const TRON_WALLET_TYPE = tronWalletType(DEFAULT_TRON_NETWORK);
 const SUN = 1_000_000; // 1 TRX = 1e6 sun
 // Tron's black hole (base58check of the all-zero EVM address, 41 + 20×00): no key exists,
 // so TRX sent here is provably unspendable — the canonical burn. Used for the initiator's
@@ -42,6 +67,7 @@ class TronWallet extends Wallet {
   #account;
   #tronweb;
   #address;
+  #network;
   #log;
 
   /**
@@ -50,19 +76,28 @@ class TronWallet extends Wallet {
    * @param {Object} deps.account - The derived account.
    * @param {Object} deps.tronweb - WDK's TronWeb (Bare-compatible).
    * @param {string} deps.address - The derived Tron address.
+   * @param {string} [deps.network] - The Tron network name (labels the wire type).
    * @param {(...args: any[]) => void} deps.log - Logger.
    */
-  constructor({ wallet, account, tronweb, address, log }) {
+  constructor({
+    wallet,
+    account,
+    tronweb,
+    address,
+    network = DEFAULT_TRON_NETWORK,
+    log
+  }) {
     super();
     this.#wallet = wallet;
     this.#account = account;
     this.#tronweb = tronweb;
     this.#address = address;
+    this.#network = network;
     this.#log = log;
   }
 
   get type() {
-    return TRON_WALLET_TYPE;
+    return tronWalletType(this.#network);
   }
 
   get fee() {
@@ -224,16 +259,27 @@ class TronWallet extends Wallet {
  * @param {Object} [options] - Init options.
  * @param {string} options.storageDir - Directory holding the persisted `wallet.seed` file.
  * @param {string} [options.seed] - Injected seed phrase (skips the filesystem when provided).
- * @param {string} [options.provider] - Tron JSON-RPC provider URL (defaults to Nile testnet).
+ * @param {string} [options.network] - Tron network name (`nile` default, `mainnet`, `shasta`, …) —
+ *   selects the default provider AND the wire type. Mainnet is opt-in (real funds).
+ * @param {string} [options.provider] - Tron JSON-RPC provider URL — overrides the network's default
+ *   (point a named `network` at a custom node); REQUIRED for a network not in `TRON_NETWORKS`.
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
- * @returns {Promise<{wallet: Object, account: Object, tronweb: Object, address: string, log: Function}>} The WDK handles.
+ * @returns {Promise<{wallet: Object, account: Object, tronweb: Object, address: string, network: string, log: Function}>} The WDK handles.
  */
 async function initTronAccount({
   storageDir,
   seed: injectedSeed,
-  provider = NILE_PROVIDER,
+  network = DEFAULT_TRON_NETWORK,
+  provider,
   log = () => {}
 } = {}) {
+  const rpc = provider || TRON_NETWORKS[network];
+  if (!rpc) {
+    throw new Error(
+      `unknown Tron network '${network}' — pass a known network (` +
+        `${Object.keys(TRON_NETWORKS).join(', ')}) or an explicit \`provider\` URL`
+    );
+  }
   const { default: WDK } = await import('@tetherto/wdk');
   const { default: WalletManagerTron } =
     await import('@tetherto/wdk-wallet-tron');
@@ -257,15 +303,15 @@ async function initTronAccount({
     fs.writeFileSync(seedFile, seed);
   }
 
-  const wallet = new WalletManagerTron(seed, { provider });
+  const wallet = new WalletManagerTron(seed, { provider: rpc });
   const account = await wallet.getAccount(0);
   const address = await account.getAddress(); // offline (derived from the seed)
   // Reuse WDK's own TronWeb (Bare-compatible; a standalone `require('tronweb')` pulls in
   // ethers/http which Bare lacks) to build the memo'd burn tx, which WDK then signs+sends.
   const tronweb = account._tronWeb || wallet._tronWeb;
-  log('wallet ready', address);
+  log('wallet ready', address, 'on', network);
 
-  return { wallet, account, tronweb, address, log };
+  return { wallet, account, tronweb, address, network, log };
 }
 
 /**
@@ -286,6 +332,9 @@ module.exports = {
   toSun,
   fromSun,
   FEE_TRX,
+  tronWalletType,
   TRON_WALLET_TYPE,
+  TRON_NETWORKS,
+  DEFAULT_TRON_NETWORK,
   BURN_ADDRESS
 };

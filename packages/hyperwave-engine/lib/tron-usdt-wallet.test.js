@@ -51,6 +51,23 @@ test('createTronUsdtWallet builds a USDT wallet that extends TronWallet (offline
   usdt2.dispose();
 });
 
+test('the network carries into the USDT wire type (offline)', async (t) => {
+  const dir = '/tmp/hyperwave-usdt-net-' + Date.now();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const usdt = await createTronUsdtWallet({
+    storageDir: dir,
+    usdtContract: USDT_CONTRACT,
+    network: 'mainnet'
+  });
+  t.is(
+    usdt.type,
+    'tron-usdt-mainnet',
+    'mainnet USDT advertises tron-usdt-mainnet (distinct from native + from testnet)'
+  );
+  usdt.dispose();
+});
+
 test('createTronUsdtWallet requires the USDT contract address', async (t) => {
   await t.exception(
     () => createTronUsdtWallet({ storageDir: '/tmp/x' }),

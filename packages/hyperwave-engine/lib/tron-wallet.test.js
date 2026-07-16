@@ -31,6 +31,31 @@ test('createPayments derives a persistent self-custodial Tron wallet (offline)',
   pay2.dispose();
 });
 
+test('the network selects the wire type (offline; mainnet is opt-in)', async (t) => {
+  const dir = '/tmp/hyperwave-wallet-net-' + Date.now();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // Same implementation, different network -> different on-the-wire type (a Nile burn is worthless
+  // on mainnet, so the types must differ). Address derivation stays offline (no RPC call).
+  const main = await createPayments({ storageDir: dir, network: 'mainnet' });
+  t.is(main.type, 'tron-mainnet', 'mainnet advertises tron-mainnet');
+  t.ok(TRON_ADDRESS.test(main.address), 'still derives a valid address');
+  main.dispose();
+
+  // Default is the testnet, so nothing spends real funds by accident.
+  const def = await createPayments({ storageDir: dir });
+  t.is(def.type, 'tron-nile', 'defaults to the Nile testnet');
+  def.dispose();
+});
+
+test('an unknown network without a provider fails fast', async (t) => {
+  await t.exception(
+    createPayments({ storageDir: '/tmp/hyperwave-wallet-bad', network: 'x' }),
+    /unknown Tron network/,
+    'throws before any network call (must name a known network or a provider)'
+  );
+});
+
 test('TRX <-> sun conversion is 6-decimal exact', (t) => {
   t.is(toSun(1.5), 1500000n);
   t.is(toSun(0.000001), 1n, 'smallest unit (1 sun)');

@@ -18,6 +18,7 @@ const { payFee, confirmBurn, wireWallet } = require('./payments');
  * @property {string} [topicId] - Swarm topic id (isolates rings).
  * @property {boolean} [wallet] - Set `false` to run wallet-less (no burns/paid-gate/tips).
  * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by wallet.js).
+ * @property {Object} [walletOptions] - Opaque config forwarded to the payments factory. The default Tron wallet reads `{ network: 'mainnet' }` (opt into mainnet — testnet by default), `provider`, and (USDT) `usdtContract`.
  * @property {string} [swarmSeed] - Injected hex swarm-identity seed (else persisted at <storage>/swarm.seed).
  * @property {boolean} [autoSubscribe] - Set `false` for browse-then-pick: hold cores only for waves the host explicitly subscribes to (scaling.md Phase 2). Default true (auto-engage every announced wave).
  */
@@ -99,7 +100,11 @@ function createEngine({
     makePayments({
       storageDir,
       seed: config.seed,
-      log: (...args) => log('[wallet]', ...args)
+      log: (...args) => log('[wallet]', ...args),
+      // Opaque, wallet-specific config forwarded verbatim to the payments factory (e.g. the default
+      // Tron wallet reads `{ network: 'mainnet' }` / `provider` / `usdtContract`). Spread last so a
+      // host can override the defaults above.
+      ...(config.walletOptions || {})
     })
       .then(async (pay) => {
         payments = pay;

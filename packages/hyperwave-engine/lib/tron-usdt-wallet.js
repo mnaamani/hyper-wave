@@ -1,9 +1,10 @@
 // A USDT (TRC-20) wallet on Tron — an alternative payment mechanism to the native-TRX `TronWallet`.
 // It EXTENDS `TronWallet` (reusing the shared WDK account init, the address, dispose, and the burn
 // memo), overriding the currency operations to move USDT via the token contract instead of native
-// TRX. Its `type` is `'tron-usdt-nile'`, distinct from the native `'tron-nile'`, so on the wire a
-// USDT wave and a TRX wave are DIFFERENT payment mechanisms — a peer only joins a wave whose type
-// its own wallet matches (wave.js join gate).
+// TRX. Its `type` is `tron-usdt-<network>` (e.g. `tron-usdt-nile`), distinct from the native
+// `tron-<network>`, so on the wire a USDT wave and a TRX wave are DIFFERENT payment mechanisms — a
+// peer only joins a wave whose type its own wallet matches (wave.js join gate). Like the native
+// wallet, the network (nile default, mainnet opt-in) is an option (selects the RPC + the wire type).
 //
 // **USDT is a TRC-20 token, so a transfer costs TRX for GAS** (energy/bandwidth) — this wallet
 // pays fees in USDT but must also hold a little TRX to send. (This gas dependency is exactly why
@@ -28,10 +29,21 @@ const {
   initTronAccount,
   toSun,
   fromSun,
+  DEFAULT_TRON_NETWORK,
   BURN_ADDRESS
 } = require('./tron-wallet');
 
-const TRON_USDT_WALLET_TYPE = 'tron-usdt-nile'; // on-the-wire payment-mechanism id
+/**
+ * The USDT wallet's on-the-wire type id for a Tron network — `tron-usdt-<network>` (e.g.
+ * `tron-usdt-nile`, `tron-usdt-mainnet`). Distinct from the native `tron-<network>` AND per network.
+ * @param {string} network - The Tron network name (e.g. 'nile', 'mainnet').
+ * @returns {string} The wallet type id.
+ */
+const tronUsdtWalletType = (network) => 'tron-usdt-' + network;
+
+// The default-network ('nile') USDT type id — exported for reference; the live value is
+// `wallet.type` (network-derived), so a mainnet USDT wallet advertises `tron-usdt-mainnet`.
+const TRON_USDT_WALLET_TYPE = tronUsdtWalletType(DEFAULT_TRON_NETWORK);
 const FEE_USDT = 1; // participation fee, in USDT
 const TRANSFER_SELECTOR = 'a9059cbb'; // keccak256('transfer(address,uint256)')[0:4]
 // Fee-limit (energy cap) for a TRC-20 contract call — a token transfer needs one or it fails
@@ -47,6 +59,7 @@ class TronUsdtWallet extends TronWallet {
   #account;
   #tronweb;
   #usdtContract;
+  #network;
   #log;
 
   /**
@@ -56,18 +69,29 @@ class TronUsdtWallet extends TronWallet {
    * @param {Object} deps.tronweb - WDK's TronWeb (Bare-compatible).
    * @param {string} deps.address - The derived Tron address.
    * @param {string} deps.usdtContract - The USDT TRC-20 contract address (base58).
+   * @param {string} [deps.network] - The Tron network name (labels the wire type).
    * @param {(...args: any[]) => void} deps.log - Logger.
    */
-  constructor({ wallet, account, tronweb, address, usdtContract, log }) {
-    super({ wallet, account, tronweb, address, log }); // parent stores its own copies (dispose, address)
+  constructor({
+    wallet,
+    account,
+    tronweb,
+    address,
+    usdtContract,
+    network = DEFAULT_TRON_NETWORK,
+    log
+  }) {
+    // parent stores its own copies (dispose, address, network for `super.type`).
+    super({ wallet, account, tronweb, address, network, log });
     this.#account = account;
     this.#tronweb = tronweb;
     this.#usdtContract = usdtContract;
+    this.#network = network;
     this.#log = log;
   }
 
   get type() {
-    return TRON_USDT_WALLET_TYPE;
+    return tronUsdtWalletType(this.#network);
   }
 
   get fee() {
@@ -225,7 +249,10 @@ class TronUsdtWallet extends TronWallet {
  * @param {string} options.usdtContract - The USDT TRC-20 contract address (base58) — REQUIRED (the
  *   Nile testnet USDT you faucet-funded; there is no safe default).
  * @param {string} [options.seed] - Injected seed phrase.
- * @param {string} [options.provider] - Tron JSON-RPC provider URL (defaults to Nile testnet).
+ * @param {string} [options.network] - Tron network name (`nile` default, `mainnet` opt-in) —
+ *   selects the RPC provider AND the wire type (`tron-usdt-<network>`). Note the mainnet USDT
+ *   contract differs from Nile's — pass the matching `usdtContract`.
+ * @param {string} [options.provider] - Tron JSON-RPC provider URL (overrides the network default).
  * @param {(...args: any[]) => void} [options.log] - Logger.
  * @returns {Promise<TronUsdtWallet>} The ready wallet.
  */
@@ -240,6 +267,7 @@ async function createTronUsdtWallet({ usdtContract, ...options } = {}) {
 module.exports = {
   TronUsdtWallet,
   createTronUsdtWallet,
+  tronUsdtWalletType,
   TRON_USDT_WALLET_TYPE,
   FEE_USDT
 };

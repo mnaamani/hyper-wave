@@ -404,14 +404,16 @@ and **`payments.js`** (the wallet-agnostic fee flows: `payFee`/`confirmBurn`/`wi
 
 The engine talks to payments only through the **`Wallet`** interface — the members any wallet must
 implement (`type`, `fee`, `address`, `balances`, `send`, `burn`, `verifyBurnTx`, `transactions`,
-`dispose`). The default is **`TronWallet`** (self-custodial Tron Nile testnet, WDK), built by
-`createPayments` (`async` because WDK is ESM-only). An app plugs in its **own** payment mechanism
-by injecting a factory returning any `Wallet` subclass — `createEngine({ deps: {
-createPayments: async () => new MyWallet() } })`.
+`dispose`). The default is **`TronWallet`** (self-custodial Tron, WDK), built by `createPayments`
+(`async` because WDK is ESM-only). An app plugs in its **own** payment mechanism by injecting a
+factory returning any `Wallet` subclass — `createEngine({ deps: { createPayments: async () => new
+MyWallet() } })`.
 
 Each wallet declares a **`type`** (e.g. `'tron-nile'`) that travels on the wire (wave-announce/
 start/sync), so a joiner only joins a wave whose payment mechanism its own wallet supports (§ the
 `walletType` gate in `protocol.md` §9). The `fee` is the wallet's own participation-fee amount.
+The **`TronWallet` type is network-derived** — `tron-<network>` (`tron-nile`, `tron-mainnet`, …) —
+so testnet and mainnet are automatically distinct mechanisms and their waves never mix.
 
 ```js
 const { Wallet } = require('hyperwave-engine'); // the base class to extend for a custom wallet
@@ -447,8 +449,9 @@ class MyWallet extends Wallet {
 **Bundled alternative — `TronUsdtWallet` (USDT / TRC-20).** A second Tron wallet that pays in USDT
 instead of native TRX, **extending `TronWallet`** (it reuses the shared WDK account + address +
 dispose and overrides the currency ops to move USDT via the token contract). Its `type` is
-`'tron-usdt-nile'` — a **distinct** payment mechanism, so a USDT wave and a TRX wave don't mix (a
-TRX-wallet peer can't join a USDT wave, and vice versa). An app opts in by injecting it:
+`tron-usdt-<network>` (e.g. `'tron-usdt-nile'`) — a **distinct** payment mechanism, so a USDT wave
+and a TRX wave don't mix (a TRX-wallet peer can't join a USDT wave, and vice versa). An app opts in
+by injecting it:
 
 ```js
 const { createTronUsdtWallet } = require('hyperwave-engine');
@@ -490,6 +493,28 @@ await pay.verifyBurnTx('deadbeef…', {
 await pay.transactions(10); // → recent on-chain txs, both directions
 pay.dispose();
 ```
+
+**Selecting the network (testnet → mainnet).** The same `TronWallet`/`TronUsdtWallet` implementation
+serves every Tron network — pass `network` (default `'nile'`; `'mainnet'`, `'shasta'`, or any name +
+an explicit `provider` for a custom node). The network selects both the RPC endpoint **and** the
+wire `type`, so mainnet peers (`tron-mainnet`) and testnet peers (`tron-nile`) can't join each
+other's waves. **Mainnet is opt-in** — the default is the testnet, so nothing spends real funds by
+accident. A host reaches it through `config.walletOptions` (forwarded verbatim to the payments
+factory), no custom wallet needed:
+
+```js
+createEngine({
+  storageDir,
+  emit,
+  config: { walletOptions: { network: 'mainnet' } } // real funds — opt-in
+});
+// USDT on mainnet: { walletOptions: { network: 'mainnet', usdtContract: 'T…MainnetUSDT' } }
+// (the mainnet USDT contract differs from Nile's — pass the matching address)
+```
+
+Or directly: `createPayments({ storageDir, network: 'mainnet' })` /
+`createTronUsdtWallet({ storageDir, network: 'mainnet', usdtContract })`. The headless CLI
+(`bin/wave.run.js`) takes `TRON_NETWORK` + optional `TRON_PROVIDER` env vars.
 
 Wire it into a `createWave` instance and run the fee flow:
 
