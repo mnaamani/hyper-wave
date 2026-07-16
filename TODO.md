@@ -329,19 +329,20 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       stream, so `app.js` / `useEngine.js` result-handling was unchanged. Remaining runtime check
       (can't be done headlessly): confirm the desktop app + iOS sim actually round-trip (bare-rpc in
       Electron main / Hermes — low risk, load-time safe, stream paths unused).
-- [ ] **Secure seed storage on desktop (OS keychain via Electron `safeStorage`).** Today
-      `wallet.seed` + `swarm.seed` are **plaintext files**; file permissions only stop other OS
-      users, not disk theft / backups / casual inspection. Move desktop secret storage to the OS
-      keychain: Electron **main** owns `safeStorage` (encrypt-at-rest, key in Keychain/DPAPI/
-      libsecret) and **injects** the decrypted seeds into the Bare worker over the IPC pipe (not
-      argv/env) — reusing the injection seam mobile already uses (`createPayments({ seed })`,
-      `createWave({ swarmSeed })`, both used-verbatim-never-written). Requires making the desktop
-      worker **init-message-driven** (like `worklet/app.js`) and a `config.swarmSeed` passthrough in
-      `engine.js`; the engine's plaintext files stay as the headless/dev fallback. Handle the Linux
-      `basic_text` fallback (warn, don't imply false security) + plaintext→`.enc` migration. Honest
-      ceiling: protects at-rest / cross-user, **not** same-user malware (needs a signed build +
-      keychain ACL, ultimately hardware wallet). Low urgency (testnet, no real value) but the right
-      foundation for mainnet. **Full design: [`apps/docs/secure-seed-storage.md`](apps/docs/secure-seed-storage.md).**
+- [x] **Secure seed storage on desktop (OS keychain via Electron `safeStorage`) — DONE (2026-07-16).**
+      Electron **main** owns `safeStorage`, encrypts both seeds at `<storage>/{wallet,swarm}.seed.enc`,
+      and **injects** the decrypted values into the Bare worker over the IPC pipe (never argv/env). The
+      desktop worker is now **init-message-driven** (`serveEngine` `onBootstrap`, like `worklet/app.js`);
+      the engine was **unchanged** (it already forwards `config.seed`/`config.swarmSeed`, used-verbatim-
+      never-written). Bootstrapping chose **option B** (main generates) over the doc's option A: WDK's
+      generator is the standard `bip39@3.1.0`, so main mints a WDK-compatible mnemonic with the same lib
+      (verified end-to-end) + a 32-byte-hex swarm seed — no report-seed round-trip. Handles the Linux
+      `basic_text` fallback (warn + keep the engine's plaintext files, no false security) and
+      plaintext→`.enc` migration (adopt + delete). Honest ceiling unchanged: protects at-rest /
+      cross-user, **not** same-user malware (needs a signed build + keychain ACL, ultimately a hardware
+      wallet). **Still pending: manual GUI verification** (no headless Electron in CI) — first-run
+      `.enc` creation + no plaintext, restart reuse, migration, stable wallet address across restarts.
+      **Design + as-built: [`apps/docs/secure-seed-storage.md`](apps/docs/secure-seed-storage.md).**
 - [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
       `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
       commit `hyperwave:<waveId>:<peerId>` in an **`OP_RETURN`** output (≤ 80 bytes, with the
@@ -462,11 +463,11 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 ### Housekeeping
 
 - [~] Surface `wave-unpaid` / `join-blocked` more visibly in the UI. **Partially done
-      (desktop):** the renderer now shows a **reason-specific** message for each `join-blocked`
-      (`roster-full` → "this wave is full — spectating", `wallet-unsupported` → "needs a
-      &lt;walletType&gt; wallet", `pending`/`rejected` → payment states) and drops the lobby into
-      spectate for the terminal ones (`app.js`); `wave-unpaid` already un-dims + closes. Still
-      status-line-based (a toast/modal would be more prominent) — that's the remaining polish.
+  (desktop):** the renderer now shows a **reason-specific** message for each `join-blocked`
+  (`roster-full` → "this wave is full — spectating", `wallet-unsupported` → "needs a
+  &lt;walletType&gt; wallet", `pending`/`rejected` → payment states) and drops the lobby into
+  spectate for the terminal ones (`app.js`); `wave-unpaid` already un-dims + closes. Still
+  status-line-based (a toast/modal would be more prominent) — that's the remaining polish.
 - [x] **Show the initiator-set join fee before opting in (desktop).** The `fee` now rides the
       `wave-announce` event; the lobby panel shows "· fee N TRX" and the join button reads
       "✋ Count me in (N TRX)" (`lobby.js`), so a joiner sees the cost up front.

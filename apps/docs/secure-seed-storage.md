@@ -1,9 +1,20 @@
-# HyperWave — Secure Seed Storage (design / plan)
+# HyperWave — Secure Seed Storage (design + as-built)
 
-**Status:** Proposed — not implemented. Today both secrets are persisted as **plaintext files**
-(`<storage>/wallet.seed`, `<storage>/swarm.seed`). This note designs moving desktop secret storage
-to the OS keychain via Electron `safeStorage`, reusing the seed-injection seam the engine already
-exposes. Read [`architecture.md`](./hosting.md) and [`protocol.md`](../../packages/hyperwave-engine/docs/protocol.md) first.
+**Status: IMPLEMENTED (desktop, 2026-07-16).** Electron main owns the OS keychain via
+`safeStorage`, encrypts both seeds at `<storage>/{wallet,swarm}.seed.enc`, and injects the decrypted
+values into the Bare worker over the IPC pipe (`workers/hyperwave.js` is now init-message-driven,
+like the mobile worklet). No engine change was needed — the injection seam already existed. The
+plaintext-file path remains only as the **headless / dev / no-keychain fallback**.
+
+**Bootstrapping chose option (B), not (A):** main generates the seeds itself. §6 recommended (A)
+"worker generates, main persists" to avoid duplicating WDK's seed logic — but WDK's generator IS the
+standard `bip39` lib (`bip39@3.1.0`, verified: `getRandomSeedPhrase` → `bip39.generateMnemonic`, and
+`WalletAccountTron` validates with `bip39.validateMnemonic`). So main mints a fully WDK-compatible
+mnemonic with the same `bip39` (proven end-to-end: a `generateMnemonic()` seed derives a valid Tron
+address through WDK), plus a 32-byte hex swarm seed — no report-seed round-trip, and the engine stays
+untouched. The rest of this note is the original design; §6/§9 annotated with what shipped.
+
+Read [`hosting.md`](./hosting.md) and [`protocol.md`](../../packages/hyperwave-engine/docs/protocol.md) first.
 
 ## 1. Problem
 
@@ -119,6 +130,14 @@ First run has no `.enc` file. Two options:
 **Recommendation: (A)** — reuse the existing generators, and the "emit seed to host to store"
 message is a small, explicit addition. The seed only crosses the in-process IPC pipe, never argv/env.
 
+> **As-built: (B) was chosen.** (A)'s only downside — "duplicating WDK's BIP39 logic" — turned out
+> to be a non-issue: WDK generates and validates with the standard `bip39` lib (`bip39@3.1.0`), which
+> is already a dependency, so main uses the _same_ library and there is no divergence or format risk
+> (verified: a `bip39.generateMnemonic()` seed derives a valid Tron address through WDK; the swarm
+> seed is `crypto.randomBytes(32).toString('hex')`, the format `loadOrCreateSwarmSeed` expects). (B)
+> keeps generation, storage, injection, and migration entirely in main and leaves the engine
+> untouched — no report-seed round-trip, no host-managed persist mode threaded through the engine.
+
 ## 7. Linux caveat (must handle)
 
 On Linux, if no keyring backend is available, `safeStorage` **silently falls back to plaintext**
@@ -140,19 +159,21 @@ would be worse than today — it would _imply_ security we don't have. Also gate
   inside the per-run `hyperwave/` store that `createWave` wipes — same reasoning as the current
   seed files being siblings of that store.
 
-## 9. Work required (summary)
+## 9. Work required (summary) — as-built
 
-- `electron/main.js` — a small secret-store helper: `isEncryptionAvailable()` + backend check,
-  read/decrypt-or-generate/encrypt/write per seed, plaintext→`.enc` migration, deliver via the init
-  message. (~40–60 lines.)
-- `workers/hyperwave.js` — become **init-message-driven** (wait for `{ type:'init', config }` before
-  calling `createEngine`), mirroring `worklet/app.js`. Also handle the first-run "here is the
-  generated seed, please store it" message back to main (option A).
-- `engine.js` — forward `config.swarmSeed` to `createWave` (one line); optionally surface the
-  first-run generated seeds so the host can persist them.
-- No `wave.js` / `wallet.js` change — both already support injected, non-persisted seeds.
-- Docs: fold the outcome into `architecture.md` (the worker init flow) and note it in
-  `protocol.md` §1 once shipped.
+- `electron/main.js` — the secret-store helper shipped: `encryptionSecure()` (`isEncryptionAvailable`
+  - the Linux `basic_text` backend check), `resolveSeed()` (decrypt existing `.enc` → else adopt a
+    legacy plaintext seed → else `generate()`; then encrypt + delete any plaintext), `resolveSeeds()`
+    (both seeds, or `{}` when the OS can't encrypt), and `client.call('init', { storageDir, config })`
+    delivering them over the pipe. The `.enc` files live at `<storage>/{wallet,swarm}.seed.enc`
+    (co-located with the legacy plaintext seeds, outside the wiped `hyperwave/` store).
+- `workers/hyperwave.js` — now **init-message-driven** (builds the engine in serveEngine's
+  `onBootstrap` on the `init` command), mirroring `worklet/app.js`. **No** report-seed round-trip
+  (option B: main generates).
+- `apps/desktop/package.json` — adds `bip39@3.1.0` (main's mnemonic generator; the same lib WDK uses).
+- **No engine change at all** — `engine.js` already forwards `config.seed`/`config.swarmSeed`, and
+  `wave.js`/`wallet.js` already take the injected, non-persisted branch. (Option B avoided the
+  report-seed/host-persist-mode plumbing option A would have needed.)
 
 ## 10. Open questions
 

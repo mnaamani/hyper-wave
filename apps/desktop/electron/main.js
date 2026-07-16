@@ -4,10 +4,14 @@ const {
   Menu,
   ipcMain,
   shell,
-  clipboard
+  clipboard,
+  safeStorage
 } = require('electron');
 const os = require('os');
+const fs = require('fs');
 const path = require('path');
+const nodeCrypto = require('crypto');
+const bip39 = require('bip39');
 const PearRuntime = require('pear-runtime');
 const FramedStream = require('framed-stream');
 // The client half of the bare-rpc host<->UI seam. Only lib/rpc is required (not the whole engine),
@@ -96,6 +100,105 @@ function sendToAll(name, data) {
   }
 }
 
+// --- Secret store (apps/docs/secure-seed-storage.md) ---------------------------------------------
+// The wallet + swarm seeds are long-lived secrets. Rather than the (Bare) worker writing them as
+// plaintext files, Electron main encrypts them with the OS keychain (safeStorage — a main-process-
+// only API) and injects the decrypted values into the worker over the IPC pipe. The engine is
+// already injection-ready (`config.seed` / `config.swarmSeed`, used verbatim + never persisted).
+
+// True only when the OS actually keychain-encrypts. On Linux with no keyring backend, safeStorage
+// silently uses 'basic_text' (plaintext) — we treat that as unavailable so we never write a `.enc`
+// file that is really cleartext (implying security we don't have); the worker keeps its own
+// plaintext seed files instead (unchanged behaviour) with a warning.
+function encryptionSecure() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return false;
+    }
+    if (
+      isLinux &&
+      typeof safeStorage.getSelectedStorageBackend === 'function' &&
+      safeStorage.getSelectedStorageBackend() === 'basic_text'
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Resolve one seed to inject: decrypt an existing keychain blob, else adopt a legacy plaintext seed
+// file (upgrade from a pre-secure-storage build) into one, else generate a fresh secret. The `.enc`
+// and any legacy plaintext live at <dir>/<name>.seed[.enc] — siblings of (not inside) the per-run
+// hyperwave store the engine wipes. Best-effort: any failure logs and returns what it can.
+function resolveSeed({ dir, name, generate }) {
+  const encFile = path.join(dir, name + '.seed.enc');
+  const plainFile = path.join(dir, name + '.seed');
+  try {
+    if (fs.existsSync(encFile)) {
+      return safeStorage.decryptString(fs.readFileSync(encFile));
+    }
+  } catch (err) {
+    console.error(`[seed] could not decrypt the ${name} seed:`, err.message);
+  }
+  // First run OR a plaintext-build upgrade: reuse an existing plaintext seed if present (its on-disk
+  // format is already the injectable one — a mnemonic / 32-byte hex), else mint a new secret.
+  let seed = null;
+  try {
+    if (fs.existsSync(plainFile)) {
+      seed = fs.readFileSync(plainFile, 'utf8').trim();
+    }
+  } catch {}
+  if (!seed) {
+    seed = generate();
+  }
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(encFile, safeStorage.encryptString(seed));
+    if (fs.existsSync(plainFile)) {
+      // Migrated: the secret is now keychain-encrypted, so remove the plaintext copy.
+      try {
+        fs.rmSync(plainFile);
+      } catch (err) {
+        console.error(
+          `[seed] could not remove the plaintext ${name} seed:`,
+          err.message
+        );
+      }
+    }
+  } catch (err) {
+    console.error(`[seed] could not persist the ${name} seed:`, err.message);
+  }
+  return seed;
+}
+
+// Resolve both seeds for injection into the worker, or {} to leave the worker on its plaintext-file
+// fallback (when the OS can't encrypt). `dir` is the instance storage dir.
+function resolveSeeds(dir) {
+  if (!encryptionSecure()) {
+    console.warn(
+      '[seed] OS keychain encryption unavailable — the engine will use plaintext seed files ' +
+        '(NOT encrypted). See apps/docs/secure-seed-storage.md.'
+    );
+    return {};
+  }
+  return {
+    // 12-word BIP39 mnemonic — the same bip39 lib+version WDK validates/derives with.
+    seed: resolveSeed({
+      dir,
+      name: 'wallet',
+      generate: () => bip39.generateMnemonic()
+    }),
+    // 32-byte hex — the swarm-identity seed format loadOrCreateSwarmSeed expects.
+    swarmSeed: resolveSeed({
+      dir,
+      name: 'swarm',
+      generate: () => nodeCrypto.randomBytes(32).toString('hex')
+    })
+  };
+}
+
 function getWorker(specifier) {
   if (workers.has(specifier)) {
     return workers.get(specifier);
@@ -170,6 +273,13 @@ function getWorker(specifier) {
       stream: pipe,
       onEvent: (msg) => sendToAll('hw:event', msg)
     });
+    // Init the worker: deliver the storage dir + the keychain-decrypted seeds over the pipe (never
+    // argv/env — a secret must not be visible to `ps`). The worker builds the engine on receipt
+    // (serveEngine's onBootstrap). Sent before the renderer can issue any command (getWorker runs
+    // from the renderer's startWorker request, and the framed pipe buffers until the worker reads).
+    Promise.resolve(
+      client.call('init', { storageDir: dir, config: resolveSeeds(dir) })
+    ).catch((err) => console.error('[main] worker init failed:', err.message));
     ipcMain.handle('hw:call', (evt, payload) =>
       client.call(payload.type, payload.args || {})
     );
