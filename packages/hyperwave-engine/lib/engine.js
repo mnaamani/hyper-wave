@@ -8,7 +8,8 @@
 // (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('./wave');
-const { createPayments, payFee, confirmBurn, wireWallet } = require('./wallet');
+const { createPayments } = require('./tron-wallet'); // the default wallet (deps can override)
+const { payFee, confirmBurn, wireWallet } = require('./payments');
 
 /**
  * Host-supplied engine configuration (only these fields are read).

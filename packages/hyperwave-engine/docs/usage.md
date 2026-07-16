@@ -396,13 +396,17 @@ buildFeed([op]); // → [op]
 
 ---
 
-## 9. Payments — `wallet.js`
+## 9. Payments — `wallet.js` / `tron-wallet.js` / `payments.js`
 
-The engine talks to payments through the abstract **`Wallet`** base class — the concrete interface
-any wallet must implement (`type`, `fee`, `address`, `balances`, `send`, `burn`, `verifyBurnTx`,
-`transactions`, `dispose`). The default is **`TronWallet`** (self-custodial Tron Nile testnet, WDK),
-built by `createPayments` (`async` because WDK is ESM-only). An app plugs in its **own** payment
-mechanism by injecting a factory returning any `Wallet` subclass — `createEngine({ deps: {
+The payment layer is three modules: **`wallet.js`** (the abstract **`Wallet`** base class — the
+interface), **`tron-wallet.js`** (the default **`TronWallet`** implementation + `createPayments`),
+and **`payments.js`** (the wallet-agnostic fee flows: `payFee`/`confirmBurn`/`wireWallet`).
+
+The engine talks to payments only through the **`Wallet`** interface — the members any wallet must
+implement (`type`, `fee`, `address`, `balances`, `send`, `burn`, `verifyBurnTx`, `transactions`,
+`dispose`). The default is **`TronWallet`** (self-custodial Tron Nile testnet, WDK), built by
+`createPayments` (`async` because WDK is ESM-only). An app plugs in its **own** payment mechanism
+by injecting a factory returning any `Wallet` subclass — `createEngine({ deps: {
 createPayments: async () => new MyWallet() } })`.
 
 Each wallet declares a **`type`** (e.g. `'tron-nile'`) that travels on the wire (wave-announce/

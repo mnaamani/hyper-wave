@@ -12,7 +12,7 @@
 const env = require('bare-env');
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('../lib/wave.js');
-const { payFee, confirmBurn, wireWallet } = require('../lib/wallet.js');
+const { payFee, confirmBurn, wireWallet } = require('../lib/payments.js');
 
 const name = Bare.argv[2] || 'peer';
 const storageDir = Bare.argv[3];
@@ -172,7 +172,7 @@ async function joinAndBurn() {
 // env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
 // WALLET_SEND=<addr>:<amt> -> also do a one-off TRX transfer (funded wallets only).
 if (env.WALLET) {
-  const { createPayments } = require('../lib/wallet.js');
+  const { createPayments } = require('../lib/tron-wallet.js');
   createPayments({
     storageDir,
     log: (...args) => console.log(`[${name}] wallet`, ...args)
