@@ -11,11 +11,17 @@
 // balance vs the fee, not the TRX gas — an under-gassed send surfaces as a `burn-result: failed`
 // rather than a fail-fast. USDT is 6-decimal (like TRX↔sun), so toSun/fromSun are reused.
 //
-// NOTE: the on-chain overrides (balances/send/burn/verifyBurnTx/transactions) build standard
-// TRC-20 `transfer(address,uint256)` calls via TronWeb and are **pending Nile verification** — as
-// with the native `TronWallet`, the on-chain path is de-risked by the on-chain e2e tier / a spike,
-// not by offline unit tests (which cover derivation + the interface). Supply the correct Nile USDT
-// contract address via `usdtContract`.
+// Uses WDK's own TRC-20 token API on the account (`getTokenBalance` for balances, `transfer` for
+// sends — both from wdk-wallet-tron, which handle the fee-limit + fee quoting). The BURN is the one
+// op WDK's `transfer` can't do: it attaches no on-chain memo, and the burn must commit the wave via
+// `hyperwave:<waveId>:<peerId>`. So burn hand-builds the same `transfer(address,uint256)` call (WITH
+// a feeLimit) + `addUpdateData(memo)` and lets WDK sign+send it — the same pattern the native
+// TronWallet uses for its memo'd burn. `verifyBurnTx`/`transactions` are read/parse paths with no
+// WDK equivalent (raw TronWeb).
+//
+// NOTE: the on-chain paths are **pending Nile verification** — as with the native `TronWallet`, the
+// on-chain behaviour is de-risked by the on-chain e2e tier / a spike, not offline unit tests (which
+// cover derivation + the interface). Supply the correct Nile USDT contract address via `usdtContract`.
 const b4a = require('b4a');
 const {
   TronWallet,
@@ -28,6 +34,9 @@ const {
 const TRON_USDT_WALLET_TYPE = 'tron-usdt-nile'; // on-the-wire payment-mechanism id
 const FEE_USDT = 1; // participation fee, in USDT
 const TRANSFER_SELECTOR = 'a9059cbb'; // keccak256('transfer(address,uint256)')[0:4]
+// Fee-limit (energy cap) for a TRC-20 contract call — a token transfer needs one or it fails
+// out-of-energy. Matches wdk-wallet-tron's DEFAULT_FEE_LIMIT_SUN (used by account.transfer).
+const TRC20_FEE_LIMIT_SUN = 15_000_000; // 15 TRX
 
 /**
  * A self-custodial Tron wallet that pays in **USDT (TRC-20)** rather than native TRX. Constructed
@@ -65,24 +74,20 @@ class TronUsdtWallet extends TronWallet {
     return FEE_USDT;
   }
 
-  // The USDT token balance (balanceOf, a constant/read call), in whole USDT.
+  // The USDT token balance (WDK's TRC-20 balanceOf), in whole USDT.
   async balances() {
-    const res = await this.#tronweb.transactionBuilder.triggerConstantContract(
-      this.#usdtContract,
-      'balanceOf(address)',
-      {},
-      [{ type: 'address', value: this.address }],
-      this.address
-    );
-    const raw = BigInt('0x' + (res?.constant_result?.[0] || '0'));
+    const raw = await this.#account.getTokenBalance(this.#usdtContract);
     return { address: this.address, trx: fromSun(raw) };
   }
 
-  // Send `amount` USDT to a Tron address (a TRC-20 transfer; gas paid in TRX). WDK signs+broadcasts.
+  // Send `amount` USDT to a Tron address — WDK's own TRC-20 transfer (handles fee-limit + quoting;
+  // gas paid in TRX). No memo needed for a plain send.
   async send(recipient, amount) {
-    const res = await this.#account.sendTransaction(
-      await this.#buildTransfer(recipient, amount)
-    );
+    const res = await this.#account.transfer({
+      token: this.#usdtContract,
+      recipient,
+      amount: toSun(amount)
+    });
     this.#log('sent', amount, 'USDT ->', recipient, 'hash', res.hash);
     return { hash: res.hash, fee: res.fee };
   }
@@ -109,13 +114,15 @@ class TronUsdtWallet extends TronWallet {
     return { hash: res.hash, fee: res.fee };
   }
 
-  // Build (unsigned) a TRC-20 transfer(recipient, amount*1e6) on the USDT contract.
+  // Build (unsigned) a TRC-20 transfer(recipient, amount) on the USDT contract WITH a feeLimit (a
+  // contract call needs one or it fails out-of-energy). Used only by burn(), which then attaches
+  // the memo (addUpdateData) — the reason it hand-builds instead of WDK's memo-less transfer().
   async #buildTransfer(recipient, amount) {
     const { transaction } =
       await this.#tronweb.transactionBuilder.triggerSmartContract(
         this.#usdtContract,
         'transfer(address,uint256)',
-        {},
+        { feeLimit: TRC20_FEE_LIMIT_SUN },
         [
           { type: 'address', value: recipient },
           { type: 'uint256', value: toSun(amount).toString() }
