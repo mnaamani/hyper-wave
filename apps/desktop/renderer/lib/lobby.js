@@ -13,6 +13,7 @@ let joined = false;
 let deadline = 0;
 let timer = null;
 let onCancelCb = null;
+let fee = null; // the initiator-set participation fee (TRX), null on an unpaid/wallet-less wave
 
 // Register what happens when a non-joiner dismisses the lobby (app.js un-dims + resumes browsing).
 export function onCancel(cb) {
@@ -22,6 +23,7 @@ export function onCancel(cb) {
 export function open(evt) {
   count = evt.count || 1;
   joined = !!evt.mine || !!evt.joined;
+  fee = typeof evt.fee === 'number' ? evt.fee : null;
   deadline = performance.now() + (evt.lobbyMs || 15000);
   // a non-joiner gets Join + "Not now" (dismiss to keep browsing the previous gallery)
   joinBtn.style.display = joined ? 'none' : 'inline-block';
@@ -45,7 +47,11 @@ export function setJoinable(ok) {
     return;
   }
   joinBtn.disabled = !ok;
-  joinBtn.innerText = ok ? '✋ Count me in' : '⏳ verifying payment…';
+  // Show the fee on the button so a joiner sees the cost before opting in (the initiator sets it).
+  const feeSuffix = fee !== null ? ` (${fee} TRX)` : '';
+  joinBtn.innerText = ok
+    ? `✋ Count me in${feeSuffix}`
+    : '⏳ verifying payment…';
 }
 
 export function close() {
@@ -59,7 +65,8 @@ function paint() {
   }
   const secs = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
   countEl.innerText = secs;
-  msgEl.innerText = `wave forming · ${joined ? 'you are in' : 'join in?'} · ${count} in`;
+  const feeNote = fee !== null ? ` · fee ${fee} TRX` : '';
+  msgEl.innerText = `wave forming · ${joined ? 'you are in' : 'join in?'} · ${count} in${feeNote}`;
 }
 
 // Paint now, then re-arm — a self-rescheduling timeout (CLAUDE.md Code Style: no setInterval).

@@ -1134,6 +1134,7 @@ function createWave({
    * @param {number} [opts.dur] Lobby duration in ms (defaults to lobbyMs).
    * @param {boolean} [opts.silent] Suppress the wave-announce UI event.
    * @param {string|null} [opts.walletType] The wave's payment-mechanism id (paid waves), so join() can gate on support.
+   * @param {number|null} [opts.fee] The wave's initiator-set participation fee (paid waves), surfaced on the wave-announce event so a host can show the cost before opting in.
    */
   function enterLobby({
     waveId,
@@ -1225,7 +1226,8 @@ function createWave({
       count: rosterCount(wave),
       lobbyMs: dur,
       paid: wave.paid, // 'verified' (enforcement off / already paid) | 'pending' (verifying)
-      walletType: wave.walletType // the payment mechanism (null on an unpaid/wallet-less wave)
+      walletType: wave.walletType, // the payment mechanism (null on an unpaid/wallet-less wave)
+      fee: wave.fee // the initiator-set participation fee (null on an unpaid/wallet-less wave)
     });
   }
 

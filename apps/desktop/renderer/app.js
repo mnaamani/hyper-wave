@@ -176,8 +176,23 @@ const EVENT_HANDLERS = {
     lobby.close();
   },
 
-  'join-blocked': () => {
-    hud.waveStatus('⏳ verifying the wave’s kick-off payment…');
+  // The engine refused a join and says WHY (reason). `pending` is transient — the join button
+  // re-enables when `wave-verified` fires, so keep the lobby open. Every other reason is terminal
+  // (I can’t take a seat), so drop the lobby and let the peer keep browsing (spectate), like "Not now".
+  'join-blocked': (evt) => {
+    const messageByReason = {
+      'roster-full': '🚧 this wave is full — spectating',
+      'wallet-unsupported': evt.walletType
+        ? `💸 can’t join — this wave needs a ${evt.walletType} wallet`
+        : '💸 can’t join — no compatible wallet',
+      pending: '⏳ verifying the wave’s kick-off payment…',
+      rejected: '⚠️ the wave’s kick-off payment was rejected'
+    };
+    hud.waveStatus(messageByReason[evt.reason] || '🚫 can’t join this wave');
+    if (evt.reason !== 'pending') {
+      setDim(false);
+      lobby.close();
+    }
   },
 
   // opted in - swap the join panel for the camera

@@ -461,5 +461,15 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 
 ### Housekeeping
 
-- [ ] Surface `wave-unpaid` / `join-blocked` more visibly in the UI (currently status line)
-- [ ] Configurable fee/tip amounts (constants in `wallet.js` / renderer)
+- [~] Surface `wave-unpaid` / `join-blocked` more visibly in the UI. **Partially done
+      (desktop):** the renderer now shows a **reason-specific** message for each `join-blocked`
+      (`roster-full` → "this wave is full — spectating", `wallet-unsupported` → "needs a
+      &lt;walletType&gt; wallet", `pending`/`rejected` → payment states) and drops the lobby into
+      spectate for the terminal ones (`app.js`); `wave-unpaid` already un-dims + closes. Still
+      status-line-based (a toast/modal would be more prominent) — that's the remaining polish.
+- [x] **Show the initiator-set join fee before opting in (desktop).** The `fee` now rides the
+      `wave-announce` event; the lobby panel shows "· fee N TRX" and the join button reads
+      "✋ Count me in (N TRX)" (`lobby.js`), so a joiner sees the cost up front.
+- [ ] Configurable fee/tip amounts. **The participation fee is now engine-configurable**
+      (`createPayments({ fee })` / `config.walletOptions.fee`, initiator-set per wave) — remaining:
+      expose it in the desktop UI (a settings input) + configurable tip amounts.
