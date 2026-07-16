@@ -161,3 +161,131 @@ test(
     );
   }
 );
+
+// The waveIds a peer saw reach a given lifecycle event (started / completed), read from its
+// own event stream. Concurrent waves each carry a distinct waveId, so a set of size ≥ 2 is the
+// proof that the singleton is gone.
+function waveIdsForEvent(peer, name) {
+  const ids = new Set();
+  for (const evt of peer.events) {
+    if (evt.event === name && evt.waveId) {
+      ids.add(evt.waveId);
+    }
+  }
+  return ids;
+}
+
+// Concurrent waves (scaling.md Phase 1): with the singleton + lower-waveId tie-break gone, TWO
+// initiators announcing at once no longer collapse to one wave — both run to completion, and a
+// third peer adopts + sweeps + completes BOTH. (Under the old rule one initiator's wave would be
+// superseded and only one waveId would ever complete cluster-wide.)
+test(
+  `two concurrent initiators run two independent waves (${PEER_COUNT} peers)`,
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const cluster = await new Cluster({ lobbyMs: LOBBY_MS }).start();
+    t.teardown(() => cluster.destroy());
+
+    // p1 AND p2 both initiate (both carry START); everyone else just auto-joins/enters. Each
+    // peer adopts every announced wave regardless of which one it opts into.
+    const peers = [];
+    for (let i = 1; i <= PEER_COUNT; i++) {
+      peers.push(
+        cluster.launch('p' + i, {
+          AUTOJOIN: '1',
+          AUTOENTRY: '1',
+          ...(process.env.E2E_MAX_PEERS
+            ? { HYPERWAVE_MAX_PEERS: process.env.E2E_MAX_PEERS }
+            : {}),
+          ...(i === 1 || i === 2 ? { START: String(START_TARGET) } : {})
+        })
+      );
+      await sleep(400);
+    }
+
+    // both initiators start their own wave
+    t.ok(
+      await peers[0].waitForEvent('started', WAIT_MS),
+      'p1 started its wave'
+    );
+    t.ok(
+      await peers[1].waitForEvent('started', WAIT_MS),
+      'p2 started its wave'
+    );
+    const waveA = [...waveIdsForEvent(peers[0], 'started')][0];
+    const waveB = [...waveIdsForEvent(peers[1], 'started')][0];
+    t.ok(waveA && waveB && waveA !== waveB, 'two distinct waves are running');
+
+    // a non-initiator adopts and completes BOTH concurrent waves (proving no singleton/tie-break)
+    const spectator = peers[2];
+    const bothCompleted = await spectator.waitForEvent(
+      'completed',
+      WAIT_MS,
+      () => waveIdsForEvent(spectator, 'completed').size >= 2
+    );
+    t.ok(bothCompleted, 'a third peer completed two concurrent waves');
+    const completedIds = waveIdsForEvent(spectator, 'completed');
+    t.ok(
+      completedIds.has(waveA) && completedIds.has(waveB),
+      'both wave A and wave B completed on the same peer'
+    );
+  }
+);
+
+// Subscription layer (scaling.md Phase 2/3): with HYPERWAVE_AUTO_SUBSCRIBE=0, a peer stays merely
+// AWARE of an announced wave until it explicitly joins or subscribes. A SPECTATE peer subscribes
+// (holds the feed, watches the sweep) WITHOUT joining/posting — proving subscribe-without-join
+// gives you the full feed, and that the browse-then-pick path engages the feed on demand.
+test(
+  `browse-then-pick: a spectator subscribes to the feed without joining (${PEER_COUNT} peers)`,
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const cluster = await new Cluster({ lobbyMs: LOBBY_MS }).start();
+    t.teardown(() => cluster.destroy());
+
+    // Everyone runs autoSubscribe=false (browse-then-pick). p1 initiates + joins; p2..p(N-1) join;
+    // pN only SPECTATEs (subscribe, no join, no entry). Joiners = N-1; the spectator adds nothing.
+    const peers = [];
+    for (let i = 1; i <= PEER_COUNT; i++) {
+      const isSpectator = i === PEER_COUNT;
+      peers.push(
+        cluster.launch('p' + i, {
+          HYPERWAVE_AUTO_SUBSCRIBE: '0',
+          ...(isSpectator
+            ? { SPECTATE: '1' }
+            : { AUTOJOIN: '1', AUTOENTRY: '1' }),
+          ...(i === 1 ? { START: String(START_TARGET) } : {})
+        })
+      );
+      await sleep(400);
+    }
+
+    await peers[0].waitForEvent('started', WAIT_MS);
+    // the roster the lobby gathered = the joiners (the spectator never joins, so it's not counted)
+    const joiners = STRICT_FULL_ROSTER
+      ? PEER_COUNT - 1
+      : gatheredRoster(peers[0]);
+    t.ok(joiners >= 2, `at least two peers joined (${joiners})`);
+
+    // every joiner converges to the joiner count
+    for (let i = 0; i < PEER_COUNT - 1; i++) {
+      t.ok(
+        await peers[i].waitForFeed(joiners, WAIT_MS),
+        `joiner ${peers[i].name} converged to ${joiners}`
+      );
+    }
+
+    // the spectator explicitly subscribed on demand...
+    const spectator = peers[PEER_COUNT - 1];
+    t.ok(
+      await spectator.waitForEvent('subscribed', WAIT_MS),
+      'the spectator subscribed on demand (browse-then-pick)'
+    );
+    // ...and converged to the SAME feed as the joiners despite never joining or posting (its own
+    // entry is absent — it can only ever reach the joiner count, never one more).
+    t.ok(
+      await spectator.waitForFeed(joiners, WAIT_MS),
+      `the spectator sees the full feed (${joiners}) without joining`
+    );
+  }
+);

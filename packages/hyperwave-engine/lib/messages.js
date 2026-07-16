@@ -22,8 +22,9 @@
  */
 
 // Kinds that are flooded (relayed hop-to-hop with `mid` dedup) rather than one-hop.
-// wave-sync is unicast (join-time catch-up) and heartbeat is one-hop; neither carries
-// a `mid`.
+// wave-sync is unicast (join-time catch-up) and heartbeat/subs are one-hop; none carry
+// a `mid`. wave-announce floods the whole directory; wave-join/wave-start flood only the
+// subscribed subgraph of their wave (Phase 3 scoping) — the `mid` dedup is identical either way.
 const FLOODED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start']);
 
 const HEX_RE = /^[0-9a-f]+$/;
@@ -98,10 +99,19 @@ function isWriters(value) {
   return Array.isArray(value) && value.every(isWriterCred);
 }
 
+/** @param {*} value - Candidate. @returns {boolean} An array of wave ids (the `subs` set). */
+function isWaveIdList(value) {
+  return Array.isArray(value) && value.every(isWaveId);
+}
+
 // One shape validator per kind. Flooded kinds require their `mid` (so the dedup/relay
 // decision never sees a mid-less flood); direct kinds simply don't check it.
 const VALIDATORS = {
   heartbeat: (msg) => isId(msg.id) && isTag(msg.tag),
+
+  // subs: this peer's subscription set (which waves it holds cores for). One-hop, no mid — a
+  // neighbour uses it to scope which waves' join/start/sync it forwards here (Phase 3).
+  subs: (msg) => isWaveIdList(msg.subs),
 
   'wave-announce': (msg) =>
     isMid(msg.mid) &&
@@ -165,6 +175,17 @@ function validGossip(msg) {
  */
 function makeHeartbeat({ id, tag }) {
   return { kind: 'heartbeat', id, tag: tag || null };
+}
+
+/**
+ * Build a subs message: the waves this peer is subscribed to (holds cores for). A neighbour scopes
+ * which waves' join/start/sync it forwards to me by this set. One-hop (sent on connect + on change).
+ * @param {Object} fields - The subs fields.
+ * @param {string[]} fields.subs - The subscribed wave ids.
+ * @returns {GossipMessage} The subs message.
+ */
+function makeSubs({ subs }) {
+  return { kind: 'subs', subs };
 }
 
 /**
@@ -271,6 +292,7 @@ module.exports = {
   FLOODED_KINDS,
   validGossip,
   makeHeartbeat,
+  makeSubs,
   makeWaveAnnounce,
   makeWaveJoin,
   makeWaveStart,

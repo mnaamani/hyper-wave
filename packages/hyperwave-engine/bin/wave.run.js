@@ -57,6 +57,9 @@ const wave = createWave({
   maxPeers: env.HYPERWAVE_MAX_PEERS
     ? Number(env.HYPERWAVE_MAX_PEERS)
     : undefined,
+  // Phase 2 subscription policy. HYPERWAVE_AUTO_SUBSCRIBE=0 → stay merely AWARE of announced waves
+  // (hold no cores) until this peer explicitly subscribes/joins — the browse-then-pick path.
+  autoSubscribe: env.HYPERWAVE_AUTO_SUBSCRIBE === '0' ? false : undefined,
   // One host sink: the wave emits typed messages ({type:'state'|'event'|'feed', …}); dispatch on
   // the type. (Replaces the former onState/onEvent/onFeed trio — see createWave.)
   emit: (msg) => {
@@ -101,6 +104,12 @@ const wave = createWave({
         (msg.event === 'wave-announce' || msg.event === 'wave-verified')
       ) {
         joinAndBurn();
+      }
+      // SPECTATE: subscribe (hold the feed + watch the sweep) WITHOUT joining/posting — the
+      // browse-then-pick path (Phase 2). Meaningful with HYPERWAVE_AUTO_SUBSCRIBE=0, where
+      // awareness alone holds no cores; subscribe() engages the feed on demand.
+      if (env.SPECTATE && !msg.mine && msg.event === 'wave-announce') {
+        wave.subscribe(msg.waveId);
       }
       // stage a (fake) entry payload during the lobby, exactly like a host does at start;
       // the engine posts it to the feed when this peer's sweep slot fires. The payload is

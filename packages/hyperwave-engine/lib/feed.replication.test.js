@@ -58,7 +58,7 @@ function makePeer(dir) {
   peer.session = new CrdtFeed({
     store: peer.store,
     me: { id: peer.id, tag: null },
-    onFeed: (items) => {
+    onFeed: (_waveId, items) => {
       peer.view = items;
     },
     walletAddress: () => null,

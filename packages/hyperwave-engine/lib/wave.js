@@ -10,6 +10,32 @@
 // Money model: burned fees (skin in the game) + feed tips; there are no sponsor rewards.
 // Runs under Bare (the worker) or a Node harness. The Bare worker (hyperwave.js) bridges
 // this to the renderer; wave.run.js drives it headlessly.
+//
+// Concurrent waves (protocol scaling.md Phase 1): the wave FSM is MULTIPLEXED — the engine
+// runs `lobby → racing → idle` per wave, holding a Map<waveId, WaveState> instead of a
+// singleton. Several waves can be engaged at once on the one topic; there is no longer a
+// "one wave at a time" rule or a lower-waveId tie-break (those existed only to enforce the
+// singleton). Every wave carries its own timers, EntryPipeline, and feed.
+//
+// Subscription layer (Phase 2): being AWARE of a wave (you saw its wave-announce) is distinct
+// from PARTICIPATING in it (subscribed → you hold its feed cores + can join/post). A peer
+// browses announced waves and subscribes to a chosen subset; an un-subscribed peer tracks the
+// wave's existence (roster count, sweep) but opens NO cores — this bounds each peer's core
+// budget to O(subscribed), not O(all waves). `subscribe`/`unsubscribe` open/close a wave's feed
+// (feed lifecycle = join/leave). `autoSubscribe` (default true) subscribes on awareness, which
+// preserves the single-wave demo UX; a host that wants true pick-and-choose sets it false.
+//
+// Scoped control gossip + sub-topics (Phase 3): the shared topic is a DIRECTORY (heartbeat
+// liveness + tiny wave-announce — the browse surface, seen by everyone). Each wave's heavy
+// control gossip (wave-join/start/sync) is SENT only to neighbours that advertised (via a one-hop
+// `subs` message) they're subscribed to that wave, so a peer's control-plane traffic is
+// O(subscribed). It all rides one Protomux channel per connection — the scoping is a send-side
+// filter (`neighborSubs`), not separate channels. Subscribing also joins the wave's own sub-topic
+// hash(prefix:topic:wave) so its participants discover each other off the O(N) directory mesh.
+// Feed replication auto-scopes: a peer only opens (and so only replicates) cores for waves it
+// subscribed to. A late/missed flood is always recovered by a wave-sync sent on mutual
+// subscription. Result: a peer sees control traffic + feed for its subscribed waves + the
+// directory → true O(subscribed).
 
 const Hyperswarm = require('hyperswarm');
 const Corestore = require('corestore');
@@ -25,6 +51,7 @@ const {
   FLOODED_KINDS,
   validGossip,
   makeHeartbeat,
+  makeSubs,
   makeWaveAnnounce,
   makeWaveJoin,
   makeWaveStart,
@@ -43,6 +70,14 @@ const {
 } = require('./attest');
 
 const DEFAULT_TOPIC = 'hyperwave:demo:v1';
+const GOSSIP_PROTOCOL = 'hyperwave/gossip'; // the one Protomux channel per connection
+// Phase 3 transport scoping. All gossip rides the single channel, but a wave's HEAVY control
+// gossip (wave-join / wave-start / wave-sync) is only SENT to neighbours that told us (via a `subs`
+// message) they're subscribed to that wave — so a peer's control-plane traffic is O(subscribed),
+// not O(all waves). The tiny wave-announce still floods the whole directory (the browse surface).
+// Each subscribed wave also joins its own Hyperswarm sub-topic hash(prefix:topic:wave) so its
+// participants discover each other directly (off the O(N) directory mesh) at scale.
+const WAVE_SUBTOPIC_PREFIX = 'hyperwave:wave:';
 const HEARTBEAT_MS = 2000; // heartbeat cadence (liveness + tag)
 const RINGUPDATE_MS = 4000; // seat-staleness + feed-pull maintenance cadence
 const PEER_STALE_MS = 12000; // a peer whose last heartbeat is older than this is stale (dropped)
@@ -153,7 +188,7 @@ function loadOrCreateSwarmSeed(
 /**
  * @typedef {Object} CreateWaveOptions
  * @property {string} storageDir Instance storage dir (per-run hyperwave store + persisted swarm.seed).
- * @property {(msg: Object) => void} emit The single host sink: every observable change is raised as a typed message — `{ type: 'state', me, peers, connected, discovered }` on a ring change, `{ type: 'event', event, … }` for lifecycle/UI events, `{ type: 'feed', items }` on a feed update.
+ * @property {(msg: Object) => void} emit The single host sink: every observable change is raised as a typed message — `{ type: 'state', me, peers, connected, discovered }` on a ring change, `{ type: 'event', event, … }` for lifecycle/UI events, `{ type: 'feed', waveId, items }` on a feed update (tagged with the wave it belongs to, since several waves can update concurrently).
  * @property {(...args: any[]) => void} [log] Logger.
  * @property {Array<{host: string, port: number}>|null} [bootstrap] Local-DHT bootstrap nodes, or null for the public DHT.
  * @property {string} [topicId] Topic string (all peers on the same id share one ring).
@@ -165,20 +200,22 @@ function loadOrCreateSwarmSeed(
 /**
  * @typedef {Object} WaveHandle
  * @property {{id: string, angle: number, tag: string|null}} me This peer's ring identity.
- * @property {() => string|null} startWave Announce a wave + open the lobby; returns the new waveId, or null if busy.
- * @property {() => string|null} join Opt into the current lobby; returns the joined waveId, or null on a no-op.
+ * @property {() => string|null} startWave Announce a new wave + open its lobby; returns the new waveId. Concurrent starts are allowed (no singleton).
+ * @property {(waveId: string) => string|null} subscribe Subscribe to a wave (hold its feed cores + receive its control gossip); returns the waveId, or null if unknown.
+ * @property {(waveId: string) => void} unsubscribe Unsubscribe from a wave (free its cores; stay aware for the browse list).
+ * @property {(waveId?: string) => string|null} join Opt into a lobby (the given wave, or the newest joinable one); implies subscribe; returns the joined waveId, or null on a no-op.
  * @property {(tag: string) => void} setTag Set the tag (cosmetic, rides the heartbeat).
- * @property {(entry: {payload?: *}) => void} stageEntry Stage my opaque entry payload to post at my sweep slot.
+ * @property {(entry: {payload?: *, waveId?: string}) => void} stageEntry Stage my opaque entry payload to post at my sweep slot (for the given wave, or the newest one I've joined).
  * @property {(address: string|null, verifier?: Function) => void} setWallet Wire the payment layer (address + on-chain burn verifier).
- * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed start proof and announce.
- * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket).
+ * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed start proof and announce (routed to the proof's waveId).
+ * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket) for its waveId.
  * @property {() => Promise<void>} close Tear down timers, swarm, galleries, and the store.
  */
 
 /**
  * Create the HyperWave orchestrator: joins the topic swarm, runs the wave lifecycle
- * (lobby → sweep → feed) over the topic mesh, and exposes the command
- * surface the host (worker/harness) drives.
+ * (lobby → sweep → feed) — multiplexed per wave over the topic mesh — and exposes the
+ * command surface the host (worker/harness) drives.
  * @param {CreateWaveOptions} options
  * @returns {WaveHandle} The command + identity surface for this peer.
  */
@@ -193,15 +230,21 @@ function createWave({
   // force a genuine partial mesh below the peer count — the condition the flood is
   // designed for, and what a real large swarm looks like.
   maxPeers = 64,
-  swarmSeed = null // hex seed for the swarm identity; distinct from the wallet seed (createPayments)
+  swarmSeed = null, // hex seed for the swarm identity; distinct from the wallet seed (createPayments)
+  // Subscription policy (Phase 2). true → subscribe to every wave the moment we become aware of
+  // it (open its cores; the single-wave demo UX + the headless CLI rely on this). false → stay
+  // merely AWARE until the host calls subscribe()/join(), so a peer holds cores only for the
+  // waves it chose — the O(subscribed) core budget.
+  autoSubscribe = true
 }) {
   // One host sink. Every observable change flows to the host through `emit(msg)` as a typed
   // message; these three build the envelopes the former onState/onEvent/onFeed trio used to. The
   // engine's `emit` and the seam's are the same single-notifier shape, so a message the wave emits
-  // reaches the UI unwrapped.
+  // reaches the UI unwrapped. A feed update carries its `waveId` — with concurrent waves, several
+  // feeds can update, and the host keys its view by wave.
   const emitState = (state) => emit({ type: 'state', ...state });
   const emitEvent = (event) => emit({ type: 'event', ...event });
-  const emitFeed = (items) => emit({ type: 'feed', items });
+  const emitFeed = (waveId, items) => emit({ type: 'feed', waveId, items });
   // The store is per-run (galleries are keyed by the random waveId, so nothing persists
   // meaningfully across runs); wipe it on startup to reclaim disk.
   const storePath = storageDir + '/hyperwave';
@@ -236,38 +279,76 @@ function createWave({
   const table = new PeerTable({ meId: me.id, staleMs: PEER_STALE_MS });
   const endedWaves = new Set(); // waves that finished — never re-adopt (prevents revival)
   const flood = new Flood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
+  // Phase 3 scoping state. neighborSubs: what each connected neighbour told us it's subscribed to
+  // (via `subs`) — I forward a wave's join/start/sync only to neighbours whose set contains it.
+  const neighborSubs = new Map(); // connId -> Set<waveId>
+  const subTopics = new Set(); // waveIds whose sub-topic I've swarm.join()'d (subscribed waves)
+
+  // Wave lifecycle, MULTIPLEXED: idle -> lobby -> racing -> idle, per wave. `waves` holds every
+  // currently-engaged wave keyed by its id; each WaveState owns its own timers, EntryPipeline,
+  // roster (writers), and paid-gate status. Concurrent waves coexist (no singleton, no
+  // lower-waveId tie-break). During a wave's lobby, peers opt in; only its roster gets an entry
+  // slot — everyone renders its sweep.
+  const waves = new Map(); // waveId -> WaveState
+  // Waves I hold the feed cores for (Phase 2 subscription layer). DECOUPLED from `waves`: a wave's
+  // FSM ends (its WaveState is dropped) but its feed lingers as the idle gallery until the host
+  // unsubscribes (or engine close) — so this outlives the WaveState, and unsubscribe() can free an
+  // already-ended wave's cores. Feeds are NOT auto-closed at wave-end: entries from the final sweep
+  // slots keep replicating (and latecomers keep pulling) past the deterministic end, so closing
+  // there would race convergence. Lifecycle is join/leave (subscribe/unsubscribe), per scaling.md.
+  const subscriptions = new Set(); // waveId
+  // When a revivable idle (lobby-timeout) abandons a wave I had JOINED, remember my join state so
+  // a late wave-start can re-adopt the wave with my slot still arming + my entry still posting.
+  // Keyed by waveId (concurrent waves each get their own memo). See REVIVABLE_IDLE_REASONS.
+  const abandonedJoins = new Map(); // waveId -> { joinSig, burnProof }
 
   // Per-wave feed (feed-crdt.js): each participant owns one Hypercore and appends
   // its one entry; every peer opens the roster's cores (keys ride wave-join) and merges
-  // locally — no indexer, no admission. The accessors read live wave.js state.
+  // locally — no indexer, no admission. It holds every concurrently-engaged wave's feed;
+  // the accessors read the live per-wave WaveState (its EntryPipeline's burn proof + my join sig).
   const session = new CrdtFeed({
     store,
     me,
     onFeed: emitFeed,
     walletAddress: () => walletAddress,
-    burnProof: () => entryPipeline.burnProof,
-    joinProof: () => (wave ? wave.joinSig : null),
+    burnProof: (waveId) => waves.get(waveId)?.pipeline.burnProof ?? null,
+    joinProof: (waveId) => waves.get(waveId)?.joinSig ?? null,
     log
   });
 
-  // Wave lifecycle: idle -> lobby -> racing -> idle. One wave engaged at a time;
-  // concurrent starts resolve deterministically (lower waveId wins). During the lobby,
-  // peers opt in; only the roster gets a entry slot — everyone renders the sweep.
-  let wave = null;
-  let lobbyEndsAt = 0; // ~when the lobby closes (for syncing a late joiner's countdown)
-  let lobbyTimer = null; // fires the sweep (initiator) or a fallback to idle (others)
-  let waveTimer = null; // the deterministic end of the sweep (t0 + lapMs + grace)
-  let sweepTimers = []; // my-slot + position timers for the running sweep
-  let tHeartbeat = null; // heartbeat timer (self-rescheduling, see the timers section)
-  let tRing = null; // ring-maintenance timer
+  // --- per-wave state helpers -------------------------------------------------
 
-  // Entry is captured up-front during the lobby (renderer stages it into the pipeline),
-  // then posted to the feed when my sweep slot fires. The pipeline (entry.js) owns
-  // the pairing/once-per-wave/burn-ticket invariants.
-  const entryPipeline = new EntryPipeline({
-    currentWaveId: () => (wave ? wave.id : null),
-    post: (entry) => session.postEntry(entry)
-  });
+  /**
+   * The newest lobby I can still opt into (joinable = in lobby, paid-verified, not yet joined) —
+   * the default target when a host calls join() without a waveId. `waves` preserves insertion
+   * order, so the last match is the most-recently-announced wave.
+   * @returns {Object|null} The WaveState, or null if none is joinable.
+   */
+  function newestJoinableLobby() {
+    const list = [...waves.values()];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const wave = list[i];
+      if (wave.phase === 'lobby' && !wave.joined && wave.paid === 'verified') {
+        return wave;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The newest wave I've joined — the default target when a host stages an entry without a
+   * waveId (the wave whose sweep will post it).
+   * @returns {Object|null} The WaveState, or null if I've joined none.
+   */
+  function newestJoinedWave() {
+    const list = [...waves.values()];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].joined) {
+        return list[i];
+      }
+    }
+    return null;
+  }
 
   // --- ring / peer table -----------------------------------------------------
   /** Recompute the live ring and push `{ me, peers, connected, discovered }` to the host (emitState). */
@@ -301,152 +382,211 @@ function createWave({
   }
 
   /**
-   * Central inbound-gossip dispatcher: shape-validates, identity-binds, floods relayable
-   * control messages, then routes each message kind to its handler (wave-*, heartbeat).
+   * Central inbound-gossip dispatcher (one Protomux channel per connection carries every kind).
+   * Shape-validates, identity-binds the heartbeat, then routes. wave-announce floods the whole
+   * directory; wave-join/wave-start flood only the subscribed subgraph (relayWave); wave-sync +
+   * subs are one-hop.
    * @param {Object} msg Parsed gossip message (has a `kind`).
    * @param {string} fromId Hex id of the Noise-authenticated connection it arrived on.
    */
   function handleGossip(msg, fromId) {
-    // Shape gate (messages.js): unknown kinds and malformed messages are dropped here,
-    // before any signature or state work — every handler below trusts the shape.
+    // Shape gate (messages.js): unknown/malformed messages drop here, before any state work.
     if (!validGossip(msg)) {
       return;
     }
-    // Identity binding: the heartbeat is the only direct message that describes its own
-    // sender, so its claimed id must equal the Noise-authenticated connection id it
-    // arrived on — otherwise a modified client could fake other peers' liveness (ring
-    // pollution). Cheap string compare, before any other work. Flooded messages (wave-*)
-    // can't be bound this way — at relay hops their `by`/`peerId` is a third party — so
-    // they're authenticated by their carried signatures (start burn proof, join
-    // attestations) instead.
-    if (msg.kind === 'heartbeat' && msg.id !== fromId) {
+    if (msg.kind === 'heartbeat') {
+      // Identity binding: the heartbeat is the only self-describing message, so its claimed id must
+      // equal the Noise-authenticated connection id it arrived on — otherwise a modified client
+      // could fake other peers' liveness (ring pollution). Cheap compare first.
+      if (msg.id !== fromId) {
+        return;
+      }
+      table.upsert(msg.id, Date.now(), msg.tag);
+      pushRingState();
       return;
     }
-
-    // Flood relayable control messages across the partial mesh: process each exactly
-    // once, and on first sight re-broadcast to my other neighbours (dedup by `mid`;
-    // the shape gate guarantees flooded kinds carry one).
-    if (FLOODED_KINDS.has(msg.kind)) {
-      if (!flood.firstSight(msg.mid)) {
-        return; // already seen -> drop (stops loops)
-      }
-      relayFlood(msg, fromId);
+    if (msg.kind === 'subs') {
+      recordNeighborSubs(fromId, msg.subs);
+      return;
     }
     if (msg.kind === 'wave-sync') {
-      // a peer told us the wave state when we joined mid-lobby / mid-race
-      if (!shouldAdopt(msg.waveId)) {
+      handleWaveSync(msg);
+      return;
+    }
+    // Flooded control kinds (announce / join / start): process once, relay on first sight.
+    if (FLOODED_KINDS.has(msg.kind)) {
+      if (!flood.firstSight(msg.mid)) {
+        return; // already seen -> drop (stops loops). catchup announces carry a fresh mid.
+      }
+      if (msg.kind === 'wave-announce') {
+        // announce floods the whole directory (browse surface) — UNLESS it's a directed catch-up
+        // re-announce (unicast on connect so I discover an older wave); a catch-up isn't re-flooded.
+        if (!msg.catchup) {
+          relayDir(msg, fromId);
+        }
+        handleWaveAnnounce(msg);
         return;
       }
-      // anti-spam: adopt a synced wave (lobby OR racing) only with a valid start proof.
-      // Previously a *racing* sync skipped this — a hostile peer could unicast a fabricated
-      // racing wave-sync on connect to force a newcomer into a bogus wave, bypassing the
-      // paid gate. The signed burn-proof can't be forged for a key the attacker lacks.
-      if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
-        return;
-      }
-      if (msg.phase === 'racing') {
-        if (!wave || wave.id !== msg.waveId) {
-          enterLobby({ waveId: msg.waveId, by: msg.by, dur: 0, silent: true });
-        }
-        if (msg.paid) {
-          wave.startProof = msg.paid;
-        }
-        wave.paid = 'verified';
-        // learn every participant's feed core (self-contained: the sync carries the
-        // writers, so a mid-race newcomer doesn't depend on having seen the wave-joins)
-        for (const cred of msg.writers || []) {
-          ingestWriter(cred);
-        }
-        beginSweep({
-          rosterIds: canonicalRoster(msg),
-          t0: msg.t0,
-          lapMs: msg.lapMs
-        });
+      // join / start flood only among the wave's subscribers (O(subscribed), not O(topic)).
+      relayWave(msg.waveId, msg, fromId);
+      if (msg.kind === 'wave-join') {
+        handleWaveJoin(msg);
       } else {
-        if (!wave || wave.id !== msg.waveId) {
-          enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMsLeft });
-        }
-        if (enforcePaid && msg.paid && !wave.startProof) {
-          wave.startProof = msg.paid;
-          verifyStartProof(msg.waveId, msg.paid);
-        }
-        for (const cred of msg.writers || []) {
-          ingestWriter(cred);
-        }
-        emitEvent({ event: 'roster', waveId: wave.id, count: rosterCount() });
+        handleWaveStart(msg);
       }
-      return;
     }
-    if (msg.kind === 'wave-announce') {
-      // anti-spam: an enforced peer ignores any announce lacking a validly-signed start
-      // proof (unpaid/spam waves are invisible). Then it verifies the burn on-chain.
-      if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
-        return;
-      }
-      if (!shouldAdopt(msg.waveId)) {
-        return;
-      }
-      enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMs });
-      if (enforcePaid && msg.paid) {
-        wave.startProof = msg.paid;
-        verifyStartProof(msg.waveId, msg.paid);
-      }
-      return;
-    }
-    if (msg.kind === 'wave-join') {
-      // Every peer ingests every wave-join: learn the participant's feed core (its key
-      // rides the join, self-certified by joinSig) + count it into the roster. Only DURING
-      // THE LOBBY — the roster freezes into the schedule at lobby close, so a late join
-      // can't take a seat it can never fill. When enforcing, the join must present a valid
-      // burn (paid gate — every peer checks, deterministically).
-      if (wave && wave.phase === 'lobby' && msg.waveId === wave.id) {
-        if (enforcePaid && !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)) {
-          return;
-        }
-        ingestWriter({
-          peerId: msg.peerId,
-          writerKey: msg.writerKey,
-          joinSig: msg.joinSig
-        });
-      }
-      return;
-    }
-    if (msg.kind === 'wave-start') {
-      // initiator finalized the roster and started the sweep. Gate on the same start
-      // proof as the announce, so a forged wave-start can't conjure a race.
-      if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
-        return;
-      }
-      if (shouldAdopt(msg.waveId)) {
-        if (!wave || wave.id !== msg.waveId) {
-          enterLobby({ waveId: msg.waveId, by: msg.by });
-        }
-        if (msg.paid) {
-          wave.startProof = msg.paid; // carry it so we can re-sync newcomers
-        }
-        // the flooded writers make wave-start self-contained: a peer adopting here (that
-        // missed the wave-joins) still learns every participant's feed core
-        for (const cred of msg.writers || []) {
-          ingestWriter(cred);
-        }
-        beginSweep({
-          rosterIds: canonicalRoster(msg),
-          t0: msg.t0,
-          lapMs: msg.lapMs
-        });
-      }
-      return;
-    }
-    if (msg.kind !== 'heartbeat') {
-      return;
-    }
-    // sender is a live neighbour (direct channel): refresh its seat + tag
-    table.upsert(msg.id, Date.now(), msg.tag);
-    pushRingState();
   }
 
   /**
-   * JSON-encode and send a message to every direct connection.
+   * A neighbour told us its subscription set (on connect + on change). Record it (so we scope which
+   * waves' join/start/sync we forward there), and catch it up: for every wave it just revealed it's
+   * subscribed to that I'm also subscribed to and hold state for, unicast it a wave-sync.
+   * @param {string} fromId The neighbour's connection id.
+   * @param {string[]} subs The neighbour's subscribed wave ids.
+   */
+  function recordNeighborSubs(fromId, subs) {
+    const previous = neighborSubs.get(fromId) || new Set();
+    const next = new Set(subs);
+    neighborSubs.set(fromId, next);
+    for (const waveId of next) {
+      if (!previous.has(waveId) && subscriptions.has(waveId)) {
+        syncPeer(fromId, waveId); // newly-mutual subscription → catch the neighbour up
+      }
+    }
+  }
+
+  /**
+   * A peer told us a wave's state when we joined mid-lobby / mid-race (unicast on connect).
+   * @param {Object} msg A wave-sync message.
+   */
+  function handleWaveSync(msg) {
+    if (!canAdopt(msg.waveId)) {
+      return;
+    }
+    // anti-spam: adopt a synced wave (lobby OR racing) only with a valid start proof. A
+    // *racing* sync is gated too — else a hostile peer could unicast a fabricated racing
+    // wave-sync on connect to force a newcomer into a bogus wave, bypassing the paid gate.
+    // The signed burn-proof can't be forged for a key the attacker lacks.
+    if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
+      return;
+    }
+    if (msg.phase === 'racing') {
+      let wave = waves.get(msg.waveId);
+      if (!wave) {
+        enterLobby({ waveId: msg.waveId, by: msg.by, dur: 0, silent: true });
+        wave = waves.get(msg.waveId);
+      }
+      if (msg.paid) {
+        wave.startProof = msg.paid;
+      }
+      wave.paid = 'verified';
+      // learn every participant's feed core (self-contained: the sync carries the writers,
+      // so a mid-race newcomer doesn't depend on having seen the wave-joins)
+      for (const cred of msg.writers || []) {
+        ingestWriter(wave, cred);
+      }
+      beginSweep(wave, {
+        rosterIds: canonicalRoster(msg),
+        t0: msg.t0,
+        lapMs: msg.lapMs
+      });
+      return;
+    }
+    let wave = waves.get(msg.waveId);
+    if (!wave) {
+      enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMsLeft });
+      wave = waves.get(msg.waveId);
+    }
+    if (enforcePaid && msg.paid && !wave.startProof) {
+      wave.startProof = msg.paid;
+      verifyStartProof(msg.waveId, msg.paid);
+    }
+    for (const cred of msg.writers || []) {
+      ingestWriter(wave, cred);
+    }
+    emitEvent({ event: 'roster', waveId: wave.id, count: rosterCount(wave) });
+  }
+
+  /**
+   * A wave was announced (flooded) — open its lobby.
+   * @param {Object} msg A wave-announce message.
+   */
+  function handleWaveAnnounce(msg) {
+    // anti-spam: an enforced peer ignores any announce lacking a validly-signed start
+    // proof (unpaid/spam waves are invisible). Then it verifies the burn on-chain.
+    if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
+      return;
+    }
+    if (!canAdopt(msg.waveId)) {
+      return;
+    }
+    enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMs });
+    const wave = waves.get(msg.waveId);
+    if (enforcePaid && msg.paid && wave && !wave.startProof) {
+      wave.startProof = msg.paid;
+      verifyStartProof(msg.waveId, msg.paid);
+    }
+  }
+
+  /**
+   * A peer opted into a wave's lobby (flooded) — learn its feed core + count it into the
+   * roster. Only DURING THE LOBBY: the roster freezes into the schedule at lobby close, so a
+   * late join can't take a seat it can never fill. When enforcing, the join must present a
+   * valid burn (paid gate — every peer checks, deterministically).
+   * @param {Object} msg A wave-join message.
+   */
+  function handleWaveJoin(msg) {
+    const wave = waves.get(msg.waveId);
+    if (!wave || wave.phase !== 'lobby') {
+      return;
+    }
+    if (enforcePaid && !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)) {
+      return;
+    }
+    ingestWriter(wave, {
+      peerId: msg.peerId,
+      writerKey: msg.writerKey,
+      joinSig: msg.joinSig
+    });
+  }
+
+  /**
+   * The initiator finalized the roster and started the sweep (flooded). Gate on the same
+   * start proof as the announce, so a forged wave-start can't conjure a race.
+   * @param {Object} msg A wave-start message.
+   */
+  function handleWaveStart(msg) {
+    if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
+      return;
+    }
+    if (!canAdopt(msg.waveId)) {
+      return;
+    }
+    let wave = waves.get(msg.waveId);
+    if (!wave) {
+      enterLobby({ waveId: msg.waveId, by: msg.by });
+      wave = waves.get(msg.waveId);
+    }
+    if (msg.paid) {
+      wave.startProof = msg.paid; // carry it so we can re-sync newcomers
+    }
+    // the flooded writers make wave-start self-contained: a peer adopting here (that missed
+    // the wave-joins) still learns every participant's feed core
+    for (const cred of msg.writers || []) {
+      ingestWriter(wave, cred);
+    }
+    beginSweep(wave, {
+      rosterIds: canonicalRoster(msg),
+      t0: msg.t0,
+      lapMs: msg.lapMs
+    });
+  }
+
+  // --- gossip transport (one channel per connection; wave gossip scoped by subs) ----
+
+  /**
+   * JSON-encode + send a message over every connection's gossip channel. Used for the heartbeat +
+   * originating a directory flood (wave-announce).
    * @param {Object} obj The gossip message to broadcast.
    */
   function broadcast(obj) {
@@ -459,25 +599,22 @@ function createWave({
   }
 
   /**
-   * Originate a flooded control message: stamp a unique id, remember it (so it doesn't
-   * loop back into me), and broadcast to every direct connection. Receivers relay it on
-   * (relayFlood) until it has blanketed the whole partial mesh.
+   * Originate a DIRECTORY flood (a wave-announce): stamp a unique id, remember it (so it can't loop
+   * back into me), and broadcast to every neighbour. Receivers relay it (relayDir) across the mesh.
    * @param {Object} obj The message to flood (a fresh `mid` is stamped onto it).
    */
-  function floodGossip(obj) {
+  function floodDir(obj) {
     obj.mid = b4a.toString(crypto.randomBytes(8), 'hex');
-    flood.firstSight(obj.mid); // mark mine seen so relays can't loop back into me
+    flood.firstSight(obj.mid);
     broadcast(obj);
   }
 
   /**
-   * Re-broadcast a flooded message to my other neighbours (everyone except whoever sent
-   * it to me — dedup handles the remaining echoes). This is the relay step that carries
-   * an announcement across a swarm too large to be a full mesh.
-   * @param {Object} msg The already-seen flooded message to relay on.
-   * @param {string} fromId Hex id of the connection it arrived on (excluded from the relay).
+   * Relay a directory flood to my other neighbours (all except the sender; dedup handles echoes).
+   * @param {Object} msg The already-seen message to relay.
+   * @param {string} fromId Hex id of the connection it arrived on (excluded).
    */
-  function relayFlood(msg, fromId) {
+  function relayDir(msg, fromId) {
     const str = JSON.stringify(msg);
     for (const [id, send] of table.senderEntries()) {
       if (id === fromId) {
@@ -487,6 +624,127 @@ function createWave({
         send(str);
       } catch {}
     }
+  }
+
+  /**
+   * Originate a SCOPED wave flood (wave-join / wave-start): stamp a mid and send only to neighbours
+   * that told us (via `subs`) they're subscribed to this wave — so a peer never receives control
+   * gossip for a wave it didn't subscribe to. Relayed on by relayWave.
+   * @param {string} waveId The wave the message belongs to.
+   * @param {Object} obj The message to flood.
+   */
+  function floodWave(waveId, obj) {
+    obj.mid = b4a.toString(crypto.randomBytes(8), 'hex');
+    flood.firstSight(obj.mid);
+    const str = JSON.stringify(obj);
+    for (const [id, send] of table.senderEntries()) {
+      if (neighborSubs.get(id)?.has(waveId)) {
+        try {
+          send(str);
+        } catch {}
+      }
+    }
+  }
+
+  /**
+   * Relay a scoped wave flood to my other subscribed neighbours (all except the sender).
+   * @param {string} waveId The wave the message belongs to.
+   * @param {Object} msg The already-seen message to relay.
+   * @param {string} fromId Hex id of the connection it arrived on (excluded).
+   */
+  function relayWave(waveId, msg, fromId) {
+    const str = JSON.stringify(msg);
+    for (const [id, send] of table.senderEntries()) {
+      if (id === fromId) {
+        continue;
+      }
+      if (neighborSubs.get(id)?.has(waveId)) {
+        try {
+          send(str);
+        } catch {}
+      }
+    }
+  }
+
+  /** Tell every neighbour my current subscription set (on connect + on subscribe/unsubscribe). */
+  function broadcastSubs() {
+    broadcast(makeSubs({ subs: [...subscriptions] }));
+  }
+
+  /**
+   * Unicast a wave-sync (the self-contained catch-up snapshot: phase / writers / sweep timing /
+   * paid proof) to one neighbour for one wave. Sent when we learn a neighbour is mutually
+   * subscribed — so late joins + missed floods are always recovered by a sync.
+   * @param {string} toId The neighbour's connection id.
+   * @param {string} waveId The wave to catch it up on.
+   */
+  function syncPeer(toId, waveId) {
+    const send = table.senderOf(toId);
+    const wave = waves.get(waveId);
+    if (!send || !wave) {
+      return;
+    }
+    send(
+      JSON.stringify(
+        makeWaveSync({
+          waveId: wave.id,
+          phase: wave.phase,
+          by: wave.by,
+          writers: [...wave.writers.entries()].map(([peerId, cred]) => ({
+            peerId,
+            writerKey: cred.writerKey,
+            joinSig: cred.joinSig
+          })),
+          t0: wave.t0,
+          lapMs: wave.lapMs,
+          paid: wave.startProof,
+          lobbyMsLeft:
+            wave.phase === 'lobby'
+              ? Math.max(0, wave.lobbyEndsAt - Date.now())
+              : 0
+        })
+      )
+    );
+  }
+
+  /**
+   * The Hyperswarm sub-topic for a wave — its participants join it to discover each other directly,
+   * off the O(N) directory mesh (a scale optimisation; small swarms are already fully connected).
+   * @param {string} waveId The wave.
+   * @returns {Buffer} The 32-byte topic key.
+   */
+  function subTopicKey(waveId) {
+    return crypto.hash(b4a.from(WAVE_SUBTOPIC_PREFIX + topicId + ':' + waveId));
+  }
+
+  /**
+   * Subscribe's transport half: join the wave's sub-topic (so its participants find me), announce
+   * my updated subscription set, and proactively sync any neighbour I already know is subscribed.
+   * @param {string} waveId The wave to engage on the wire.
+   */
+  function joinWaveTransport(waveId) {
+    if (!subTopics.has(waveId)) {
+      subTopics.add(waveId);
+      swarm.join(subTopicKey(waveId), { server: true, client: true });
+    }
+    broadcastSubs();
+    for (const [connId, subs] of neighborSubs) {
+      if (subs.has(waveId)) {
+        syncPeer(connId, waveId);
+      }
+    }
+  }
+
+  /**
+   * Unsubscribe's transport half: leave the wave's sub-topic and announce my updated set.
+   * @param {string} waveId The wave to disengage on the wire.
+   */
+  function leaveWaveTransport(waveId) {
+    if (subTopics.has(waveId)) {
+      subTopics.delete(waveId);
+      swarm.leave(subTopicKey(waveId)).catch(() => {});
+    }
+    broadcastSubs();
   }
 
   // --- feed (multicore CRDT) ---------------------------------------------
@@ -509,16 +767,17 @@ function createWave({
 
   // Learn a participant's feed core: verify its join attestation (binds peerId →
   // writerKey, so a relayed credential can't be forged or substituted), then count it
-  // into the writers map (the roster) and open its core (feed-crdt.js). Idempotent;
-  // the paid gate for direct wave-joins is enforced by the caller (wave-start/sync
-  // writers carry no burn — the wave itself is gated by the start proof).
+  // into the writers map (the roster) and open its core (feed-crdt.js). Idempotent; the
+  // paid gate for direct wave-joins is enforced by the caller (wave-start/sync writers
+  // carry no burn — the wave itself is gated by the start proof).
   /**
+   * @param {Object} wave The WaveState to ingest into.
    * @param {Object} cred A feed-core credential.
    * @param {string} cred.peerId The participant's ring id.
    * @param {string} cred.writerKey The participant's feed core key (hex).
    * @param {string} cred.joinSig The join attestation over (waveId, peerId, writerKey).
    */
-  function ingestWriter(cred) {
+  function ingestWriter(wave, cred) {
     // shape is guaranteed upstream (messages.js validates wave-join fields and every
     // writers[] entry); only the signature and duplicate checks remain here
     if (!wave || wave.writers.has(cred.peerId)) {
@@ -536,32 +795,39 @@ function createWave({
       writerKey: cred.writerKey,
       joinSig: cred.joinSig
     });
-    session.addWriter(wave.id, cred.peerId, cred.writerKey);
-    emitEvent({ event: 'roster', waveId: wave.id, count: rosterCount() });
+    // The writers map is cheap roster metadata (kept even when merely aware, so the browse count
+    // is right and a later subscribe can open every core). Opening the participant's CORE — the
+    // expensive, O(subscribed) part — happens only when subscribed.
+    if (wave.subscribed) {
+      session.addWriter(wave.id, cred.peerId, cred.writerKey);
+    }
+    emitEvent({ event: 'roster', waveId: wave.id, count: rosterCount(wave) });
   }
 
   // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
-  // identity to the on-chain tx), stash it, and return it. Two consumers: the initiator
-  // attaches its START proof to the wave-announce (the paid-wave gate, announcePaid);
-  // a joiner's proof rides its wave-join (the per-peer paid gate) and its feed entry
-  // (the tip-address binding).
+  // identity to the on-chain tx), stash it in the wave's EntryPipeline, and return it. Two
+  // consumers: the initiator attaches its START proof to the wave-announce (the paid-wave
+  // gate, announcePaid); a joiner's proof rides its wave-join (the per-peer paid gate) and
+  // its feed entry (the tip-address binding).
   /**
    * @param {Object} fields The confirmed on-chain burn.
    * @param {string} fields.reason 'start' (initiator) or 'join' (participant).
    * @param {number} fields.amount TRX amount burned.
    * @param {string} fields.txHash On-chain transaction hash.
-   * @param {string} [fields.waveId] Wave the burn is for (falls back to the current wave).
-   * @returns {Object|null} The signed burn attestation, or null if we've moved past that wave.
+   * @param {string} fields.waveId Wave the burn is for (threaded from payFee).
+   * @returns {Object|null} The signed burn attestation, or null if that wave is no longer engaged.
    */
   function recordBurn({ reason, amount, txHash, waveId }) {
-    // The burn is for `waveId` (threaded from payFee). A burn for an older wave must never
-    // overwrite the current wave's proof; one landing after its own wave moved on is inert.
-    const wid = waveId || wave?.id;
-    if (!wid || (wid !== wave?.id && wid !== session.waveId)) {
+    // The burn is for `waveId` (threaded from payFee). Its entry posts during the wave's own
+    // sweep (postEntry captures the proof synchronously while the wave is still engaged), so a
+    // proof landing after its wave ended is inert — the immutable block-0 entry already
+    // appended (with or without it), and no new entry can post once the wave is gone.
+    const wave = waveId ? waves.get(waveId) : null;
+    if (!wave) {
       return null;
     }
     const fields = {
-      waveId: wid,
+      waveId,
       peerId: me.id,
       reason,
       amount,
@@ -570,54 +836,46 @@ function createWave({
       burnTs: Date.now()
     };
     const proof = { ...fields, sig: signBurn(swarm.keyPair, fields) };
-    entryPipeline.setBurnProof(proof);
+    wave.pipeline.setBurnProof(proof);
     // My join fee just confirmed while the lobby is still open: re-flood my wave-join with
     // the burn attached — enforcing peers dropped the earlier burn-less join (per-peer paid
     // gate), so this flood is the one that actually seats me.
-    if (
-      reason === 'join' &&
-      wave &&
-      wave.id === wid &&
-      wave.joined &&
-      wave.phase === 'lobby'
-    ) {
-      floodMyFeedCore(wid);
+    if (reason === 'join' && wave.joined && wave.phase === 'lobby') {
+      floodMyFeedCore(waveId);
     }
     return proof;
   }
 
-  // --- wave lifecycle (idle -> lobby -> racing -> idle) ----------------------
+  // --- wave lifecycle (idle -> lobby -> racing -> idle), per wave -------------
 
   /**
-   * Accept this wave? Idle -> yes; same wave -> yes; a competing wave only if its
-   * id is lower (deterministic tie-break so every peer converges on one wave).
+   * Accept this wave? Any wave that hasn't already finished can be adopted — concurrent
+   * waves coexist (the old singleton's lower-waveId tie-break is gone). A finished wave never
+   * comes back (endedWaves), so stale floods can't revive it.
    * @param {string} waveId Candidate wave id.
    * @returns {boolean} True if we should adopt/keep it.
    */
-  function shouldAdopt(waveId) {
-    if (endedWaves.has(waveId)) {
-      return false; // a finished wave never comes back
-    }
-    if (!wave || waveId === wave.id) {
-      return true;
-    }
-    return waveId < wave.id;
-  }
-
-  /** Clear the lobby/sweep timers (wave is ending or being superseded). */
-  function teardown() {
-    clearTimeout(lobbyTimer);
-    clearTimeout(waveTimer);
-    for (const timer of sweepTimers) {
-      clearTimeout(timer);
-    }
-    sweepTimers = [];
+  function canAdopt(waveId) {
+    return !endedWaves.has(waveId);
   }
 
   /**
-   * Enter the lobby for `waveId` (announced by `by`; `mine` if I'm the initiator).
-   * `silent` skips the wave-announce UI event (used when catching up straight into a
-   * race, so no bogus lobby countdown flashes).
+   * Clear one wave's lobby/sweep timers (it's ending or being torn down).
+   * @param {Object} wave The WaveState whose timers to clear.
+   */
+  function teardownWave(wave) {
+    clearTimeout(wave.lobbyTimer);
+    clearTimeout(wave.waveTimer);
+    for (const timer of wave.sweepTimers) {
+      clearTimeout(timer);
+    }
+    wave.sweepTimers = [];
+  }
+
+  /**
+   * Enter the lobby for `waveId` (announced by `by`; `mine` if I'm the initiator), creating
+   * its WaveState. No-op if the wave is already engaged. `silent` skips the wave-announce UI
+   * event (used when catching up straight into a race, so no bogus lobby countdown flashes).
    * @param {Object} opts The lobby to enter.
    * @param {string} opts.waveId The wave to enter a lobby for.
    * @param {string} opts.by Hex id of the initiator that announced it.
@@ -632,46 +890,66 @@ function createWave({
     dur = lobbyMs,
     silent = false
   }) {
-    if (wave && wave.id === waveId) {
+    if (waves.has(waveId)) {
       return;
     }
-    if (wave) {
-      // superseded by a lower-id wave — abandon the old one
-      endedWaves.add(wave.id);
-      teardown();
-    }
-    entryPipeline.reset(); // fresh wave — clear any staged entry/slot from a prior one
-    entryPipeline.clearBurnProof(); // a genuinely new wave (guarded above): drop the previous wave's burn ticket
-    // paid: 'verified' when the start burn is confirmed (or enforcement is off);
-    // 'pending' while a peer verifies it on-chain; 'rejected' if it isn't a real burn.
-    wave = {
+    // paid: 'verified' when the start burn is confirmed (or enforcement is off); 'pending'
+    // while a peer verifies it on-chain; 'rejected' if it isn't a real burn.
+    const wave = {
       id: waveId,
       phase: 'lobby',
       by,
       joined: !!mine,
+      // subscribed = I hold this wave's feed cores (open my own + the roster's, replicate,
+      // render its gallery). Awareness alone (from a wave-announce) does NOT open cores.
+      subscribed: false,
       paid: enforcePaid ? 'pending' : 'verified',
       startProof: null,
       joinSig: null, // MY join attestation (attest.js signJoin) — every feed entry carries it
-      // peerId -> {writerKey, joinSig}: every participant's feed core. This IS the
-      // roster — the single source of truth (a participant without a credential can't
-      // fill a sweep slot, so counting anything else invents seats; two scale bugs came
-      // from exactly that divergence).
-      writers: new Map()
+      // peerId -> {writerKey, joinSig}: every participant's feed core. This IS the roster —
+      // the single source of truth (a participant without a credential can't fill a sweep
+      // slot, so counting anything else invents seats; two scale bugs came from exactly that
+      // divergence).
+      writers: new Map(),
+      t0: undefined,
+      lapMs: undefined,
+      lobbyEndsAt: Date.now() + dur,
+      lobbyTimer: null, // fires the sweep (initiator) or a fallback to idle (others)
+      waveTimer: null, // the deterministic end of the sweep (t0 + lapMs + grace)
+      sweepTimers: [], // my-slot + position timers for the running sweep
+      // Entry is captured up-front during the lobby (renderer stages it into the pipeline),
+      // then posted to the feed when my sweep slot fires. The pipeline (entry.js) owns the
+      // pairing/once-per-wave/burn-ticket invariants — one per wave, so concurrent waves each
+      // stage + post independently.
+      pipeline: new EntryPipeline({
+        currentWaveId: () => (waves.has(waveId) ? waveId : null),
+        post: (entry) => session.postEntry(entry)
+      })
     };
-    // engage the wave's feed for viewing (create my own core; foreign cores arrive via
-    // ingestWriter). Fire-and-forget — the writer key is awaited where it's needed.
-    session.open(waveId).catch(() => {});
+    waves.set(waveId, wave);
     // Re-adopting a wave I joined, then abandoned on a revivable lobby-timeout (a late
-    // wave-start re-opened it): restore my join state so my slot still arms + posts.
-    if (abandonedJoin && abandonedJoin.waveId === waveId) {
+    // wave-start re-opened it): restore my join state so my slot still arms + posts, and the
+    // burn ticket so my entry keeps its tip-address binding.
+    const memo = abandonedJoins.get(waveId);
+    if (memo) {
       wave.joined = true;
-      wave.joinSig = abandonedJoin.joinSig;
-      abandonedJoin = null;
+      wave.joinSig = memo.joinSig;
+      if (memo.burnProof) {
+        wave.pipeline.setBurnProof(memo.burnProof);
+      }
+      abandonedJoins.delete(waveId);
     }
-    lobbyEndsAt = Date.now() + dur;
     // fallback: if the start never arrives (initiator vanished), drop back to idle
-    clearTimeout(lobbyTimer);
-    lobbyTimer = setTimeout(() => goIdle('lobby-timeout'), lobbyMs + 10000);
+    wave.lobbyTimer = setTimeout(
+      () => goIdle(waveId, 'lobby-timeout'),
+      lobbyMs + 10000
+    );
+    // engage the feed (open my core + the roster's) only when subscribing — awareness alone
+    // holds no cores (the core budget). Auto-subscribe (the default), the initiator (mine), and
+    // a revived join all subscribe; an explicit-pick host stays merely aware until it chooses.
+    if (autoSubscribe || wave.joined) {
+      subscribe(waveId);
+    }
     if (silent) {
       return;
     }
@@ -681,18 +959,72 @@ function createWave({
       by,
       mine: !!mine,
       joined: wave.joined,
-      count: rosterCount(),
+      subscribed: wave.subscribed,
+      count: rosterCount(wave),
       lobbyMs: dur,
       paid: wave.paid // 'verified' (enforcement off / already paid) | 'pending' (verifying)
     });
   }
 
   /**
-   * Opt in to the current lobby (renderer command / harness).
+   * Subscribe to a wave: open its feed (my own core + every roster writer's core already known)
+   * and, in Phase 3, join its sub-topic + open the per-wave gossip channel so I receive its
+   * control gossip. Idempotent. This is what actually spends a core budget slot — an un-subscribed
+   * (merely aware) peer holds no cores.
+   * @param {string} waveId The wave to subscribe to.
+   * @returns {string|null} The waveId, or null if unknown.
+   */
+  function subscribe(waveId) {
+    const wave = waves.get(waveId);
+    if (!wave) {
+      return null;
+    }
+    if (subscriptions.has(waveId)) {
+      return wave.id;
+    }
+    subscriptions.add(waveId);
+    wave.subscribed = true;
+    // open my own core for this wave (fire-and-forget; the writer key is awaited where needed)
+    session.open(waveId).catch(() => {});
+    // open every roster writer's core I already learned while merely aware
+    for (const [peerId, cred] of wave.writers) {
+      session.addWriter(waveId, peerId, cred.writerKey);
+    }
+    joinWaveTransport(waveId); // Phase 3: sub-topic + per-wave channels (no-op pre-Phase-3)
+    emitEvent({ event: 'subscribed', waveId, joined: wave.joined });
+    return wave.id;
+  }
+
+  /**
+   * Unsubscribe from a wave: close its feed (free its cores) and, in Phase 3, leave its sub-topic
+   * + drop its gossip channels. The peer stays AWARE (its WaveState/roster survive for the browse
+   * list) but no longer replicates. Un-joins too — you can't post without holding your core.
+   * @param {string} waveId The wave to unsubscribe from.
+   */
+  function unsubscribe(waveId) {
+    if (!subscriptions.has(waveId)) {
+      return;
+    }
+    subscriptions.delete(waveId);
+    const wave = waves.get(waveId); // may be gone (ended) — the feed still needs freeing
+    if (wave) {
+      wave.subscribed = false;
+      wave.joined = false;
+    }
+    leaveWaveTransport(waveId); // Phase 3: leave sub-topic + close per-wave channels
+    session.closeWave(waveId).catch(() => {});
+    emitEvent({ event: 'unsubscribed', waveId });
+  }
+
+  /**
+   * Opt in to a lobby (renderer command / harness): the given wave, or the newest joinable
+   * one when no waveId is supplied (concurrent waves — the host picks, or takes the default).
+   * @param {string} [waveId] The wave to join (default: newest joinable lobby).
    * @returns {string|null} The joined waveId (so the worker can charge the join fee on a real
    *   opt-in), or null if it was a no-op.
    */
-  function join() {
+  function join(waveId) {
+    const wave = waveId ? waves.get(waveId) : newestJoinableLobby();
     if (!wave || wave.phase !== 'lobby' || wave.joined) {
       return null;
     }
@@ -701,25 +1033,42 @@ function createWave({
       emitEvent({ event: 'join-blocked', waveId: wave.id, reason: wave.paid });
       return null;
     }
+    subscribe(wave.id); // participating implies holding the feed (idempotent)
     wave.joined = true;
     floodMyFeedCore(wave.id);
-    emitEvent({ event: 'joined', waveId: wave.id, count: rosterCount() });
+    emitEvent({ event: 'joined', waveId: wave.id, count: rosterCount(wave) });
     return wave.id;
   }
 
   /**
-   * Publish MY feed core: open it (its key is my writer key), sign my join attestation
-   * over it, remember myself in `writers`, and flood a wave-join carrying (writerKey,
-   * joinSig, burn). Every peer ingests it → opens my core → sees my entry. The core key
-   * needs my core ready, so the flood is async. Called by joiners (from join()) and the
-   * initiator (from doAnnounce); recordBurn re-floods once a late join burn confirms.
+   * Stage my opaque entry payload for a wave (the given one, or the newest I've joined) — it's
+   * posted to that wave's feed when my sweep slot fires.
+   * @param {Object} [input] The staged entry.
+   * @param {*} [input.payload] Opaque application content (arbitrary JSON the host owns).
+   * @param {string} [input.waveId] The wave to stage for (default: newest joined).
+   */
+  function stageEntry(input = {}) {
+    const wave = input.waveId ? waves.get(input.waveId) : newestJoinedWave();
+    if (!wave) {
+      return;
+    }
+    wave.pipeline.stage(input);
+  }
+
+  /**
+   * Publish MY feed core for `waveId`: open it (its key is my writer key), sign my join
+   * attestation over it, remember myself in `writers`, and flood a wave-join carrying
+   * (writerKey, joinSig, burn). Every peer ingests it → opens my core → sees my entry. The
+   * core key needs my core ready, so the flood is async. Called by joiners (from join()) and
+   * the initiator (from doAnnounce); recordBurn re-floods once a late join burn confirms.
    * @param {string} waveId The wave whose core to publish.
    */
   function floodMyFeedCore(waveId) {
     session
       .open(waveId)
       .then((writerKey) => {
-        if (!wave || wave.id !== waveId || !wave.joined || !writerKey) {
+        const wave = waves.get(waveId);
+        if (!wave || !wave.joined || !writerKey) {
           return;
         }
         if (!wave.joinSig) {
@@ -727,13 +1076,14 @@ function createWave({
         }
         // remember myself so my own wave-sync shares my core with newcomers
         wave.writers.set(me.id, { writerKey, joinSig: wave.joinSig });
-        floodGossip(
+        floodWave(
+          waveId,
           makeWaveJoin({
             waveId,
             peerId: me.id,
             writerKey,
             joinSig: wave.joinSig,
-            burn: entryPipeline.burnProof
+            burn: wave.pipeline.burnProof
           })
         );
       })
@@ -741,16 +1091,17 @@ function createWave({
   }
 
   /**
-   * Transition the current wave from lobby to the racing sweep: derive the schedule
-   * from the CANONICAL roster (the ids flooded on wave-start — every peer must compute
-   * the identical schedule), arm my slot + the position ticker + the deterministic end.
-   * Receiver-side clamps stop a hostile start from wedging a wave open.
+   * Transition a wave from lobby to the racing sweep: derive the schedule from the CANONICAL
+   * roster (the ids flooded on wave-start — every peer must compute the identical schedule),
+   * arm my slot + the position ticker + the deterministic end. Receiver-side clamps stop a
+   * hostile start from wedging a wave open.
+   * @param {Object} wave The WaveState to race.
    * @param {Object} opts The sweep parameters (from wave-start / wave-sync / my own start).
    * @param {string[]} opts.rosterIds The canonical roster ids.
    * @param {number} opts.t0 Epoch ms the sweep starts.
    * @param {number} opts.lapMs Duration of the full lap.
    */
-  function beginSweep({ rosterIds, t0, lapMs }) {
+  function beginSweep(wave, { rosterIds, t0, lapMs }) {
     if (!wave || wave.phase === 'racing') {
       return;
     }
@@ -768,13 +1119,13 @@ function createWave({
     wave.t0 = t0;
     wave.lapMs = cappedLapMs;
     const schedule = sweepSchedule({ rosterIds, t0, lapMs: cappedLapMs });
-    clearTimeout(lobbyTimer);
-    armSweepTimers(schedule);
+    clearTimeout(wave.lobbyTimer);
+    armSweepTimers(wave, schedule);
     // the deterministic end: EVERY peer observes t0 + lap + grace locally — there is
     // no wave-end message (nothing to trust, nothing to lose in the mesh)
-    clearTimeout(waveTimer);
+    clearTimeout(wave.waveTimer);
     const waveId = wave.id;
-    waveTimer = setTimeout(
+    wave.waveTimer = setTimeout(
       () => finishWave(waveId, { hops: schedule.length }),
       Math.max(0, t0 + cappedLapMs + END_GRACE_MS - Date.now())
     );
@@ -787,23 +1138,25 @@ function createWave({
   }
 
   /**
-   * Arm the running sweep's timers: my own slot (records it into the entry pipeline —
-   * pairing with the staged lobby frame posts the feed entry — and tells the renderer
-   * I'm holding) and the position ticker (every screen walks the schedule locally and emits
-   * `position` events — there is no wave-pos gossip; already-past slots flush at once so
-   * a mid-race joiner catches up).
+   * Arm a wave's running sweep timers: my own slot (records it into the wave's entry pipeline
+   * — pairing with the staged lobby frame posts the feed entry — and tells the renderer I'm
+   * holding) and the position ticker (every screen walks the schedule locally and emits
+   * `position` events — there is no wave-pos gossip; already-past slots flush at once so a
+   * mid-race joiner catches up). Each timer bails if the wave was torn down (checked by
+   * identity against the live map, so a superseded/ended wave's timers no-op).
+   * @param {Object} wave The WaveState being raced.
    * @param {import('./sweep').SweepSlot[]} schedule The derived sweep schedule.
    */
-  function armSweepTimers(schedule) {
+  function armSweepTimers(wave, schedule) {
     const waveId = wave.id;
     const mine = mySlot(schedule, me.id);
     if (mine && wave.joined) {
       const slotTimer = setTimeout(
         () => {
-          if (!wave || wave.id !== waveId) {
+          if (waves.get(waveId) !== wave) {
             return;
           }
-          entryPipeline.recordSlot({ waveId, hopCount: mine.rank });
+          wave.pipeline.recordSlot({ waveId, hopCount: mine.rank });
           emitEvent({
             event: 'holding',
             waveId,
@@ -814,11 +1167,11 @@ function createWave({
         },
         Math.max(0, mine.at - Date.now())
       );
-      sweepTimers.push(slotTimer);
+      wave.sweepTimers.push(slotTimer);
     }
     let index = 0;
     const tick = () => {
-      if (!wave || wave.id !== waveId) {
+      if (waves.get(waveId) !== wave) {
         return;
       }
       const now = Date.now();
@@ -836,7 +1189,9 @@ function createWave({
       if (index >= schedule.length) {
         return;
       }
-      sweepTimers.push(setTimeout(tick, Math.max(0, schedule[index].at - now)));
+      wave.sweepTimers.push(
+        setTimeout(tick, Math.max(0, schedule[index].at - now))
+      );
     };
     tick();
   }
@@ -849,46 +1204,44 @@ function createWave({
   // the wave. Genuine ends (completed, unpaid-rejected, superseded) still blacklist, so
   // stale floods can't revive a finished wave.
   const REVIVABLE_IDLE_REASONS = new Set(['lobby-timeout']);
-  // When a revivable idle abandons a wave I had JOINED, remember my join state: a late
-  // wave-start re-adopts the wave through enterLobby, which builds fresh state — without
-  // this memo the re-adopted wave would have joined=false (my slot never arms, my entry
-  // never posts) and a blank joinSig (my entry would fail mergeFeed's write-gate).
-  // Single slot: only one wave is ever engaged at a time. (Found at N=128: one peer per
-  // ~100 hit exactly this path.)
-  let abandonedJoin = null; // { waveId, joinSig } | null
 
   /**
-   * Return to idle: mark the wave ended (unless the reason is revivable), clear
-   * per-wave state, and notify the UI.
+   * Return a wave to idle: mark it ended (unless the reason is revivable), clear its timers,
+   * drop its WaveState, and notify the UI. Its feed is left open (the post-race idle gallery /
+   * latecomer replication rely on it) — feeds are freed on close().
+   * @param {string} waveId The wave to idle.
    * @param {string} reason Why we went idle (lobby-timeout, ended, unpaid…).
    */
-  function goIdle(reason) {
+  function goIdle(waveId, reason) {
+    const wave = waves.get(waveId);
     if (!wave) {
       return;
     }
-    const waveId = wave.id;
     if (!REVIVABLE_IDLE_REASONS.has(reason)) {
       endedWaves.add(waveId);
-      abandonedJoin = null;
+      abandonedJoins.delete(waveId);
     } else if (wave.joined) {
-      abandonedJoin = { waveId, joinSig: wave.joinSig };
+      // remember my join state (+ burn ticket) so a late wave-start can revive my seat
+      abandonedJoins.set(waveId, {
+        joinSig: wave.joinSig,
+        burnProof: wave.pipeline.burnProof
+      });
     }
-    wave = null;
-    entryPipeline.reset(); // drop any staged entry / slot for the next wave
-    teardown();
+    teardownWave(wave);
+    waves.delete(waveId);
     emitEvent({ event: 'wave-idle', waveId, reason });
   }
 
   /**
-   * Finish the current wave: emit the outcome to the UI and return to idle. Fired by
-   * every peer's own deterministic end timer (t0 + lapMs + grace) — completion needs no
-   * message and no trust.
+   * Finish a wave: emit the outcome to the UI and return it to idle. Fired by that wave's own
+   * deterministic end timer (t0 + lapMs + grace) — completion needs no message and no trust.
    * @param {string} waveId The wave that finished.
    * @param {Object} [outcome]
    * @param {number} [outcome.hops] How many roster slots the sweep covered.
    */
   function finishWave(waveId, { hops = 0 } = {}) {
-    if (!wave || wave.id !== waveId) {
+    const wave = waves.get(waveId);
+    if (!wave) {
       return;
     }
     emitEvent({
@@ -897,15 +1250,16 @@ function createWave({
       hops,
       angle: angleOfId(wave.by)
     });
-    goIdle('ended');
+    goIdle(waveId, 'ended');
   }
 
   /**
-   * The roster size for display: the credentialed participants plus the initiator
+   * A wave's roster size for display: its credentialed participants plus the initiator
    * (counted once — its own credential lands async).
+   * @param {Object} wave The WaveState.
    * @returns {number} How many peers hold (or are guaranteed) a sweep slot.
    */
-  function rosterCount() {
+  function rosterCount(wave) {
     if (!wave) {
       return 0;
     }
@@ -913,23 +1267,24 @@ function createWave({
   }
 
   /**
-   * Announce a new wave and open the lobby (any peer can start when idle). At lobby
-   * close the initiator freezes the roster and starts the sweep.
-   * @returns {string|null} The new waveId, or null if a wave is already engaged.
+   * Announce a new wave and open its lobby. Concurrent waves are allowed (any peer can start
+   * at any time — no singleton). At lobby close the initiator freezes the roster and starts
+   * the sweep.
+   * @returns {string} The new waveId.
    */
   function startWave() {
-    if (wave) {
-      emitEvent({ event: 'busy', waveId: wave.id });
-      return null;
-    }
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
     enterLobby({ waveId, by: me.id, mine: true }); // initiator auto-joins (marks its own lobby)
     if (enforcePaid) {
-      // Anti-spam: don't announce yet. Wait for the worker to burn the start fee and
-      // prove it (announcePaid). Fall back to idle if that never happens.
+      // Anti-spam: don't announce yet. Wait for the worker to burn the start fee and prove it
+      // (announcePaid). Fall back to idle if that never happens.
+      const wave = waves.get(waveId);
       log('wave', shortId(waveId), '— awaiting start payment');
-      clearTimeout(lobbyTimer);
-      lobbyTimer = setTimeout(() => goIdle('unpaid'), PAY_TIMEOUT_MS);
+      clearTimeout(wave.lobbyTimer);
+      wave.lobbyTimer = setTimeout(
+        () => goIdle(waveId, 'unpaid'),
+        PAY_TIMEOUT_MS
+      );
       emitEvent({ event: 'paying', waveId });
     } else {
       // no-wallet path (tests/headless): announce immediately, unpaid
@@ -939,29 +1294,35 @@ function createWave({
   }
 
   /**
-   * Flood the wave-announce (carrying the start `paid` proof when present), publish the
-   * initiator's own feed core (floodMyFeedCore), and start the lobby→sweep timer.
-   * There is no shared feed key any more — each participant contributes its own
-   * self-certified core. Shared by the paid and unpaid paths.
+   * Flood a wave's wave-announce (carrying the start `paid` proof when present), publish the
+   * initiator's own feed core (floodMyFeedCore), and start its lobby→sweep timer. There is no
+   * shared feed key — each participant contributes its own self-certified core. Shared by the
+   * paid and unpaid paths.
    * @param {string} waveId The wave being announced.
    * @param {Object|null} paidProof The signed start burn proof, or null (unpaid path).
    */
   function doAnnounce(waveId, paidProof) {
+    const wave = waves.get(waveId);
+    if (!wave) {
+      return;
+    }
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '');
-    floodGossip(
-      makeWaveAnnounce({ waveId, by: me.id, lobbyMs, paid: paidProof })
-    );
+    // the announce rides the DIRECTORY (every peer sees it → the browse surface); the initiator's
+    // own feed core rides the wave sub-topic channel (floodMyFeedCore → floodWave)
+    floodDir(makeWaveAnnounce({ waveId, by: me.id, lobbyMs, paid: paidProof }));
     floodMyFeedCore(waveId); // the initiator is a participant too — share its core
-    clearTimeout(lobbyTimer);
-    lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs);
+    clearTimeout(wave.lobbyTimer);
+    wave.lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs);
   }
 
   /**
-   * The worker proved the start burn (after it confirmed on-chain) — attach the proof
-   * and NOW announce. The initiator trusts its own confirmed burn (paid = 'verified').
-   * @param {Object} proof The signed start burn attestation.
+   * The worker proved a wave's start burn (after it confirmed on-chain) — attach the proof
+   * and NOW announce. Routed to the proof's own waveId. The initiator trusts its own confirmed
+   * burn (paid = 'verified').
+   * @param {Object} proof The signed start burn attestation (carries its waveId).
    */
   function announcePaid(proof) {
+    const wave = proof ? waves.get(proof.waveId) : null;
     if (!wave || wave.phase !== 'lobby' || !enforcePaid) {
       return;
     }
@@ -1008,7 +1369,8 @@ function createWave({
       minTrx: proof.amount
     })
       .then((res) => {
-        if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
+        const wave = waves.get(waveId);
+        if (!wave || wave.phase !== 'lobby') {
           return;
         }
         if (res && res.ok) {
@@ -1021,39 +1383,41 @@ function createWave({
             waveId,
             reason: res && res.reason
           });
-          goIdle('unpaid-rejected');
+          goIdle(waveId, 'unpaid-rejected');
         }
       })
       .catch(() => {});
   }
 
   /**
-   * Lobby closed: freeze the roster + writers and flood wave-start with them and the sweep
-   * parameters, then begin the sweep. The wave-start is self-contained — its `writers`
-   * carry every participant's feed-core credential, so a peer adopting via wave-start
-   * (that missed the wave-joins) still learns every core.
+   * Lobby closed: freeze the wave's roster + writers and flood wave-start with them and the
+   * sweep parameters, then begin the sweep. The wave-start is self-contained — its `writers`
+   * carry every participant's feed-core credential, so a peer adopting via wave-start (that
+   * missed the wave-joins) still learns every core.
    * @param {string} waveId The wave to finalize and start.
    */
   function finalizeAndStart(waveId) {
-    if (!wave || wave.id !== waveId || wave.phase !== 'lobby') {
+    const wave = waves.get(waveId);
+    if (!wave || wave.phase !== 'lobby') {
       return;
     }
-    // safety net: make sure my own credential is in `writers` (floodMyFeedCore set it
-    // at announce, but the async open may have raced the lobby close)
-    if (!wave.joinSig && session.writerKey) {
+    // safety net: make sure my own credential is in `writers` (floodMyFeedCore set it at
+    // announce, but the async open may have raced the lobby close)
+    const myWriterKey = session.writerKeyFor(waveId);
+    if (!wave.joinSig && myWriterKey) {
       wave.joinSig = signJoin(swarm.keyPair, {
         waveId,
-        writerKey: session.writerKey
+        writerKey: myWriterKey
       });
     }
-    if (session.writerKey && !wave.writers.has(me.id)) {
+    if (myWriterKey && !wave.writers.has(me.id)) {
       wave.writers.set(me.id, {
-        writerKey: session.writerKey,
+        writerKey: myWriterKey,
         joinSig: wave.joinSig
       });
     }
-    // the sweep parameters: a short lead so the flooded start reaches everyone before
-    // the first slot, and a lap scaled to the roster (clamped — see the constants)
+    // the sweep parameters: a short lead so the flooded start reaches everyone before the
+    // first slot, and a lap scaled to the roster (clamped — see the constants)
     const rosterIds = [...new Set([me.id, ...wave.writers.keys()])];
     const t0 = Date.now() + SWEEP_LEAD_MS;
     const lapMs = Math.max(
@@ -1066,7 +1430,8 @@ function createWave({
       joinSig: cred.joinSig
     }));
     log('starting wave', shortId(waveId), 'writers', writers.length);
-    floodGossip(
+    floodWave(
+      waveId,
       makeWaveStart({
         waveId,
         by: me.id,
@@ -1077,18 +1442,21 @@ function createWave({
       })
     );
     emitEvent({ event: 'started', waveId, by: me.id });
-    beginSweep({ rosterIds, t0, lapMs });
+    beginSweep(wave, { rosterIds, t0, lapMs });
   }
 
   // --- connections -----------------------------------------------------------
+  // One Protomux gossip channel per connection carries every kind (heartbeat / subs / wave-*), plus
+  // Corestore feed-core replication. A connection may be shared across the directory topic and
+  // several wave sub-topics (Hyperswarm dedups by remote key) — same one stream.
   swarm.on('connection', (conn) => {
-    store.replicate(conn); // carries gossip mux + feed-core replication
+    store.replicate(conn); // carries the gossip mux + feed-core replication
 
     const id = b4a.toString(conn.remotePublicKey, 'hex');
     log('peer connected', shortId(id));
 
     const mux = Protomux.from(conn);
-    const channel = mux.createChannel({ protocol: 'hyperwave/gossip' });
+    const channel = mux.createChannel({ protocol: GOSSIP_PROTOCOL });
     const message = channel.addMessage({
       encoding: cenc.string,
       onmessage(str) {
@@ -1106,38 +1474,32 @@ function createWave({
     const send = (str) => message.send(str);
     table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
 
-    // greet: my heartbeat (liveness + tag), so the newcomer seats me immediately.
-    // Membership converges via DHT discovery (swarm.peers) + direct connections.
+    // greet: my heartbeat (liveness + tag) so the newcomer seats me, and my subscription set so it
+    // knows which waves' control gossip to forward here (Phase 3 scoping).
     send(JSON.stringify(myHeartbeat()));
-    // if a wave is forming/racing, tell the newcomer so their UI syncs and they can't
-    // start a competing one (broadcasts they missed won't reach them otherwise)
-    if (wave) {
-      send(
-        JSON.stringify(
-          makeWaveSync({
-            waveId: wave.id,
-            phase: wave.phase,
-            by: wave.by,
-            // every participant's feed-core credential, so a newcomer is self-contained
-            writers: [...wave.writers.entries()].map(([peerId, cred]) => ({
-              peerId,
-              writerKey: cred.writerKey,
-              joinSig: cred.joinSig
-            })),
-            t0: wave.t0, // sweep timing, so a mid-race newcomer animates + ends right
-            lapMs: wave.lapMs,
-            paid: wave.startProof, // so a mid-lobby newcomer can verify + join
-            lobbyMsLeft:
-              wave.phase === 'lobby' ? Math.max(0, lobbyEndsAt - Date.now()) : 0
-          })
-        )
-      );
+    send(JSON.stringify(makeSubs({ subs: [...subscriptions] })));
+
+    // Directory catch-up: a fresh announce floods ONCE, so a peer connecting later would miss waves
+    // already announced. Unicast it a re-announce (marked `catchup`, so it processes but doesn't
+    // re-flood) for every wave I'm aware of, so it can browse + subscribe. If both of us then
+    // subscribe, our `subs` messages cross and we sync each other (recordNeighborSubs → syncPeer).
+    for (const wave of waves.values()) {
+      const announce = makeWaveAnnounce({
+        waveId: wave.id,
+        by: wave.by,
+        lobbyMs,
+        paid: wave.startProof
+      });
+      announce.mid = b4a.toString(crypto.randomBytes(8), 'hex');
+      announce.catchup = true;
+      send(JSON.stringify(announce));
     }
     pushRingState();
 
     conn.on('close', () => {
-      // authoritative disconnect: drop the channel + seat immediately
+      // authoritative disconnect: drop the seat + its subscription record immediately
       table.onDisconnect(id);
+      neighborSubs.delete(id);
       log('peer disconnected', shortId(id));
       pushRingState();
     });
@@ -1152,7 +1514,7 @@ function createWave({
   const discovery = swarm.join(topic, { server: true, client: true });
   discovery.flushed().then(() => {
     log(
-      'joined topic',
+      'joined directory topic',
       topicId,
       'topic',
       shortId(b4a.toString(topic, 'hex')),
@@ -1165,14 +1527,17 @@ function createWave({
   // --- timers ----------------------------------------------------------------
   // All periodic work is a self-rescheduling setTimeout (CLAUDE.md Code Style: no setInterval):
   // each tick re-arms itself as its last step, so a slow tick delays the next instead of stacking.
-  /** Heartbeat tick: broadcast my liveness to every connection, then re-arm. */
+  let tHeartbeat = null; // heartbeat timer
+  let tRing = null; // ring-maintenance timer
+
+  /** Heartbeat tick: broadcast my liveness to every neighbour, then re-arm. */
   function heartbeatTick() {
     broadcast(myHeartbeat());
     tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
   }
   tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
 
-  /** Maintenance tick: prune stale seats, pull feed updates, then re-arm. */
+  /** Maintenance tick: prune stale seats, pull feed updates (every held wave), then re-arm. */
   function ringTick() {
     pushRingState(); // re-evaluate staleness pruning
     // Pull replicated feed writes for every feed held and repaint.
@@ -1184,9 +1549,11 @@ function createWave({
   return {
     me,
     startWave,
+    subscribe,
+    unsubscribe,
     join,
     setTag,
-    stageEntry: (input) => entryPipeline.stage(input),
+    stageEntry,
     // Wire the payment layer once the wallet is up: my address (for feed tips /
     // attestations) and the on-chain burn verifier (enables the paid-wave anti-spam gate).
     setWallet: (address, verifier) => {
@@ -1201,10 +1568,8 @@ function createWave({
     async close() {
       clearTimeout(tHeartbeat);
       clearTimeout(tRing);
-      clearTimeout(lobbyTimer);
-      clearTimeout(waveTimer);
-      for (const timer of sweepTimers) {
-        clearTimeout(timer);
+      for (const wave of waves.values()) {
+        teardownWave(wave);
       }
       await swarm.destroy();
       await session.close();

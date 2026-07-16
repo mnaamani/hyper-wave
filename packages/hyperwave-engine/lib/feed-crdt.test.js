@@ -159,7 +159,7 @@ test('CrdtFeed: PEERS peers each with their own core converge to one feed', asyn
       new CrdtFeed({
         store: stores[i],
         me: { id: b4a.toString(keyPairs[i].publicKey, 'hex'), tag: 'BR' },
-        onFeed: (items) => {
+        onFeed: (_waveId, items) => {
           views[i] = items;
         },
         walletAddress: () => null,
@@ -246,8 +246,66 @@ test('CrdtFeed: writerKey is null before open, set after', async (t) => {
     await store.close();
     fs.rmSync(dir, { recursive: true, force: true });
   });
-  t.is(session.writerKey, null, 'no writer key before open');
+  t.is(session.writerKeyFor(WAVE), null, 'no writer key before open');
   const key = await session.open(WAVE);
-  t.is(session.writerKey, key, 'writer key available after open');
+  t.is(session.writerKeyFor(WAVE), key, 'writer key available after open');
   t.is(key.length, 64, 'a 32-byte core key in hex');
+});
+
+// Concurrent waves (scaling.md Phase 1): opening a second wave must NOT close the first, and
+// each wave's feed must emit tagged with its own waveId — the two never bleed into each other.
+test('CrdtFeed: concurrent waves stay independent (open one never closes another)', async (t) => {
+  const dir = `/tmp/hw-crdt-multi-${Date.now()}`;
+  const store = new Corestore(dir);
+  const keyPair = crypto.keyPair();
+  const feeds = new Map(); // waveId -> latest items
+  const session = new CrdtFeed({
+    store,
+    me: { id: b4a.toString(keyPair.publicKey, 'hex'), tag: null },
+    onFeed: (waveId, items) => {
+      feeds.set(waveId, items);
+    },
+    walletAddress: () => null,
+    burnProof: () => null,
+    joinProof: (waveId) =>
+      signJoin(keyPair, { waveId, writerKey: session.writerKeyFor(waveId) }),
+    log: () => {}
+  });
+  t.teardown(async () => {
+    await session.close();
+    await store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const keyA = await session.open('wave-A');
+  const keyB = await session.open('wave-B'); // opening B must not close A
+  t.ok(keyA && keyB && keyA !== keyB, 'each wave gets its own writer core');
+  t.is(
+    session.writerKeyFor('wave-A'),
+    keyA,
+    'wave-A core still open after B opened'
+  );
+
+  await session.postEntry({ waveId: 'wave-A', hopCount: 0, payload: 'a' });
+  await session.postEntry({ waveId: 'wave-B', hopCount: 0, payload: 'b' });
+
+  t.alike(
+    feeds.get('wave-A').map((entry) => entry.payload),
+    ['a'],
+    'wave-A feed holds only its own entry'
+  );
+  t.alike(
+    feeds.get('wave-B').map((entry) => entry.payload),
+    ['b'],
+    'wave-B feed holds only its own entry'
+  );
+
+  // closing one wave leaves the other intact
+  await session.closeWave('wave-A');
+  t.is(session.writerKeyFor('wave-A'), null, 'wave-A closed');
+  t.is(
+    session.writerKeyFor('wave-B'),
+    keyB,
+    'wave-B untouched by closing wave-A'
+  );
 });

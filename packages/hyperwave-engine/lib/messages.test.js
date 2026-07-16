@@ -8,6 +8,7 @@ const {
   FLOODED_KINDS,
   validGossip,
   makeHeartbeat,
+  makeSubs,
   makeWaveAnnounce,
   makeWaveJoin,
   makeWaveStart,
@@ -31,6 +32,15 @@ test('every factory builds a message its validator accepts', (t) => {
   t.ok(
     validGossip(makeHeartbeat({ id: PEER })),
     'heartbeat tag defaults to null'
+  );
+  t.ok(validGossip(makeSubs({ subs: [WAVE] })), 'subs');
+  t.ok(
+    validGossip(makeSubs({ subs: [] })),
+    'empty subs (subscribed to nothing)'
+  );
+  t.absent(
+    validGossip({ kind: 'subs', subs: [PEER] }),
+    'subs rejects non-waveIds'
   );
   t.ok(
     validGossip(

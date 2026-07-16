@@ -17,6 +17,13 @@
 // entry per peer — extra blocks a malicious peer appends are never fetched), plus the
 // per-entry byte caps in mergeFeed.
 //
+// Concurrent waves (protocol scaling.md Phase 1): several waves can be engaged at once, so
+// this holds a feed per wave in `#waves` and never closes one wave's cores when another
+// opens — a wave's feed is closed explicitly (closeWave) or on teardown (close). Every
+// method is waveId-scoped, and onFeed carries the waveId so the host can key its view by
+// wave. (Per-wave feed LIFECYCLE — closing a feed the instant its wave ends — is a Phase 2
+// concern; here feeds live until close(), which preserves the post-race idle gallery.)
+//
 // Pure feed logic — no swarm. wave.js supplies the store + live accessors
 // (walletAddress/burnProof/joinProof) and floods the writer keys; addWriter is driven by
 // every wave-join seen. Unit-tested in feed-crdt.test.js.
@@ -37,12 +44,14 @@ function shortId(hex) {
  * @typedef {Object} CrdtFeedCtx
  * @property {Object} store - The Corestore all wave cores namespace from.
  * @property {{id: string, tag: (string|null)}} me - My identity (tag read at post time).
- * @property {function(Object[]): void} onFeed - Push the ordered feed view to the host.
+ * @property {function(string, Object[]): void} onFeed - Push a wave's ordered feed view to
+ *   the host, tagged with its waveId (several waves can emit concurrently).
  * @property {function(): (string|null)} walletAddress - My TRX address, for the tip field.
- * @property {function(): (Object|null)} burnProof - My signed fee-burn attestation.
- * @property {function(): (string|null)} joinProof - My signed join attestation for the
- *   current wave (attest.js signJoin over waveId|peerId|writerKey) — every feed entry
- *   carries it (mergeFeed's write-gate).
+ * @property {function(string): (Object|null)} burnProof - My signed fee-burn attestation for
+ *   the given wave (each concurrent wave has its own burn ticket).
+ * @property {function(string): (string|null)} joinProof - My signed join attestation for the
+ *   given wave (attest.js signJoin over waveId|peerId|writerKey) — every feed entry carries
+ *   it (mergeFeed's write-gate).
  * @property {function(...*): void} log - Diagnostic logger.
  */
 
@@ -55,7 +64,8 @@ function shortId(hex) {
  */
 
 /**
- * The per-wave CRDT feed: my core + the participants' cores, merged locally.
+ * The per-wave CRDT feed: my core + the participants' cores, merged locally. Holds every
+ * concurrently-engaged wave's feed at once (keyed by waveId).
  */
 class CrdtFeed {
   #store;
@@ -65,7 +75,6 @@ class CrdtFeed {
   #burnProof;
   #joinProof;
   #log;
-  #waveId = null; // the CURRENT wave
   #waves = new Map(); // waveId -> WaveCores
 
   /**
@@ -82,20 +91,13 @@ class CrdtFeed {
   }
 
   /**
-   * The wave the current feed belongs to, or null when none is open.
-   * @returns {(string|null)} The current wave id.
-   */
-  get waveId() {
-    return this.#waveId;
-  }
-
-  /**
-   * My writer core key for the current wave (hex) — the credential a wave-join carries
-   * (a join attestation signs it), or null before the core is ready / no wave open.
+   * My writer core key for `waveId` (hex) — the credential a wave-join carries (a join
+   * attestation signs it), or null before the core is ready / that wave isn't open.
+   * @param {string} waveId - The wave whose core key to read.
    * @returns {(string|null)} My writer core key (hex).
    */
-  get writerKey() {
-    const wave = this.#waves.get(this.#waveId);
+  writerKeyFor(waveId) {
+    const wave = this.#waves.get(waveId);
     if (!wave || !wave.own.key) {
       return null;
     }
@@ -103,20 +105,13 @@ class CrdtFeed {
   }
 
   /**
-   * Open (create) MY writable core for `waveId` and make it current, closing the previous
-   * wave's cores (the feed is ephemeral — nothing to keep once a new wave supersedes
-   * it; a departing peer's entry is already replicated into everyone's view). Awaits my
-   * core's readiness so writerKey is available.
+   * Open (create) MY writable core for `waveId`, if not already open. Concurrent waves each
+   * keep their own cores — opening one never closes another (closeWave/close do that). Awaits
+   * my core's readiness so writerKeyFor is available.
    * @param {string} waveId - The wave whose feed to open.
    * @returns {Promise<string>} My writer core key (hex) for this wave.
    */
   open(waveId) {
-    // Set the current wave + its record SYNCHRONOUSLY, so addWriter/emitView work
-    // immediately; only my core's readiness (for the writer key) is awaited.
-    if (this.#waveId !== waveId && this.#waveId !== null) {
-      this.#closeWave(this.#waveId).catch(() => {}); // background-close the previous wave
-    }
-    this.#waveId = waveId;
     let wave = this.#waves.get(waveId);
     if (!wave) {
       const own = this.#store.get({
@@ -125,11 +120,7 @@ class CrdtFeed {
       });
       wave = { own, foreign: new Map(), posted: false };
       this.#waves.set(waveId, wave);
-      own.on('append', () => {
-        if (this.#waveId === waveId) {
-          this.#emitView();
-        }
-      });
+      own.on('append', () => this.#emitView(waveId));
     }
     return wave.own.ready().then(() => b4a.toString(wave.own.key, 'hex'));
   }
@@ -165,14 +156,8 @@ class CrdtFeed {
       // one entry per peer by construction: only block 0 is ever fetched, so a
       // malicious peer's extra appends are never downloaded
       core.download({ start: 0, end: 1 });
-      core.on('append', () => {
-        if (this.#waveId === waveId) {
-          this.#emitView();
-        }
-      });
-      if (this.#waveId === waveId) {
-        this.#emitView();
-      }
+      core.on('append', () => this.#emitView(waveId));
+      this.#emitView(waveId);
     });
     this.#log('feed: learned writer', shortId(peerId));
   }
@@ -196,8 +181,8 @@ class CrdtFeed {
     }
     // capture the proofs NOW, before the await: a fast wave can end mid-append and a new
     // wave would blank them, stripping our own tip address / write credential
-    const burnProof = this.#burnProof();
-    const joinSig = this.#joinProof();
+    const burnProof = this.#burnProof(waveId);
+    const joinSig = this.#joinProof(waveId);
     await wave.own.ready();
     wave.posted = true;
     await wave.own.append({
@@ -214,30 +199,31 @@ class CrdtFeed {
       timestamp: Date.now()
     });
     this.#log('posted entry hop', hopCount);
-    this.#emitView();
+    this.#emitView(waveId);
   }
 
   /**
-   * Pull replicated entries for every held wave, then repaint the
-   * current one. Called periodically by wave.js so a feed keeps converging even when
-   * no `append` event fires locally.
+   * Pull replicated entries for every held wave, then repaint each. Called periodically by
+   * wave.js so every feed keeps converging even when no `append` event fires locally.
    * @returns {void}
    */
   tick() {
-    for (const wave of this.#waves.values()) {
+    for (const [waveId, wave] of this.#waves) {
       for (const core of [wave.own, ...wave.foreign.values()]) {
         core.update().catch(() => {});
       }
+      this.#emitView(waveId);
     }
-    this.#emitView();
   }
 
   /**
-   * Read block 0 of every current-wave core that has it, merge, and push to the host.
+   * Read block 0 of every core of `waveId` that has it, merge, and push to the host tagged
+   * with the waveId.
+   * @param {string} waveId - The wave to repaint.
    * @returns {Promise<void>}
    */
-  async #emitView() {
-    const wave = this.#waves.get(this.#waveId);
+  async #emitView(waveId) {
+    const wave = this.#waves.get(waveId);
     if (!wave) {
       return;
     }
@@ -249,18 +235,18 @@ class CrdtFeed {
         } catch {}
       }
     }
-    if (this.#waves.get(this.#waveId) !== wave) {
+    if (this.#waves.get(waveId) !== wave) {
       return; // moved on while reading
     }
-    this.#onFeed(mergeFeed(raw));
+    this.#onFeed(waveId, mergeFeed(raw));
   }
 
   /**
-   * Close every core of a wave and forget it.
-   * @param {(string|null)} waveId - The wave to close.
+   * Close every core of a wave and forget it (its feed ended / was superseded).
+   * @param {string} waveId - The wave to close.
    * @returns {Promise<void>}
    */
-  async #closeWave(waveId) {
+  async closeWave(waveId) {
     const wave = this.#waves.get(waveId);
     if (!wave) {
       return;
@@ -277,7 +263,7 @@ class CrdtFeed {
    */
   async close() {
     for (const waveId of [...this.#waves.keys()]) {
-      await this.#closeWave(waveId);
+      await this.closeWave(waveId);
     }
   }
 }

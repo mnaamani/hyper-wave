@@ -106,6 +106,15 @@ class PeerTable {
   senderEntries() {
     return this.#senders.entries();
   }
+
+  /**
+   * The direct-send fn for one connected peer (unicast, e.g. a wave-sync catch-up), or undefined.
+   * @param {string} id - The peer's connection id.
+   * @returns {(function(string): void)|undefined} Its send fn, or undefined if not connected.
+   */
+  senderOf(id) {
+    return this.#senders.get(id);
+  }
 }
 
 module.exports = { PeerTable };

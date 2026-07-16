@@ -22,6 +22,8 @@ function fakeWave() {
       calls.push('join');
       return 'wave-1';
     },
+    subscribe: (waveId) => calls.push(['subscribe', waveId]),
+    unsubscribe: (waveId) => calls.push(['unsubscribe', waveId]),
     announcePaid: (paid) => calls.push(['announcePaid', paid]),
     setTag: (tag) => calls.push(['setTag', tag]),
     stageEntry: (entry) => calls.push(['stageEntry', entry]),
@@ -99,6 +101,18 @@ test('the engine routes commands to the wave protocol and forwards its events to
   t.ok(
     sent.find((msg) => msg.type === 'error' && msg.command === 'stage-entery'),
     'the error echoes the offending command type (not the payload)'
+  );
+
+  // subscription commands (Phase 2) route to the wave protocol with their waveId
+  engine.exec({ type: 'subscribe-wave', waveId: 'wave-9' });
+  engine.exec({ type: 'unsubscribe-wave', waveId: 'wave-9' });
+  t.alike(
+    wave.calls.slice(-2),
+    [
+      ['subscribe', 'wave-9'],
+      ['unsubscribe', 'wave-9']
+    ],
+    'subscribe-wave / unsubscribe-wave routed to the wave protocol'
   );
 
   await flush();

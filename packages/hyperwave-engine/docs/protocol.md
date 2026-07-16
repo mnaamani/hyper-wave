@@ -189,8 +189,23 @@ connections. The sweep needs only a **connected flood graph** with small diamete
 random mesh of degree ≈ `maxPeers` has one with overwhelming probability (validated at
 128 peers over a local DHT: the incidental mesh alone gathered the full lobby). The
 accepted trade-off: flood connectivity depends entirely on the transport's mesh quality.
-**`wave-sync`** on connect is the catch-up path for a peer that connects after a flood
-has passed.
+**`wave-sync`** is the catch-up path for a peer that connects (or subscribes) after a
+flood has passed.
+
+**Directory vs subscribed scoping (scaling.md Phases 2–3).** The shared topic is a
+**directory**: everyone on it exchanges `heartbeat` (liveness) + `wave-announce` (the
+browse surface), and a peer connecting late gets a unicast **`catchup` re-announce** for
+every wave the neighbour knows. A wave's **heavy control gossip (`wave-join`/`wave-start`/
+`wave-sync`)** is scoped to its **subscribers**: each peer advertises its subscription set
+in a one-hop **`subs`** message, and a wave's join/start is forwarded only to neighbours
+whose set contains it — so a peer's control-plane traffic is **O(subscribed)**, not
+O(topic). Subscribing also joins the wave's own sub-topic `hash("hyperwave:wave:" +
+topicId + ":" + waveId)` so its participants discover each other off the O(N) directory
+mesh. **Feed replication auto-scopes**: a peer opens (hence replicates) a wave's cores only
+while subscribed. All of this rides **one Protomux channel per connection** — the scoping
+is a send-side filter, not separate channels (per-wave sub-channels were tried but their
+dynamic-open pairing races the first flood; the `subs` filter self-heals via a sync on
+mutual subscription).
 
 ## 4. Peer map (membership & liveness)
 
@@ -246,8 +261,10 @@ a `wave-sync` (§7.4), so the newcomer's map _and_ wave state converge immediate
 
 ## 5. Gossip message catalog
 
-The protocol has exactly **five** message kinds, all JSON objects on the
-`hyperwave/gossip` channel. Unknown `kind`s are ignored.
+The protocol has **six** message kinds, all JSON objects on the one `hyperwave/gossip`
+channel per connection. Unknown `kind`s are ignored. `wave-announce` floods the whole
+directory; `wave-join`/`wave-start` flood only a wave's subscribers (§3, scaling.md
+Phase 3); `heartbeat`/`subs`/`wave-sync` are one-hop.
 
 ### 5.0 Uniform message envelope (planned)
 
@@ -314,6 +331,23 @@ structure** — the sweep needs no successor precision. Every peer is equal
 — the heartbeat carries no role and no peer is special. Primary membership comes from DHT
 discovery (`swarm.peers`); the heartbeat is liveness, not the authoritative peer set.
 
+### subs — my subscription set, one hop (on connect + on change)
+
+```json
+{
+  "kind": "subs",
+  "subs": ["<waveId>", "..."]
+}
+```
+
+The waves this peer is subscribed to (holds cores for). Sent on connect and whenever it
+subscribes/unsubscribes (scaling.md Phases 2–3). A neighbour records it and forwards a
+wave's `wave-join`/`wave-start` here **only if** the set contains that wave — the send-side
+scoping that makes control traffic O(subscribed). On learning a **newly-mutual**
+subscription, the peer unicasts a `wave-sync` to catch the neighbour up (so a late
+subscribe or a flood that raced the subscription is always recovered). Not relayed; carries
+no `mid`.
+
 The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carries a unique
 `mid` (random hex id); receivers relay on first sight and drop repeats.
 
@@ -332,7 +366,12 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
 }
 ```
 
-Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId`.
+Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId` (as
+merely **aware** — no cores open until they subscribe/join, §7.2). A fresh announce floods
+the whole directory. On connect, a peer also **unicasts** a re-announce for every wave it
+knows, marked `"catchup": true` (fresh `mid`), so a peer that joined the swarm after the
+original flood can still discover the wave — a catch-up is processed but **not** re-flooded
+(it's directed, not a fresh flood).
 
 **No shared feed key.** There is no shared per-wave feed core and no feed key to
 carry or sign — each participant owns its own feed core (§8). The originator is a participant too: right
@@ -586,34 +625,53 @@ sequenceDiagram
 (Open arrows = **flooded** gossip. C never joined, so it has no slot — it watches the same
 sweep and ends at the same moment.)
 
-### 7.1 Adoption & tie-break (`shouldAdopt(waveId)`)
+### 7.1 Adoption (`canAdopt(waveId)`)
 
 - If `waveId ∈ endedWaves` → **reject** (a finished wave never restarts).
-- If idle, or `waveId == wave.id` → **accept**.
-- Else accept **iff `waveId < wave.id`** (lexicographic on hex). Lower id wins, so
-  concurrent starts deterministically converge on one wave. On accepting a different
-  wave, the old one is abandoned (added to `endedWaves`).
+- Otherwise → **accept**.
 
-### 7.2 Roles in a wave
+**Concurrent waves** (scaling.md Phase 1): the wave FSM is multiplexed — the engine holds a
+`Map<waveId, WaveState>` and runs `lobby → racing → idle` **per wave**, so several waves can be
+engaged at once on the one topic. The former singleton rule (one wave at a time) and its
+lower-`waveId`-wins tie-break are **gone** — they existed only to collapse concurrent starts onto a
+single wave (`shouldAdopt` → `canAdopt`). Nothing is superseded on a new start; each wave lives and
+ends on its own timers. The gossip wire is unchanged (already keyed by `waveId`).
+
+### 7.2 Awareness, subscription, and roles
+
+Being **aware** of a wave (you accepted its `wave-announce`) is distinct from
+**subscribing** to it (scaling.md Phase 2). An aware peer tracks the wave's existence
+(roster count) for the browse list and relays its announce, but opens **no cores**.
+`subscribe()` opens the wave's feed (my own core + the roster's) and joins its sub-topic;
+`unsubscribe()` closes them. `join()` implies subscribe. `autoSubscribe` (default true)
+subscribes on awareness — the single-wave demo UX; false gives browse-then-pick. This bounds
+a peer's core budget to **O(subscribed)**, not O(all announced waves).
+
+Among **subscribed** peers there are still no lasting roles:
 
 - **Originator:** the peer that called `startWave` — sends `wave-announce`, publishes its own
   feed core (`floodMyFeedCore`), runs the lobby timer, and sends `wave-start` with
   `writers` and the sweep parameters. It is otherwise an **ordinary participant** with no
   lasting asymmetry: its slot is wherever its angle falls, it posts its own entry, and there
-  is no indexer, admission, or retention role. (Every participant already holds every core
-  during the wave — §8 — so a departing peer's entry survives in everyone's view; the feed
-  is ephemeral once superseded, so nobody keeps cores open across waves.)
-- **Joiner (roster):** opted in during the lobby (`wave-join` publishes its feed core);
-  gets an entry prompt and a slot in the schedule.
-- **Spectator:** engaged with the wave but not in the roster — it opens its own (empty) core
-  to engage the wave, animates the same sweep, and ends at the same moment, but has no slot
-  and never posts. **A peer whose join misses the lobby is a spectator**: the roster freezes
-  into the schedule at lobby close, so a late join can't take a slot it could never fill.
+  is no indexer, admission, or retention role. (Every _subscriber_ holds every core during
+  the wave — §8 — so a departing peer's entry survives; a subscribed wave's feed stays open
+  until `unsubscribe()` or `close()` — the post-race idle gallery + latecomer replication rely
+  on it; it is **not** auto-closed at wave-end, since final-slot entries keep replicating past
+  the deterministic end.)
+- **Joiner (roster):** subscribed **and** opted in during the lobby (`wave-join` publishes its
+  feed core); gets an entry prompt and a slot in the schedule.
+- **Spectator:** subscribed but not in the roster — holds the feed and animates the same sweep,
+  ends at the same moment, but has no slot and never posts. **A peer whose join misses the
+  lobby is a spectator**: the roster freezes into the schedule at lobby close, so a late join
+  can't take a slot it could never fill.
 
-### 7.3 Join-time sync
+### 7.3 Catch-up sync
 
-Lifecycle floods fire once, so a peer connecting mid-wave would miss them. On each new
-connection, existing peers send a **direct** `wave-sync`. The newcomer:
+Lifecycle floods fire once, so a peer connecting or subscribing mid-wave would miss them. Two
+catch-up paths converge state: a **`catchup` re-announce** on connect (directory; makes a
+newcomer _aware_, §5 wave-announce), and a **`wave-sync`** exchanged when two peers become
+mutually subscribed (each learns the other's subscription from a `subs` message and unicasts
+a sync). The subscriber receiving a `wave-sync`:
 
 - `phase: lobby` → enter the lobby (join window with `lobbyMsLeft` remaining), ingest every
   credential in `writers` (open each participant's core) — then it can flood its own
@@ -621,7 +679,9 @@ connection, existing peers send a **direct** `wave-sync`. The newcomer:
 - `phase: racing` → ingest `writers` (open every participant's core), derive the schedule from
   `(by + writers, t0, lapMs)`, and go straight to `racing` as a spectator — animating from the
   current point and ending at the same deterministic moment.
-  Either way it's now engaged, so it can't start a competing wave.
+
+Because the sync fires on **mutual subscription** (not merely on connect), a join or start
+flood that raced the subscription is always recovered.
 
 ### 7.4 Ending & anti-revival
 
@@ -893,7 +953,8 @@ following guards keep a hostile peer running a modified app from disrupting hone
   wedge a wave open indefinitely — the deterministic end always arrives.
 - **Canonical-roster schedule.** The sweep schedule is a pure function of the flooded
   `(by + writers, t0, lapMs)`, so no peer can shift its own (or anyone's) slot without
-  producing a different `wave-start` — which the paid-gate + lower-id tie-break already constrain.
+  producing a different `wave-start` — which the paid-gate already constrains (a forged start needs
+  a valid start burn-proof).
 - **Paid-gate on every adoption path.** When enforced, `wave-announce`, `wave-start`, and
   `wave-sync` (both lobby **and** racing) are all gated on a valid start burn-proof, so no
   single message shape can push a peer into an unpaid/forged wave.
@@ -907,7 +968,7 @@ following guards keep a hostile peer running a modified app from disrupting hone
 - **Burn-bound tip address + one entry per peer.** `mergeFeed()` deterministically keeps a
   entry's tip `address` only if a signed burn names that wallet, and folds one entry per peer
   (§8.2) — so tips can't be routed to a non-payer and a seat can't bloat the feed.
-- **Cheap-before-expensive.** Adoption runs the cheap wave-filter (`shouldAdopt`) and flood
+- **Cheap-before-expensive.** Adoption runs the cheap wave-filter (`canAdopt`) and flood
   dedup before any signature verification, limiting the CPU a gossip flood can extract.
 
 ### 11.3 Known residual risks (hardening backlog)

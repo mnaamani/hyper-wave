@@ -24,6 +24,7 @@ const {
  * @property {boolean} [wallet] - Set `false` to run wallet-less (no burns/paid-gate/tips).
  * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by wallet.js).
  * @property {string} [swarmSeed] - Injected hex swarm-identity seed (else persisted at <storage>/swarm.seed).
+ * @property {boolean} [autoSubscribe] - Set `false` for browse-then-pick: hold cores only for waves the host explicitly subscribes to (scaling.md Phase 2). Default true (auto-engage every announced wave).
  */
 
 /**
@@ -72,6 +73,8 @@ function createEngine({
     // host-injected swarm identity seed (secure-seed-storage.md: the host owns the
     // secret store; the engine never persists an injected seed)
     swarmSeed: config.swarmSeed,
+    // subscription policy (Phase 2): undefined → createWave's default (true)
+    autoSubscribe: config.autoSubscribe,
     // The wave emits typed messages ({type:'state'|'event'|'feed', …}) straight to the host sink —
     // one notifier end to end, no per-kind wrapping here.
     emit,
@@ -308,6 +311,11 @@ function createEngine({
   const commandHandlers = {
     'start-wave': () => handleStartWave(),
     'join-wave': () => handleJoin(),
+    // Subscription layer (scaling.md Phase 2): browse-then-pick. subscribe holds a wave's feed
+    // cores (+ receives its control gossip); unsubscribe frees them but stays aware. A host running
+    // with autoSubscribe:false drives these to bound its core budget.
+    'subscribe-wave': (command) => wave.subscribe(command.waveId),
+    'unsubscribe-wave': (command) => wave.unsubscribe(command.waveId),
     'set-tag': (command) => wave.setTag(command.tag),
     'stage-entry': (command) => wave.stageEntry(command.entry),
     tip: (command) => handleTip(command),

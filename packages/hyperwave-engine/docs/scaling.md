@@ -1,11 +1,13 @@
 # Design note — scaling via concurrent waves
 
-**Status:** Proposed / exploratory — **not built.** [`protocol.md`](./protocol.md) is authoritative
-for the current, single-wave system; this note explores how to grow past it and deliberately
-revisits several baked-in assumptions (`one wave at a time`, `every peer holds every core`, the
-global ring). Nothing here is on the wire yet.
+**Status:** **Phases 1–3 built** — the FSM is multiplexed (concurrent waves), a subscription layer
+bounds each peer's core budget to O(subscribed), and control gossip is scoped to a wave's
+subscribers (with per-wave sub-topics for discovery). Phase 4 (directory at scale) remains proposed
+/ exploratory. [`protocol.md`](./protocol.md) is authoritative for the on-wire protocol; this note
+tracks the growth path and the baked-in assumptions it revisited (`one wave at a time` — dropped —
+`every peer holds every core` — now per-subscribed-wave — the global ring).
 
-**Date:** 2026-07-15
+**Date:** 2026-07-15 (Phase 1) · 2026-07-16 (Phases 2–3)
 
 ---
 
@@ -49,12 +51,17 @@ requirement.
 
 ## 4. Proposed design
 
-### 4.1 Multiplex the wave FSM
+### 4.1 Multiplex the wave FSM ✅ **built**
 
-The engine's singleton `let wave` becomes `Map<waveId, WaveState>`; the `lobby → racing → idle` FSM
-runs **per wave**. Drop "exactly one wave at a time" and the lower-`waveId`-wins tie-break (they
-exist only to enforce the singleton). The gossip wire is already keyed by `waveId`, so most of the
-protocol is unchanged — this is largely a state-management refactor.
+The engine's singleton `let wave` became `Map<waveId, WaveState>`; the `lobby → racing → idle` FSM
+now runs **per wave**. "Exactly one wave at a time" and the lower-`waveId`-wins tie-break are gone
+(they existed only to enforce the singleton — `shouldAdopt` → `canAdopt`, just the `endedWaves`
+check). Each `WaveState` owns its own timers, `EntryPipeline`, roster (`writers`), and paid-gate
+status; `CrdtFeed` holds every engaged wave's feed at once and emits `onFeed(waveId, items)`. The
+gossip wire is already keyed by `waveId`, so it is unchanged — this was a state-management refactor.
+The public command surface stays backwards-compatible: `join(waveId?)` / `stageEntry({waveId?})`
+default to the newest joinable / joined wave, and the host's `feed` message gains an additive
+`waveId`. Control gossip still floods to every peer on the topic (that is §4.3, Phase 3).
 
 ### 4.2 Subscription layer (the new concept)
 
@@ -99,13 +106,24 @@ place to spend the complexity.
 
 Each phase is independently shippable and testable:
 
-1. **Multiplex the FSM** (still one topic). Concurrent waves work end-to-end; control still floods.
-   Unblocks the "pick and choose" UX immediately at small scale.
-2. **Subscription layer + per-wave feed lifecycle** (keep multiple feeds open; join/leave).
-3. **Per-wave sub-topics** — move `join`/`start`/`sync` + feed replication onto `hash(waveId)`
-   topics; add the minimal directory topic. This is where per-peer traffic becomes O(subscribed).
-4. **Directory at scale** — index / pagination / filtering. The hard part; deferred until waves
-   (not just peers) number in the thousands.
+1. ✅ **Multiplex the FSM** (still one topic) — **done.** Concurrent waves work end-to-end; control
+   still floods. Unblocks the "pick and choose" UX immediately at small scale. (Engine-internal;
+   the host UI still shows one gallery per wave, keyed by the feed's `waveId`.)
+2. ✅ **Subscription layer + per-wave feed lifecycle** — **done.** A wave you're merely AWARE of
+   (saw its announce) opens no cores; `subscribe()` opens its feed and `unsubscribe()` closes it
+   (join/leave lifecycle) — `autoSubscribe` (default true) subscribes on awareness for the demo UX,
+   false gives true browse-then-pick. `join()` implies subscribe. Core budget → O(subscribed).
+3. ✅ **Per-wave scoping + sub-topics** — **done.** A wave's join/start/sync are forwarded only to
+   neighbours that advertised (via a one-hop `subs` message) they're subscribed to it, so control
+   traffic is O(subscribed); the tiny wave-announce still floods the directory (the browse surface,
+   with a unicast catch-up re-announce on connect). Each subscribed wave also joins its own
+   sub-topic `hash(prefix:topic:wave)` so its participants discover each other off the O(N) mesh.
+   Feed replication auto-scopes (a peer only opens cores for waves it subscribed to). Implemented as
+   ONE Protomux channel per connection with software send-scoping (per-wave Protomux sub-channels
+   were tried first but the dynamic-open pairing races the first flood — the `subs` filter is
+   simpler and self-heals via the sync-on-mutual-subscription).
+4. **Directory at scale** — index / pagination / filtering (+ the O(known-waves) connect catch-up).
+   The hard part; deferred until waves (not just peers) number in the thousands.
 
 ## 6. What we give up / tensions
 
