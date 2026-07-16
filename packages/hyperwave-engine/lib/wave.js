@@ -63,10 +63,12 @@ const { PeerTable } = require('./peer-table');
 const { EntryPipeline } = require('./entry');
 const {
   signBurn,
-  verifyBurn,
   signJoin,
   verifyJoin,
-  burnAuthorizes
+  burnAuthorizes,
+  startProofValid,
+  signMessage,
+  verifyMessage
 } = require('./attest');
 
 const DEFAULT_TOPIC = 'hyperwave:demo:v1';
@@ -103,6 +105,20 @@ const GOSSIP_SEEN_CAP = 4096;
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000;
+// Envelope age bound (protocol.md §5.0): a message whose signed `ts` is older than this is
+// dropped at the receive edge (and never relayed). This is a HARD cap on how long any flooded
+// message can circulate — independent of `mid` dedup — so a routing loop / dedup-set bug can't
+// amplify into unbounded flooding, AND a captured message can't be replayed later (its `ts` is
+// signed, so it can't be refreshed without the author's key). Generous vs the wave lifecycle
+// (lobby + lap ≤ ~75s) so slow propagation is fine; kills ancient replays.
+const GOSSIP_MAX_AGE_MS = 300000; // 5 min
+// Tolerance for a message whose `ts` is in the future (unsynchronized peer clocks).
+const CLOCK_SKEW_MS = 60000; // 1 min
+// A wave's kick-off (start) burn must be recent to adopt the wave — belt-and-suspenders beyond
+// the message age bound: even a freshly-signed announce that reuses a very old burn is rejected.
+// The burnTs is part of the signed burn tuple, so it can't be back-dated without the initiator's
+// key. Generous clock-skew allowance (peers aren't time-synchronized).
+const MAX_KICKOFF_AGE_MS = 300000; // 5 min
 
 /**
  * Short 8-char prefix of a hex id, for readable logs.
@@ -375,33 +391,57 @@ function createWave({
 
   // The heartbeat: pure liveness + tag, one hop to every connection (tiny ×
   // ≤maxPeers every HEARTBEAT_MS is noise). Peers don't gossip ring structure — the
-  // sweep needs no successors.
-  /** @returns {Object} A `heartbeat` gossip message: my id + tag (pure liveness). */
+  // sweep needs no successors. The envelope (origin/ts/sig) is stamped by originate().
+  /** @returns {Object} A `heartbeat` gossip message (pre-envelope): my tag (pure liveness). */
   function myHeartbeat() {
-    return makeHeartbeat({ id: me.id, tag: me.tag });
+    return makeHeartbeat({ tag: me.tag });
+  }
+
+  /**
+   * Is a message's signed timestamp within the acceptable window — not older than
+   * GOSSIP_MAX_AGE_MS (the replay / circulation bound) and not implausibly in the future
+   * (CLOCK_SKEW_MS, for unsynchronized clocks)?
+   * @param {number} ts The message's author timestamp (ms).
+   * @returns {boolean} True if the message is fresh enough to accept + relay.
+   */
+  function freshEnough(ts) {
+    const now = Date.now();
+    return ts <= now + CLOCK_SKEW_MS && ts >= now - GOSSIP_MAX_AGE_MS;
   }
 
   /**
    * Central inbound-gossip dispatcher (one Protomux channel per connection carries every kind).
-   * Shape-validates, identity-binds the heartbeat, then routes. wave-announce floods the whole
-   * directory; wave-join/wave-start flood only the subscribed subgraph (relayWave); wave-sync +
-   * subs are one-hop.
+   * Shape-gates, then verifies the uniform envelope (signature by `origin` + age bound), then
+   * identity-binds direct kinds, then routes. wave-announce floods the whole directory;
+   * wave-join/wave-start flood only the subscribed subgraph (relayWave); wave-sync + subs are
+   * one-hop. `origin` is the author on every kind; wave-sync's `by` is the wave initiator.
    * @param {Object} msg Parsed gossip message (has a `kind`).
    * @param {string} fromId Hex id of the Noise-authenticated connection it arrived on.
    */
   function handleGossip(msg, fromId) {
-    // Shape gate (messages.js): unknown/malformed messages drop here, before any state work.
+    // Shape gate (messages.js): unknown/malformed messages (incl. a missing envelope) drop here.
     if (!validGossip(msg)) {
       return;
     }
+    // Envelope authenticity: `sig` is a valid Ed25519 by `origin` over the whole message. This is
+    // the ONE shared check for every kind — a flooded message is trusted by this, not by the
+    // connection it arrived on (its `origin` is a third party at relay hops). Reject forgeries
+    // BEFORE relaying, so a bad message can't be amplified.
+    if (!verifyMessage(msg)) {
+      return;
+    }
+    // Age bound: drop (and never relay) a message whose signed `ts` is too old / too far future.
+    if (!freshEnough(msg.ts)) {
+      return;
+    }
+    // Identity binding for DIRECT kinds (heartbeat / subs / wave-sync): the author must be the
+    // Noise-authenticated peer that sent it — otherwise a peer could fake another's liveness /
+    // subscriptions. Flooded kinds legitimately carry a third-party `origin` (authenticated above).
+    if (!FLOODED_KINDS.has(msg.kind) && msg.origin !== fromId) {
+      return;
+    }
     if (msg.kind === 'heartbeat') {
-      // Identity binding: the heartbeat is the only self-describing message, so its claimed id must
-      // equal the Noise-authenticated connection id it arrived on — otherwise a modified client
-      // could fake other peers' liveness (ring pollution). Cheap compare first.
-      if (msg.id !== fromId) {
-        return;
-      }
-      table.upsert(msg.id, Date.now(), msg.tag);
+      table.upsert(msg.origin, Date.now(), msg.tag);
       pushRingState();
       return;
     }
@@ -416,14 +456,13 @@ function createWave({
     // Flooded control kinds (announce / join / start): process once, relay on first sight.
     if (FLOODED_KINDS.has(msg.kind)) {
       if (!flood.firstSight(msg.mid)) {
-        return; // already seen -> drop (stops loops). catchup announces carry a fresh mid.
+        return; // already seen -> drop (stops loops)
       }
       if (msg.kind === 'wave-announce') {
-        // announce floods the whole directory (browse surface) — UNLESS it's a directed catch-up
-        // re-announce (unicast on connect so I discover an older wave); a catch-up isn't re-flooded.
-        if (!msg.catchup) {
-          relayDir(msg, fromId);
-        }
+        // the tiny announce floods the whole directory (browse surface). The connect-time catch-up
+        // forwards a stored announce verbatim (same signed frame + mid), so a re-flood of it dies
+        // within one hop by the same dedup — no separate catch-up path needed.
+        relayDir(msg, fromId);
         handleWaveAnnounce(msg);
         return;
       }
@@ -486,7 +525,7 @@ function createWave({
         ingestWriter(wave, cred);
       }
       beginSweep(wave, {
-        rosterIds: canonicalRoster(msg),
+        rosterIds: canonicalRoster(msg.by, msg.writers),
         t0: msg.t0,
         lapMs: msg.lapMs
       });
@@ -514,15 +553,22 @@ function createWave({
   function handleWaveAnnounce(msg) {
     // anti-spam: an enforced peer ignores any announce lacking a validly-signed start
     // proof (unpaid/spam waves are invisible). Then it verifies the burn on-chain.
-    if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
+    // (`origin` is the initiator — it signed both the envelope and the start burn.)
+    if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.origin)) {
       return;
     }
     if (!canAdopt(msg.waveId)) {
       return;
     }
-    enterLobby({ waveId: msg.waveId, by: msg.by, dur: msg.lobbyMs });
+    enterLobby({ waveId: msg.waveId, by: msg.origin, dur: msg.lobbyMs });
     const wave = waves.get(msg.waveId);
-    if (enforcePaid && msg.paid && wave && !wave.startProof) {
+    if (!wave) {
+      return;
+    }
+    // remember the signed announce verbatim so I can catch up a peer that connects later (I
+    // forward this exact frame — its `mid` dedups any re-flood within one hop)
+    wave.announceMsg = msg;
+    if (enforcePaid && msg.paid && !wave.startProof) {
       wave.startProof = msg.paid;
       verifyStartProof(msg.waveId, msg.paid);
     }
@@ -540,11 +586,12 @@ function createWave({
     if (!wave || wave.phase !== 'lobby') {
       return;
     }
-    if (enforcePaid && !burnAuthorizes(msg.burn, msg.peerId, msg.waveId)) {
+    // origin is the joiner (envelope); the burn + join attestation bind to it.
+    if (enforcePaid && !burnAuthorizes(msg.burn, msg.origin, msg.waveId)) {
       return;
     }
     ingestWriter(wave, {
-      peerId: msg.peerId,
+      peerId: msg.origin,
       writerKey: msg.writerKey,
       joinSig: msg.joinSig
     });
@@ -556,7 +603,8 @@ function createWave({
    * @param {Object} msg A wave-start message.
    */
   function handleWaveStart(msg) {
-    if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.by)) {
+    // origin is the initiator — it signed the envelope and the start burn.
+    if (enforcePaid && !validStartProof(msg.paid, msg.waveId, msg.origin)) {
       return;
     }
     if (!canAdopt(msg.waveId)) {
@@ -564,7 +612,7 @@ function createWave({
     }
     let wave = waves.get(msg.waveId);
     if (!wave) {
-      enterLobby({ waveId: msg.waveId, by: msg.by });
+      enterLobby({ waveId: msg.waveId, by: msg.origin });
       wave = waves.get(msg.waveId);
     }
     if (msg.paid) {
@@ -576,18 +624,46 @@ function createWave({
       ingestWriter(wave, cred);
     }
     beginSweep(wave, {
-      rosterIds: canonicalRoster(msg),
+      rosterIds: canonicalRoster(msg.origin, msg.writers),
       t0: msg.t0,
       lapMs: msg.lapMs
     });
   }
 
   // --- gossip transport (one channel per connection; wave gossip scoped by subs) ----
+  // Every message I ORIGINATE is sealed with the uniform envelope here (origin = me, ts = now,
+  // sig by my ring key) — the single signing choke point. Relays forward the sealed frame
+  // VERBATIM (no re-sign), so a flooded message's `origin`/`sig` stay the originator's across
+  // every hop. `me` is always the origin at origination (a relay is not an origination).
 
   /**
-   * JSON-encode + send a message over every connection's gossip channel. Used for the heartbeat +
-   * originating a directory flood (wave-announce).
-   * @param {Object} obj The gossip message to broadcast.
+   * Seal an outgoing message with the uniform envelope (origin/ts/sig) and return it.
+   * @param {Object} msg The factory-built message (kind + payload; mid already set on flooded).
+   * @returns {Object} The same object, now carrying origin + ts + sig.
+   */
+  function originate(msg) {
+    msg.origin = me.id;
+    msg.ts = Date.now();
+    msg.sig = signMessage(swarm.keyPair, msg);
+    return msg;
+  }
+
+  /**
+   * Seal an outgoing FLOODED message: stamp a unique `mid` (remembered so it can't loop back into
+   * me), then apply the envelope. `mid` is set before signing, so the signature covers it.
+   * @param {Object} msg The factory-built flooded message.
+   * @returns {Object} The sealed message (mid + origin + ts + sig).
+   */
+  function originateFlood(msg) {
+    msg.mid = b4a.toString(crypto.randomBytes(8), 'hex');
+    flood.firstSight(msg.mid);
+    return originate(msg);
+  }
+
+  /**
+   * JSON-encode + send an (already-sealed) message over every connection's gossip channel. Used
+   * for the heartbeat + relaying / directory floods.
+   * @param {Object} obj The sealed gossip message to broadcast.
    */
   function broadcast(obj) {
     const str = JSON.stringify(obj);
@@ -599,14 +675,16 @@ function createWave({
   }
 
   /**
-   * Originate a DIRECTORY flood (a wave-announce): stamp a unique id, remember it (so it can't loop
-   * back into me), and broadcast to every neighbour. Receivers relay it (relayDir) across the mesh.
-   * @param {Object} obj The message to flood (a fresh `mid` is stamped onto it).
+   * Originate a DIRECTORY flood (a wave-announce): seal it (mid + envelope) and broadcast to every
+   * neighbour. Receivers relay it (relayDir) across the mesh. Returns the sealed frame so the
+   * initiator can store it for connect-time catch-up.
+   * @param {Object} obj The message to flood.
+   * @returns {Object} The sealed message.
    */
   function floodDir(obj) {
-    obj.mid = b4a.toString(crypto.randomBytes(8), 'hex');
-    flood.firstSight(obj.mid);
-    broadcast(obj);
+    const sealed = originateFlood(obj);
+    broadcast(sealed);
+    return sealed;
   }
 
   /**
@@ -634,9 +712,7 @@ function createWave({
    * @param {Object} obj The message to flood.
    */
   function floodWave(waveId, obj) {
-    obj.mid = b4a.toString(crypto.randomBytes(8), 'hex');
-    flood.firstSight(obj.mid);
-    const str = JSON.stringify(obj);
+    const str = JSON.stringify(originateFlood(obj));
     for (const [id, send] of table.senderEntries()) {
       if (neighborSubs.get(id)?.has(waveId)) {
         try {
@@ -668,7 +744,7 @@ function createWave({
 
   /** Tell every neighbour my current subscription set (on connect + on subscribe/unsubscribe). */
   function broadcastSubs() {
-    broadcast(makeSubs({ subs: [...subscriptions] }));
+    broadcast(originate(makeSubs({ subs: [...subscriptions] })));
   }
 
   /**
@@ -686,23 +762,25 @@ function createWave({
     }
     send(
       JSON.stringify(
-        makeWaveSync({
-          waveId: wave.id,
-          phase: wave.phase,
-          by: wave.by,
-          writers: [...wave.writers.entries()].map(([peerId, cred]) => ({
-            peerId,
-            writerKey: cred.writerKey,
-            joinSig: cred.joinSig
-          })),
-          t0: wave.t0,
-          lapMs: wave.lapMs,
-          paid: wave.startProof,
-          lobbyMsLeft:
-            wave.phase === 'lobby'
-              ? Math.max(0, wave.lobbyEndsAt - Date.now())
-              : 0
-        })
+        originate(
+          makeWaveSync({
+            waveId: wave.id,
+            phase: wave.phase,
+            by: wave.by,
+            writers: [...wave.writers.entries()].map(([peerId, cred]) => ({
+              peerId,
+              writerKey: cred.writerKey,
+              joinSig: cred.joinSig
+            })),
+            t0: wave.t0,
+            lapMs: wave.lapMs,
+            paid: wave.startProof,
+            lobbyMsLeft:
+              wave.phase === 'lobby'
+                ? Math.max(0, wave.lobbyEndsAt - Date.now())
+                : 0
+          })
+        )
       )
     );
   }
@@ -753,16 +831,17 @@ function createWave({
   // wave-sync) — no shared feed key, no admission.
 
   /**
-   * The canonical schedule input carried by a wave-start/wave-sync: the initiator plus
-   * every flooded writer. Derived from the MESSAGE (not local state) so every receiver
-   * computes the identical schedule even if it has ingested extra joins the initiator
-   * missed.
-   * @param {Object} msg A wave-start or wave-sync message.
+   * The canonical schedule input carried by a wave-start/wave-sync: the initiator plus every
+   * flooded writer. Derived from the MESSAGE (not local state) so every receiver computes the
+   * identical schedule even if it has ingested extra joins the initiator missed. The initiator is
+   * `origin` on a wave-start (it originated it) but `by` on a wave-sync (which a subscriber sends).
+   * @param {string} initiatorId The wave initiator's ring id.
+   * @param {import('./messages').WriterCred[]} writers The flooded writer credentials.
    * @returns {string[]} The canonical participant ids.
    */
-  function canonicalRoster(msg) {
-    const ids = (msg.writers || []).map((cred) => cred.peerId);
-    return [msg.by, ...ids];
+  function canonicalRoster(initiatorId, writers) {
+    const ids = (writers || []).map((cred) => cred.peerId);
+    return [initiatorId, ...ids];
   }
 
   // Learn a participant's feed core: verify its join attestation (binds peerId →
@@ -917,6 +996,7 @@ function createWave({
       lobbyTimer: null, // fires the sweep (initiator) or a fallback to idle (others)
       waveTimer: null, // the deterministic end of the sweep (t0 + lapMs + grace)
       sweepTimers: [], // my-slot + position timers for the running sweep
+      announceMsg: null, // the sealed wave-announce (stored to catch up late-connecting peers)
       // Entry is captured up-front during the lobby (renderer stages it into the pipeline),
       // then posted to the feed when my sweep slot fires. The pipeline (entry.js) owns the
       // pairing/once-per-wave/burn-ticket invariants — one per wave, so concurrent waves each
@@ -1080,7 +1160,6 @@ function createWave({
           waveId,
           makeWaveJoin({
             waveId,
-            peerId: me.id,
             writerKey,
             joinSig: wave.joinSig,
             burn: wave.pipeline.burnProof
@@ -1308,8 +1387,11 @@ function createWave({
     }
     log('announcing wave', shortId(waveId), paidProof ? '(paid)' : '');
     // the announce rides the DIRECTORY (every peer sees it → the browse surface); the initiator's
-    // own feed core rides the wave sub-topic channel (floodMyFeedCore → floodWave)
-    floodDir(makeWaveAnnounce({ waveId, by: me.id, lobbyMs, paid: paidProof }));
+    // own feed core rides the wave sub-topic channel (floodMyFeedCore → floodWave). Store the
+    // sealed announce so I can catch up peers that connect later (I forward this exact frame).
+    wave.announceMsg = floodDir(
+      makeWaveAnnounce({ waveId, lobbyMs, paid: paidProof })
+    );
     floodMyFeedCore(waveId); // the initiator is a participant too — share its core
     clearTimeout(wave.lobbyTimer);
     wave.lobbyTimer = setTimeout(() => finalizeAndStart(waveId), lobbyMs);
@@ -1336,21 +1418,24 @@ function createWave({
   }
 
   /**
-   * A start proof is structurally valid: signed (Ed25519) by the initiator over a
-   * start burn for this wave. (On-chain reality is checked separately, async.)
+   * A start proof is structurally valid: signed (Ed25519) by the initiator over a start burn for
+   * this wave, AND recent (the signed `burnTs` is within MAX_KICKOFF_AGE_MS). The freshness bound
+   * is replay-attack prevention: a captured, still-validly-signed announce reusing an old burn is
+   * rejected — the burnTs is part of the signed burn tuple, so it can't be back-dated without the
+   * initiator's key. (On-chain reality is checked separately, async.)
    * @param {Object} proof The start burn attestation to check.
    * @param {string} waveId The wave it must name.
    * @param {string} byId Hex id of the initiator it must be signed by.
-   * @returns {boolean} True if structurally valid and correctly signed.
+   * @returns {boolean} True if structurally valid, correctly signed, and fresh.
    */
   function validStartProof(proof, waveId, byId) {
-    return !!(
-      proof &&
-      proof.reason === 'start' &&
-      proof.waveId === waveId &&
-      proof.peerId === byId &&
-      verifyBurn(proof, proof.sig)
-    );
+    return startProofValid({
+      proof,
+      waveId,
+      byId,
+      now: Date.now(),
+      maxAgeMs: MAX_KICKOFF_AGE_MS + CLOCK_SKEW_MS
+    });
   }
 
   /**
@@ -1434,7 +1519,6 @@ function createWave({
       waveId,
       makeWaveStart({
         waveId,
-        by: me.id,
         writers,
         t0,
         lapMs,
@@ -1475,24 +1559,21 @@ function createWave({
     table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
 
     // greet: my heartbeat (liveness + tag) so the newcomer seats me, and my subscription set so it
-    // knows which waves' control gossip to forward here (Phase 3 scoping).
-    send(JSON.stringify(myHeartbeat()));
-    send(JSON.stringify(makeSubs({ subs: [...subscriptions] })));
+    // knows which waves' control gossip to forward here (Phase 3 scoping). Both are sealed
+    // (origin/ts/sig) like every message.
+    send(JSON.stringify(originate(myHeartbeat())));
+    send(JSON.stringify(originate(makeSubs({ subs: [...subscriptions] }))));
 
     // Directory catch-up: a fresh announce floods ONCE, so a peer connecting later would miss waves
-    // already announced. Unicast it a re-announce (marked `catchup`, so it processes but doesn't
-    // re-flood) for every wave I'm aware of, so it can browse + subscribe. If both of us then
-    // subscribe, our `subs` messages cross and we sync each other (recordNeighborSubs → syncPeer).
+    // already announced. Forward the INITIATOR's stored, signed announce VERBATIM for every wave I
+    // know, so the newcomer can browse + subscribe. It re-verifies the initiator's envelope sig and,
+    // if it relays the frame on, the original `mid` dedups it within one hop (no amplification, no
+    // separate catch-up message kind). If we both then subscribe, our `subs` cross and we sync each
+    // other (recordNeighborSubs → syncPeer).
     for (const wave of waves.values()) {
-      const announce = makeWaveAnnounce({
-        waveId: wave.id,
-        by: wave.by,
-        lobbyMs,
-        paid: wave.startProof
-      });
-      announce.mid = b4a.toString(crypto.randomBytes(8), 'hex');
-      announce.catchup = true;
-      send(JSON.stringify(announce));
+      if (wave.announceMsg) {
+        send(JSON.stringify(wave.announceMsg));
+      }
     }
     pushRingState();
 
@@ -1530,9 +1611,9 @@ function createWave({
   let tHeartbeat = null; // heartbeat timer
   let tRing = null; // ring-maintenance timer
 
-  /** Heartbeat tick: broadcast my liveness to every neighbour, then re-arm. */
+  /** Heartbeat tick: broadcast my (sealed) liveness to every neighbour, then re-arm. */
   function heartbeatTick() {
-    broadcast(myHeartbeat());
+    broadcast(originate(myHeartbeat()));
     tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);
   }
   tHeartbeat = setTimeout(heartbeatTick, HEARTBEAT_MS);

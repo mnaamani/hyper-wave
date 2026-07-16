@@ -107,6 +107,34 @@ function burnAuthorizes(burn, peerId, waveId) {
   );
 }
 
+// Is a wave's START burn proof valid enough to ADOPT the wave (the paid-wave anti-spam gate)?
+// A start proof must be a 'start'-reason burn bound to this wave + signed by the claimed
+// initiator, AND recent — its signed `burnTs` within `maxAgeMs` of `now`. The freshness bound is
+// replay-attack prevention: a captured, still-validly-signed announce that reuses an old burn is
+// rejected (burnTs is inside the signed burn tuple, so it can't be back-dated without the key).
+// Pure — the on-chain reality of the txHash is checked separately (network I/O). Extracted here
+// (from wave.js) so the gate + its freshness window are unit-testable without a swarm.
+/**
+ * @param {Object} opts
+ * @param {BurnProof} opts.proof - The start burn attestation to check.
+ * @param {string} opts.waveId - The wave the proof must name.
+ * @param {string} opts.byId - Hex id of the initiator the proof must be signed by.
+ * @param {number} opts.now - The current time (ms).
+ * @param {number} opts.maxAgeMs - Reject a burn whose `burnTs` is farther than this from `now`.
+ * @returns {boolean} True if the start proof is structurally valid, correctly signed, and fresh.
+ */
+function startProofValid({ proof, waveId, byId, now, maxAgeMs }) {
+  return !!(
+    proof &&
+    proof.reason === 'start' &&
+    proof.waveId === waveId &&
+    proof.peerId === byId &&
+    Number.isFinite(proof.burnTs) &&
+    Math.abs(now - proof.burnTs) <= maxAgeMs &&
+    verifyBurn(proof, proof.sig)
+  );
+}
+
 // --- join attestation --------------------------------------------------------
 // A peer's signed opt-in to a wave, binding its identity to the feed writer
 // core it publishes. Carried on `wave-join` (the join IS the write credential —
@@ -161,10 +189,84 @@ function verifyJoin({ waveId, peerId, writerKey }, sigHex) {
   }
 }
 
+// --- message envelope -------------------------------------------------------
+// Every gossip message carries a uniform envelope: `origin` (the author's ring id, hex),
+// `ts` (author timestamp, ms), and `sig` (an Ed25519 signature by `origin`'s ring key over
+// the WHOLE message minus `sig`). This generalizes the ad-hoc per-kind identity binding into
+// one shared check: any relay or recipient can verify authenticity independent of the
+// connection a flooded message arrived over, and the signed `ts` gives every message a
+// hard age bound (a replayed message can't have its timestamp refreshed without the key).
+// The domain attestations above (join, burn) still bind their own tuples; the envelope `sig`
+// additionally authenticates the message as a whole. (§ protocol.md §5.0)
+
+/**
+ * Deterministically serialize any JSON value with object keys sorted recursively, so the
+ * sender and every verifier compute the identical bytes regardless of key insertion order.
+ * @param {*} value - Any JSON-serializable value.
+ * @returns {string} The canonical serialization.
+ */
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableStringify).join(',') + ']';
+  }
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    const pairs = keys.map(
+      (key) => JSON.stringify(key) + ':' + stableStringify(value[key])
+    );
+    return '{' + pairs.join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Hash the canonical form of a message EXCLUDING its `sig` field — the bytes the envelope
+ * signature covers (everything else: kind, origin, ts, mid, and the kind's payload).
+ * @param {Object} msg - The gossip message (with or without `sig`).
+ * @returns {Buffer} The blake2b hash of the canonical, sig-less message.
+ */
+function messageHash(msg) {
+  const { sig: _sig, ...rest } = msg;
+  return crypto.hash(b4a.from(stableStringify(rest)));
+}
+
+/**
+ * Sign a message envelope with the author's ring key (covers the whole message minus `sig`).
+ * @param {KeyPair} keyPair - The author's signing ring keypair (its public key is `msg.origin`).
+ * @param {Object} msg - The message to sign (already carrying `origin`, `ts`, and payload).
+ * @returns {string} The Ed25519 envelope signature (hex).
+ */
+function signMessage(keyPair, msg) {
+  return b4a.toString(crypto.sign(messageHash(msg), keyPair.secretKey), 'hex');
+}
+
+/**
+ * Verify a message's envelope signature: `msg.sig` is a valid Ed25519 signature by
+ * `msg.origin` over the whole message minus `sig`. Authenticity independent of transport —
+ * a relayed (flooded) message is trusted by this, not by the connection it arrived on.
+ * @param {Object} msg - The message with `origin` + `sig`.
+ * @returns {boolean} True if `origin` signed this exact message.
+ */
+function verifyMessage(msg) {
+  try {
+    return crypto.verify(
+      messageHash(msg),
+      b4a.from(msg.sig, 'hex'),
+      b4a.from(msg.origin, 'hex')
+    );
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   signBurn,
   verifyBurn,
   burnAuthorizes,
+  startProofValid,
   signJoin,
-  verifyJoin
+  verifyJoin,
+  stableStringify,
+  signMessage,
+  verifyMessage
 };

@@ -210,10 +210,19 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 
 ### Adversarial hardening still open (`packages/hyperwave-engine/docs/protocol.md` §11.3)
 
-- [ ] **Automated coverage for the paid gate (currently a test gap).** The
-      burn/attestation path — `enforcePaid`, `recordBurn`, `validStartProof`/`verifyStartProof`,
-      the per-peer `burnAuthorizes` check on `wave-join` ingest — has **no automated test
-      with a wallet**: the unit suites don't wire a wallet and the `e2e/` harness runs
+- [~] **Automated coverage for the paid gate — PARTIALLY DONE (2026-07-16).** Added: the pure
+  gate predicate `startProofValid` (extracted to `attest.js`) is unit-tested — signed/bound/
+  reason checks + the freshness/replay window (`attest.test.js`); `burnAuthorizes` was already
+  tested; and `engine.test.js` now covers the enforced START/JOIN fee ORCHESTRATION with a
+  **mocked wallet** (burn → confirm → `announcePaid`; unfunded fail-fast; join burn; burn-result
+  staging). **Still open:** the wave-lifecycle timing scenarios — (a) mid-lobby join burn
+  re-floods + seats, (d) a burn confirming after the wave ends still binds the tip address —
+  need the wave running, so they remain covered only by the manual/nightly on-chain e2e (or a
+  future mock-payments mode in `e2e/`). Original note kept below.
+- [ ] **(remaining) Full lifecycle paid-gate coverage.** The
+      burn/attestation path — `enforcePaid`, `recordBurn`,
+      the per-peer `burnAuthorizes` check on `wave-join` ingest — is exercised in the enforced,
+      timing-dependent lifecycle only by the on-chain tier: the `e2e/` harness runs
       wallet-less (`enforcePaid` off, join-attestation-only ingest), so this path is
       exercised only by the manual/nightly on-chain e2e tier and two-peer runs. A fast wave
       can end before a joiner's fee burn confirms, and the burn proof must survive that
@@ -226,9 +235,16 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       (d) a burn confirming after the wave ends still binds the tip address on the posted
       entry. Optionally extend `e2e/` with a mock-payments mode so the paid gate gets
       end-to-end coverage too.
-- [ ] **Reject a wave whose kick-off burn is stale (replay-attack prevention).** `canAdopt()`
+- [x] **Reject a wave whose kick-off burn is stale (replay-attack prevention) — DONE (2026-07-16).**
+      Two layers now: (1) the uniform envelope's signed `ts` — the receive edge drops any message
+      whose `ts` is older than `GOSSIP_MAX_AGE_MS` (5 min), so a captured `wave-announce` replayed
+      later is dropped BEFORE adoption (its `ts` can't be refreshed without the initiator's key);
+      (2) `validStartProof` also enforces a freshness window on the signed `burnTs`
+      (`MAX_KICKOFF_AGE_MS`), so a still-valid old burn reused in a fresh frame is rejected too.
+      Both allow generous clock-skew. The stronger on-chain-tx-timestamp anchor (below) is a
+      possible future tightening. Original analysis kept below.
+- [ ] **(future tightening) Anchor kick-off freshness to the on-chain tx timestamp.** `canAdopt()`
       only refuses a `waveId` already in `endedWaves`, and `validStartProof()` checks the burn
-      attestation's `reason`/`waveId`/`peerId`/signature but **not its age**. So an attacker can
       **replay a captured, still-validly-signed `wave-announce`** later: a peer that never saw the
       original end (a freshly joined or **restarted** peer has an empty `endedWaves`) will adopt the
       stale wave, since the signed kick-off proof still verifies. Fix: enforce a **freshness
@@ -254,24 +270,20 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       (N reads of 1 immutable tx). Not a concentration bottleneck (distributed, 1 read/joiner)
       and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
       the anti-_wave_-spam gate; making it optimistic would re-open free wave-spam).
-- [ ] **Uniform gossip message envelope: `origin` + `sig` + `ts` on every message.** Today the
-      originator field is named inconsistently across kinds — `peerId` (`wave-join`),
-      `by` (`wave-announce`/`wave-start`/`wave-sync`), `id` (`heartbeat`) — and only
-      some messages carry a signature. Standardize a common envelope on **every** gossip message:
-      (1) **`origin`** — one convention everywhere for who authored the message (replace
-      `peerId`/`by`/`holder`/`id`); (2) **`sig`** — an Ed25519 signature by `origin`'s ring key
-      covering **all** fields (canonical serialization of the whole message minus `sig`), so any
-      relay/recipient can verify authenticity and the identity binding (§11.2) becomes a single
-      shared check instead of per-kind ad-hoc; (3) **`ts`** — the origin timestamp, so relays can
-      make **age-based drop decisions** (reject/stop relaying a message older than a max-lifetime
-      bound). The `ts` is the real defence: it's a hard cap on how long any flooded message can
-      circulate, so a routing loop or a dedup-set bug can't turn into an unbounded flooding
-      amplification — a message simply dies once it's older than the TTL regardless of `mid`
-      dedup state. Note the trade-offs: `ts` needs loose clock-skew tolerance (peers aren't
-      synchronized — allow a generous window), and signing every message adds a verify on the
-      hot path (the heartbeat fires every `HEARTBEAT_MS` per connection) — pair with the
-      compact-encoding item (raw-byte sig) and per-connection rate limiting above. **Schema
-      documented** in `packages/hyperwave-engine/docs/protocol.md` §5.0 (marked planned); implementation still to do.
+- [x] **Uniform gossip message envelope: `origin` + `sig` + `ts` on every message — DONE
+      (2026-07-16).** Every message now carries the envelope (protocol.md §5.0, `attest.js`
+      `signMessage`/`verifyMessage`/`stableStringify`, stamped at wave.js's `originate()` choke
+      point): (1) **`origin`** replaced the per-kind `id`/`by`/`peerId` author field everywhere
+      (the only surviving `by` is wave-sync's INITIATOR, distinct from the sync's sender-origin);
+      (2) **`sig`** — Ed25519 by `origin` over the canonical (recursively key-sorted) message minus
+      `sig`, verified on every message at the receive edge before acting/relaying, so a forgery
+      can't be amplified and identity binding (§11.2) is now one shared check; (3) **`ts`** — the
+      receive edge drops/never-relays a message older than `GOSSIP_MAX_AGE_MS` (5 min) or too far
+      future (`CLOCK_SKEW_MS`) — the hard flood-circulation cap + replay prevention. Enabled the
+      catch-up simplification (forward the initiator's stored signed announce verbatim; dropped the
+      `catchup` flag). Remaining perf follow-ups (still open, below): the per-message verify on the
+      heartbeat hot path pairs with the compact-encoding (raw-byte sig) + per-connection rate-limit
+      items.
 - [ ] **Harden `pay.send` to report failed transactions** (`wallet.js`). The returned `hash` is the
       txID computed client-side from the signed bytes (`sha256(raw_data)`), so `send` resolves
       `{ hash }` even when the broadcast is rejected or the tx later fails on-chain — e.g. sending

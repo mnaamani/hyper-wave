@@ -275,10 +275,12 @@ verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed t
 
 The single definition point for the six on-wire message kinds (`protocol.md` §5: `heartbeat`,
 `subs`, `wave-announce`, `wave-join`, `wave-start`, `wave-sync`): one `make*` factory per kind
-(every send site builds through it, so a shape can't drift per call site) and one shape validator
-per kind, run once at the receive edge via `validGossip` before any signature or state work.
-Validation is shape only — signatures and the paid gate stay in `attest.js` / the handlers.
-`FLOODED_KINDS` is the flooded/direct classification the relay decision uses.
+(builds the KIND + PAYLOAD; the uniform envelope — `origin`/`ts`/`sig`, §5.0 — is stamped at
+origination by wave.js via `attest.signMessage`) and one shape validator per kind, run once at the
+receive edge via `validGossip` (which checks the envelope + payload shape) before the envelope-sig
+verification (`attest.verifyMessage`), age check, and state work. Validation is shape only —
+signatures / age / the paid gate stay in `attest.js` / the handlers. `FLOODED_KINDS` is the
+flooded/direct classification the relay decision uses.
 
 ```js
 const {
@@ -288,19 +290,27 @@ const {
   makeSubs,
   makeWaveJoin
 } = require('hyperwave-engine/lib/messages');
+const { signMessage } = require('hyperwave-engine/lib/attest');
 
-const heartbeat = makeHeartbeat({ id: peerId, tag: 'BR' });
-validGossip(heartbeat); // → true (direct kind — no mid needed)
+// factories build the KIND + PAYLOAD (no author field — origin is the envelope). wave.js seals
+// each ORIGINATED message with the envelope; here we do it by hand to satisfy validGossip:
+const seal = (msg) => {
+  const framed = { ...msg, origin: peerId, ts: Date.now() };
+  return { ...framed, sig: signMessage(myKeyPair, framed) };
+};
+
+validGossip(makeHeartbeat({ tag: 'BR' })); // → false: no envelope yet
+validGossip(seal(makeHeartbeat({ tag: 'BR' }))); // → true (direct kind — envelope, no mid)
 
 const subs = makeSubs({ subs: [waveId] }); // my subscription set — scopes wave gossip (Phase 3)
-validGossip(subs); // → true (one-hop, no mid)
+validGossip(seal(subs)); // → true (one-hop, no mid)
 
-const join = makeWaveJoin({ waveId, peerId, writerKey, joinSig });
-validGossip(join); // → false: flooded kinds must carry their flood mid...
-validGossip({ ...join, mid: 'ab12cd34ef56ab12' }); // → true (floodGossip stamps it)
+const join = makeWaveJoin({ waveId, writerKey, joinSig }); // origin is the joiner
+validGossip(seal(join)); // → false: flooded kinds ALSO need their flood mid...
+validGossip(seal({ ...join, mid: 'ab12cd34ef56ab12' })); // → true (originateFlood stamps mid + envelope)
 
 FLOODED_KINDS.has('wave-join'); // → true (relayed); heartbeat/subs/wave-sync are one-hop
-validGossip({ kind: 'token', waveId }); // → false — unknown kinds are dropped at the edge
+validGossip(seal({ kind: 'token', waveId })); // → false — unknown kinds are dropped at the edge
 ```
 
 ---

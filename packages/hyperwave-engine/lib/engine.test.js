@@ -24,6 +24,11 @@ function fakeWave() {
     },
     subscribe: (waveId) => calls.push(['subscribe', waveId]),
     unsubscribe: (waveId) => calls.push(['unsubscribe', waveId]),
+    recordBurn: (fields) => {
+      calls.push(['recordBurn', fields]);
+      // a proof-like object (the real one is ring-signed; the gate crypto is tested in attest.test.js)
+      return { ...fields, peerId: wave.me.id, sig: 'proofsig' };
+    },
     announcePaid: (paid) => calls.push(['announcePaid', paid]),
     setTag: (tag) => calls.push(['setTag', tag]),
     stageEntry: (entry) => calls.push(['stageEntry', entry]),
@@ -220,5 +225,163 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   t.ok(
     txMsg && txMsg.list.length === 1 && txMsg.list[0].direction === 'in',
     'on-chain history forwarded'
+  );
+});
+
+// The enforced paid path (start/join fee burns) with a MOCKED wallet — deterministic, no Nile.
+// Closes the "paid gate has no automated test with a wallet" gap for engine.js's orchestration
+// (the wave.js gate CRYPTO — startProofValid / burnAuthorizes — is unit-tested in attest.test.js).
+function payMock({ trx = 7, confirms = true } = {}) {
+  const calls = { burns: [], verifies: [] };
+  return {
+    calls,
+    address: 'TMe',
+    balances: async () => ({ address: 'TMe', trx }),
+    burn: async (amount, memo) => {
+      calls.burns.push({ amount, memo });
+      return { hash: 'burnhash' + calls.burns.length };
+    },
+    verifyBurnTx: async (hash, expect) => {
+      calls.verifies.push({ hash, expect });
+      return { ok: confirms, reason: confirms ? undefined : 'not found' };
+    },
+    send: async () => ({ hash: 'x' }),
+    transactions: async () => [],
+    dispose: () => {}
+  };
+}
+
+const settle = async () => {
+  for (let i = 0; i < 8; i++) {
+    await flush(); // drain the payFee → confirmBurn → announcePaid async chain
+  }
+};
+
+test('start-wave burns the fee, confirms it, then announces the paid wave', async (t) => {
+  const sent = [];
+  const wave = fakeWave();
+  const pay = payMock({ trx: 7, confirms: true });
+  const engine = createEngine({
+    storageDir: '/tmp/e',
+    config: {},
+    emit: (msg) => sent.push(msg),
+    log: () => {},
+    deps: {
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
+      createPayments: async () => pay
+    }
+  });
+  t.teardown(() => engine.close());
+  await flush(); // wallet init → wireWallet → setWallet
+
+  engine.exec({ type: 'start-wave' });
+  await settle();
+
+  t.is(pay.calls.burns.length, 1, 'the start fee was burned once');
+  t.ok(
+    pay.calls.burns[0].memo.includes('wave-1'),
+    'the burn memo commits the waveId'
+  );
+  t.ok(
+    wave.calls.find(
+      (call) => call[0] === 'recordBurn' && call[1].reason === 'start'
+    ),
+    'a start burn attestation was recorded'
+  );
+  t.ok(
+    wave.calls.find((call) => call[0] === 'announcePaid'),
+    'the wave is announced ONLY after the burn confirms (announcePaid)'
+  );
+  const stages = sent
+    .filter((msg) => msg.type === 'burn-result' && msg.reason === 'start')
+    .map((msg) => msg.stage);
+  t.ok(
+    stages.includes('confirming') && stages.includes('burned'),
+    'burn-result staged confirming → burned'
+  );
+});
+
+test('an unfunded wallet fails fast — no burn, no announce', async (t) => {
+  const sent = [];
+  const wave = fakeWave();
+  const pay = payMock({ trx: 0 }); // below FEE_TRX
+  const engine = createEngine({
+    storageDir: '/tmp/e',
+    config: {},
+    emit: (msg) => sent.push(msg),
+    log: () => {},
+    deps: {
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
+      createPayments: async () => pay
+    }
+  });
+  t.teardown(() => engine.close());
+  await flush();
+
+  engine.exec({ type: 'start-wave' });
+  await settle();
+
+  t.is(pay.calls.burns.length, 0, 'nothing was burned from an unfunded wallet');
+  t.absent(
+    wave.calls.find(
+      (call) => call === 'startWave' || call[0] === 'announcePaid'
+    ),
+    'the wave was never started/announced'
+  );
+  t.ok(
+    sent.find(
+      (msg) =>
+        msg.type === 'burn-result' &&
+        msg.stage === 'failed' &&
+        /unfunded/.test(msg.error)
+    ),
+    'a fail-fast unfunded burn-result is surfaced'
+  );
+});
+
+test('join-wave burns the join fee for a joinable wave', async (t) => {
+  const sent = [];
+  const wave = fakeWave();
+  const pay = payMock({ trx: 7 });
+  const engine = createEngine({
+    storageDir: '/tmp/e',
+    config: {},
+    emit: (msg) => sent.push(msg),
+    log: () => {},
+    deps: {
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
+      createPayments: async () => pay
+    }
+  });
+  t.teardown(() => engine.close());
+  await flush();
+
+  engine.exec({ type: 'join-wave' });
+  await settle();
+
+  t.is(pay.calls.burns.length, 1, 'the join fee was burned');
+  t.ok(
+    wave.calls.find(
+      (call) => call[0] === 'recordBurn' && call[1].reason === 'join'
+    ),
+    'a join burn attestation was recorded'
+  );
+  t.ok(
+    sent.find(
+      (msg) =>
+        msg.type === 'burn-result' &&
+        msg.reason === 'join' &&
+        msg.stage === 'burned'
+    ),
+    'the join burn is reported burned (fire-and-forget, no on-chain confirm)'
   );
 });

@@ -266,66 +266,74 @@ channel per connection. Unknown `kind`s are ignored. `wave-announce` floods the 
 directory; `wave-join`/`wave-start` flood only a wave's subscribers (§3, scaling.md
 Phase 3); `heartbeat`/`subs`/`wave-sync` are one-hop.
 
-### 5.0 Uniform message envelope (planned)
+### 5.0 Uniform message envelope
 
-> **Status: planned, not yet implemented.** The per-message schemas below document the wire
-> format **as built**, which is inconsistent: the author field is variously `id` (`heartbeat`),
-> `by` (`wave-announce`/`wave-start`/`wave-sync`), or `peerId` (`wave-join`); only some
-> messages carry a signature; and there is no uniform per-message timestamp. The target is a
-> single envelope shared by **every** gossip message. Tracked in `TODO.md` (Adversarial
-> hardening).
-
-Every message will carry these three envelope fields in addition to its `kind` and payload:
+> **Status: implemented.** Every gossip message carries a uniform envelope on top of its `kind`
+> and payload. This replaced the old inconsistent per-kind author field (`id`/`by`/`peerId`) and
+> the partially-signed wire.
 
 ```jsonc
 {
   "kind": "<message-kind>",
-  "origin": "<peerId>", // one convention everywhere for who authored the message
-  // (replaces id / by / peerId)
+  "origin": "<peerId>", // who authored the message (one convention everywhere)
   "ts": 1719705612080, // origin timestamp (ms) — when the author created the message
-  "sig": "<hex64>" // Ed25519 signature by origin's ring key over the canonical
-  // serialization of the whole message minus `sig`
+  "sig": "<hex128>", // Ed25519 signature by origin's ring key over the canonical
+  // serialization of the whole message minus `sig` (attest.signMessage)
+  "mid": "<hex16>" // flooded kinds only — the dedup id (covered by `sig`)
   // …kind-specific payload fields…
 }
 ```
 
-- **`origin`** — the single authorship field on every message. `angle` is still derived from it
-  locally (§2.1), never trusted from the wire; the identity binding of §11.2 (self-describing id
-  must match the Noise connection id, where the message came direct) becomes **one shared check**
-  instead of a per-kind one.
-- **`sig`** — an Ed25519 signature by `origin`'s ring key covering **all** fields (canonical
-  serialization of the message with `sig` removed). Any relay or recipient can verify authenticity
-  before acting or re-flooding, so authenticity no longer depends on the connection a flooded
-  message arrived over. This **generalizes** today's ad-hoc signatures (the join `joinSig`,
-  the burn attestation `sig`) rather than replacing their _semantics_: those domain signatures
-  still bind their specific tuples (join, burn), but the envelope `sig` additionally
-  authenticates the message as a whole.
-- **`ts`** — the origin timestamp, enabling **age-based relay decisions**: a peer refuses to
-  accept or re-flood any message older than a max-lifetime bound (`GOSSIP_MAX_AGE_MS`, TBD). This
-  is a **hard cap on how long any flooded message can circulate** — independent of `mid` dedup — so
-  a routing loop or a dedup-set bug cannot amplify into unbounded flooding; a message simply dies
-  once it is too old. Requires generous clock-skew tolerance (peers are not time-synchronized).
-
-Until implemented, treat the individual schemas below as authoritative.
+- **`origin`** — the single authorship field on every message (peerId = the ring public key in
+  hex). `angle` is derived from it locally (§2.1), never trusted from the wire. There is **no**
+  separate `id`/`by`/`peerId` author field — `origin` is the author everywhere. The one exception
+  is `wave-sync`'s **`by`**, which is the wave INITIATOR (payload) distinct from `origin` (the peer
+  that _sent_ the sync). Identity binding (§11.2) is now **one shared check**: a DIRECT
+  (one-hop: heartbeat/subs/wave-sync) message's `origin` must equal the Noise connection id; a
+  FLOODED message's `origin` is a third party at relay hops, authenticated by `sig`.
+- **`sig`** — an Ed25519 signature by `origin`'s ring key over the canonical serialization
+  (recursively key-sorted JSON, `attest.stableStringify`) of the message with `sig` removed. Any
+  relay or recipient verifies authenticity (`attest.verifyMessage`) **before acting or
+  re-flooding**, so a forgery can't be amplified and authenticity no longer depends on the
+  connection a flooded message arrived over. This **generalizes** the domain signatures (the join
+  `joinSig`, the burn `sig`) rather than replacing them: those still bind their own tuples; the
+  envelope `sig` authenticates the whole message. (The signing choke point is wave.js's
+  `originate()` — every ORIGINATED message is sealed there; relays forward the sealed frame
+  verbatim, so `origin`/`sig` stay the originator's across every hop.)
+- **`ts`** — the origin timestamp. The receive edge **drops (and never relays) any message whose
+  `ts` is older than `GOSSIP_MAX_AGE_MS` (5 min)** or implausibly in the future (`CLOCK_SKEW_MS`,
+  1 min). This is a **hard cap on how long a flooded message can circulate** — independent of `mid`
+  dedup — so a routing loop / dedup-set bug can't amplify into unbounded flooding; and it is
+  **replay-attack prevention**: a captured message can't be re-injected later because its `ts` is
+  signed and can't be refreshed without the author's key (§11.2). Generous clock-skew tolerance
+  (peers aren't time-synchronized). The kick-off burn additionally carries a signed `burnTs` with
+  its own freshness window (§9.0) — belt-and-suspenders against reusing an old burn in a fresh frame.
 
 **Shape enforcement.** The schemas below are code, not just documentation: `lib/messages.js`
-defines one factory per kind (every send site builds through it) and one shape validator per
-kind, run once at the receive edge before any signature or state work. An unknown kind, a
-missing required field, or a mistyped field drops the message; unknown extra fields are
-tolerated (forward compatibility). Flooded kinds must carry their `mid`. Validation is shape
-only — signatures, the paid gate, and hostile-value clamps remain in the handlers.
+defines one factory per kind (every send site builds the KIND + PAYLOAD through it) and one shape
+validator per kind. `validGossip` runs once at the receive edge — it checks the envelope
+(`origin`/`ts`/`sig` well-typed, + `mid` on flooded kinds) and the payload — before the signature
+verification, age check, and state work. An unknown kind, a missing envelope/field, or a mistyped
+field drops the message; unknown extra fields are tolerated (forward compatibility). Validation is
+shape only — the `sig` verification, age check, paid gate, and hostile-value clamps are in the
+handlers (wave.js) / attest.js.
+
+> Each schema below shows the **kind + payload**. Every message ALSO carries the §5.0 envelope
+> (`origin`, `ts`, `sig`, + `mid` on flooded kinds); it is omitted from the blocks for brevity.
+> The author is always `origin` — there is no per-kind `id`/`by`/`peerId` (except `wave-sync`'s
+> `by`, the wave initiator).
 
 ### heartbeat — one hop to every connection, every `HEARTBEAT_MS`
 
 ```json
 {
   "kind": "heartbeat",
-  "id": "<peerId>",
   "tag": "BR" | null
 }
 ```
 
-Pure liveness + cosmetic tag, sent one hop to every direct connection (not relayed).
+Pure liveness + cosmetic tag, sent one hop to every direct connection (not relayed). The sender
+is the envelope `origin` (which, being a direct message, must equal the Noise connection id).
 Receiver upserts the sender (`lastSeen = now`, `tag`). It carries **no ring
 structure** — the sweep needs no successor precision. Every peer is equal
 — the heartbeat carries no role and no peer is special. Primary membership comes from DHT
@@ -356,9 +364,7 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
 ```json
 {
   "kind": "wave-announce",
-  "mid": "<hex8>",
   "waveId": "<hex16>",
-  "by": "<peerId>",
   "lobbyMs": 15000,
   "paid": {
     /* start attestation, §9.0 — present when the paid-wave gate is enforced */
@@ -366,12 +372,13 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
 }
 ```
 
-Opens the lobby. Receivers that accept it (§7.1 adoption) enter `lobby` for `waveId` (as
-merely **aware** — no cores open until they subscribe/join, §7.2). A fresh announce floods
-the whole directory. On connect, a peer also **unicasts** a re-announce for every wave it
-knows, marked `"catchup": true` (fresh `mid`), so a peer that joined the swarm after the
-original flood can still discover the wave — a catch-up is processed but **not** re-flooded
-(it's directed, not a fresh flood).
+Opens the lobby; the envelope `origin` is the initiator. Receivers that accept it (§7.1 adoption)
+enter `lobby` for `waveId` (as merely **aware** — no cores open until they subscribe/join, §7.2).
+A fresh announce floods the whole directory. On connect, a peer also **forwards the initiator's
+stored, signed announce VERBATIM** (same frame, same `mid`, same `origin`/`sig`) for every wave it
+knows, so a peer that joined the swarm after the original flood can still discover the wave — the
+receiver re-verifies the initiator's envelope sig, and if it relays the frame on, the original
+`mid` dedups it within one hop (no amplification, no separate catch-up message kind).
 
 **No shared feed key.** There is no shared per-wave feed core and no feed key to
 carry or sign — each participant owns its own feed core (§8). The originator is a participant too: right
@@ -393,9 +400,7 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
 ```json
 {
   "kind": "wave-join",
-  "mid": "<hex8>",
   "waveId": "<hex16>",
-  "peerId": "<peerId>",
   "writerKey": "<coreKeyHex>",
   "joinSig": "<hex64>",
   "burn": {
@@ -404,30 +409,28 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
 }
 ```
 
-**The join publishes the peer's feed core.** `writerKey` is the joiner's own Hypercore key
-for this wave's feed (§8), and `joinSig` is its join attestation over
-`(waveId, peerId, writerKey)` (§2.2). **Every peer** that sees the join (during the lobby)
-verifies `joinSig`, adds `peerId` to the `writers` map, and opens+downloads that core
-(block 0 only, §8.2) — there is no admission and no coordinator. A joiner whose join fee
-confirms mid-lobby **re-floods** its `wave-join` with the `burn` attestation attached (paid
-gate). A join without a credential is ignored — the `writers` map is the roster, so a seat
-that can never post would only stretch the schedule with a guaranteed-empty slot.
+**The join publishes the peer's feed core.** The joiner is the envelope `origin`. `writerKey` is
+its own Hypercore key for this wave's feed (§8), and `joinSig` is its join attestation over
+`(waveId, origin, writerKey)` (§2.2). **Every peer** that sees the join (during the lobby)
+verifies `joinSig`, adds `origin` to the `writers` map, and opens+downloads that core (block 0
+only, §8.2) — there is no admission and no coordinator. A joiner whose join fee confirms mid-lobby
+**re-floods** its `wave-join` with the `burn` attestation attached (paid gate). A join without a
+credential is ignored — the `writers` map is the roster, so a seat that can never post would only
+stretch the schedule with a guaranteed-empty slot.
 
-Flooded so it reaches every peer (and the initiator, which assembles the roster) even across
-a partial mesh. `wave-join` is authenticated by its carried `joinSig` (bound to `peerId` +
-wave + writer key), not by the connection — it is relayed, so at relay hops its `peerId` is a
-third party. **Paid gate:** when enforced, **every peer** ignores a direct `wave-join` whose
-`burn` doesn't authorize `peerId` for `waveId` (`burnAuthorizes`, §9.2) before ingesting it
-— the check that was once the initiator's alone at admission.
+Flooded (to the wave's subscribers, §3) so it reaches every subscriber (and the initiator, which
+assembles the roster) even across a partial mesh. `wave-join` is authenticated by the envelope
+`sig` (and its `joinSig` binds the credential) — it is relayed, so at relay hops its `origin` is a
+third party. **Paid gate:** when enforced, **every peer** ignores a `wave-join` whose `burn`
+doesn't authorize `origin` for `waveId` (`burnAuthorizes`, §9.2) before ingesting it — the check
+that was once the initiator's alone at admission.
 
 ### wave-start — flooded (originator, when the lobby closes)
 
 ```json
 {
   "kind": "wave-start",
-  "mid": "<hex8>",
   "waveId": "<hex16>",
-  "by": "<peerId>",
   "writers": [{ "peerId": "<peerId>", "writerKey": "<coreKeyHex>", "joinSig": "<hex64>" }, ...],
   "t0": 1719705612080,
   "lapMs": 8000,
@@ -435,14 +438,15 @@ third party. **Paid gate:** when enforced, **every peer** ignores a direct `wave
 }
 ```
 
-Finalizes the roster and starts the sweep. The **canonical roster is derived, not carried**:
-`{by} ∪ writers[].peerId` — the initiator plus every credentialed joiner (no separate
-roster field travels; `writers` is the single membership source).
+Finalizes the roster and starts the sweep; the envelope `origin` is the initiator. The
+**canonical roster is derived, not carried**: `{origin} ∪ writers[].peerId` — the initiator plus
+every credentialed joiner (no separate roster field travels; `writers` is the single membership
+source). (`writers[].peerId` are the participants — DATA — distinct from the message `origin`.)
 `t0` is the epoch-ms moment the sweep begins
 (`now + SWEEP_LEAD_MS` at the initiator — a short lead so the flooded start blankets the
 swarm before the first slot fires); `lapMs` is the lap duration,
 `clamp(rosterSize × SLOT_MS, MIN_LAP_MS, MAX_LAP_MS)`. Every receiver derives the identical
-schedule from `(by + writers, t0, lapMs)` (§6). Receivers clamp hostile values: `lapMs` is capped
+schedule from `(origin + writers, t0, lapMs)` (§6). Receivers clamp hostile values: `lapMs` is capped
 at `MAX_LAP_MS`, and a start whose `t0` is more than `MAX_LAP_MS` in the future is ignored
 (§11.2).
 
@@ -488,7 +492,11 @@ same slots), and (b) each peer knows whether it has a slot (roster member) or me
 }
 ```
 
-Lets a peer joining mid-wave sync (§7.4). Like `wave-start`, it carries the `writers` array —
+Lets a peer joining mid-wave sync (§7.4). **This is the one kind where `origin` ≠ the subject:**
+the envelope `origin` (which, being direct, must equal the Noise connection id) is the peer that
+_sent_ the sync — any subscriber — while **`by` is the wave INITIATOR** (the roster derives from
+`{by} ∪ writers[].peerId`, and `by` signed the `paid` proof). Like `wave-start`, it carries the
+`writers` array —
 every participant's feed-core credential — so a newcomer (in either phase) learns every
 core without needing to have seen the lobby's `wave-join`s; each is re-verified (`verifyJoin`)
 before its core is opened. `t0`/`lapMs` (racing phase) let a mid-race newcomer derive the
@@ -937,12 +945,21 @@ The transport (Noise over Hyperswarm) authenticates _who_ a message came from, b
 application logic must actually **use** that rather than trust self-reported fields. The
 following guards keep a hostile peer running a modified app from disrupting honest peers:
 
-- **Identity binding.** For a message that describes its own sender and arrives direct —
-  `heartbeat.id` — the claimed id must equal the authenticated connection id it arrived on,
-  else it's dropped. This blocks peer-map/ring pollution under spoofed ids. The flooded
-  `wave-*` messages are deliberately **not** connection-bound: they are relayed, so their
-  `by`/`peerId` is a third party at relay hops — they are authenticated by the signatures
-  they carry instead (start attestation, `joinSig`).
+- **Uniform envelope authenticity (§5.0).** Every message carries `origin`/`ts`/`sig`, and the
+  receive edge verifies the envelope `sig` (by `origin`) on **every** message before acting or
+  relaying — one shared check, so a forgery can't be relayed and authenticity never depends on the
+  connection a flooded message arrived over.
+- **Identity binding.** For a DIRECT (one-hop) message — `heartbeat`, `subs`, `wave-sync` — the
+  envelope `origin` must equal the authenticated connection id it arrived on, else it's dropped.
+  This blocks peer-map/ring pollution + spoofed subscriptions under a forged id. The flooded
+  `wave-*` messages are deliberately **not** connection-bound: they are relayed, so their `origin`
+  is a third party at relay hops — the envelope `sig` (plus the domain attestations: start proof,
+  `joinSig`) authenticates them instead.
+- **Message age bound / replay prevention (§5.0).** The receive edge drops (and never relays) any
+  message whose signed `ts` is older than `GOSSIP_MAX_AGE_MS` — a hard cap on flood circulation
+  (independent of `mid` dedup) AND replay prevention (a captured message can't have its `ts`
+  refreshed without the key). The kick-off burn carries its own signed `burnTs` freshness window
+  (`validStartProof`), so a stale burn reused in a fresh frame is also rejected.
 - **Self-certifying feed cores.** A `wave-join`'s credential is signed over
   `(waveId, peerId, writerKey)` (§2.2), so a relay can't forge or substitute a core key under
   someone else's `peerId` and hijack that peer's feed seat — and there is **no shared
@@ -952,7 +969,7 @@ following guards keep a hostile peer running a modified app from disrupting hone
   whose `t0` is more than `MAX_LAP_MS` in the future (§6.6), so a forged/buggy start can't
   wedge a wave open indefinitely — the deterministic end always arrives.
 - **Canonical-roster schedule.** The sweep schedule is a pure function of the flooded
-  `(by + writers, t0, lapMs)`, so no peer can shift its own (or anyone's) slot without
+  `(origin + writers, t0, lapMs)`, so no peer can shift its own (or anyone's) slot without
   producing a different `wave-start` — which the paid-gate already constrains (a forged start needs
   a valid start burn-proof).
 - **Paid-gate on every adoption path.** When enforced, `wave-announce`, `wave-start`, and

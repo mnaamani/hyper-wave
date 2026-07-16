@@ -9,8 +9,12 @@ const {
   signBurn,
   verifyBurn,
   burnAuthorizes,
+  startProofValid,
   signJoin,
-  verifyJoin
+  verifyJoin,
+  stableStringify,
+  signMessage,
+  verifyMessage
 } = require('./attest');
 
 const waveId = 'wave-attest-1';
@@ -72,6 +76,89 @@ test('burnAuthorizes gates the paid join on a real, bound burn', (t) => {
   );
 });
 
+// --- start proof gate (paid-wave adoption + kick-off freshness) --------------
+test('startProofValid gates wave adoption on a signed, bound, FRESH start burn', (t) => {
+  const initiator = keyPairs[0];
+  const byId = ids[0];
+  const wave = 'paid-wave-1';
+  const now = 1783150000000;
+  const fields = {
+    waveId: wave,
+    peerId: byId,
+    reason: 'start',
+    amount: 1,
+    txHash: 'startburntx',
+    tronAddress: 'TInitiator',
+    burnTs: now
+  };
+  const proof = { ...fields, sig: signBurn(initiator, fields) };
+  const maxAgeMs = 300000;
+
+  t.ok(
+    startProofValid({ proof, waveId: wave, byId, now, maxAgeMs }),
+    'a fresh, signed, bound start proof is valid'
+  );
+  t.absent(
+    startProofValid({ proof: null, waveId: wave, byId, now, maxAgeMs }),
+    'no proof → invalid (unpaid/spam announce)'
+  );
+  t.absent(
+    startProofValid({
+      proof: { ...proof, reason: 'join' },
+      waveId: wave,
+      byId,
+      now,
+      maxAgeMs
+    }),
+    'a join burn cannot pass as a start proof'
+  );
+  t.absent(
+    startProofValid({ proof, waveId: 'other-wave', byId, now, maxAgeMs }),
+    'a burn for another wave is rejected (bound to waveId)'
+  );
+  t.absent(
+    startProofValid({ proof, waveId: wave, byId: ids[1], now, maxAgeMs }),
+    'must be signed by the claimed initiator'
+  );
+  const forged = { ...fields, sig: signBurn(keyPairs[1], fields) };
+  t.absent(
+    startProofValid({ proof: forged, waveId: wave, byId, now, maxAgeMs }),
+    'a signature by someone other than the initiator is rejected'
+  );
+
+  // freshness / replay: a captured proof replayed later (now advanced past the window) is stale
+  t.absent(
+    startProofValid({
+      proof,
+      waveId: wave,
+      byId,
+      now: now + maxAgeMs + 1,
+      maxAgeMs
+    }),
+    'a start burn older than the freshness window is rejected (replay prevention)'
+  );
+  t.ok(
+    startProofValid({
+      proof,
+      waveId: wave,
+      byId,
+      now: now + maxAgeMs,
+      maxAgeMs
+    }),
+    'a burn just inside the window is still accepted'
+  );
+  t.absent(
+    startProofValid({
+      proof: { ...proof, burnTs: 'soon' },
+      waveId: wave,
+      byId,
+      now,
+      maxAgeMs
+    }),
+    'a non-numeric burnTs is rejected'
+  );
+});
+
 // --- join attestation --------------------------------------------------------
 test('signJoin/verifyJoin binds a peer to its wave + writer core', (t) => {
   const writerKey = b4a.toString(crypto.keyPair().publicKey, 'hex');
@@ -93,5 +180,64 @@ test('signJoin/verifyJoin binds a peer to its wave + writer core', (t) => {
   t.absent(
     verifyJoin(bound, '00'.repeat(64)),
     'wrong signature bytes rejected'
+  );
+});
+
+// --- message envelope (origin/ts/sig on every gossip message) ----------------
+test('stableStringify is canonical (key order independent, sig excluded upstream)', (t) => {
+  t.is(
+    stableStringify({ b: 1, a: 2 }),
+    stableStringify({ a: 2, b: 1 }),
+    'object key order does not change the serialization'
+  );
+  t.is(
+    stableStringify([{ y: 1, x: 2 }]),
+    '[{"x":2,"y":1}]',
+    'nested object keys sorted; array order preserved'
+  );
+  t.not(
+    stableStringify([1, 2]),
+    stableStringify([2, 1]),
+    'array order IS significant'
+  );
+});
+
+test('signMessage/verifyMessage authenticate the whole message by origin', (t) => {
+  const author = keyPairs[0];
+  const origin = ids[0];
+  const msg = {
+    kind: 'wave-start',
+    mid: 'ab'.repeat(8),
+    origin,
+    ts: 1719705612080,
+    waveId,
+    writers: [{ peerId: ids[1], writerKey: 'ee'.repeat(32), joinSig: 'ff' }],
+    t0: 1,
+    lapMs: 8000
+  };
+  const sig = signMessage(author, msg);
+  t.ok(
+    verifyMessage({ ...msg, sig }),
+    'a valid envelope verifies against origin'
+  );
+
+  t.absent(
+    verifyMessage({ ...msg, sig, ts: msg.ts + 1 }),
+    'tampering with any field (ts) breaks the signature'
+  );
+  t.absent(
+    verifyMessage({ ...msg, sig, origin: ids[1] }),
+    'a different claimed origin (relay forgery) is rejected'
+  );
+  t.absent(
+    verifyMessage({ ...msg, sig: '00'.repeat(64) }),
+    'a garbage signature is rejected'
+  );
+
+  // key-order independence: re-serialized (parsed→stringified) message still verifies
+  const roundTripped = JSON.parse(JSON.stringify({ sig, ...msg }));
+  t.ok(
+    verifyMessage(roundTripped),
+    'survives a JSON round-trip (canonical hash is key-order independent)'
   );
 });
