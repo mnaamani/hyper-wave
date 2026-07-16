@@ -68,6 +68,7 @@ class TronWallet extends Wallet {
   #tronweb;
   #address;
   #network;
+  #fee;
   #log;
 
   /**
@@ -77,6 +78,7 @@ class TronWallet extends Wallet {
    * @param {Object} deps.tronweb - WDK's TronWeb (Bare-compatible).
    * @param {string} deps.address - The derived Tron address.
    * @param {string} [deps.network] - The Tron network name (labels the wire type).
+   * @param {number} [deps.fee] - Participation fee in whole TRX (default FEE_TRX).
    * @param {(...args: any[]) => void} deps.log - Logger.
    */
   constructor({
@@ -85,14 +87,21 @@ class TronWallet extends Wallet {
     tronweb,
     address,
     network = DEFAULT_TRON_NETWORK,
+    fee = FEE_TRX,
     log
   }) {
     super();
+    // A burn is a real transfer to the black hole (Tron rejects zero-amount transfers), so the fee
+    // must be a positive number — fail fast on a misconfigured `{ fee }` rather than at burn time.
+    if (!(Number(fee) > 0)) {
+      throw new Error('wallet `fee` must be a positive number');
+    }
     this.#wallet = wallet;
     this.#account = account;
     this.#tronweb = tronweb;
     this.#address = address;
     this.#network = network;
+    this.#fee = Number(fee);
     this.#log = log;
   }
 
@@ -101,7 +110,7 @@ class TronWallet extends Wallet {
   }
 
   get fee() {
-    return FEE_TRX;
+    return this.#fee;
   }
 
   get address() {
@@ -318,11 +327,16 @@ async function initTronAccount({
  * Create the default self-custodial Tron wallet (a `TronWallet`, native TRX). This is the default
  * the engine uses; an app injects its own `Wallet` subclass (e.g. `createTronUsdtWallet`,
  * tron-usdt-wallet.js) via createEngine `deps.createPayments`.
- * @param {Object} [options] - Wallet options (see initTronAccount).
+ * @param {Object} [options] - Wallet options (see initTronAccount), plus:
+ * @param {number} [options.fee] - Participation fee in whole TRX (default FEE_TRX).
  * @returns {Promise<TronWallet>} The ready wallet.
  */
 async function createPayments(options = {}) {
-  return new TronWallet(await initTronAccount(options));
+  // `fee` is a wallet-construction option, not an account concern — initTronAccount ignores it.
+  return new TronWallet({
+    ...(await initTronAccount(options)),
+    fee: options.fee
+  });
 }
 
 module.exports = {

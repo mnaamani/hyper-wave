@@ -56,6 +56,26 @@ test('an unknown network without a provider fails fast', async (t) => {
   );
 });
 
+test('the fee is configurable, defaults to 1, and must be positive', async (t) => {
+  const dir = '/tmp/hyperwave-wallet-fee-' + Date.now();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const custom = await createPayments({ storageDir: dir, fee: 0.5 });
+  t.is(custom.fee, 0.5, 'a per-deployment fee overrides the default');
+  custom.dispose();
+
+  const def = await createPayments({ storageDir: dir });
+  t.is(def.fee, 1, 'defaults to 1 TRX when unset');
+  def.dispose();
+
+  // A burn is a real transfer (Tron rejects zero-amount) — reject a non-positive fee up front.
+  await t.exception(
+    createPayments({ storageDir: dir, fee: 0 }),
+    /fee` must be a positive number/,
+    'a zero fee fails fast'
+  );
+});
+
 test('TRX <-> sun conversion is 6-decimal exact', (t) => {
   t.is(toSun(1.5), 1500000n);
   t.is(toSun(0.000001), 1n, 'smallest unit (1 sun)');

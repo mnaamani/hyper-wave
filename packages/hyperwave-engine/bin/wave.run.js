@@ -173,13 +173,15 @@ async function joinAndBurn() {
 // WALLET_TYPE=usdt (+ USDT_CONTRACT=<addr>) -> use the USDT/TRC-20 wallet instead of native TRX
 // (the same seed/address holds both — USDT for fees, TRX for gas). TRON_NETWORK=<name> (nile
 // default, mainnet, shasta) + optional TRON_PROVIDER=<url> -> pick the network (mainnet = real
-// funds). WALLET_SEND=<addr>:<amt> -> also do a one-off transfer (funded wallets only).
+// funds). WALLET_FEE=<amt> -> override the participation fee. WALLET_SEND=<addr>:<amt> -> also do a
+// one-off transfer (funded wallets only).
 if (env.WALLET) {
   const walletLog = (...args) => console.log(`[${name}] wallet`, ...args);
   const walletOpts = {
     storageDir,
     network: env.TRON_NETWORK, // undefined -> the wallet's default (nile)
     provider: env.TRON_PROVIDER, // undefined -> the network's default RPC
+    fee: env.WALLET_FEE ? Number(env.WALLET_FEE) : undefined, // -> default fee
     log: walletLog
   };
   const ready =

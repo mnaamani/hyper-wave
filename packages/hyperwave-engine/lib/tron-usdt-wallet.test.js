@@ -68,6 +68,26 @@ test('the network carries into the USDT wire type (offline)', async (t) => {
   usdt.dispose();
 });
 
+test('the USDT fee is configurable and defaults to FEE_USDT', async (t) => {
+  const dir = '/tmp/hyperwave-usdt-fee-' + Date.now();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const custom = await createTronUsdtWallet({
+    storageDir: dir,
+    usdtContract: USDT_CONTRACT,
+    fee: 2
+  });
+  t.is(custom.fee, 2, 'a per-deployment USDT fee overrides the default');
+  custom.dispose();
+
+  const def = await createTronUsdtWallet({
+    storageDir: dir,
+    usdtContract: USDT_CONTRACT
+  });
+  t.is(def.fee, FEE_USDT, 'defaults to FEE_USDT (via the inherited get fee())');
+  def.dispose();
+});
+
 test('createTronUsdtWallet requires the USDT contract address', async (t) => {
   await t.exception(
     () => createTronUsdtWallet({ storageDir: '/tmp/x' }),

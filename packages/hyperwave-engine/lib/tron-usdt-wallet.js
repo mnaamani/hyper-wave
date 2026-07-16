@@ -70,6 +70,7 @@ class TronUsdtWallet extends TronWallet {
    * @param {string} deps.address - The derived Tron address.
    * @param {string} deps.usdtContract - The USDT TRC-20 contract address (base58).
    * @param {string} [deps.network] - The Tron network name (labels the wire type).
+   * @param {number} [deps.fee] - Participation fee in whole USDT (default FEE_USDT).
    * @param {(...args: any[]) => void} deps.log - Logger.
    */
   constructor({
@@ -79,10 +80,12 @@ class TronUsdtWallet extends TronWallet {
     address,
     usdtContract,
     network = DEFAULT_TRON_NETWORK,
+    fee = FEE_USDT,
     log
   }) {
-    // parent stores its own copies (dispose, address, network for `super.type`).
-    super({ wallet, account, tronweb, address, network, log });
+    // parent stores its own copies (dispose, address, network for `super.type`, and the fee — the
+    // inherited `get fee()` returns it, so this wallet doesn't override fee, only the currency ops).
+    super({ wallet, account, tronweb, address, network, fee, log });
     this.#account = account;
     this.#tronweb = tronweb;
     this.#usdtContract = usdtContract;
@@ -92,10 +95,6 @@ class TronUsdtWallet extends TronWallet {
 
   get type() {
     return tronUsdtWalletType(this.#network);
-  }
-
-  get fee() {
-    return FEE_USDT;
   }
 
   // The USDT token balance (WDK's TRC-20 balanceOf), in whole USDT.
@@ -253,6 +252,7 @@ class TronUsdtWallet extends TronWallet {
  *   selects the RPC provider AND the wire type (`tron-usdt-<network>`). Note the mainnet USDT
  *   contract differs from Nile's — pass the matching `usdtContract`.
  * @param {string} [options.provider] - Tron JSON-RPC provider URL (overrides the network default).
+ * @param {number} [options.fee] - Participation fee in whole USDT (default FEE_USDT).
  * @param {(...args: any[]) => void} [options.log] - Logger.
  * @returns {Promise<TronUsdtWallet>} The ready wallet.
  */
@@ -260,8 +260,9 @@ async function createTronUsdtWallet({ usdtContract, ...options } = {}) {
   if (!usdtContract) {
     throw new Error('createTronUsdtWallet requires a `usdtContract` address');
   }
+  // `fee` is a wallet-construction option (initTronAccount ignores it) — thread it explicitly.
   const deps = await initTronAccount(options);
-  return new TronUsdtWallet({ ...deps, usdtContract });
+  return new TronUsdtWallet({ ...deps, usdtContract, fee: options.fee });
 }
 
 module.exports = {
