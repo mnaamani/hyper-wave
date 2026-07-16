@@ -87,6 +87,8 @@ own concepts to these at the boundary (`renderer/lib/ipc.js` + `app.js`): a self
 renderer  ──(commands)──▶  worker
   { type: 'start-wave' }                              // burn start fee → announce + lobby
   { type: 'join-wave' }                               // verify wave paid → opt in + burn join fee
+  { type: 'subscribe-wave', waveId }                  // hold a wave's feed cores (browse-then-pick)
+  { type: 'unsubscribe-wave', waveId }                // free its cores, stay aware of it
   { type: 'set-tag', tag }                            // cosmetic per-peer tag (app: country)
   { type: 'stage-entry', entry: { payload } }         // opaque payload (app: a {image, caption} selfie)
   { type: 'tip', to, amount }                         // real TRX to an entry owner
@@ -97,7 +99,7 @@ renderer  ──(commands)──▶  worker
 worker  ──(events)──▶  renderer
   { type: 'state',   me, peers[], connected, discovered }  // ring membership (every change)
   { type: 'event',   event, ... }                     // lifecycle + race events (protocol.md)
-  { type: 'feed',    items[] }                        // ordered entries (every change)
+  { type: 'feed',    waveId, items[] }                // ordered entries for one wave (several can update)
   { type: 'wallet',  address, trx }                   // wallet chip (on ready + every 15s; { error } on init failure)
   { type: 'burn-result' | 'tip-result' | 'send-result', ... }  // fee/tip/send outcomes (toasts)
   { type: 'transactions', list[] }                    // on-chain history, both directions, newest first
@@ -116,8 +118,9 @@ unhandled rejection, since mobile has no console.)
 
 - **Protocol & authoritative state → worker.** Anything that defines correctness on the
   wire (discovery, the ring, the sweep schedule, lobby/roster, the attestations, the
-  gallery + its write-gate) lives in the worker. Guards are _enforced_ here: e.g. "one
-  wave at a time" is enforced by `wave.js`, not by hiding a button.
+  gallery + its write-gate) lives in the worker. Guards are _enforced_ here: e.g. the
+  paid-wave adoption gate (`canAdopt` + the burn-attestation write-gate) is enforced by
+  `wave.js`, not by hiding a button.
 - **Presentation, user input, device APIs → renderer.** Canvas drawing, countdown
   animations, the webcam (`getUserMedia` — Chromium only), the gallery slideshow, and
   the flag rendering (`flagOf`) live in the renderer. The renderer holds only _derived_
@@ -143,11 +146,12 @@ keyed by the random `waveId`, nothing persists across runs.
 
 The gallery is a **multicore CRDT** — one Hypercore per participant, merged locally (no
 indexer, no coordinator; see `protocol.md` §8) — so every participant already holds every
-core and could serve the whole gallery. There is not even a per-wave asymmetry: the initiator
-is an ordinary participant (posts its own selfie, publishes its own core, no indexer/admission
-/retention role). A departing peer's selfie survives in everyone's view because they already
-replicated it; the gallery is ephemeral once a new wave supersedes it, so nobody keeps cores
-open across waves.
+core and could serve the whole gallery of a subscribed wave. There is not even a per-wave
+asymmetry: the initiator is an ordinary participant (posts its own selfie, publishes its own core,
+no indexer/admission/retention role). A departing peer's selfie survives in everyone's view because
+they already replicated it. Concurrent waves coexist; a wave's feed cores stay open while the peer
+is **subscribed** to that wave (freed on unsubscribe or engine close), so a peer holds cores only
+for the waves it subscribed to — the O(subscribed) core budget (scaling.md Phases 2–3).
 
 ## Module map
 

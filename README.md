@@ -29,7 +29,7 @@ With a built-in self-custodial wallet via
   joining).
 - **Gallery tips** — Tip a selfie 1 TRX straight to its owner's wallet.
 
-Every peer runs the same code — the protocol is fully role-free (the initiator is an ordinary participant that just calls "kick off"). Every peer already holds every participant's gallery core, so there is no indexer, no archivist, and no single point of failure; galleries are ephemeral per run.
+Every peer runs the same code — the protocol is fully role-free (the initiator is an ordinary participant that just calls "kick off"). Every peer subscribed to a wave holds every participant's gallery core for it, so there is no indexer, no archivist, and no single point of failure; galleries are ephemeral per run. Waves run concurrently, and a peer holds cores only for the waves it subscribed to.
 
 Built for the [Tether Developers Cup](https://dorahacks.io/hackathon/tether-developers-cup) (theme: football / global tournament moment).
 

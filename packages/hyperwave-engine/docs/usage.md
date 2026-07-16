@@ -73,10 +73,12 @@ const engine = createEngine({
   config: {
     topicId: 'hyperwave:my-match:v1', // peers on the same topicId share one ring
     bootstrap: '127.0.0.1:49737', // optional host:port → local DHT (instant same-machine discovery)
-    wallet: true // default; false → wallet-less (join-attestation feed, no fees/tips)
+    wallet: true, // default; false → wallet-less (join-attestation feed, no fees/tips)
+    autoSubscribe: true // default; false → browse-then-pick (hold cores only for waves you subscribe to)
   },
   emit: (msg) => {
     // engine → host events, e.g. { type: 'state' | 'event' | 'feed' | 'wallet' | 'burn-result' }
+    // (a 'feed' message carries a `waveId` — several waves can update concurrently)
     if (msg.type === 'state') {
       console.log(
         'ring:',
@@ -94,6 +96,9 @@ const engine = createEngine({
 engine.exec({ type: 'set-tag', tag: 'BR' }); // cosmetic per-peer tag
 engine.exec({ type: 'start-wave' }); // burns the start fee, then announces + opens the lobby
 engine.exec({ type: 'join-wave' }); // opt into an announced wave (+ burns the join fee)
+// subscription layer (scaling.md Phase 2/3): browse-then-pick when autoSubscribe:false.
+engine.exec({ type: 'subscribe-wave', waveId: 'a1b2…' }); // hold a wave's feed without joining
+engine.exec({ type: 'unsubscribe-wave', waveId: 'a1b2…' }); // free its cores (stay aware)
 engine.exec({
   type: 'stage-entry',
   // payload is opaque application content — the host owns its shape
@@ -128,29 +133,33 @@ const wave = createWave({
   // One host sink `emit(msg)` — every observable change is a typed message:
   //   { type: 'state', me, peers, connected, discovered } — the live ring, the direct-connection
   //     count, and the DHT-discovered count (hosts gate start triggers on `discovered`)
-  //   { type: 'event', event, … } — lifecycle/UI events;  { type: 'feed', items } — feed updates
+  //   { type: 'event', event, … } — lifecycle/UI events;  { type: 'feed', waveId, items } — feed updates
   emit: (msg) => {
     if (msg.type === 'state') {
       console.log('me', msg.me.id.slice(0, 8), 'peers', msg.peers.length);
     } else if (msg.type === 'event') {
       console.log('event', msg.event, msg.waveId);
     } else if (msg.type === 'feed') {
-      console.log('feed', msg.items.length);
+      console.log('feed', msg.waveId, msg.items.length);
     }
   }
   // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see §10)
 });
 
 console.log('my seat:', wave.me); // { id, angle, tag }
-const waveId = wave.startWave(); // announce + open the lobby; returns the new waveId (or null if busy)
+const waveId = wave.startWave(); // announce + open the lobby; always returns the new waveId
 wave.setTag('BR');
 wave.stageEntry({ payload: { label: 'me' } }); // opaque payload; posts at my sweep slot
 await wave.close();
 ```
 
-`createWave` returns: `{ me, startWave, join, setTag, stageEntry, setWallet, announcePaid,
-recordBurn, close }`. There is no routing surface — the wave is a deterministic sweep.
-The payment methods (`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §9.
+`createWave` returns: `{ me, startWave, subscribe, unsubscribe, join, setTag, stageEntry,
+setWallet, announcePaid, recordBurn, close }`. Concurrent waves are allowed — `startWave()`
+never returns null and there is no "busy" guard. `join(waveId?)` / `stageEntry({payload, waveId?})`
+default to the newest joinable / joined wave; `subscribe(waveId)` / `unsubscribe(waveId)` open /
+close a wave's feed (holding cores only for waves you subscribed to — see §11 CrdtFeed). There is
+no routing surface — the wave is a deterministic sweep. The payment methods
+(`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §9.
 
 ---
 
@@ -237,7 +246,7 @@ const waveId = 'w1';
 const fields = {
   waveId,
   peerId,
-  reason: 'kickoff',
+  reason: 'start',
   amount: 1,
   txHash: 'deadbeef…',
   tronAddress: 'T…',
@@ -264,29 +273,33 @@ verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed t
 
 ## 6. `messages.js` — the gossip message seam
 
-The single definition point for the five on-wire message kinds (`protocol.md` §5): one
-`make*` factory per kind (every send site builds through it, so a shape can't drift per call
-site) and one shape validator per kind, run once at the receive edge via `validGossip` before
-any signature or state work. Validation is shape only — signatures and the paid gate stay in
-`attest.js` / the handlers. `FLOODED_KINDS` is the flooded/direct classification the relay
-decision uses.
+The single definition point for the six on-wire message kinds (`protocol.md` §5: `heartbeat`,
+`subs`, `wave-announce`, `wave-join`, `wave-start`, `wave-sync`): one `make*` factory per kind
+(every send site builds through it, so a shape can't drift per call site) and one shape validator
+per kind, run once at the receive edge via `validGossip` before any signature or state work.
+Validation is shape only — signatures and the paid gate stay in `attest.js` / the handlers.
+`FLOODED_KINDS` is the flooded/direct classification the relay decision uses.
 
 ```js
 const {
   FLOODED_KINDS,
   validGossip,
   makeHeartbeat,
+  makeSubs,
   makeWaveJoin
 } = require('hyperwave-engine/lib/messages');
 
 const heartbeat = makeHeartbeat({ id: peerId, tag: 'BR' });
 validGossip(heartbeat); // → true (direct kind — no mid needed)
 
+const subs = makeSubs({ subs: [waveId] }); // my subscription set — scopes wave gossip (Phase 3)
+validGossip(subs); // → true (one-hop, no mid)
+
 const join = makeWaveJoin({ waveId, peerId, writerKey, joinSig });
 validGossip(join); // → false: flooded kinds must carry their flood mid...
 validGossip({ ...join, mid: 'ab12cd34ef56ab12' }); // → true (floodGossip stamps it)
 
-FLOODED_KINDS.has('wave-join'); // → true (relayed); heartbeat/wave-sync are one-hop
+FLOODED_KINDS.has('wave-join'); // → true (relayed); heartbeat/subs/wave-sync are one-hop
 validGossip({ kind: 'token', waveId }); // → false — unknown kinds are dropped at the edge
 ```
 
@@ -324,11 +337,11 @@ mesh of degree ≈ `maxPeers`, connected with overwhelming probability). Nothing
 
 The feed is a multicore CRDT. Each participant
 owns **one** Hypercore and appends its single `wave-entry` op at block 0; its writer key rides
-that peer's own `wave-join` (self-certified by the join attestation). Every peer opens every
-participant's core, downloads block 0, and folds the bag with the pure **`mergeFeed`** — every
-peer that has replicated the same set of cores computes a **byte-identical** feed. No indexer,
-no admission, no consensus, no shared feed key. The stateful `CrdtFeed` that owns the cores
-is in `feed-crdt.js` (§11).
+that peer's own `wave-join` (self-certified by the join attestation). Every peer **subscribed to
+the wave** opens every participant's core, downloads block 0, and folds the bag with the pure
+**`mergeFeed`** — every peer that has replicated the same set of cores computes a **byte-identical**
+feed. No indexer, no admission, no consensus, no shared feed key. The stateful `CrdtFeed` that owns
+the cores is in `feed-crdt.js` (§11); it holds one feed per subscribed wave concurrently.
 
 ```js
 const crypto = require('hypercore-crypto');
@@ -457,11 +470,13 @@ each subpath-importable and unit-tested. `Flood` is shown in §7; the others:
   per wave and only for the current wave, and owns the burn-proof ticket lifetime (survives
   `reset()`, dropped by `clearBurnProof()` on a new wave). `bare examples/entry.js`
 - **`CrdtFeed`** (`lib/feed-crdt.js`) — the per-wave multicore CRDT feed over a
-  Corestore: `open(waveId)` creates MY writable core (its key is my writer key),
+  Corestore, holding one feed per subscribed wave concurrently: `open(waveId)` creates MY
+  writable core (its key is `writerKeyFor(waveId)`) without closing other waves,
   `addWriter(waveId, peerId, writerKey)` opens a participant's core (from its flooded
-  `wave-join`) and downloads its one entry, `postEntry(entry)` appends my single op, and
-  `tick()` pulls replication + repaints the merged view. No admission, no indexer, no
-  retention — every peer holds every core and merges locally with `mergeFeed` (§8).
+  `wave-join`) and downloads its one entry, `postEntry(entry)` appends my single op, `tick()`
+  pulls replication + repaints every held wave (`onFeed(waveId, items)`), and
+  `closeWave(waveId)` frees one wave's cores (on unsubscribe). No admission, no indexer, no
+  retention — every subscribed peer holds every core and merges locally with `mergeFeed` (§8).
 
 ---
 

@@ -122,7 +122,7 @@ sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
   (Protomux multiplexes them).
 
 **Wire encoding — JSON, and when to revisit.** Gossip messages are JSON (a baked-in design
-rule). This is deliberate and, today, correct: the five kinds are tiny and infrequent (hex ids,
+rule). This is deliberate and, today, correct: the six kinds are tiny and infrequent (hex ids,
 one signature, a few integers — the only large payload, the selfie, rides a Hypercore block, not
 gossip), so a binary encoding would save almost nothing on the wire; JSON stays trivially
 loggable for debugging a flooded mesh; and signature safety is **independent of the wire** —
@@ -1000,13 +1000,16 @@ skew for a schema to solve — the opposite trade-off from the gossip wire in §
 reason. A different client would have its own UI and need not match these — only §3–§8 are the
 interop surface.
 
-**Renderer → worker (commands):** `start-wave`, `join-wave`, `set-tag {tag}`,
+**Renderer → worker (commands):** `start-wave`, `join-wave`, `subscribe-wave {waveId}` /
+`unsubscribe-wave {waveId}` (browse-then-pick: hold / free a wave's feed cores without
+joining — relevant when the host runs `autoSubscribe:false`), `set-tag {tag}`,
 `stage-entry {entry:{payload}}` (stage the opaque entry payload; the worker pairs it with
 the peer's sweep slot and posts it when the slot fires — the football app puts a
 `{image, caption}` selfie in the payload), `tip {to, amount}` (send a real TRX tip to an
-entry owner's wallet), `refresh-wallet` (manual balance re-check after funding).
+entry owner's wallet), `send-trx {to, amount}`, `fetch-transactions`, `refresh-wallet`
+(manual balance re-check after funding).
 
-**Worker → renderer (events):** `state {me,peers,connected,discovered}`; `feed {items}`;
+**Worker → renderer (events):** `state {me,peers,connected,discovered}`; `feed {waveId, items}`;
 `wallet {address, trx}` (self-custodial TRX wallet); `tip-result {hash?, error?}`;
 `burn-result {stage: 'confirming'|'burned'|'failed', hash?, amount?, error?, waveId?, reason}`
 (a **participation fee** — 1 TRX burned

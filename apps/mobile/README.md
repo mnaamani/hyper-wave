@@ -17,7 +17,7 @@ Expo RN app (this package)                 Bare worklet (hyperwave-engine)
   Hyperswarm/Corestore-Hypercore/WDK require graph) into `bundles/app.bundle.mjs`.
 - `react-native-bare-kit`'s `Worklet` boots that bundle inside the app; `src/useEngine.js` speaks
   the exact same JSON protocol the desktop renderer uses (`start-wave`, `tip`, `state`,
-  `gallery`, `wallet`, …), so the UI is the only new surface.
+  `feed`, `wallet`, …), so the UI is the only new surface.
 
 ## Status: ✅ runs on the iOS simulator — cross-peer with a desktop peer verified
 

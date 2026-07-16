@@ -71,8 +71,8 @@ anything to steal.
 
 Every peer runs exactly the same app. There's no server, no operator, no admin, no
 special "validator". The only asymmetry is temporary and earned: the person who starts a
-wave looks after _that wave's_ gallery while they're online. Anyone can start the next
-wave.
+wave looks after _that wave's_ gallery while they're online. Anyone can start another
+wave — several can even run side by side.
 
 ## What it looks like
 
@@ -95,10 +95,12 @@ participants (Hyperswarm for networking, Hypercore for the shared gallery, WDK f
 wallets). Kill any single machine and the wave carries on without it. There is no backend
 to shut down, throttle, or monetise the crowd through.
 
-The design also scales past a small friendly group: peers organise themselves so each one
-only keeps connections to a handful of well-chosen neighbours around the circle (rather
-than everyone connecting to everyone), which is what lets the same design stretch toward
-very large rings.
+The design also scales past a small friendly group — but not by making one wave enormous.
+Instead, many waves run **concurrently**, and each person only holds the photos for the
+waves they actually opted into (you "subscribe" to the handful you care about, and ignore
+the rest). Splitting the crowd across lots of small, self-contained waves — rather than one
+giant ring where everyone stores everyone's photo — is what lets the same design stretch to
+very large gatherings.
 
 ## Limitations
 

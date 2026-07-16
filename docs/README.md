@@ -8,17 +8,19 @@ The reusable, theme-agnostic P2P engine.
 
 - [protocol.md](../packages/hyperwave-engine/docs/protocol.md) — the on-wire protocol &
   per-peer state machine: identity/ring geometry, transport, crypto (join / burn
-  attestations), message propagation (flooding / heartbeat), every message type (five
-  kinds), the paid lobby, the **deterministic sweep** (schedule derivation, self-trigger,
-  deterministic end), join-time sync, the multicore CRDT **feed** + write gates, and
+  attestations), message propagation (flooding / heartbeat), every message type (six
+  kinds — heartbeat, subs, wave-announce, wave-join, wave-start, wave-sync), the paid lobby,
+  the **deterministic sweep** (schedule derivation, self-trigger, deterministic end),
+  the subscription layer + scoped gossip, join-time sync, the multicore CRDT **feed** + write gates, and
   **participation fees — burning & verification**. Detailed enough to build a compatible
   client in another language.
 - [usage.md](../packages/hyperwave-engine/docs/usage.md) — the API walkthrough: `createEngine`
   / `createWave`, the command + event surface, and every pure submodule with runnable snippets.
-- [scaling.md](../packages/hyperwave-engine/docs/scaling.md) — **design note (proposed, not
-  built)**: scaling to thousands of peers via **concurrent waves** as a sharding model
-  (subscription, per-wave sub-topics, and a discovery directory), what breaks in a single wave (the
-  feed's O(N)-cores wall), and a phased migration. Revisits several baked-in assumptions.
+- [scaling.md](../packages/hyperwave-engine/docs/scaling.md) — **Phases 1–3 built**: scaling to
+  thousands of peers via **concurrent waves** as a sharding model — the multiplexed wave FSM, the
+  subscription layer (O(subscribed) core budget), and scoped gossip with per-wave sub-topics. Covers
+  what breaks in a single wave (the feed's O(N)-cores wall); **Phase 4 (a discovery directory at
+  scale) is still proposed**. Revisits several baked-in assumptions.
 
 ## Apps (`apps/docs/`)
 

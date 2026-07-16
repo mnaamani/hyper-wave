@@ -13,6 +13,11 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `apps/d
 - [x] Token race with Ed25519 receipts + constant-size blake2b chain accumulator
 - [x] Wave lifecycle: idle → lobby → racing → idle; single active wave; lower-`waveId`
       tie-break; `wave-end` broadcast; timeout fallbacks; `busy` guard; join-time `wave-sync`
+      **Superseded (scaling.md Phases 1–3, 2026-07-16):** the FSM is now **multiplexed**
+      (`Map<waveId, WaveState>` — concurrent waves). Single-active-wave, the lower-`waveId`
+      tie-break, the `busy` guard, and `wave-end` are all **gone** (`shouldAdopt` → `canAdopt`;
+      the wave ends deterministically at `t0+lapMs+grace`, no completion message). `wave-sync`
+      survives but now fires on **mutual subscription**, not plain connect.
 - [x] Resilience / healing: forward to the next _reachable_ peer; `wave-pos` = ACK; skip a
       silent successor and re-forward; `seen` per wave + `endedWaves` anti-revival
 - [x] Gallery: per-wave Autobase (namespaced by `waveId`), writer admission gated on a valid
@@ -180,6 +185,12 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `apps/d
 The deterministic angular sweep replaced the serial token entirely (see the Done
 section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining scale work:
 
+> **Reframed by scaling.md Phases 1–3 (2026-07-16).** The adopted answer to "large N on one
+> topic" is **sharding across concurrent waves** + a subscription layer (O(subscribed) core
+> budget) + scoped control gossip — NOT growing a single wave to thousands. So the O(N) `writers`
+> items below matter only within one wave; the product answer to very large gatherings is many
+> bounded waves, each with its full-replication feed. See `packages/hyperwave-engine/docs/scaling.md`.
+
 - [x] **Duplicate `roster` field dropped from the wire (2026-07-14).** `wave-start`/`wave-sync`
       no longer carry a `roster` array — it was always the same set as `{by} ∪ writers[].peerId`,
       so every receiver now derives the canonical roster from the `writers` credentials
@@ -200,7 +211,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 ### Adversarial hardening still open (`packages/hyperwave-engine/docs/protocol.md` §11.3)
 
 - [ ] **Automated coverage for the paid gate (currently a test gap).** The
-      burn/attestation path — `enforcePaid`, `recordBurn`, `validKickoff`/`verifyKickoff`,
+      burn/attestation path — `enforcePaid`, `recordBurn`, `validStartProof`/`verifyStartProof`,
       the per-peer `burnAuthorizes` check on `wave-join` ingest — has **no automated test
       with a wallet**: the unit suites don't wire a wallet and the `e2e/` harness runs
       wallet-less (`enforcePaid` off, join-attestation-only ingest), so this path is
@@ -215,16 +226,15 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       (d) a burn confirming after the wave ends still binds the tip address on the posted
       entry. Optionally extend `e2e/` with a mock-payments mode so the paid gate gets
       end-to-end coverage too.
-- [ ] **Reject a wave whose kick-off burn is stale (replay-attack prevention).** `shouldAdopt()`
-      only refuses a `waveId` already in `endedWaves`, and `validKickoff()` checks the burn
+- [ ] **Reject a wave whose kick-off burn is stale (replay-attack prevention).** `canAdopt()`
+      only refuses a `waveId` already in `endedWaves`, and `validStartProof()` checks the burn
       attestation's `reason`/`waveId`/`peerId`/signature but **not its age**. So an attacker can
       **replay a captured, still-validly-signed `wave-announce`** later: a peer that never saw the
       original end (a freshly joined or **restarted** peer has an empty `endedWaves`) will adopt the
       stale wave, since the signed kick-off proof still verifies. Fix: enforce a **freshness
       window** on adoption. The burn attestation already carries a **signed `burnTs`** (part of
       `burnHash`, so it can't be back-dated without the initiator's key) — reject a kick-off whose
-      `burnTs` is older than a bound (`MAX_KICKOFF_AGE_MS`, e.g. a few minutes) in `validKickoff`
-      /`shouldAdopt`. For a stronger, unforgeable anchor, gate on the **on-chain tx timestamp**
+      `burnTs` is older than a bound (`MAX_KICKOFF_AGE_MS`, e.g. a few minutes) in `validStartProof`/`canAdopt`. For a stronger, unforgeable anchor, gate on the **on-chain tx timestamp**
       via `verifyBurnTx` (already fetched at the paid-gate verify step) rather than the
       self-reported `burnTs`. Allow generous clock-skew (peers aren't synchronized). Ties into the
       envelope `ts` item (§5.0) — a per-message timestamp would let the same freshness check apply

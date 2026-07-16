@@ -9,7 +9,7 @@
 /**
  * Any gossip message: a `kind` plus that kind's fields (see protocol.md §5).
  * @typedef {Object} GossipMessage
- * @property {string} kind - The message kind (one of the five below).
+ * @property {string} kind - The message kind (one of the six below).
  * @property {string} [mid] - Flood-dedup id (stamped by floodGossip on flooded kinds).
  */
 

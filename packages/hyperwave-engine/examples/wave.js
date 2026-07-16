@@ -36,7 +36,7 @@ async function main() {
   console.log('my seat:', wave.me); // { id, angle, tag }
 
   wave.setTag('BR');
-  const waveId = wave.startWave(); // announce + open the lobby; null if busy
+  const waveId = wave.startWave(); // announce + open the lobby; always returns the new waveId
   console.log('started wave:', waveId);
   wave.stageEntry({ payload: { label: 'me' } }); // opaque; posts at my sweep slot
 
