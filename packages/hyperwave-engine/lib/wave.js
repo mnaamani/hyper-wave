@@ -209,8 +209,9 @@ function loadOrCreateSwarmSeed(
  * @property {Array<{host: string, port: number}>|null} [bootstrap] Local-DHT bootstrap nodes, or null for the public DHT.
  * @property {string} [topicId] Topic string (all peers on the same id share one ring).
  * @property {number} [lobbyMs] Lobby window length in ms (opt-in window before the race).
- * @property {number} [maxPeers] Hyperswarm connection cap (default 64; lower to force a partial mesh).
- * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments).
+ * @property {number} [maxPeers] Hyperswarm connection cap (default 64; lower to force a partial mesh). Ignored when `swarm` is supplied.
+ * @property {string} [swarmSeed] Hex seed for the swarm identity; distinct from the wallet seed (createPayments). Ignored when `swarm` is supplied.
+ * @property {Object} [swarm] An existing Hyperswarm the host owns; the engine shares it (joins its topics + adds listeners) and NEVER destroys it — on close it only leaves those topics + detaches its listeners. Share the host's swarm when the app also uses Hyperswarm (one instance per process). When set, `maxPeers`/`bootstrap`/`swarmSeed` are the host's concern and are ignored.
  */
 
 /**
@@ -251,7 +252,10 @@ function createWave({
   // it (open its cores; the single-wave demo UX + the headless CLI rely on this). false → stay
   // merely AWARE until the host calls subscribe()/join(), so a peer holds cores only for the
   // waves it chose — the O(subscribed) core budget.
-  autoSubscribe = true
+  autoSubscribe = true,
+  // An existing Hyperswarm the host already owns; share it instead of creating one (correct when
+  // the app also uses Hyperswarm — one instance per process). The engine never destroys it.
+  swarm: externalSwarm = null
 }) {
   // One host sink. Every observable change flows to the host through `emit(msg)` as a typed
   // message; these three build the envelopes the former onState/onEvent/onFeed trio used to. The
@@ -268,19 +272,31 @@ function createWave({
     fs.rmSync(storePath, { recursive: true, force: true });
   } catch {}
   const store = new Corestore(storePath);
-  // Persisted swarm identity: derive the Noise keypair from a seed that survives restarts, so a
-  // peer keeps the SAME id / ring seat / signing key across runs (loadOrCreateSwarmSeed). Passing
-  // an explicit keyPair overrides Hyperswarm's fresh-per-run default.
-  const swarmKeyPair = crypto.keyPair(
-    loadOrCreateSwarmSeed(storageDir, swarmSeed, log)
-  );
-  // bootstrap: pass a local DHT for instant same-machine discovery (tests / single
-  // -laptop demo). Omit for the public DHT (cross-machine, ~20-35s cold discovery).
-  const swarm = new Hyperswarm({
-    keyPair: swarmKeyPair,
-    maxPeers,
-    ...(bootstrap ? { bootstrap } : {})
-  });
+  // The swarm: either an existing instance the HOST already owns (passed in), or one we create.
+  // Sharing the host's swarm is the correct choice when the app is ALSO using Hyperswarm — two
+  // Hyperswarm instances in one process don't reliably discover each other, so a host with its
+  // own swarm should hand it here rather than let the engine open a second. When `swarm` is
+  // provided the engine NEVER destroys it (the host owns its lifecycle — on close we only leave
+  // the topics we joined + detach our listeners), and `maxPeers`/`bootstrap`/`swarmSeed` are the
+  // host's concern (ignored here; identity is the shared swarm's keyPair).
+  const ownsSwarm = !externalSwarm;
+  let swarm;
+  if (externalSwarm) {
+    swarm = externalSwarm;
+  } else {
+    // Persisted swarm identity: derive the Noise keypair from a seed that survives restarts, so a
+    // peer keeps the SAME id / ring seat / signing key across runs (loadOrCreateSwarmSeed). Passing
+    // an explicit keyPair overrides Hyperswarm's fresh-per-run default. bootstrap: pass a local DHT
+    // for instant same-machine discovery (tests / single-laptop demo); omit for the public DHT.
+    const swarmKeyPair = crypto.keyPair(
+      loadOrCreateSwarmSeed(storageDir, swarmSeed, log)
+    );
+    swarm = new Hyperswarm({
+      keyPair: swarmKeyPair,
+      maxPeers,
+      ...(bootstrap ? { bootstrap } : {})
+    });
+  }
 
   const meKey = swarm.keyPair.publicKey;
   const me = {
@@ -1532,8 +1548,15 @@ function createWave({
   // --- connections -----------------------------------------------------------
   // One Protomux gossip channel per connection carries every kind (heartbeat / subs / wave-*), plus
   // Corestore feed-core replication. A connection may be shared across the directory topic and
-  // several wave sub-topics (Hyperswarm dedups by remote key) — same one stream.
-  swarm.on('connection', (conn) => {
+  // several wave sub-topics (Hyperswarm dedups by remote key) — same one stream. `channels` tracks
+  // our gossip channels so a shared-swarm close() can tear them down without destroying the swarm.
+  const channels = new Set();
+
+  /**
+   * Handle a new Hyperswarm connection: wire the gossip channel + feed replication, greet, and seat.
+   * @param {Object} conn The Noise duplex stream from Hyperswarm.
+   */
+  function onConnection(conn) {
     store.replicate(conn); // carries the gossip mux + feed-core replication
 
     const id = b4a.toString(conn.remotePublicKey, 'hex');
@@ -1554,6 +1577,7 @@ function createWave({
       }
     });
     channel.open();
+    channels.add(channel);
 
     const send = (str) => message.send(str);
     table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
@@ -1581,11 +1605,13 @@ function createWave({
       // authoritative disconnect: drop the seat + its subscription record immediately
       table.onDisconnect(id);
       neighborSubs.delete(id);
+      channels.delete(channel);
       log('peer disconnected', shortId(id));
       pushRingState();
     });
     conn.on('error', () => {});
-  });
+  }
+  swarm.on('connection', onConnection);
 
   // Every time Hyperswarm learns of or drops peers on the topic, repaint (the
   // `discovered` count feeds host start-gating).
@@ -1652,7 +1678,25 @@ function createWave({
       for (const wave of waves.values()) {
         teardownWave(wave);
       }
-      await swarm.destroy();
+      // close our gossip channels (they ride the connections; harmless if the conn is going away)
+      for (const channel of channels) {
+        try {
+          channel.close();
+        } catch {}
+      }
+      channels.clear();
+      if (ownsSwarm) {
+        await swarm.destroy(); // we made it → tear it down (closes every connection)
+      } else {
+        // a host-owned swarm: leave only the topics we joined + detach our listeners; never destroy
+        // it (the host owns its lifecycle + its other topics/connections).
+        swarm.off('connection', onConnection);
+        swarm.off('update', pushRingState);
+        await swarm.leave(topic).catch(() => {});
+        for (const waveId of subTopics) {
+          await swarm.leave(subTopicKey(waveId)).catch(() => {});
+        }
+      }
       await session.close();
       await store.close();
     }

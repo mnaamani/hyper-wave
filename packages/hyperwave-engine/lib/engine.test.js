@@ -385,3 +385,30 @@ test('join-wave burns the join fee for a joinable wave', async (t) => {
     'the join burn is reported burned (fire-and-forget, no on-chain confirm)'
   );
 });
+
+test('createEngine threads a host-supplied Hyperswarm to the wave protocol', async (t) => {
+  const wave = fakeWave();
+  const hostSwarm = { marker: 'host-owned-swarm' }; // a stand-in; createWave decides how to use it
+  const engine = createEngine({
+    storageDir: '/tmp/e',
+    config: {},
+    emit: () => {},
+    log: () => {},
+    swarm: hostSwarm, // the new option — a live object, not part of `config`
+    deps: {
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
+      createPayments: async () => {
+        throw new Error('no wallet in this test');
+      }
+    }
+  });
+  t.teardown(() => engine.close());
+  t.is(
+    wave.opts.swarm,
+    hostSwarm,
+    'the host-owned swarm is passed straight through to createWave'
+  );
+});

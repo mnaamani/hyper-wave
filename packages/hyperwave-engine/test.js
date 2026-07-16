@@ -14,3 +14,4 @@ require('./lib/feed-crdt.test.js');
 require('./lib/wallet.test.js');
 require('./lib/engine.test.js');
 require('./lib/rpc.test.js');
+require('./lib/swarm.share.test.js');

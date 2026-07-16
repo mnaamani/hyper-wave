@@ -47,6 +47,7 @@ const {
  * @param {(msg: Object) => void} options.emit - Callback the engine calls to raise messages to the host.
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
  * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests).
+ * @param {Object} [options.swarm] - An existing Hyperswarm the host already owns; the engine shares it instead of creating one (correct when the app also uses Hyperswarm — one instance per process) and NEVER destroys it. A live object, so it is passed here, not in the JSON `config`.
  * @returns {Engine} The engine handle (`exec`, `close`).
  */
 function createEngine({
@@ -54,7 +55,8 @@ function createEngine({
   config = {},
   emit,
   log = (...args) => console.log('[hyperwave]', ...args),
-  deps = {}
+  deps = {},
+  swarm
 }) {
   const makeWave = deps.createWave || createWave;
   const makePayments = deps.createPayments || createPayments;
@@ -75,6 +77,9 @@ function createEngine({
     swarmSeed: config.swarmSeed,
     // subscription policy (Phase 2): undefined → createWave's default (true)
     autoSubscribe: config.autoSubscribe,
+    // an existing host-owned Hyperswarm to share (undefined → the engine creates its own).
+    // A live object, so it rides the top-level option, not the serializable `config`.
+    swarm,
     // The wave emits typed messages ({type:'state'|'event'|'feed', …}) straight to the host sink —
     // one notifier end to end, no per-kind wrapping here.
     emit,

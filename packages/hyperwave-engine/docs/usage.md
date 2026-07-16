@@ -76,6 +76,12 @@ const engine = createEngine({
     wallet: true, // default; false → wallet-less (join-attestation feed, no fees/tips)
     autoSubscribe: true // default; false → browse-then-pick (hold cores only for waves you subscribe to)
   },
+  // Optional: share an existing Hyperswarm the host already owns (a LIVE object, so it rides the
+  // top-level option, NOT `config`). When set, the engine joins its topics on that instance and
+  // NEVER destroys it (on close it only leaves those topics + detaches its listeners), and
+  // config.bootstrap / swarmSeed are ignored. Pass this when the app ALSO uses Hyperswarm — two
+  // instances in one process don't reliably discover each other.
+  // swarm: myHyperswarm,
   emit: (msg) => {
     // engine → host events, e.g. { type: 'state' | 'event' | 'feed' | 'wallet' | 'burn-result' }
     // (a 'feed' message carries a `waveId` — several waves can update concurrently)
@@ -144,6 +150,9 @@ const wave = createWave({
     }
   }
   // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see §10)
+  // swarm: myHyperswarm  // optional: share the host's Hyperswarm instead of creating one; the
+  //   engine takes its identity from it and NEVER destroys it (it only leaves the topics it
+  //   joined on close). Use when the app also runs Hyperswarm — one instance per process.
 });
 
 console.log('my seat:', wave.me); // { id, angle, tag }
