@@ -40,7 +40,19 @@ joins a wave whose `walletType` its wallet matches), but never mint-A from mint-
 
 The desktop wallet modal offers a **curated mint picker** (the account dropdown,
 reused); switching sends `set-wallet-options {mint}` (a live re-wire) and main
-persists the choice to `<storage>/cashu.mint`.
+persists the choice to `<storage>/cashu.mint`. The curated list (`CASHU_MINTS` in
+`renderer/lib/wallet.js`):
+
+- **testnut** (`testnut.cashu.space`) + **testnut · no fees**
+  (`nofee.testnut.cashu.space`) — the free TEST mints (auto-pay, no real
+  Lightning). The default; play money.
+- **⚠ Minibits** (`mint.minibits.cash/Bitcoin`) and **⚠ Coinos**
+  (`mint.coinos.io`) — real, reputable **mainnet** Lightning mints (verified via
+  `/v1/info`: bolt11 mint+melt, NUT-07/11/12). Selecting one means **REAL sats** —
+  Top up pays a real invoice, burns/tips move real funds. They're the only way to
+  actually settle cross-mint tips (`consolidate`), which fake mints can't do. This
+  sits in tension with the project's testnet-only rule, so they're clearly
+  labelled and never the default.
 
 ## Cashu is stateful — the proof store
 

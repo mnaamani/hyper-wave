@@ -17,12 +17,21 @@ import { isCashu, unitLabel, activeMint } from './wallet-meta.js';
 import { openAddress, txLink } from './explorer.js';
 
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage';
-// Curated Cashu mints for the picker (each peer chooses its own). testnut is a free test mint
-// (auto-pays mint quotes — no real Lightning), so it works for the demo with no funding step.
-// A real LN-connected mint enables cross-mint tip settlement (consolidate).
+// Curated Cashu mints for the picker (each peer chooses its own). The DEFAULT is testnut — a free
+// TEST mint (auto-pays mint quotes, no real Lightning), so the demo funds/burns/tips with no real
+// money, honouring the project's testnet-only rule. The two ⚠ MAINNET mints below are real,
+// reputable, Lightning-connected mints (verified live via /v1/info: bolt11 mint+melt, NUT-07/11/12)
+// — selecting one means REAL sats: Top up pays a real invoice, burns/tips move real funds. They're
+// the only way to actually settle cross-mint tips (consolidate), which fake mints can't do. Keep
+// testnut first so it stays the default.
 const CASHU_MINTS = [
   { url: 'https://testnut.cashu.space', label: 'testnut (test · auto-pay)' },
-  { url: 'https://nofees.testnut.cashu.space', label: 'testnut · no fees' }
+  { url: 'https://nofee.testnut.cashu.space', label: 'testnut · no fees' },
+  {
+    url: 'https://mint.minibits.cash/Bitcoin',
+    label: '⚠ Minibits — mainnet · REAL sats'
+  },
+  { url: 'https://mint.coinos.io', label: '⚠ Coinos — mainnet · REAL sats' }
 ];
 // How many sats a "Top up" mints at once (testnut auto-pays; a real mint returns an invoice).
 const TOPUP_SATS = 100;
