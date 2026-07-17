@@ -33,6 +33,11 @@ try {
     format: 'iife',
     globalName: 'HWNsfw',
     minify: true,
+    // Shim the Node globals nsfwjs/tfjs reference — otherwise the IIFE throws at load in the
+    // browser (Buffer/process undefined) and never sets `HWNsfw`. `global` → globalThis; Buffer +
+    // process come from the injected shim.
+    define: { global: 'globalThis' },
+    inject: [path.join(ROOT, 'apps/desktop/scripts/nsfw-shims.mjs')],
     outfile,
     logLevel: 'error'
   });
