@@ -331,5 +331,14 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
      real Lightning to route between mints) — the code path is built and the
      no-op path verified; true settlement needs two LN-connected mints.
    - Tip **delivery** (carrying the token in a `wave-note`) is Part 4 (desktop).
-4. **Part 4 desktop** — inject as default, mint picker, top-up UX, proof store.
-5. **Part 6/7** — e2e verify + docs. Flip the desktop default to Cashu.
+4. ✅ **Part 4 desktop** — Cashu is the desktop default (worker injects
+   `createCashuWallet`). Engine gained generic `set-wallet-options` / `fund-wallet`
+   / `redeem` commands + `mint` in the wallet msg. Renderer: `wallet-meta.js`
+   shared unit/mint/type; unit labels everywhere; the account `<select>` reused
+   as a **mint picker**; the faucet button reused as **Top up** (fund-wallet);
+   **tip redeem** (a Cashu tip token rides the tip wave-note's `hash`, the
+   recipient `redeem`s it); chain-only UI hidden for Cashu. main.js persists the
+   chosen mint (`cashu.mint`). _(done — GUI end-to-end still to verify on a
+   display: two live desktop peers, a paid Cashu wave, a tip that redeems.)_
+5. **Part 6/7** — e2e verify (GUI + a headless two-peer paid-wave check) + docs
+   (protocol.md payments §, idea.md money model, CLAUDE.md, a cashu doc).
