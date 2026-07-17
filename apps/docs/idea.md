@@ -67,6 +67,14 @@ no "sponsor rewards" for participating — earlier versions of the design had th
 turned out to be an open invitation to farm fake participants. Burning the fee removes
 anything to steal.
 
+**On the desktop the built-in wallet now defaults to Cashu — digital cash ("ecash") backed
+by Bitcoin's Lightning network** — with the exact same rules. A fee is "burned" by locking a
+few sats to a key nobody holds (the ecash equivalent of an unspendable address), stamped with
+which wave it paid for; a tip is a little ecash token handed straight to the selfie-taker, who
+redeems it. Each player picks which "mint" (the service that issues the ecash) they use, and
+tips still work across different mints. The Tron wallet is still there as an option. It's all
+testnet — play money, not real funds. (Details: `apps/docs/cashu.md`.)
+
 ## Nobody is special
 
 Every peer runs exactly the same app. There's no server, no operator, no admin, no

@@ -32,6 +32,9 @@ The "stadium Mexican wave" product and how the two hosts wrap the engine.
 - [hosting.md](../apps/docs/hosting.md) — the app-hosting architecture: the desktop Electron
   three-process split (main · renderer · Bare worker), the mobile bare-kit worklet, the
   renderer↔worker IPC seam, the module map, and where logic lives. (Formerly `architecture.md`.)
+- [cashu.md](../apps/docs/cashu.md) — the **Cashu (ecash) payment mechanism**, the desktop
+  default: NUMS-pubkey burns, mint-signed memos, per-peer mint choice, redeemable multimint
+  tips, funding, and the (custodial) trust model. The protocol is unchanged (see protocol.md §9).
 - [secure-seed-storage.md](../apps/docs/secure-seed-storage.md) — design for moving desktop
   secret storage (wallet + swarm seeds) to the OS keychain (planned, not built).
 
@@ -40,6 +43,9 @@ The "stadium Mexican wave" product and how the two hosts wrap the engine.
 - [research.md](./research.md) — the papers, protocols, and projects HyperWave draws on
   (Chord, epidemic gossip, Kademlia, CRDTs, the Holepunch stack, WDK, proof-of-burn, …)
   and what each contributed.
+- [cashu-integration-plan.md](./cashu-integration-plan.md) — the plan (and progress) for
+  adding Cashu as the desktop's default payment mechanism: the currency-agnostic rename, the
+  `CashuWallet`, tips + multimint, the desktop wiring, and what remains.
 
 Project overview, quickstart, and the local demo walkthrough: [`../README.md`](../README.md).
 Desktop app shell: [`../apps/desktop/README.md`](../apps/desktop/README.md). Mobile host:

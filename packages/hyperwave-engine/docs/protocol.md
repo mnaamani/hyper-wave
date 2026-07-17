@@ -95,13 +95,16 @@ authenticity, not uniqueness — one-entry-per-peer and the byte caps bound what
 
 ### 2.3 Fee-burn attestation
 
-The signed proof binding a peer's ring identity to its on-chain fee burn (schema and
-verification in §9.0):
+The signed proof binding a peer's ring identity to its fee burn (schema and
+verification in §9.0). The burn is **mechanism-abstract**: `burnRef` is the payment
+mechanism's burn reference (a Tron tx hash, or a Cashu ecash token) and `payerAddress`
+is the wallet/identity that funded it. (These fields were `txHash`/`tronAddress` before
+the currency-agnostic rename — all peers updated together, pre-release.)
 
 ```
-burnHash(waveId, peerId, reason, amount, txHash, tronAddress, burnTs)
+burnHash(waveId, peerId, reason, amount, burnRef, payerAddress, burnTs)
     = BLAKE2b-256( utf8( waveId + "|" + peerId + "|" + reason + "|" + amount + "|"
-                         + txHash + "|" + tronAddress + "|" + burnTs ) )
+                         + burnRef + "|" + payerAddress + "|" + burnTs ) )
 
 sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
 ```
@@ -873,7 +876,7 @@ is a cosmetic short string (the reference app uses an ISO country code). `addres
 viewer can **tip** this entry with a real testnet transfer (renderer `tip` → worker
 `pay.send(address, amount)`; §WDK) — but only if `mergeFeed()` finds it backed by the
 `burn` (§8.2), so a tip always reaches the wallet that paid in. Merged form: one entry per
-`(waveId, peerId)`, the bulky `burn` stripped (its `txHash` kept as `burnTx` for audit),
+`(waveId, peerId)`, the bulky `burn` stripped (its `burnRef` kept as `burnTx` for audit),
 sorted by `hopCount` then `timestamp`.
 
 ## 9. Participation fees — burning & verification
@@ -883,6 +886,15 @@ Each burn does real work: the **start** burn gates whether a wave is adoptable a
 paid-wave gate, §9.3), and a **join** burn gates whether peers will ingest that participant's
 feed core (the ingest gate, §8.2). (Wire details: the paid-wave gate on
 `wave-announce`/`wave-start`/`wave-sync` §5; the ingest gate rides `wave-join` §8.2.)
+
+**The payment mechanism is pluggable** (the abstract `Wallet` interface, wallet.js). This
+section describes the flow with the default **Tron** wallet (native TRX burned to a black-hole
+address, verified on-chain). A second mechanism, **Cashu** (Chaumian ecash on a Lightning-connected
+mint — the desktop default), maps every concept below onto ecash: the black-hole address becomes a
+**NUMS pubkey** nobody can spend, the on-chain memo becomes a **mint-signed NUT-11 tag** in the
+locking secret, and `verifyBurnTx` becomes a decode + NUT-07 checkstate against the token's own
+mint. The wire — `walletType`, the `paid`/`burn` attestations, `burnRef`/`payerAddress` — is
+identical; only the mechanism behind the `Wallet` interface differs. See `apps/docs/cashu.md`.
 
 ### 9.0 Fee-burn attestation
 
@@ -896,24 +908,26 @@ carried as the `burn` field on `wave-join` (§8.2). It is **not** an on-wire fee
   "peerId": "<peerId>",
   "reason": "start" | "join",
   "amount": 1,
-  "txHash": "<tron-tx-hash>",
-  "tronAddress": "T…",
+  "burnRef": "<tron-tx-hash | cashu-token>",
+  "payerAddress": "<T… | cashu-pubkey>",
   "burnTs": 1719705612080,
   "sig": "<hex128>"
 }
 ```
 
-Two independent bindings make it verifiable (the Tron key that signs the burn is a different
+Two independent bindings make it verifiable (the payment key that signs the burn is a different
 keypair from the ring identity, so both are needed):
 
-1. **On-chain memo.** The burn tx carries `data = "hyperwave:<waveId>:<peerId>"` (readable via
-   `gettransactionbyid`). The burn _itself names the wave_ — a third party can confirm it
-   from-chain, and it can't be an old burn replayed for another wave (each carries its own
-   random `waveId`, unguessable in advance).
+1. **Instrument memo.** The burn commits `hyperwave:<waveId>:<peerId>` (Tron: the on-chain tx
+   `data`, readable via `gettransactionbyid`; Cashu: a mint-signed tag in the locking secret).
+   The burn _itself names the wave + peer_ — a third party can confirm it, and it can't be an old
+   burn replayed for another wave (each carries its own random `waveId`, unguessable in advance).
 2. **Ring attestation.** `sig` = Ed25519 by `peerId` over
-   `(waveId, peerId, reason, amount, txHash, tronAddress, burnTs)` (§2.3) — binds the ring
-   participant to the on-chain tx. `validKickoff` admits the proof only if `sig` verifies,
-   and a peer then cross-checks the `txHash` on-chain before joining (§9.2).
+   `(waveId, peerId, reason, amount, burnRef, payerAddress, burnTs)` (§2.3) — binds the ring
+   participant to the burn. `validKickoff` admits the proof only if `sig` verifies, and a peer
+   then cross-checks the `burnRef` with the mechanism (`verifyBurnTx`) before joining (§9.2).
+   (Cashu note: ecash is anonymous, so `payerAddress` is **not** re-checkable from the token —
+   the payer binding rests on the memo's `peerId` + this ring signature.)
 
 ### 9.1 The mechanism: fees are burned, not paid
 
