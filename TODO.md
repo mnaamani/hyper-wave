@@ -371,6 +371,16 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       without storing every hash. False positives (rare) just ask the peer to re-shoot; no false
       negatives. Complements the per-entry byte cap + one-per-peer dedup (bounds _content_ reuse,
       not just count). Pairs well with a lightweight perceptual hash to catch near-duplicates.
+- [~] **Automatic NSFW filter (desktop) — DONE (2026-07-17).** A **local, on-device** image-safety
+  classifier (NSFWJS / MobileNetV2) blurs flagged gallery selfies behind a "Show anyway" cover —
+  the coherent moderation model for a CRDT gallery (each peer filters its OWN view; the entry
+  stays in the log). Runs entirely in the renderer via an esbuild bundle (tfjs + nsfwjs + the
+  mobilenet_v2 model **embedded**, so it loads from memory — no fetch, which a sandboxed file://
+  renderer blocks). `scripts/build-nsfw.mjs` builds it at postinstall + in the forge package
+  hook; `renderer/lib/nsfw.js` lazy-loads it + classifies (~ms/image, fail-open). Considered
+  Tether's QVAC but its "vision" is a multimodal **VLM** (GB RAM, seconds/image) — overkill for
+  binary NSFW, especially P2P-every-peer + mobile; MobileNet is ~100–1000× cheaper. The
+  **report/downvote** mechanism below still complements it for the tail (false negatives).
 - [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) selfies.** A `wave-entry` is
       an inline image any admitted participant can post, so a peer could post something NSFW or
       abusive. Add a **report/downvote** signal that propagates so each peer can **choose not to

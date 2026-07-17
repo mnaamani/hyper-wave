@@ -166,6 +166,18 @@ module.exports = {
       childProcess.execSync(`node "${secretStreamPatch}" "${buildPath}"`, {
         stdio: 'inherit'
       });
+      // Rebuild the NSFW classifier bundle fresh into the packaged tree (esbuild lives in the repo
+      // root's devDeps — available at build time — so this doesn't depend on the copy carrying it).
+      const nsfwBuild = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'scripts',
+        'build-nsfw.mjs'
+      );
+      childProcess.execSync(`node "${nsfwBuild}" "${buildPath}"`, {
+        stdio: 'inherit'
+      });
     },
     readPackageJson: async (forgeConfig, packageJson) => {
       if (process.env.UPGRADE_KEY) {

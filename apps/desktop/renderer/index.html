@@ -651,6 +651,45 @@
         color: #eafff0;
         border: 1px solid rgba(255, 255, 255, 0.3);
       }
+      /* NSFW safety cover: an opaque card over a flagged selfie in the ring centre */
+      #nsfw-cover {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        width: 220px;
+        height: 220px;
+        box-sizing: border-box;
+        padding: 0 18px;
+        text-align: center;
+        border-radius: 18px;
+        background: rgba(4, 20, 10, 0.94);
+        border: 1px solid #6b4a2f;
+      }
+      #nsfw-cover.show {
+        display: flex;
+      }
+      #nsfw-cover .nsfw-icon {
+        font-size: 40px;
+      }
+      #nsfw-cover .nsfw-msg {
+        font-size: 13px;
+        opacity: 0.9;
+        line-height: 1.3;
+      }
+      #nsfw-reveal {
+        padding: 7px 16px;
+        font-size: 13px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 18px;
+        background: rgba(0, 0, 0, 0.4);
+        color: #eafff0;
+        cursor: pointer;
+      }
+      #nsfw-reveal:hover {
+        background: rgba(0, 0, 0, 0.6);
+      }
     </style>
   </head>
   <body>
@@ -769,6 +808,12 @@
             <button id="capture">📸 Capture</button>
             <button id="skip">Skip</button>
           </div>
+        </div>
+        <!-- safety cover: shown over a featured selfie the local NSFW classifier flagged -->
+        <div id="nsfw-cover">
+          <div class="nsfw-icon">🚫</div>
+          <div class="nsfw-msg">This selfie was flagged as possibly unsafe</div>
+          <button id="nsfw-reveal">👁 Show anyway</button>
         </div>
       </div>
     </div>

@@ -7,6 +7,9 @@ package-lock.json
 out/
 bundles/
 
+# Generated NSFW classifier bundle (esbuild: tfjs + nsfwjs + mobilenet_v2 model), rebuilt on install.
+apps/desktop/renderer/vendor
+
 # Generated native mobile projects (apps/mobile/ios|android are gitignored + regenerated):
 # CocoaPods, Xcode/Gradle build dirs, Expo cache. Never hand-edited, so never format them.
 apps/mobile/ios

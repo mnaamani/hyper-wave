@@ -8,3 +8,5 @@ apps/mobile/android
 Pods/
 .expo/
 .gradle/
+# Generated NSFW classifier bundle (esbuild: tfjs + nsfwjs + mobilenet_v2 model), rebuilt on install.
+apps/desktop/renderer/vendor

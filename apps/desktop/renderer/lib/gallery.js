@@ -6,6 +6,7 @@
 // (buildGallery), so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js';
 import { tip, note } from './ipc.js';
+import { classify as classifyNsfw } from './nsfw.js';
 import { txLink } from './explorer.js';
 
 const progressEl = document.getElementById('progress');
@@ -13,6 +14,8 @@ const progressFill = document.getElementById('progress-fill');
 const progressLabel = document.getElementById('progress-label');
 const tipBtn = document.getElementById('tip');
 const toastEl = document.getElementById('tip-toast');
+const nsfwCover = document.getElementById('nsfw-cover');
+const nsfwRevealBtn = document.getElementById('nsfw-reveal');
 const TIP_TRX = 1;
 
 let items = [];
@@ -24,6 +27,16 @@ let myAddress = null; // my own wallet — never tip myself
 let lastTip = null; // the entry we just tipped (captured at click; announced on success)
 let pendingReplay = false; // replay requested but waiting for the first selfie (see startReplay)
 const shownKeys = new Set(); // waveId|peerId already featured
+// Local NSFW safety filter (nsfw.js): waveId|peerId -> 'pending' | true (unsafe) | false (safe).
+// `revealed` holds keys the user chose to un-hide. A flagged, un-revealed featured selfie is
+// covered by an opaque overlay (#nsfw-cover) instead of shown.
+const nsfwVerdicts = new Map();
+const nsfwRevealed = new Set();
+
+// Stable per-selfie key (a peer posts one entry per wave).
+function keyOf(item) {
+  return item.waveId + '|' + item.peerId;
+}
 
 // Tell the gallery our own wallet address so it hides the tip button on our own selfies.
 export function setMyAddress(addr) {
@@ -78,9 +91,51 @@ export function setExpected(count) {
 
 function feature(index) {
   centerIdx = index;
-  ring.setCenter(items[centerIdx] || null);
+  const item = items[centerIdx] || null;
+  ring.setCenter(item);
   refreshTip();
+  classifyItem(item); // kick off (or reuse a cached) local NSFW check
+  updateCover(item); // show/hide the "possibly unsafe" cover for this selfie
 }
+
+// Classify a selfie locally the first time it's featured (cached by key). Fail-open: the selfie is
+// shown while the (fast, ~ms) check runs, then covered if the verdict comes back unsafe — so a safe
+// selfie never flickers, and the classifier can't blank the gallery if it's unavailable.
+function classifyItem(item) {
+  if (!item || !item.image) {
+    return;
+  }
+  const key = keyOf(item);
+  if (nsfwVerdicts.has(key)) {
+    return;
+  }
+  nsfwVerdicts.set(key, 'pending');
+  classifyNsfw(item.image).then(({ unsafe }) => {
+    nsfwVerdicts.set(key, unsafe);
+    // if this selfie is still the featured one, reflect the verdict now
+    const featured = items[centerIdx];
+    if (featured && keyOf(featured) === key) {
+      updateCover(featured);
+    }
+  });
+}
+
+// Show the opaque cover iff the featured selfie is flagged unsafe and the user hasn't revealed it.
+function updateCover(item) {
+  const key = item ? keyOf(item) : null;
+  const flagged =
+    !!key && nsfwVerdicts.get(key) === true && !nsfwRevealed.has(key);
+  nsfwCover.classList.toggle('show', flagged);
+}
+
+// "Show anyway": reveal the featured selfie for the rest of the session.
+nsfwRevealBtn.onclick = () => {
+  const item = items[centerIdx];
+  if (item) {
+    nsfwRevealed.add(keyOf(item));
+    updateCover(item);
+  }
+};
 
 // Worker reply to a tip: show the clickable tx (success) or the error, then re-enable.
 export function tipResult({ hash, error }) {
@@ -142,6 +197,7 @@ export function clearView() {
   ring.setCenter(null);
   hideProgress();
   refreshTip(); // no featured selfie now → hide the tip button (don't leave it over the capture)
+  nsfwCover.classList.remove('show'); // no featured selfie → no safety cover
 }
 
 // Close the gallery view: clear it AND stop rendering feed updates until the wave next races/idles

@@ -7,7 +7,7 @@
     "apps/*"
   ],
   "scripts": {
-    "postinstall": "node scripts/fix-bare-engines.js && node scripts/patch-secret-stream.js",
+    "postinstall": "node scripts/fix-bare-engines.js && node scripts/patch-secret-stream.js && node scripts/build-nsfw.mjs",
     "test": "npm test -w hyperwave-engine",
     "test:e2e:local": "npm run test:e2e:local -w hyperwave-engine",
     "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-engine",
