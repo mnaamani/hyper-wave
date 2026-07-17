@@ -22,6 +22,16 @@ The reusable, theme-agnostic P2P engine.
   what breaks in a single wave (the feed's O(N)-cores wall); **Phase 4 (a discovery directory at
   scale) is still proposed**. Revisits several baked-in assumptions.
 
+## Wallets (`packages/hyperwave-wallet-*/`)
+
+Concrete `Wallet` implementations, each its own package so the engine (and its
+consumers) carry no payment deps. A host injects one via
+`createEngine({ deps: { createPayments } })`.
+
+- **`hyperwave-wallet-cashu`** — Chaumian ecash on a Lightning mint (the desktop
+  default). See [cashu.md](../apps/docs/cashu.md).
+- **`hyperwave-wallet-tron`** — WDK self-custodial Tron: native TRX + TRC-20 USDT.
+
 ## Apps (`apps/docs/`)
 
 The "stadium Mexican wave" product and how the two hosts wrap the engine.

@@ -2,9 +2,12 @@
 
 HyperWave's payment layer is pluggable (the abstract `Wallet` interface,
 `packages/hyperwave-engine/lib/wallet.js`). The **desktop default** is **Cashu** —
-Chaumian ecash on a Lightning-connected mint — alongside the original Tron (TRX)
-and TRC-20 USDT wallets. This doc covers the Cashu mechanism; the on-wire
-protocol is unchanged (see `packages/hyperwave-engine/docs/protocol.md` §9).
+Chaumian ecash on a Lightning-connected mint — implemented in its own package,
+**`packages/hyperwave-wallet-cashu/`** (the engine ships no wallet; a host injects
+one via `createEngine({ deps: { createPayments: createCashuWallet } })`). The Tron
+(TRX) + TRC-20 USDT wallets live in `packages/hyperwave-wallet-tron/`. This doc
+covers the Cashu mechanism; the on-wire protocol is unchanged (see
+`packages/hyperwave-engine/docs/protocol.md` §9).
 
 ## Why it fits the money model
 
@@ -23,7 +26,7 @@ the `paid`/`burn` attestations, `address`, `fee`).
 | unit                                      | TRX                                             | sat                                                                                                               |
 
 The NUMS burn key is derived deterministically from the frozen domain string
-`hyperwave:burn:v1` (`lib/nums.js`), so every peer computes the identical key and
+`hyperwave:burn:v1` (`hyperwave-wallet-cashu/lib/nums.js`), so every peer computes the identical key and
 an auditor checks "is this burned?" by comparing against it.
 
 ## Each peer chooses its own mint
@@ -58,7 +61,7 @@ persists the choice to `<storage>/cashu.mint`. The curated list (`CASHU_MINTS` i
 
 Unlike a chain wallet (balance lives on-chain), **a Cashu wallet's balance IS the
 ecash proofs it holds locally** — bearer tokens; losing them loses funds
-(`lib/proof-store.js`). Proofs are kept **per mint** and persisted to
+(`hyperwave-wallet-cashu/lib/proof-store.js`). Proofs are kept **per mint** and persisted to
 `<storage>/cashu-proofs.json`, which **must live outside** `<storage>/hyperwave`
 (that corestore is wiped on startup). Writes are atomic (tmp + rename).
 
@@ -124,7 +127,7 @@ bin/wave.run.js A /tmp/hw/a` (from `packages/hyperwave-engine`).
 ## Runtime note (Bare)
 
 cashu-ts + `@noble/*` need `fetch` / WebCrypto / `TextEncoder` / `TextDecoder`,
-which Bare doesn't ship; `lib/bare-web-shims.js` installs them from Bare
+which Bare doesn't ship; `hyperwave-wallet-cashu/lib/bare-web-shims.js` installs them from Bare
 ecosystem shims before cashu-ts loads. cashu-ts is ESM, bridged from the CJS
 wallet via dynamic `import()` (like WDK). Its `engines.node >=22.4.0` would trip
 Bare's resolver (emulated node 20), so `scripts/fix-bare-engines.js` normalizes
