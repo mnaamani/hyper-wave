@@ -67,5 +67,11 @@ export const refreshWallet = () => send('refresh-wallet');
 export const listAccounts = (count = 5) => send('list-accounts', { count });
 export const setAccount = (index) => send('set-account', { index });
 export const fetchTransactions = () => send('fetch-transactions');
+// Cashu (ecash) wallet: switch the active mint (live re-wire), mint funds (top up),
+// and redeem a bearer token received in a tip note. No-ops on a chain wallet.
+export const setMint = (mint) =>
+  send('set-wallet-options', { walletOptions: { mint } });
+export const fundWallet = (amount) => send('fund-wallet', { amount });
+export const redeem = (token) => send('redeem', { token });
 
 export const appVersion = () => bridge.pkg().version;

@@ -6,6 +6,7 @@
 // (buildGallery), so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js';
 import { tip, note } from './ipc.js';
+import { unitLabel, isCashu } from './wallet-meta.js';
 import { classify as classifyNsfw } from './nsfw.js';
 import { txLink } from './explorer.js';
 
@@ -16,7 +17,9 @@ const tipBtn = document.getElementById('tip');
 const toastEl = document.getElementById('tip-toast');
 const nsfwCover = document.getElementById('nsfw-cover');
 const nsfwRevealBtn = document.getElementById('nsfw-reveal');
-const TIP_TRX = 1;
+// The tip amount, in the active wallet's unit. Cashu is in sats — a few sats so the tip
+// survives the mint's ~1-sat swap fee; a chain wallet tips 1 whole unit (TRX).
+const tipAmount = () => (isCashu() ? 5 : 1);
 
 let items = [];
 let centerIdx = 0;
@@ -51,7 +54,7 @@ function refreshTip() {
     featured && featured.address && featured.address !== myAddress;
   tipBtn.classList.toggle('show', !!payable);
   tipBtn.disabled = false;
-  tipBtn.innerText = `💵 Tip ${TIP_TRX} TRX`;
+  tipBtn.innerText = `💵 Tip ${tipAmount()} ${unitLabel()}`;
 }
 
 tipBtn.onclick = () => {
@@ -63,13 +66,14 @@ tipBtn.onclick = () => {
   tipBtn.innerText = '💸 sending…';
   // Remember the target now — by the time the result comes back the user may have scrubbed to
   // another selfie. Used to announce the tip on the wave once it confirms (tipResult).
+  const amount = tipAmount();
   lastTip = {
     waveId: featured.waveId,
     peerId: featured.peerId,
     address: featured.address,
-    amount: TIP_TRX
+    amount
   };
-  tip(featured.address, TIP_TRX, featured.peerId);
+  tip(featured.address, amount, featured.peerId);
 };
 
 export function count() {
@@ -140,7 +144,12 @@ nsfwRevealBtn.onclick = () => {
 // Worker reply to a tip: show the clickable tx (success) or the error, then re-enable.
 export function tipResult({ hash, error }) {
   if (hash) {
-    toastEl.replaceChildren('✅ tipped — ', txLink(hash));
+    // Chain tip → a clickable explorer tx; Cashu tip → `hash` is a bearer token (no explorer).
+    if (isCashu()) {
+      toastEl.textContent = '✅ tipped';
+    } else {
+      toastEl.replaceChildren('✅ tipped — ', txLink(hash));
+    }
     // Announce the tip on the wave so the recipient (and everyone) sees it. Roster-gated in the
     // engine — a no-op if we only spectated this wave (the on-chain tip still went through).
     if (lastTip) {

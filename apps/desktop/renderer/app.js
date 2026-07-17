@@ -8,6 +8,7 @@ import * as lobby from './lib/lobby.js';
 import * as proof from './lib/proof.js';
 import * as hud from './lib/hud.js';
 import * as wallet from './lib/wallet.js';
+import { setWalletMeta, unitLabel } from './lib/wallet-meta.js';
 import { txLink } from './lib/explorer.js';
 
 // Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the ⚽
@@ -110,9 +111,17 @@ ipc.on('feed', (msg) => {
 });
 
 ipc.on('wallet', (msg) => {
-  wallet.walletStatus(msg); // self-custodial TRX wallet address + balance (wallet-view modal)
+  setWalletMeta(msg); // active mechanism + unit + mint, for labels across the UI
+  wallet.walletStatus(msg); // self-custodial wallet address + balance (wallet-view modal)
   gallery.setMyAddress(msg.address); // so we don't offer to tip our own selfie
   setState({ myAddress: msg.address }); // to recognise a tip note addressed to me
+});
+// Cashu top-up (fund-wallet) and tip redeem (receive) results — surfaced as toasts.
+ipc.on('fund-result', (msg) => wallet.fundResult(msg));
+ipc.on('redeem-result', (msg) => {
+  if (!msg.error && msg.amount > 0) {
+    hud.waveStatus(`🎉 tip redeemed — +${msg.amount} ${unitLabel()}`);
+  }
 });
 // The seed's BIP-44 accounts (for the wallet-view picker); a distinct address per index.
 ipc.on('accounts', (msg) => wallet.setAccounts(msg));
@@ -134,7 +143,10 @@ ipc.on('burn-result', (msg) => {
   } else if (msg.stage === 'failed') {
     hud.waveStatus(`⚠️ ${what} fee burn failed: ${msg.error}`);
   } else {
-    hud.waveStatusNodes(`🔥 ${what} fee burned - ${msg.amount} TRX`, ...tx);
+    hud.waveStatusNodes(
+      `🔥 ${what} fee burned - ${msg.amount} ${unitLabel()}`,
+      ...tx
+    );
     wallet.record({ kind: 'burn', hash: msg.hash, amount: msg.amount }); // 'burned' stage
   }
 });
@@ -277,11 +289,17 @@ const EVENT_HANDLERS = {
       return;
     }
     if (payload.to && payload.to === state.myAddress) {
-      hud.waveStatus(`🎉 you got tipped ${payload.amount} TRX!`);
+      hud.waveStatus(`🎉 you got tipped ${payload.amount} ${unitLabel()}!`);
       ring.startFlourish(); // golden pulse + confetti — same celebration as a completed wave
+      // A Cashu tip rides as a bearer token in `payload.hash` — redeem it (P2PK-locked to us) to
+      // credit the funds. A chain tip already settled on-chain (the engine no-ops redeem there),
+      // so a balance refresh is enough.
+      if (payload.hash) {
+        ipc.redeem(payload.hash);
+      }
       ipc.refreshWallet(); // the tip landed — re-check my balance
     } else {
-      hud.waveStatus(`💸 a selfie was tipped ${payload.amount} TRX`);
+      hud.waveStatus(`💸 a selfie was tipped ${payload.amount} ${unitLabel()}`);
     }
   },
 

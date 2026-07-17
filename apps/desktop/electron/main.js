@@ -224,6 +224,25 @@ function writeAccountIndex(dir, index) {
   }
 }
 
+// The chosen Cashu mint URL — persisted plain (not a secret) next to the seeds, so a live mint
+// switch (set-wallet-options) survives a restart. Missing → undefined (the wallet's default mint).
+function readMint(dir) {
+  try {
+    const value = fs.readFileSync(path.join(dir, 'cashu.mint'), 'utf8').trim();
+    return /^https?:\/\//.test(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function writeMint(dir, mint) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'cashu.mint'), String(mint));
+  } catch (err) {
+    console.error('[main] could not persist the Cashu mint:', err.message);
+  }
+}
+
 function getWorker(specifier) {
   if (workers.has(specifier)) {
     return workers.get(specifier);
@@ -306,6 +325,11 @@ function getWorker(specifier) {
         ) {
           writeAccountIndex(dir, msg.accountIndex);
         }
+        // Persist the active Cashu mint (a live set-wallet-options switch reports it here) so the
+        // peer's chosen mint survives a restart. Not a secret — plain file next to the seeds.
+        if (msg && msg.type === 'wallet' && typeof msg.mint === 'string') {
+          writeMint(dir, msg.mint);
+        }
         sendToAll('hw:event', msg);
       }
     });
@@ -317,7 +341,11 @@ function getWorker(specifier) {
     Promise.resolve(
       client.call('init', {
         storageDir: dir,
-        config: { ...resolveSeeds(dir), accountIndex: readAccountIndex(dir) }
+        config: {
+          ...resolveSeeds(dir),
+          accountIndex: readAccountIndex(dir),
+          mint: readMint(dir) // the peer's chosen Cashu mint (undefined → the wallet default)
+        }
       })
     ).catch((err) => console.error('[main] worker init failed:', err.message));
     ipcMain.handle('hw:call', (evt, payload) =>

@@ -9,11 +9,23 @@ import {
   sendTrx,
   fetchTransactions,
   listAccounts,
-  setAccount
+  setAccount,
+  setMint,
+  fundWallet
 } from './ipc.js';
+import { isCashu, unitLabel, activeMint } from './wallet-meta.js';
 import { openAddress, txLink } from './explorer.js';
 
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage';
+// Curated Cashu mints for the picker (each peer chooses its own). testnut is a free test mint
+// (auto-pays mint quotes — no real Lightning), so it works for the demo with no funding step.
+// A real LN-connected mint enables cross-mint tip settlement (consolidate).
+const CASHU_MINTS = [
+  { url: 'https://testnut.cashu.space', label: 'testnut (test · auto-pay)' },
+  { url: 'https://nofees.testnut.cashu.space', label: 'testnut · no fees' }
+];
+// How many sats a "Top up" mints at once (testnut auto-pays; a real mint returns an invoice).
+const TOPUP_SATS = 100;
 
 const viewEl = document.getElementById('wallet-view');
 const openBtn = document.getElementById('wallet-btn');
@@ -37,7 +49,7 @@ const accountSelect = document.getElementById('wallet-account');
 const SENT_META = {
   burn: { icon: '🔥', label: 'Burned participation fee' },
   tip: { icon: '💵', label: 'Tipped a selfie' },
-  send: { icon: '📤', label: 'Sent TRX' }
+  send: { icon: '📤', label: 'Sent' }
 };
 
 let walletAddress = ''; // full address, for copy + faucet + explorer links
@@ -47,20 +59,55 @@ const txById = new Map(); // hash -> { hash, dir, icon, label, amount, ts } — 
 // Worker `wallet` message (address + balance + which account): keep the modal live whether open or
 // not. A live account switch arrives here too (a new accountIndex + address) — clear the old
 // account's history and re-fetch for the new one.
-export function walletStatus({ address, amount, unit, accountIndex }) {
+export function walletStatus({ address, amount, unit, accountIndex, mint }) {
   if (!address) {
     return;
   }
   if (Number.isInteger(accountIndex) && accountIndex !== activeAccount) {
     activeAccount = accountIndex;
     txById.clear(); // the history belonged to the previous account's address
-    fetchTransactions();
+    if (!isCashu()) {
+      fetchTransactions();
+    }
     syncAccountSelect();
   }
   walletAddress = address;
+  // Cashu balances are whole sats; a chain balance shows 2 decimals.
+  const shown = isCashu() ? String(amount) : amount.toFixed(2);
   balanceEl.innerText =
-    `${amount.toFixed(2)} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
+    `${shown} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
+  // Cashu reuses the account <select> as a MINT picker (no BIP-44 accounts), the faucet button as
+  // a "Top up" (mint-funded), and hides the chain-only Send form + explorer links.
+  if (isCashu()) {
+    applyCashuChrome(mint || activeMint());
+  }
+}
+
+// Repurpose the modal's chain-wallet chrome for Cashu: mint picker, top-up, no explorer/send.
+function applyCashuChrome(currentMint) {
+  faucetBtn.textContent = '⬆ Top up';
+  faucetBtn.title = `Mint ${TOPUP_SATS} sat at the selected mint`;
+  sendToggleBtn.style.display = 'none'; // the modal can't deliver a bearer token
+  renderMintPicker(currentMint);
+}
+
+// Render the curated mints into the account <select>, marking the active one. Includes the active
+// mint even if it's a custom one not in the list, so the selection always reflects reality.
+function renderMintPicker(currentMint) {
+  const known = CASHU_MINTS.slice();
+  if (currentMint && !known.some((mint) => mint.url === currentMint)) {
+    known.unshift({ url: currentMint, label: currentMint });
+  }
+  accountSelect.replaceChildren(
+    ...known.map((mint) => {
+      const option = document.createElement('option');
+      option.value = mint.url;
+      option.textContent = mint.label;
+      option.selected = mint.url === currentMint;
+      return option;
+    })
+  );
 }
 
 // Worker `accounts` message: render the picker (all derived from the same seed, distinct addresses).
@@ -94,6 +141,14 @@ function syncAccountSelect() {
 // Switch the active account (live re-wire, same seed). The worker replies with a new `wallet`
 // message carrying the new accountIndex + address, which walletStatus applies above.
 accountSelect.onchange = () => {
+  // Cashu: the <select> holds mint URLs — switch the active mint (live re-wire). Chain wallet:
+  // it holds BIP-44 account indices.
+  if (isCashu()) {
+    if (accountSelect.value) {
+      setMint(accountSelect.value);
+    }
+    return;
+  }
   const index = Number(accountSelect.value);
   if (Number.isInteger(index) && index !== activeAccount) {
     setAccount(index);
@@ -182,9 +237,14 @@ function renderHistory() {
       const amt = document.createElement('span');
       amt.className = tx.dir === 'in' ? 'tx-amt in' : 'tx-amt';
       if (typeof tx.amount === 'number') {
-        amt.textContent = `${tx.dir === 'in' ? '+' : '−'}${tx.amount} TRX`;
+        const sign = tx.dir === 'in' ? '+' : '−';
+        amt.textContent = `${sign}${tx.amount} ${unitLabel()}`;
       }
-      row.append(label, time, amt, txLink(tx.hash));
+      // A Cashu `hash` is a bearer token (no block explorer) — omit the tx link.
+      row.append(label, time, amt);
+      if (!isCashu()) {
+        row.append(txLink(tx.hash));
+      }
       return row;
     })
   );
@@ -193,8 +253,12 @@ function renderHistory() {
 // --- modal open/close -------------------------------------------------------
 function open() {
   refreshWallet(); // grab a fresh balance each time it's opened
-  fetchTransactions(); // pull the on-chain history (incoming funds/tips + everything else)
-  listAccounts(); // populate the account picker (offline derivation in the worker)
+  // Chain wallet: pull on-chain history + the BIP-44 account picker. Cashu has neither (the mint
+  // picker is rendered from the wallet msg; history is the app's own recorded events).
+  if (!isCashu()) {
+    fetchTransactions();
+    listAccounts();
+  }
   viewEl.classList.add('show');
 }
 function close() {
@@ -215,8 +279,17 @@ document.addEventListener('keydown', (evt) => {
 
 // --- wallet actions ---------------------------------------------------------
 // Both the short address and the "full history" link open the address's on-chain history.
-addressEl.onclick = () => openAddress(walletAddress);
-explorerEl.onclick = () => openAddress(walletAddress);
+// Chain wallets open the address on a block explorer; a Cashu identity pubkey has no explorer.
+addressEl.onclick = () => {
+  if (!isCashu()) {
+    openAddress(walletAddress);
+  }
+};
+explorerEl.onclick = () => {
+  if (!isCashu()) {
+    openAddress(walletAddress);
+  }
+};
 
 copyBtn.onclick = async () => {
   if (!walletAddress) {
@@ -231,14 +304,44 @@ copyBtn.onclick = async () => {
 // updates when the fresh `wallet` message lands; the spin is click feedback.
 refreshBtn.onclick = () => {
   refreshWallet();
-  fetchTransactions(); // also re-pull the on-chain history
+  if (!isCashu()) {
+    fetchTransactions(); // also re-pull the on-chain history (chain wallets only)
+  }
   refreshBtn.classList.remove('spin');
   void refreshBtn.offsetWidth; // restart the animation if clicked again mid-spin
   refreshBtn.classList.add('spin');
 };
 
-// Open the Nile faucet in the default browser, where they paste the address to receive test TRX.
-faucetBtn.onclick = () => window.bridge.openExternal(NILE_FAUCET_URL);
+// Cashu: "Top up" mints sats at the active mint (testnut auto-pays; a real mint returns an invoice,
+// surfaced by fundResult). Chain wallet: open the Nile faucet to receive test TRX.
+faucetBtn.onclick = () => {
+  if (isCashu()) {
+    faucetBtn.disabled = true;
+    faucetBtn.textContent = '⏳ minting…';
+    fundWallet(TOPUP_SATS);
+    return;
+  }
+  window.bridge.openExternal(NILE_FAUCET_URL);
+};
+
+// Worker reply to a top-up (fund-wallet). testnut auto-pays → minted>0 and the balance rises; a
+// real LN mint returns an `invoice` to pay externally.
+export function fundResult({ minted, invoice, amount, error }) {
+  faucetBtn.disabled = false;
+  faucetBtn.textContent = '⬆ Top up';
+  if (error) {
+    balanceEl.title = `top-up failed: ${error}`;
+    return;
+  }
+  if (minted > 0) {
+    refreshWallet(); // balance rises — pull it now
+    return;
+  }
+  if (invoice) {
+    // Not auto-paid: show the invoice so the user can pay it from any Lightning wallet.
+    window.prompt(`Pay this bolt11 to add ${amount} sat:`, invoice);
+  }
+}
 
 // --- send TRX ---------------------------------------------------------------
 // A plain transfer to any address — mainly to fund another peer's wallet (replacing the

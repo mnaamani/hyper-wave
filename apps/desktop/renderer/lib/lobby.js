@@ -1,6 +1,7 @@
 // Lobby panel (opt in before the wave starts) — the countdown + join button shown
 // in the centre of the ring while a wave is forming.
 import { joinWave } from './ipc.js';
+import { unitLabel } from './wallet-meta.js';
 
 const lobbyEl = document.getElementById('lobby');
 const msgEl = document.getElementById('lobby-msg');
@@ -48,7 +49,7 @@ export function setJoinable(ok) {
   }
   joinBtn.disabled = !ok;
   // Show the fee on the button so a joiner sees the cost before opting in (the initiator sets it).
-  const feeSuffix = fee !== null ? ` (${fee} TRX)` : '';
+  const feeSuffix = fee !== null ? ` (${fee} ${unitLabel()})` : '';
   joinBtn.innerText = ok
     ? `✋ Count me in${feeSuffix}`
     : '⏳ verifying payment…';
@@ -65,7 +66,7 @@ function paint() {
   }
   const secs = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
   countEl.innerText = secs;
-  const feeNote = fee !== null ? ` · fee ${fee} TRX` : '';
+  const feeNote = fee !== null ? ` · fee ${fee} ${unitLabel()}` : '';
   msgEl.innerText = `wave forming · ${joined ? 'you are in' : 'join in?'} · ${count} in${feeNote}`;
 }
 
