@@ -19,6 +19,13 @@ let deadline = 0;
 let timer = null;
 let captured = false;
 let isOpen = false;
+let onCapturedCb = null; // host hook: confirm the capture (status line) as the preview closes
+
+// Register what happens right after a selfie is captured (app.js shows a status — the preview closes,
+// so this is the user's confirmation the frame was taken).
+export function onCaptured(cb) {
+  onCapturedCb = cb;
+}
 
 // Open the capture modal for the remaining lobby time (ms until kickoff).
 export async function open(lobbyMsLeft) {
@@ -69,8 +76,9 @@ function paintLoop() {
   timer = setTimeout(paintLoop, 200);
 }
 
-// Grab the current frame + caption and hand it to the worker. Stays open (showing a
-// "ready" state) until kickoff frees the centre for the gallery.
+// Grab the current frame + caption and hand it to the worker, then CLOSE the preview — the frame is
+// staged (it posts to the gallery at this peer's sweep slot), so there's no reason to keep the camera
+// up until kickoff. The `onCaptured` hook lets the host confirm it on the status line.
 function capture() {
   if (captured) {
     return;
@@ -88,10 +96,10 @@ function capture() {
     image = snap.toDataURL('image/jpeg', 0.5);
   }
   stageSelfie({ image, caption: captionEl.value });
-  countdownEl.innerText = '✅';
-  hintEl.innerText = '✅ captured — you’re in the wave!';
-  captureBtn.style.display = 'none';
-  captionEl.disabled = true;
+  if (onCapturedCb) {
+    onCapturedCb();
+  }
+  close(); // frame staged — free the centre now (don't keep the camera on until the wave starts)
 }
 
 // Kickoff: ensure we've captured (auto if the person didn't press the button), then

@@ -44,6 +44,12 @@ function setDim(on) {
 // "Not now" in the lobby: un-dim and let the peer keep browsing the gallery they were viewing.
 lobby.onCancel(() => setDim(false));
 
+// Capturing the selfie closes the camera preview, so confirm it on the status line (it'll post to
+// the gallery when this peer's sweep slot fires).
+proof.onCaptured(() =>
+  hud.waveStatus('📸 selfie captured — get ready for the wave!')
+);
+
 // Swap the join panel for the camera and start framing the lobby selfie. Leaving the old wave's
 // gallery to take part in a new one: close its view and clear the frozen replay/scrubber.
 function beginCapture() {
