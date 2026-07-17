@@ -89,6 +89,7 @@ function applyCashuChrome(currentMint) {
   faucetBtn.textContent = '⬆ Top up';
   faucetBtn.title = `Mint ${TOPUP_SATS} sat at the selected mint`;
   sendToggleBtn.style.display = 'none'; // the modal can't deliver a bearer token
+  explorerEl.style.display = 'none'; // ecash has no block explorer (no Tronscan link)
   renderMintPicker(currentMint);
 }
 
