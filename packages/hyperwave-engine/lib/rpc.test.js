@@ -120,7 +120,7 @@ test('request/response commands correlate their replies — even with two in fli
   // out of call order — the seam must still route each result to the caller that asked for it.
   const pay = {
     address: 'Tme',
-    balances: async () => ({ address: 'Tme', trx: 100 }),
+    balances: async () => ({ address: 'Tme', amount: 100, unit: 'TRX' }),
     send: async (to, amount) => {
       await delay(to === 'Tslow' ? 40 : 5);
       return { hash: to + '-hash', to, amount };
@@ -159,7 +159,7 @@ test('request/response commands correlate their replies — even with two in fli
 test('request/response replies are ALSO surfaced through onEvent (event-oriented UIs)', async (t) => {
   const pay = {
     address: 'Tme',
-    balances: async () => ({ address: 'Tme', trx: 100 }),
+    balances: async () => ({ address: 'Tme', amount: 100, unit: 'TRX' }),
     send: async (to, amount) => ({ hash: 'h', to, amount }),
     transactions: async () => [],
     dispose: () => {}

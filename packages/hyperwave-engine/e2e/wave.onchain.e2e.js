@@ -43,8 +43,8 @@ test(
 
     // wallets load from the funded seeds (WDK init) — p1 only auto-kicks-off once its wallet is up
     await Promise.all([
-      p1.waitForLine(/WALLET T\w+ trx=/, 60000),
-      p2.waitForLine(/WALLET T\w+ trx=/, 60000)
+      p1.waitForLine(/WALLET T\w+ amount=/, 60000),
+      p2.waitForLine(/WALLET T\w+ amount=/, 60000)
     ]);
     t.pass('both funded wallets loaded');
 

@@ -98,7 +98,7 @@ function createEngine({
   );
 
   // Self-custodial WDK wallet (Tron testnet TRX) for fee burns + feed tips. Async ESM init;
-  // emits `wallet` {address,trx} on ready + every 15s, and wires into the engine (address for
+  // emits `wallet` {address, amount, unit} on ready + every 15s, and wires into the engine (address for
   // tips/attestations + the on-chain burn verifier = the paid-wave anti-spam gate). A host can
   // opt out with `config.wallet: false` — the
   // engine then runs wallet-less (join-attestation feed, no burns/paid-gate/tips).
@@ -160,7 +160,7 @@ function createEngine({
         accountIndex, // which account (address) is active, for the host's picker
         ...(await pay
           .balances()
-          .catch(() => ({ address: pay.address, trx: 0 })))
+          .catch(() => ({ address: pay.address, amount: 0, unit: pay.unit })))
       });
     await pushBalance();
     // Self-rescheduling poll (CLAUDE.md Code Style: no setInterval): the next poll is armed only
@@ -222,12 +222,12 @@ function createEngine({
   // Callers guard on `payments` so the wallet-less path stays fully synchronous.
   async function fundedForFee(reason, action) {
     const bal = await payments.balances().catch(() => null);
-    if (bal && bal.trx < payments.fee) {
+    if (bal && bal.amount < payments.fee) {
       emit({
         type: 'burn-result',
         stage: 'failed',
         reason,
-        error: `wallet unfunded (${bal.trx}) — fund it to ${action}`
+        error: `wallet unfunded (${bal.amount}) — fund it to ${action}`
       });
       return false;
     }
@@ -344,14 +344,14 @@ function createEngine({
     }
   }
 
-  // Plain wallet transfer: send `amount` TRX to any address. `id` echoes as in handleTip.
+  // Plain wallet transfer: send `amount` (native units) to any address. `id` echoes as in handleTip.
   async function handleSend({ to, amount, id }) {
     if (!payments) {
       emit({ type: 'send-result', id, error: 'wallet not ready', to });
       return;
     }
-    const trx = Number(amount);
-    if (!to || !(trx > 0)) {
+    const amountNum = Number(amount);
+    if (!to || !(amountNum > 0)) {
       emit({
         type: 'send-result',
         id,
@@ -361,18 +361,18 @@ function createEngine({
       return;
     }
     const bal = await payments.balances().catch(() => null);
-    if (bal && bal.trx < trx) {
+    if (bal && bal.amount < amountNum) {
       emit({
         type: 'send-result',
         id,
-        error: `insufficient balance (${bal.trx} TRX)`,
+        error: `insufficient balance (${bal.amount} ${bal.unit})`,
         to
       });
       return;
     }
     try {
-      const { hash } = await payments.send(to, trx);
-      emit({ type: 'send-result', id, hash, to, amount: trx });
+      const { hash } = await payments.send(to, amountNum);
+      emit({ type: 'send-result', id, hash, to, amount: amountNum });
       pushBalance?.();
     } catch (err) {
       emit({ type: 'send-result', id, error: err.message, to });

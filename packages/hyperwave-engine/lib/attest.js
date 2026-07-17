@@ -17,8 +17,8 @@ const b4a = require('b4a');
  * @property {string} peerId - The ring peer id (hex) that signs the attestation.
  * @property {string} reason - Why the fee was burned (e.g. 'start', 'join').
  * @property {number} amount - The burned amount.
- * @property {string} txHash - The on-chain burn transaction hash.
- * @property {string} tronAddress - The Tron wallet that funded the burn.
+ * @property {string} burnRef - The burn reference (chain tx hash, ecash token, …).
+ * @property {string} payerAddress - The wallet/identity that funded the burn.
  * @property {number} burnTs - The burn timestamp (ms).
  */
 
@@ -28,12 +28,12 @@ const b4a = require('b4a');
  */
 
 // --- burn attestation ------------------------------------------------------
-// Bridges the peer's RING identity (Ed25519) to its on-chain burn: the peer signs, with
-// its ring key, a statement binding (waveId, peerId, reason, amount, txHash, tronAddress).
-// The Tron key that signed the burn is a *different* keypair, so this ring-key signature is
+// Bridges the peer's RING identity (Ed25519) to its fee burn: the peer signs, with
+// its ring key, a statement binding (waveId, peerId, reason, amount, burnRef, payerAddress).
+// The payment key that signed the burn is a *different* keypair, so this ring-key signature is
 // what ties the burn to the ring participant. Used for the paid-wave anti-spam gate: the
-// initiator's start proof rides `wave-announce`, and peers cross-check its txHash on-chain
-// (to==black hole, amount, memo commits waveId) before joining. (§ protocol.md §9)
+// initiator's start proof rides `wave-announce`, and peers cross-check its burnRef with the
+// payment mechanism (destination, amount, memo commits waveId) before joining. (§ protocol.md §9)
 /**
  * Hash the burn attestation tuple that the peer signs with its ring key.
  * @param {BurnFields} fields - The burn attestation fields.
@@ -44,13 +44,13 @@ function burnHash({
   peerId,
   reason,
   amount,
-  txHash,
-  tronAddress,
+  burnRef,
+  payerAddress,
   burnTs
 }) {
   return crypto.hash(
     b4a.from(
-      `${waveId}|${peerId}|${reason}|${amount}|${txHash}|${tronAddress}|${burnTs}`
+      `${waveId}|${peerId}|${reason}|${amount}|${burnRef}|${payerAddress}|${burnTs}`
     )
   );
 }
@@ -89,7 +89,7 @@ function verifyBurn(fields, sigHex) {
 // signature and that the burn is bound to this exact peer + wave (so a burn can't be replayed
 // for another identity or wave). This is the feed-admission gate: presence in the feed
 // requires a real fee burn, which makes every tippable entry one from a peer who paid in.
-// The on-chain reality of the txHash is verified separately by the admitter (network I/O).
+// The real-world settlement of the burnRef is verified separately by the admitter (network I/O).
 /**
  * Does this burn attestation authorize `peerId` to write to `waveId`'s feed?
  * Checks the signature and that the burn is bound to this exact peer + wave.
@@ -112,7 +112,7 @@ function burnAuthorizes(burn, peerId, waveId) {
 // initiator, AND recent — its signed `burnTs` within `maxAgeMs` of `now`. The freshness bound is
 // replay-attack prevention: a captured, still-validly-signed announce that reuses an old burn is
 // rejected (burnTs is inside the signed burn tuple, so it can't be back-dated without the key).
-// Pure — the on-chain reality of the txHash is checked separately (network I/O). Extracted here
+// Pure — the real-world settlement of the burnRef is checked separately (network I/O). Extracted here
 // (from wave.js) so the gate + its freshness window are unit-testable without a swarm.
 /**
  * @param {Object} opts

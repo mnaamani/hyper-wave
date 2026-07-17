@@ -67,7 +67,11 @@ export function useEngine(config = {}) {
             if (msg.error) {
               setToast(`⚠ wallet: ${msg.error}`);
             } else {
-              setWallet({ address: msg.address, trx: msg.trx });
+              setWallet({
+                address: msg.address,
+                amount: msg.amount,
+                unit: msg.unit
+              });
             }
             break;
           case 'burn-result':

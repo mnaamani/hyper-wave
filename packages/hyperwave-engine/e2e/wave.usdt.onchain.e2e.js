@@ -57,8 +57,8 @@ test(
 
     // both USDT wallets load from the funded seeds (WDK init + a TRC-20 balanceOf)
     await Promise.all([
-      p1.waitForLine(/WALLET T\w+ trx=.*type=tron-usdt-nile/, 60000),
-      p2.waitForLine(/WALLET T\w+ trx=.*type=tron-usdt-nile/, 60000)
+      p1.waitForLine(/WALLET T\w+ amount=.*type=tron-usdt-nile/, 60000),
+      p2.waitForLine(/WALLET T\w+ amount=.*type=tron-usdt-nile/, 60000)
     ]);
     t.pass('both funded USDT wallets loaded');
 

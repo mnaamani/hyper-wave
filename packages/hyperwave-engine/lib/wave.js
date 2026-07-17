@@ -1106,19 +1106,19 @@ function createWave({
   }
 
   // The worker reports a successful fee burn. Sign a burn attestation (ring key binds my
-  // identity to the on-chain tx), stash it in the wave's EntryPipeline, and return it. Two
+  // identity to the burn), stash it in the wave's EntryPipeline, and return it. Two
   // consumers: the initiator attaches its START proof to the wave-announce (the paid-wave
   // gate, announcePaid); a joiner's proof rides its wave-join (the per-peer paid gate) and
   // its feed entry (the tip-address binding).
   /**
-   * @param {Object} fields The confirmed on-chain burn.
+   * @param {Object} fields The confirmed fee burn.
    * @param {string} fields.reason 'start' (initiator) or 'join' (participant).
-   * @param {number} fields.amount TRX amount burned.
-   * @param {string} fields.txHash On-chain transaction hash.
+   * @param {number} fields.amount Amount burned.
+   * @param {string} fields.burnRef Burn reference (chain tx hash, ecash token, …).
    * @param {string} fields.waveId Wave the burn is for (threaded from payFee).
    * @returns {Object|null} The signed burn attestation, or null if that wave is no longer engaged.
    */
-  function recordBurn({ reason, amount, txHash, waveId }) {
+  function recordBurn({ reason, amount, burnRef, waveId }) {
     // The burn is for `waveId` (threaded from payFee). Its entry posts during the wave's own
     // sweep (postEntry captures the proof synchronously while the wave is still engaged), so a
     // proof landing after its wave ended is inert — the immutable block-0 entry already
@@ -1132,8 +1132,8 @@ function createWave({
       peerId: me.id,
       reason,
       amount,
-      txHash,
-      tronAddress: walletAddress || '',
+      burnRef,
+      payerAddress: walletAddress || '',
       burnTs: Date.now()
     };
     const proof = { ...fields, sig: signBurn(swarm.keyPair, fields) };
@@ -1753,24 +1753,24 @@ function createWave({
   }
 
   /**
-   * Verify a wave's start burn ON-CHAIN, then settle wave.paid. Abandons the wave if the
-   * burn isn't real (anti-spam). No-op if enforcement is off or no verifier is wired.
+   * Verify a wave's start burn with the payment mechanism, then settle wave.paid. Abandons the
+   * wave if the burn isn't real (anti-spam). No-op if enforcement is off or no verifier is wired.
    * @param {string} waveId The wave whose start burn to verify.
-   * @param {Object} proof The start burn attestation (carries txHash / tronAddress / amount).
+   * @param {Object} proof The start burn attestation (carries burnRef / payerAddress / amount).
    */
   function verifyStartProof(waveId, proof) {
     if (!enforcePaid || !verifyBurnOnChain) {
       return;
     }
-    // Enforce the initiator's ANNOUNCED fee as the on-chain minimum: the start burn must really be
+    // Enforce the initiator's ANNOUNCED fee as the settled minimum: the start burn must really be
     // ≥ the fee the wave advertises (catches an initiator that announces a high fee but underpays).
     // Fall back to the proof's own claimed amount when no fee was announced (older/unpaid-shape).
     const wave = waves.get(waveId);
-    const minTrx = (wave && wave.fee) || proof.amount;
-    verifyBurnOnChain(proof.txHash, {
+    const minAmount = (wave && wave.fee) || proof.amount;
+    verifyBurnOnChain(proof.burnRef, {
       waveId,
-      from: proof.tronAddress,
-      minTrx
+      from: proof.payerAddress,
+      minAmount
     })
       .then((res) => {
         const wave = waves.get(waveId);

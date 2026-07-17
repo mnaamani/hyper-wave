@@ -210,10 +210,10 @@ if (env.WALLET) {
       payments = pay;
       wireWallet(wave, pay); // paid-wave gate (on-chain burn verifier)
       const b = await pay.balances();
-      // Format kept stable (the on-chain e2e matches `WALLET T… trx=`): `trx` is the fee-currency
-      // balance (USDT for the usdt wallet). The `pay.type` disambiguates the payment mechanism.
+      // The on-chain e2e matches `WALLET T… amount=`: `amount` is the fee-currency balance and
+      // `unit` its label (TRX / USDT / …). The `pay.type` disambiguates the payment mechanism.
       console.log(
-        `[${name}] WALLET ${b.address} trx=${b.trx} type=${pay.type} storage=${absStorageDir}`
+        `[${name}] WALLET ${b.address} amount=${b.amount} unit=${b.unit} type=${pay.type} storage=${absStorageDir}`
       );
       if (env.WALLET_SEND) {
         const [to, amt] = env.WALLET_SEND.split(':');

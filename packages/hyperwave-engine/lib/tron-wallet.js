@@ -113,6 +113,10 @@ class TronWallet extends Wallet {
     return tronWalletType(this.#network);
   }
 
+  get unit() {
+    return 'TRX';
+  }
+
   get fee() {
     return this.#fee;
   }
@@ -137,10 +141,10 @@ class TronWallet extends Wallet {
     return out;
   }
 
-  // { address, trx } in whole TRX. Network call to the provider.
+  // { address, amount, unit } in whole TRX. Network call to the provider.
   async balances() {
     const raw = await this.#account.getBalance();
-    return { address: this.#address, trx: fromSun(raw) };
+    return { address: this.#address, amount: fromSun(raw), unit: this.unit };
   }
 
   // Send `amountTrx` (whole TRX) to a Tron address; resolves { hash, fee }.
@@ -180,16 +184,16 @@ class TronWallet extends Wallet {
     return { hash: res.hash, fee: res.fee };
   }
 
-  // Verify (on-chain) that `txHash` is a burn matching expectations — the anti-spam gate a peer
-  // runs before joining a wave: the start fee must really be paid. Checks (via `getTransaction`,
-  // which reflects a broadcast tx within seconds — `getTransactionInfo`'s block confirmation lags
-  // badly on Nile): TransferContract to the black hole, from `expect.from`, amount ≥
-  // `expect.minTrx`, and the memo commits `expect.waveId`. The tx is signed + spends real TRX, so
-  // its existence is a sufficient stake for anti-spam. Returns { ok, reason }. Missing tx / RPC
-  // error → { ok: false } (fail closed).
-  async verifyBurnTx(txHash, expect = {}) {
+  // Verify (on-chain) that `burnRef` (a Tron tx hash) is a burn matching expectations — the
+  // anti-spam gate a peer runs before joining a wave: the start fee must really be paid. Checks
+  // (via `getTransaction`, which reflects a broadcast tx within seconds — `getTransactionInfo`'s
+  // block confirmation lags badly on Nile): TransferContract to the black hole, from `expect.from`,
+  // amount ≥ `expect.minAmount`, and the memo commits `expect.waveId`. The tx is signed + spends
+  // real TRX, so its existence is a sufficient stake for anti-spam. Returns { ok, reason }. Missing
+  // tx / RPC error → { ok: false } (fail closed).
+  async verifyBurnTx(burnRef, expect = {}) {
     try {
-      const tx = await this.#tronweb.trx.getTransaction(txHash);
+      const tx = await this.#tronweb.trx.getTransaction(burnRef);
       const contract = tx?.raw_data?.contract?.[0];
       if (contract?.type !== 'TransferContract') {
         return { ok: false, reason: 'not-found-or-not-transfer' };
@@ -206,8 +210,8 @@ class TronWallet extends Wallet {
         }
       }
       if (
-        expect.minTrx !== undefined &&
-        BigInt(value.amount || 0) < toSun(expect.minTrx)
+        expect.minAmount !== undefined &&
+        BigInt(value.amount || 0) < toSun(expect.minAmount)
       ) {
         return { ok: false, reason: 'amount-too-low' };
       }

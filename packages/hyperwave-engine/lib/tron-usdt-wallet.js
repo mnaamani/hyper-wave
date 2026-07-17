@@ -108,10 +108,14 @@ class TronUsdtWallet extends TronWallet {
     return tronUsdtWalletType(this.#network);
   }
 
+  get unit() {
+    return 'USDT';
+  }
+
   // The USDT token balance (WDK's TRC-20 balanceOf), in whole USDT.
   async balances() {
     const raw = await this.#account.getTokenBalance(this.#usdtContract);
-    return { address: this.address, trx: fromSun(raw) };
+    return { address: this.address, amount: fromSun(raw), unit: this.unit };
   }
 
   // Send `amount` USDT to a Tron address — WDK's own TRC-20 transfer (handles fee-limit + quoting;
@@ -166,13 +170,13 @@ class TronUsdtWallet extends TronWallet {
     return transaction;
   }
 
-  // Verify (on-chain) that `txHash` is a USDT burn matching expectations — the anti-spam gate. A
-  // TRC-20 burn is a TriggerSmartContract calling transfer(black_hole, amount) on the USDT contract;
-  // decode the ABI call data (selector + padded recipient + amount) and check the memo. Returns
-  // { ok, reason }; missing tx / RPC error → { ok: false } (fail closed).
-  async verifyBurnTx(txHash, expect = {}) {
+  // Verify (on-chain) that `burnRef` (a Tron tx hash) is a USDT burn matching expectations — the
+  // anti-spam gate. A TRC-20 burn is a TriggerSmartContract calling transfer(black_hole, amount) on
+  // the USDT contract; decode the ABI call data (selector + padded recipient + amount) and check the
+  // memo. Returns { ok, reason }; missing tx / RPC error → { ok: false } (fail closed).
+  async verifyBurnTx(burnRef, expect = {}) {
     try {
-      const tx = await this.#tronweb.trx.getTransaction(txHash);
+      const tx = await this.#tronweb.trx.getTransaction(burnRef);
       const contract = tx?.raw_data?.contract?.[0];
       if (contract?.type !== 'TriggerSmartContract') {
         return { ok: false, reason: 'not-found-or-not-trigger' };
@@ -201,8 +205,8 @@ class TronUsdtWallet extends TronWallet {
         }
       }
       if (
-        expect.minTrx !== undefined &&
-        BigInt('0x' + data.slice(72, 136)) < toSun(expect.minTrx)
+        expect.minAmount !== undefined &&
+        BigInt('0x' + data.slice(72, 136)) < toSun(expect.minAmount)
       ) {
         return { ok: false, reason: 'amount-too-low' };
       }

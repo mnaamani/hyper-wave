@@ -32,7 +32,7 @@ export default function App() {
         <Text style={styles.title}>⚽ HyperWave</Text>
         <Text style={styles.chip}>
           {wallet
-            ? `💰 ${wallet.trx} TRX · ${wallet.address.slice(0, 6)}…`
+            ? `💰 ${wallet.amount} ${wallet.unit} · ${wallet.address.slice(0, 6)}…`
             : '💰 …'}
         </Text>
       </View>

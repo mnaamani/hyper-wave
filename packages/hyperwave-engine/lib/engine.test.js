@@ -154,9 +154,10 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
   const tipped = [];
   const pay = {
     type: 'tron-nile',
+    unit: 'TRX',
     fee: 1,
     address: 'Tmywallet',
-    balances: async () => ({ address: 'Tmywallet', trx: 7 }),
+    balances: async () => ({ address: 'Tmywallet', amount: 7, unit: 'TRX' }),
     send: async (to, amount) => {
       tipped.push([to, amount]);
       return { hash: 'f'.repeat(64) };
@@ -193,7 +194,8 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
       (msg) =>
         msg.type === 'wallet' &&
         msg.address === 'Tmywallet' &&
-        msg.trx === 7 &&
+        msg.amount === 7 &&
+        msg.unit === 'TRX' &&
         msg.walletType === 'tron-nile'
     ),
     'balance pushed to the host once the wallet is ready (incl. the wallet type)'
@@ -244,12 +246,13 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
 // The enforced paid path (start/join fee burns) with a MOCKED wallet — deterministic, no Nile.
 // Closes the "paid gate has no automated test with a wallet" gap for engine.js's orchestration
 // (the wave.js gate CRYPTO — startProofValid / burnAuthorizes — is unit-tested in attest.test.js).
-function payMock({ trx = 7, confirms = true, accountIndex = 0 } = {}) {
+function payMock({ amount = 7, confirms = true, accountIndex = 0 } = {}) {
   const calls = { burns: [], verifies: [] };
   const address = 'TMe' + (accountIndex || ''); // distinct address per BIP-44 account
   return {
     calls,
     type: 'tron-nile', // the wallet's payment-mechanism id (Wallet interface)
+    unit: 'TRX', // the currency unit label (Wallet interface)
     fee: 1, // the participation fee, in the wallet's units (Wallet interface)
     address,
     accountIndex, // which BIP-44 account this wallet is
@@ -259,7 +262,7 @@ function payMock({ trx = 7, confirms = true, accountIndex = 0 } = {}) {
         index: i,
         address: 'TMe' + (i || '')
       })),
-    balances: async () => ({ address, trx }),
+    balances: async () => ({ address, amount, unit: 'TRX' }),
     burn: async (amount, memo) => {
       calls.burns.push({ amount, memo });
       return { hash: 'burnhash' + calls.burns.length };
@@ -283,7 +286,7 @@ const settle = async () => {
 test('start-wave burns the fee, confirms it, then announces the paid wave', async (t) => {
   const sent = [];
   const wave = fakeWave();
-  const pay = payMock({ trx: 7, confirms: true });
+  const pay = payMock({ amount: 7, confirms: true });
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: {},
@@ -330,7 +333,7 @@ test('start-wave burns the fee, confirms it, then announces the paid wave', asyn
 test('an unfunded wallet fails fast — no burn, no announce', async (t) => {
   const sent = [];
   const wave = fakeWave();
-  const pay = payMock({ trx: 0 }); // below FEE_TRX
+  const pay = payMock({ amount: 0 }); // below FEE_TRX
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: {},
@@ -371,7 +374,7 @@ test('an unfunded wallet fails fast — no burn, no announce', async (t) => {
 test('join-wave burns the join fee for a joinable wave', async (t) => {
   const sent = [];
   const wave = fakeWave();
-  const pay = payMock({ trx: 7 });
+  const pay = payMock({ amount: 7 });
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: {},
@@ -413,7 +416,7 @@ test('a joiner burns the wave ANNOUNCED fee, not its own wallet fee', async (t) 
   const sent = [];
   const wave = fakeWave();
   wave.feeValue = 3; // the wave's initiator set a fee of 3 (feeFor)
-  const pay = payMock({ trx: 7 }); // my own wallet fee is 1
+  const pay = payMock({ amount: 7 }); // my own wallet fee is 1
   const engine = createEngine({
     storageDir: '/tmp/e',
     config: {},

@@ -50,8 +50,8 @@ function entryHasValidJoin(op) {
 
 /**
  * Is this entry's tip `address` provably the wallet that paid the peer's fee? The op carries
- * the peer's burn attestation; the address is trusted only if it's the `tronAddress` of a
- * validly-signed burn by this peer for this wave. (The burn's on-chain reality is checked
+ * the peer's burn attestation; the address is trusted only if it's the `payerAddress` of a
+ * validly-signed burn by this peer for this wave. (The burn's real-world settlement is checked
  * where it pays off — tippers/auditors via `burnTx`; here we bind the address to that same
  * burn deterministically.) So a tip always goes to the wallet that burned in, never a
  * self-declared unrelated address.
@@ -63,7 +63,7 @@ function tipAddressIsBackedByBurn(op) {
     op.address &&
     op.burn &&
     burnAuthorizes(op.burn, op.peerId, op.waveId) &&
-    op.burn.tronAddress === op.address
+    op.burn.payerAddress === op.address
   );
 }
 
@@ -128,8 +128,8 @@ function mergeFeed(rawEntries) {
     if (!tipAddressIsBackedByBurn(op)) {
       entry.address = ''; // unverified address → not tippable
     }
-    if (burn && burn.txHash) {
-      entry.burnTx = burn.txHash;
+    if (burn && burn.burnRef) {
+      entry.burnTx = burn.burnRef;
     }
     valid.push(entry);
   }

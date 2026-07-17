@@ -56,8 +56,8 @@ test('mergeFeed keeps a tip address only if a matching burn backs it', (t) => {
     peerId: paidId,
     reason: 'join',
     amount: 1,
-    txHash: 'deadbeef',
-    tronAddress: 'TPaid',
+    burnRef: 'deadbeef',
+    payerAddress: 'TPaid',
     burnTs: 1000
   };
   const backed = entry(paid, 0, {

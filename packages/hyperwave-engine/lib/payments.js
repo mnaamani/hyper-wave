@@ -42,7 +42,7 @@ async function payFee({ wave, payments, waveId, reason }) {
   const proof = wave.recordBurn({
     reason,
     amount: fee,
-    txHash: hash,
+    burnRef: hash,
     waveId
   });
   return { hash, proof, fee };
@@ -61,7 +61,7 @@ async function confirmBurn(payments, waveId, hash) {
     const result = await payments.verifyBurnTx(hash, {
       waveId,
       from: payments.address,
-      minTrx: payments.fee
+      minAmount: payments.fee
     });
     if (result.ok) {
       return true;
@@ -83,7 +83,7 @@ async function confirmBurn(payments, waveId, hash) {
 function wireWallet(wave, payments) {
   wave.setWallet(
     payments.address,
-    (txHash, expect) => payments.verifyBurnTx(txHash, expect),
+    (burnRef, expect) => payments.verifyBurnTx(burnRef, expect),
     payments.type,
     payments.fee // the fee I SET on the waves I initiate (rides their announces)
   );

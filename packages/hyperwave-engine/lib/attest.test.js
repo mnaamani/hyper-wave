@@ -27,8 +27,8 @@ const burnFields = {
   peerId: ids[1],
   reason: 'join',
   amount: 1,
-  txHash: 'd6a0dd3fdeadbeef',
-  tronAddress: 'TJbnvY1Qudc6BE48KenG172EV1uEM5QVvJ',
+  burnRef: 'd6a0dd3fdeadbeef',
+  payerAddress: 'TJbnvY1Qudc6BE48KenG172EV1uEM5QVvJ',
   burnTs: 1783150000000
 };
 
@@ -44,8 +44,8 @@ test('burn attestation rejects impersonation and tampering', (t) => {
     'wrong peerId (impersonation)'
   );
   t.absent(
-    verifyBurn({ ...burnFields, txHash: 'other' }, sig),
-    'swapped txHash'
+    verifyBurn({ ...burnFields, burnRef: 'other' }, sig),
+    'swapped burnRef'
   );
   t.absent(
     verifyBurn({ ...burnFields, waveId: 'other-wave' }, sig),
@@ -87,8 +87,8 @@ test('startProofValid gates wave adoption on a signed, bound, FRESH start burn',
     peerId: byId,
     reason: 'start',
     amount: 1,
-    txHash: 'startburntx',
-    tronAddress: 'TInitiator',
+    burnRef: 'startburntx',
+    payerAddress: 'TInitiator',
     burnTs: now
   };
   const proof = { ...fields, sig: signBurn(initiator, fields) };

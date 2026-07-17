@@ -25,6 +25,15 @@ class Wallet {
   }
 
   /**
+   * The currency unit label for this wallet's amounts (e.g. 'TRX', 'USDT',
+   * 'sat'), so a host can render/annotate amounts without knowing the mechanism.
+   * @returns {string} The unit label.
+   */
+  get unit() {
+    return 'native';
+  }
+
+  /**
    * The participation fee, in this wallet's native units, burned on start + join.
    * @returns {number} The fee amount.
    */
@@ -61,8 +70,9 @@ class Wallet {
   }
 
   /**
-   * Fetch the on-chain balance (network call).
-   * @returns {Promise<{address: string, trx: number}>} The address + balance (`trx` = amount).
+   * Fetch the spendable balance (network call, or a local proof sum for ecash).
+   * @returns {Promise<{address: string, amount: number, unit: string}>} The
+   *   address + spendable amount + its unit label.
    */
   async balances() {
     throw new Error('Wallet#balances not implemented');
@@ -90,12 +100,13 @@ class Wallet {
   }
 
   /**
-   * Verify on-chain that `txHash` is a burn matching `expect` (fails closed on missing tx / error).
-   * @param {string} txHash - The burn tx to verify.
-   * @param {{waveId?: string, from?: string, minTrx?: number}} [expect] - Expected fields.
+   * Verify that `burnRef` is a burn matching `expect` (fails closed on missing burn / error).
+   * `burnRef` is the mechanism's burn reference — a chain tx hash, an ecash token, etc.
+   * @param {string} burnRef - The burn reference to verify.
+   * @param {{waveId?: string, from?: string, minAmount?: number}} [expect] - Expected fields.
    * @returns {Promise<{ok: boolean, reason?: string}>} Whether it verifies.
    */
-  async verifyBurnTx(txHash, expect) {
+  async verifyBurnTx(burnRef, expect) {
     throw new Error('Wallet#verifyBurnTx not implemented');
   }
 

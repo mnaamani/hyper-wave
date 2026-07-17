@@ -47,7 +47,7 @@ const txById = new Map(); // hash -> { hash, dir, icon, label, amount, ts } — 
 // Worker `wallet` message (address + balance + which account): keep the modal live whether open or
 // not. A live account switch arrives here too (a new accountIndex + address) — clear the old
 // account's history and re-fetch for the new one.
-export function walletStatus({ address, trx, accountIndex }) {
+export function walletStatus({ address, amount, unit, accountIndex }) {
   if (!address) {
     return;
   }
@@ -59,7 +59,7 @@ export function walletStatus({ address, trx, accountIndex }) {
   }
   walletAddress = address;
   balanceEl.innerText =
-    `${trx.toFixed(2)} TRX` + (trx === 0 ? '  ⚠ unfunded' : '');
+    `${amount.toFixed(2)} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
 }
 

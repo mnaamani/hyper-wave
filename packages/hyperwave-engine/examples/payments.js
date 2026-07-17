@@ -19,9 +19,9 @@ async function main() {
     const bal = await pay.balances();
     console.log(
       'balance:',
-      bal.trx,
-      'TRX',
-      bal.trx === 0 ? '(fund it at the Nile faucet)' : ''
+      bal.amount,
+      bal.unit,
+      bal.amount === 0 ? '(fund it at the Nile faucet)' : ''
     );
   } catch (err) {
     console.log('balance lookup skipped:', err.message);
@@ -30,7 +30,7 @@ async function main() {
   // The money operations (need a funded wallet — shown, not run):
   //   await pay.send('T…recipient', 5);                       // { hash, fee }  real transfer
   //   await pay.burn(1, `hyperwave:${'w1'}:${pay.address}`);  // { hash, fee }  burn + on-chain memo
-  //   await pay.verifyBurnTx(hash, { waveId: 'w1', from: pay.address, minTrx: 1 }); // { ok, reason? }
+  //   await pay.verifyBurnTx(ref, { waveId: 'w1', from: pay.address, minAmount: 1 }); // { ok, reason? }
   //   await pay.transactions(10);                             // recent txs, both directions
   //
   // wallet.js also exports the fee flow composing these into a wave (see examples/wave.js for a createWave instance):

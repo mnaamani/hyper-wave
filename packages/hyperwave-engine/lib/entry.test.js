@@ -84,7 +84,7 @@ test('reset clears staging/slot/posted so the next wave starts fresh', (t) => {
 
 test('the burn proof survives reset (late tip-address binding) but not a new wave', (t) => {
   const { pipeline } = makePipeline();
-  const proof = { waveId: 'w1', peerId: 'p1', txHash: 'dead', sig: 'beef' };
+  const proof = { waveId: 'w1', peerId: 'p1', burnRef: 'dead', sig: 'beef' };
   pipeline.setBurnProof(proof);
   pipeline.reset(); // wave ended at network speed; the burn may confirm after
   t.is(
