@@ -279,8 +279,7 @@ function open() {
 }
 function close() {
   viewEl.classList.remove('show');
-  topupEl.classList.remove('show'); // don't leave a stale invoice QR on reopen
-  topupQrEl.removeAttribute('src');
+  hideTopup(); // don't leave a stale invoice QR / spinner on reopen
 }
 openBtn.onclick = open;
 closeBtn.onclick = close;
@@ -336,6 +335,12 @@ faucetBtn.onclick = () => {
   if (isCashu()) {
     faucetBtn.disabled = true;
     faucetBtn.textContent = '⏳ minting…';
+    // Show the panel with a spinner immediately — a real mint can take several seconds to return
+    // the invoice (the worker polls the quote), so give feedback rather than a frozen button.
+    topupInvoice = '';
+    topupQrEl.removeAttribute('src');
+    topupHintEl.textContent = 'Requesting a Lightning invoice…';
+    topupEl.classList.add('show', 'loading');
     fundWallet(TOPUP_SATS);
     return;
   }
@@ -348,10 +353,12 @@ export function fundResult({ minted, invoice, amount, error }) {
   faucetBtn.disabled = false;
   faucetBtn.textContent = '⬆ Top up';
   if (error) {
+    hideTopup();
     balanceEl.title = `top-up failed: ${error}`;
     return;
   }
   if (minted > 0) {
+    hideTopup(); // auto-paid (test mint) — no invoice to show; the balance just rose
     refreshWallet(); // balance rises — pull it now
     return;
   }
@@ -372,11 +379,22 @@ export function fundResult({ minted, invoice, amount, error }) {
 async function showTopupQr(invoice) {
   const dataUrl = await qrDataUrl(invoice);
   if (!dataUrl) {
+    hideTopup(); // no QR renderer — the invoice was still copied + handed to the OS handler
     return;
   }
   topupInvoice = invoice;
   topupQrEl.src = dataUrl;
+  topupHintEl.textContent =
+    'Scan with a Lightning wallet (also copied to your clipboard).';
+  topupEl.classList.remove('loading'); // spinner → QR
   topupEl.classList.add('show');
+}
+
+// Hide + reset the top-up panel (its QR, invoice, and loading state).
+function hideTopup() {
+  topupEl.classList.remove('show', 'loading');
+  topupQrEl.removeAttribute('src');
+  topupInvoice = '';
 }
 
 // Click the QR to copy the invoice to the clipboard again (handy if the initial copy was lost).
@@ -390,11 +408,7 @@ topupQrEl.onclick = () => {
   setTimeout(() => (topupHintEl.textContent = previous), 2000);
 };
 
-topupCloseBtn.onclick = () => {
-  topupEl.classList.remove('show');
-  topupQrEl.removeAttribute('src');
-  topupInvoice = '';
-};
+topupCloseBtn.onclick = hideTopup;
 
 // --- send TRX ---------------------------------------------------------------
 // A plain transfer to any address — mainly to fund another peer's wallet (replacing the

@@ -316,6 +316,22 @@
         color: #cfeeda;
         margin-bottom: 8px;
       }
+      #topup-spinner {
+        display: none;
+        width: 40px;
+        height: 40px;
+        margin: 80px auto; /* centre it in the ~200px QR footprint */
+        border: 4px solid rgba(255, 255, 255, 0.15);
+        border-top-color: #5fd08a;
+        border-radius: 50%;
+        animation: hw-spin 0.8s linear infinite;
+      }
+      #wallet-topup.loading #topup-spinner {
+        display: block;
+      }
+      #wallet-topup.loading #topup-qr {
+        display: none;
+      }
       #topup-qr {
         width: 200px;
         height: 200px;
@@ -801,6 +817,7 @@
         <!-- top-up QR: shown when a (real-mint) top-up returns a bolt11 invoice to pay -->
         <div id="wallet-topup">
           <div class="topup-title">⚡ Top-up invoice — scan or pay</div>
+          <div id="topup-spinner"></div>
           <img
             id="topup-qr"
             alt="Lightning invoice QR code"
