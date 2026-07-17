@@ -108,6 +108,8 @@ ipc.on('wallet', (msg) => {
   gallery.setMyAddress(msg.address); // so we don't offer to tip our own selfie
   setState({ myAddress: msg.address }); // to recognise a tip note addressed to me
 });
+// The seed's BIP-44 accounts (for the wallet-view picker); a distinct address per index.
+ipc.on('accounts', (msg) => wallet.setAccounts(msg));
 ipc.on('tip-result', (msg) => {
   gallery.tipResult(msg);
   if (msg.hash) {

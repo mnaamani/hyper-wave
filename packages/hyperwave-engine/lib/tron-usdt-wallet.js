@@ -70,6 +70,7 @@ class TronUsdtWallet extends TronWallet {
    * @param {string} deps.address - The derived Tron address.
    * @param {string} deps.usdtContract - The USDT TRC-20 contract address (base58).
    * @param {string} [deps.network] - The Tron network name (labels the wire type).
+   * @param {number} [deps.accountIndex] - The BIP-44 account index (default 0).
    * @param {number} [deps.fee] - Participation fee in whole USDT (default FEE_USDT).
    * @param {(...args: any[]) => void} deps.log - Logger.
    */
@@ -80,12 +81,22 @@ class TronUsdtWallet extends TronWallet {
     address,
     usdtContract,
     network = DEFAULT_TRON_NETWORK,
+    accountIndex = 0,
     fee = FEE_USDT,
     log
   }) {
-    // parent stores its own copies (dispose, address, network for `super.type`, and the fee — the
-    // inherited `get fee()` returns it, so this wallet doesn't override fee, only the currency ops).
-    super({ wallet, account, tronweb, address, network, fee, log });
+    // parent stores its own copies (dispose, address, network + accountIndex for its getters + the
+    // inherited accounts()/`get fee()`, so this wallet only overrides type + the currency ops).
+    super({
+      wallet,
+      account,
+      tronweb,
+      address,
+      network,
+      accountIndex,
+      fee,
+      log
+    });
     this.#account = account;
     this.#tronweb = tronweb;
     this.#usdtContract = usdtContract;

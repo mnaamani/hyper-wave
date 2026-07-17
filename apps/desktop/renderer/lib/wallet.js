@@ -4,7 +4,13 @@
 // optimistic) and the wallet's on-chain history fetched from the worker (which also surfaces
 // funds/tips RECEIVED — things the app never sees as events). Each row links to Tronscan; a
 // "full history" link deep-links to the address page. Extracted from hud.js.
-import { refreshWallet, sendTrx, fetchTransactions } from './ipc.js';
+import {
+  refreshWallet,
+  sendTrx,
+  fetchTransactions,
+  listAccounts,
+  setAccount
+} from './ipc.js';
 import { openAddress, txLink } from './explorer.js';
 
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage';
@@ -25,6 +31,7 @@ const sendToInput = document.getElementById('send-to');
 const sendAmountInput = document.getElementById('send-amount');
 const sendBtn = document.getElementById('send-btn');
 const sendStatusEl = document.getElementById('send-status');
+const accountSelect = document.getElementById('wallet-account');
 
 // Icon + label per kind of outgoing tx the app itself makes (worker events).
 const SENT_META = {
@@ -34,18 +41,64 @@ const SENT_META = {
 };
 
 let walletAddress = ''; // full address, for copy + faucet + explorer links
+let activeAccount = 0; // the active BIP-44 account index (multi-account wallet)
 const txById = new Map(); // hash -> { hash, dir, icon, label, amount, ts } — merged history
 
-// Worker `wallet` message (address + balance): keep the modal live whether open or not.
-export function walletStatus({ address, trx }) {
+// Worker `wallet` message (address + balance + which account): keep the modal live whether open or
+// not. A live account switch arrives here too (a new accountIndex + address) — clear the old
+// account's history and re-fetch for the new one.
+export function walletStatus({ address, trx, accountIndex }) {
   if (!address) {
     return;
+  }
+  if (Number.isInteger(accountIndex) && accountIndex !== activeAccount) {
+    activeAccount = accountIndex;
+    txById.clear(); // the history belonged to the previous account's address
+    fetchTransactions();
+    syncAccountSelect();
   }
   walletAddress = address;
   balanceEl.innerText =
     `${trx.toFixed(2)} TRX` + (trx === 0 ? '  ⚠ unfunded' : '');
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
 }
+
+// Worker `accounts` message: render the picker (all derived from the same seed, distinct addresses).
+export function setAccounts({ list, active }) {
+  if (!list) {
+    return;
+  }
+  if (Number.isInteger(active)) {
+    activeAccount = active;
+  }
+  accountSelect.replaceChildren(
+    ...list.map((account) => {
+      const option = document.createElement('option');
+      option.value = String(account.index);
+      const short =
+        account.address.slice(0, 6) + '…' + account.address.slice(-4);
+      option.textContent = `Account ${account.index + 1} — ${short}`;
+      option.selected = account.index === activeAccount;
+      return option;
+    })
+  );
+}
+
+// Keep the dropdown's selection in sync with the active account (e.g. after a switch confirms).
+function syncAccountSelect() {
+  if (accountSelect.options.length) {
+    accountSelect.value = String(activeAccount);
+  }
+}
+
+// Switch the active account (live re-wire, same seed). The worker replies with a new `wallet`
+// message carrying the new accountIndex + address, which walletStatus applies above.
+accountSelect.onchange = () => {
+  const index = Number(accountSelect.value);
+  if (Number.isInteger(index) && index !== activeAccount) {
+    setAccount(index);
+  }
+};
 
 // Record an outgoing tx the app just made (burn / tip / send), from a worker event — instant,
 // with a specific label. Wins over the generic on-chain view for the same hash.
@@ -141,6 +194,7 @@ function renderHistory() {
 function open() {
   refreshWallet(); // grab a fresh balance each time it's opened
   fetchTransactions(); // pull the on-chain history (incoming funds/tips + everything else)
+  listAccounts(); // populate the account picker (offline derivation in the worker)
   viewEl.classList.add('show');
 }
 function close() {

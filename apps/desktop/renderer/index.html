@@ -218,6 +218,27 @@
         font-weight: 700;
         color: #7fe3a0;
       }
+      /* account picker: label + dropdown of the seed's BIP-44 accounts */
+      #wallet-account-row {
+        margin-top: 12px;
+      }
+      #wallet-account-row .account-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        opacity: 0.55;
+      }
+      #wallet-account {
+        flex: 1;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 12px;
+        padding: 6px 10px;
+        border: 1px solid #2f5f43;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.35);
+        color: #eafff0;
+        cursor: pointer;
+      }
       #wallet-balance:empty::after {
         content: '… loading wallet';
         font-size: 13px;
@@ -657,6 +678,14 @@
           <button id="wallet-close" title="Close">✕</button>
         </div>
         <div id="wallet-balance"></div>
+        <!-- account picker: all accounts share the seed; each is a distinct BIP-44 address -->
+        <div class="wallet-row" id="wallet-account-row">
+          <span class="account-label">Account</span>
+          <select
+            id="wallet-account"
+            title="Choose the active account — all derived from the same seed (BIP-44)"
+          ></select>
+        </div>
         <div class="wallet-row">
           <button id="wallet-refresh" title="Re-check your balance">🔄</button>
           <a id="wallet-address" title="View this address on Tronscan"></a>

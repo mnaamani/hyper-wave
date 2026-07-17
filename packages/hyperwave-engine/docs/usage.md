@@ -404,10 +404,19 @@ and **`payments.js`** (the wallet-agnostic fee flows: `payFee`/`confirmBurn`/`wi
 
 The engine talks to payments only through the **`Wallet`** interface — the members any wallet must
 implement (`type`, `fee`, `address`, `balances`, `send`, `burn`, `verifyBurnTx`, `transactions`,
-`dispose`). The default is **`TronWallet`** (self-custodial Tron, WDK), built by `createPayments`
-(`async` because WDK is ESM-only). An app plugs in its **own** payment mechanism by injecting a
-factory returning any `Wallet` subclass — `createEngine({ deps: { createPayments: async () => new
-MyWallet() } })`.
+`dispose`) plus two optional multi-account members (`accountIndex`, `accounts(count)` — default to a
+single account 0). The default is **`TronWallet`** (self-custodial Tron, WDK), built by
+`createPayments` (`async` because WDK is ESM-only). An app plugs in its **own** payment mechanism by
+injecting a factory returning any `Wallet` subclass — `createEngine({ deps: { createPayments: async
+() => new MyWallet() } })`.
+
+**Multiple accounts (one seed, distinct addresses).** `createPayments({ accountIndex })` derives a
+distinct BIP-44 address per index (`m/44'/195'/0'/0/i` for Tron) from the same seed. The engine
+starts on `config.accountIndex` (default 0), a **`list-accounts`** command emits an `accounts`
+message (`{ list: [{index, address}], active }`) so a host can render an account picker, and a
+**`set-account`** command switches the active account **live** (re-derives + re-wires the wallet,
+same seed → the `wallet` message reports the new `accountIndex` + address). `wallet.accounts(count)`
+derives the first `count` addresses offline for the picker.
 
 Each wallet declares a **`type`** (e.g. `'tron-nile'`) that travels on the wire (wave-announce/
 start/sync), so a joiner only joins a wave whose payment mechanism its own wallet supports (§ the

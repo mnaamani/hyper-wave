@@ -199,6 +199,31 @@ function resolveSeeds(dir) {
   };
 }
 
+// The chosen wallet account index (BIP-44) — persisted plain (not a secret) next to the seeds, so a
+// live account switch survives a restart. Missing/garbage → 0 (the default account).
+function readAccountIndex(dir) {
+  try {
+    const value = parseInt(
+      fs.readFileSync(path.join(dir, 'wallet.account'), 'utf8').trim(),
+      10
+    );
+    return Number.isInteger(value) && value >= 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+function writeAccountIndex(dir, index) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'wallet.account'), String(index));
+  } catch (err) {
+    console.error(
+      '[main] could not persist the wallet account index:',
+      err.message
+    );
+  }
+}
+
 function getWorker(specifier) {
   if (workers.has(specifier)) {
     return workers.get(specifier);
@@ -271,14 +296,29 @@ function getWorker(specifier) {
   if (specifier === hyperwaveWorkerSpecifier) {
     const client = createRpcClient({
       stream: pipe,
-      onEvent: (msg) => sendToAll('hw:event', msg)
+      onEvent: (msg) => {
+        // Persist the active wallet account index (a live set-account switch reports it here) so the
+        // choice survives a restart. Not a secret (just an integer) — plain file next to the seeds.
+        if (
+          msg &&
+          msg.type === 'wallet' &&
+          Number.isInteger(msg.accountIndex)
+        ) {
+          writeAccountIndex(dir, msg.accountIndex);
+        }
+        sendToAll('hw:event', msg);
+      }
     });
     // Init the worker: deliver the storage dir + the keychain-decrypted seeds over the pipe (never
-    // argv/env — a secret must not be visible to `ps`). The worker builds the engine on receipt
-    // (serveEngine's onBootstrap). Sent before the renderer can issue any command (getWorker runs
-    // from the renderer's startWorker request, and the framed pipe buffers until the worker reads).
+    // argv/env — a secret must not be visible to `ps`) + the last-chosen wallet account index. The
+    // worker builds the engine on receipt (serveEngine's onBootstrap). Sent before the renderer can
+    // issue any command (getWorker runs from the renderer's startWorker request, and the framed pipe
+    // buffers until the worker reads).
     Promise.resolve(
-      client.call('init', { storageDir: dir, config: resolveSeeds(dir) })
+      client.call('init', {
+        storageDir: dir,
+        config: { ...resolveSeeds(dir), accountIndex: readAccountIndex(dir) }
+      })
     ).catch((err) => console.error('[main] worker init failed:', err.message));
     ipcMain.handle('hw:call', (evt, payload) =>
       client.call(payload.type, payload.args || {})

@@ -68,6 +68,7 @@ class TronWallet extends Wallet {
   #tronweb;
   #address;
   #network;
+  #accountIndex;
   #fee;
   #log;
 
@@ -78,6 +79,7 @@ class TronWallet extends Wallet {
    * @param {Object} deps.tronweb - WDK's TronWeb (Bare-compatible).
    * @param {string} deps.address - The derived Tron address.
    * @param {string} [deps.network] - The Tron network name (labels the wire type).
+   * @param {number} [deps.accountIndex] - The BIP-44 account index this wallet is (default 0).
    * @param {number} [deps.fee] - Participation fee in whole TRX (default FEE_TRX).
    * @param {(...args: any[]) => void} deps.log - Logger.
    */
@@ -87,6 +89,7 @@ class TronWallet extends Wallet {
     tronweb,
     address,
     network = DEFAULT_TRON_NETWORK,
+    accountIndex = 0,
     fee = FEE_TRX,
     log
   }) {
@@ -101,6 +104,7 @@ class TronWallet extends Wallet {
     this.#tronweb = tronweb;
     this.#address = address;
     this.#network = network;
+    this.#accountIndex = accountIndex;
     this.#fee = Number(fee);
     this.#log = log;
   }
@@ -115,6 +119,22 @@ class TronWallet extends Wallet {
 
   get address() {
     return this.#address;
+  }
+
+  get accountIndex() {
+    return this.#accountIndex;
+  }
+
+  // Derive the first `count` accounts from the shared seed (offline — getAddress is derivation only)
+  // via BIP-44 (m/44'/195'/0'/0/i), each a distinct address, so a host can offer an account picker.
+  // Reuses the one WDK wallet manager; no network call.
+  async accounts(count = 5) {
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const account = await this.#wallet.getAccount(i);
+      out.push({ index: i, address: await account.getAddress() });
+    }
+    return out;
   }
 
   // { address, trx } in whole TRX. Network call to the provider.
@@ -272,14 +292,17 @@ class TronWallet extends Wallet {
  *   selects the default provider AND the wire type. Mainnet is opt-in (real funds).
  * @param {string} [options.provider] - Tron JSON-RPC provider URL — overrides the network's default
  *   (point a named `network` at a custom node); REQUIRED for a network not in `TRON_NETWORKS`.
+ * @param {number} [options.accountIndex] - BIP-44 account index (m/44'/195'/0'/0/i) — a distinct
+ *   address per index from the same seed, so a host can offer a multi-account picker. Default 0.
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
- * @returns {Promise<{wallet: Object, account: Object, tronweb: Object, address: string, network: string, log: Function}>} The WDK handles.
+ * @returns {Promise<{wallet: Object, account: Object, tronweb: Object, address: string, network: string, accountIndex: number, log: Function}>} The WDK handles.
  */
 async function initTronAccount({
   storageDir,
   seed: injectedSeed,
   network = DEFAULT_TRON_NETWORK,
   provider,
+  accountIndex = 0,
   log = () => {}
 } = {}) {
   const rpc = provider || TRON_NETWORKS[network];
@@ -313,14 +336,14 @@ async function initTronAccount({
   }
 
   const wallet = new WalletManagerTron(seed, { provider: rpc });
-  const account = await wallet.getAccount(0);
+  const account = await wallet.getAccount(accountIndex); // BIP-44 m/44'/195'/0'/0/<accountIndex>
   const address = await account.getAddress(); // offline (derived from the seed)
   // Reuse WDK's own TronWeb (Bare-compatible; a standalone `require('tronweb')` pulls in
   // ethers/http which Bare lacks) to build the memo'd burn tx, which WDK then signs+sends.
   const tronweb = account._tronWeb || wallet._tronWeb;
-  log('wallet ready', address, 'on', network);
+  log('wallet ready', address, 'account', accountIndex, 'on', network);
 
-  return { wallet, account, tronweb, address, network, log };
+  return { wallet, account, tronweb, address, network, accountIndex, log };
 }
 
 /**

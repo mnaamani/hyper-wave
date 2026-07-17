@@ -62,6 +62,10 @@ export const note = (waveId, payload) =>
   send('note', { waveId, note: payload });
 export const sendTrx = (to, amount) => send('send-trx', { to, amount });
 export const refreshWallet = () => send('refresh-wallet');
+// Multi-account wallet: list the derivable accounts (for the picker) + switch the active one
+// (live re-wire, same seed → a distinct BIP-44 address).
+export const listAccounts = (count = 5) => send('list-accounts', { count });
+export const setAccount = (index) => send('set-account', { index });
 export const fetchTransactions = () => send('fetch-transactions');
 
 export const appVersion = () => bridge.pkg().version;

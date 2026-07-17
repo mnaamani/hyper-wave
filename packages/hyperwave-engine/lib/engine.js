@@ -18,6 +18,7 @@ const { payFee, confirmBurn, wireWallet } = require('./payments');
  * @property {string} [topicId] - Swarm topic id (isolates rings).
  * @property {boolean} [wallet] - Set `false` to run wallet-less (no burns/paid-gate/tips).
  * @property {string} [seed] - Injected wallet seed phrase (else derived/persisted by wallet.js).
+ * @property {number} [accountIndex] - Initial BIP-44 account index for the wallet (default 0). A `set-account` command switches it live; each index is a distinct address from the same seed.
  * @property {Object} [walletOptions] - Opaque config forwarded to the payments factory. The default Tron wallet reads `{ network: 'mainnet' }` (opt into mainnet — testnet by default), `provider`, `fee` (participation fee; default 1), and (USDT) `usdtContract`.
  * @property {string} [swarmSeed] - Injected hex swarm-identity seed (else persisted at <storage>/swarm.seed).
  * @property {boolean} [autoSubscribe] - Set `false` for browse-then-pick: hold cores only for waves the host explicitly subscribes to (scaling.md Phase 2). Default true (auto-engage every announced wave).
@@ -104,45 +105,108 @@ function createEngine({
   let payments = null;
   let tBalance = null;
   let pushBalance = null; // re-fetch the balance + send a `wallet` msg; set once the wallet is up
-  if (config.wallet !== false) {
-    makePayments({
+  // The active BIP-44 account index (multi-account: a distinct address per index from the same
+  // seed). A `set-account` command switches it live; `activateSeq` guards against a slow switch
+  // clobbering a newer one.
+  let activeAccount = Number.isInteger(config.accountIndex)
+    ? config.accountIndex
+    : 0;
+  let activateSeq = 0;
+
+  // Bring up (or switch to) the wallet at `accountIndex`: dispose the previous wallet + stop its
+  // balance poll, derive the new account from the SAME seed (a distinct BIP-44 address), wire it
+  // into the wave protocol, and start a fresh balance poll. Called at startup and on `set-account`.
+  async function activateWallet(accountIndex) {
+    const seq = ++activateSeq;
+    clearTimeout(tBalance);
+    tBalance = null;
+    const previous = payments;
+    payments = null;
+    if (previous) {
+      try {
+        previous.dispose();
+      } catch {}
+    }
+    const pay = await makePayments({
       storageDir,
       seed: config.seed,
       log: (...args) => log('[wallet]', ...args),
-      // Opaque, wallet-specific config forwarded verbatim to the payments factory (e.g. the default
-      // Tron wallet reads `{ network: 'mainnet' }` / `provider` / `usdtContract`). Spread last so a
-      // host can override the defaults above.
-      ...(config.walletOptions || {})
-    })
-      .then(async (pay) => {
-        payments = pay;
-        wireWallet(wave, pay);
-        // Echo the wallet next to its storage dir so "which dir → which wallet" is unambiguous.
-        log('wallet', pay.address, 'in storage dir:', absStorageDir);
-        pushBalance = async () =>
-          emit({
-            type: 'wallet',
-            walletType: pay.type, // the host can label / branch on the payment mechanism
-            ...(await pay
-              .balances()
-              .catch(() => ({ address: pay.address, trx: 0 })))
-          });
-        await pushBalance();
-        // Self-rescheduling poll (CLAUDE.md Code Style: no setInterval): the next poll is armed
-        // only after the previous one finishes, so slow balance fetches never overlap. dispose()
-        // nulls tBalance, which also tells an in-flight tick not to re-arm.
-        const balanceTick = async () => {
-          await pushBalance();
-          if (tBalance !== null) {
-            tBalance = setTimeout(balanceTick, 15000);
-          }
-        };
-        tBalance = setTimeout(balanceTick, 15000);
-      })
-      .catch((err) => {
-        log('[wallet] init failed:', err.message);
-        emit({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)
+      // Opaque, wallet-specific config forwarded to the factory (network / provider / usdtContract).
+      ...(config.walletOptions || {}),
+      accountIndex // the live/active index wins over any static walletOptions.accountIndex
+    });
+    if (seq !== activateSeq) {
+      try {
+        pay.dispose();
+      } catch {} // a newer switch superseded this one — drop it
+      return;
+    }
+    payments = pay;
+    activeAccount = accountIndex;
+    wireWallet(wave, pay);
+    // Echo the wallet next to its storage dir so "which dir → which wallet" is unambiguous.
+    log(
+      'wallet',
+      pay.address,
+      'account',
+      accountIndex,
+      'in dir:',
+      absStorageDir
+    );
+    pushBalance = async () =>
+      emit({
+        type: 'wallet',
+        walletType: pay.type, // the host can label / branch on the payment mechanism
+        accountIndex, // which account (address) is active, for the host's picker
+        ...(await pay
+          .balances()
+          .catch(() => ({ address: pay.address, trx: 0 })))
       });
+    await pushBalance();
+    // Self-rescheduling poll (CLAUDE.md Code Style: no setInterval): the next poll is armed only
+    // after the previous finishes, so slow balance fetches never overlap. A switch (or dispose)
+    // nulls tBalance, which also tells an in-flight tick not to re-arm.
+    const balanceTick = async () => {
+      await pushBalance();
+      if (tBalance !== null) {
+        tBalance = setTimeout(balanceTick, 15000);
+      }
+    };
+    tBalance = setTimeout(balanceTick, 15000);
+  }
+
+  if (config.wallet !== false) {
+    activateWallet(activeAccount).catch((err) => {
+      log('[wallet] init failed:', err.message);
+      emit({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)
+    });
+  }
+
+  // Switch the active wallet to another BIP-44 account (live re-wire, same seed). No-op wallet-less.
+  function handleSetAccount(command) {
+    if (config.wallet === false) {
+      return;
+    }
+    const index = Number(command.index);
+    if (!Number.isInteger(index) || index < 0) {
+      emitBadCommand('set-account needs a non-negative integer index', command);
+      return;
+    }
+    activateWallet(index).catch((err) =>
+      emit({ type: 'wallet', error: err.message })
+    );
+  }
+
+  // Derive the first `count` account addresses (offline) so the host can render an account picker.
+  function handleListAccounts(command) {
+    if (!payments) {
+      return; // wallet not up yet (or wallet-less)
+    }
+    const count = Math.min(Math.max(Number(command.count) || 5, 1), 20);
+    payments
+      .accounts(count)
+      .then((list) => emit({ type: 'accounts', list, active: activeAccount }))
+      .catch((err) => emit({ type: 'accounts', error: err.message }));
   }
 
   // Participation fee (wallet.js), burned to the black hole. The `burn-result` message carries a
@@ -337,6 +401,10 @@ function createEngine({
     'unsubscribe-wave': (command) => wave.unsubscribe(command.waveId),
     'set-tag': (command) => wave.setTag(command.tag),
     'stage-entry': (command) => wave.stageEntry(command.entry),
+    // Multi-account wallet: list the derivable accounts (offline) for a picker, and switch the
+    // active one live (re-wire, same seed → a distinct BIP-44 address).
+    'list-accounts': (command) => handleListAccounts(command),
+    'set-account': (command) => handleSetAccount(command),
     // Broadcast an opaque note on a wave (roster-member announcement; a tip notification is the
     // app's first use). The engine stays theme-agnostic — `note` is host-owned JSON.
     note: (command) =>

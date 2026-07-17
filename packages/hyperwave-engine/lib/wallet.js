@@ -41,6 +41,26 @@ class Wallet {
   }
 
   /**
+   * Which account (BIP-44 index) of the shared seed this wallet is. A multi-account wallet derives
+   * a distinct address per index; a single-account wallet is always 0. Default 0.
+   * @returns {number} The account index.
+   */
+  get accountIndex() {
+    return 0;
+  }
+
+  /**
+   * Derive the first `count` accounts from the same seed (offline) — `{index, address}` per BIP-44
+   * account index — so a host can present an account picker. Default: just this one account (a
+   * single-account wallet); a multi-account wallet (e.g. TronWallet) overrides to derive `count`.
+   * @param {number} [_count] - How many accounts to derive (ignored by a single-account wallet).
+   * @returns {Promise<Array<{index: number, address: string}>>} The accounts.
+   */
+  async accounts(_count = 1) {
+    return [{ index: this.accountIndex, address: this.address }];
+  }
+
+  /**
    * Fetch the on-chain balance (network call).
    * @returns {Promise<{address: string, trx: number}>} The address + balance (`trx` = amount).
    */

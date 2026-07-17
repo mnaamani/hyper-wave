@@ -76,6 +76,46 @@ test('the fee is configurable, defaults to 1, and must be positive', async (t) =
   );
 });
 
+test('multiple BIP-44 accounts derive distinct addresses from one seed (offline)', async (t) => {
+  const dir = '/tmp/hyperwave-wallet-acct-' + Date.now();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // account 0 (default) and account 1 share the seed but derive different addresses.
+  const a0 = await createPayments({ storageDir: dir });
+  const a1 = await createPayments({ storageDir: dir, accountIndex: 1 });
+  t.is(a0.accountIndex, 0, 'default account index is 0');
+  t.is(a1.accountIndex, 1, 'accountIndex is reported');
+  t.ok(TRON_ADDRESS.test(a1.address), 'account 1 derives a valid address');
+  t.not(
+    a0.address,
+    a1.address,
+    'account 1 has a DISTINCT address from account 0'
+  );
+
+  // deterministic: the same index re-derives the same address (self-custodial across restarts).
+  const a1again = await createPayments({ storageDir: dir, accountIndex: 1 });
+  t.is(
+    a1again.address,
+    a1.address,
+    'the same index re-derives the same address'
+  );
+
+  // accounts(count) lists the first N accounts, matching the individually-derived addresses.
+  const list = await a0.accounts(3);
+  t.is(list.length, 3, 'accounts(3) returns three accounts');
+  t.alike(
+    list.map((account) => account.index),
+    [0, 1, 2],
+    'indexed 0..2'
+  );
+  t.is(list[0].address, a0.address, 'account 0 matches');
+  t.is(list[1].address, a1.address, 'account 1 matches');
+  t.is(new Set(list.map((account) => account.address)).size, 3, 'all distinct');
+  a0.dispose();
+  a1.dispose();
+  a1again.dispose();
+});
+
 test('TRX <-> sun conversion is 6-decimal exact', (t) => {
   t.is(toSun(1.5), 1500000n);
   t.is(toSun(0.000001), 1n, 'smallest unit (1 sun)');

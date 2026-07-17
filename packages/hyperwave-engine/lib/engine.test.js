@@ -244,14 +244,22 @@ test('the engine wires a ready wallet into the wave protocol and pushes the bala
 // The enforced paid path (start/join fee burns) with a MOCKED wallet — deterministic, no Nile.
 // Closes the "paid gate has no automated test with a wallet" gap for engine.js's orchestration
 // (the wave.js gate CRYPTO — startProofValid / burnAuthorizes — is unit-tested in attest.test.js).
-function payMock({ trx = 7, confirms = true } = {}) {
+function payMock({ trx = 7, confirms = true, accountIndex = 0 } = {}) {
   const calls = { burns: [], verifies: [] };
+  const address = 'TMe' + (accountIndex || ''); // distinct address per BIP-44 account
   return {
     calls,
     type: 'tron-nile', // the wallet's payment-mechanism id (Wallet interface)
     fee: 1, // the participation fee, in the wallet's units (Wallet interface)
-    address: 'TMe',
-    balances: async () => ({ address: 'TMe', trx }),
+    address,
+    accountIndex, // which BIP-44 account this wallet is
+    // derive the first `count` accounts (offline) — distinct address per index
+    accounts: async (count) =>
+      Array.from({ length: count }, (_unused, i) => ({
+        index: i,
+        address: 'TMe' + (i || '')
+      })),
+    balances: async () => ({ address, trx }),
     burn: async (amount, memo) => {
       calls.burns.push({ amount, memo });
       return { hash: 'burnhash' + calls.burns.length };
@@ -430,6 +438,66 @@ test('a joiner burns the wave ANNOUNCED fee, not its own wallet fee', async (t) 
     (msg) => msg.type === 'burn-result' && msg.reason === 'join'
   );
   t.is(burned.amount, 3, 'the burn-result reports the announced fee');
+});
+
+test('multi-account: list-accounts + a live set-account re-wire the wallet', async (t) => {
+  const sent = [];
+  const wave = fakeWave();
+  const engine = createEngine({
+    storageDir: '/tmp/e',
+    config: {},
+    emit: (msg) => sent.push(msg),
+    log: () => {},
+    deps: {
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
+      // the factory derives the wallet at the requested BIP-44 account index (distinct address)
+      createPayments: async (opts) =>
+        payMock({ accountIndex: opts.accountIndex || 0 })
+    }
+  });
+  t.teardown(() => engine.close());
+  await settle();
+
+  // startup activated account 0
+  const first = sent.find((msg) => msg.type === 'wallet' && !msg.error);
+  t.is(first.accountIndex, 0, 'started on account 0');
+  t.is(first.address, 'TMe', 'account 0 address');
+
+  // list the accounts (offline) for a picker
+  engine.exec({ type: 'list-accounts', count: 3 });
+  await settle();
+  const accounts = sent.find((msg) => msg.type === 'accounts');
+  t.ok(accounts, 'an accounts message is emitted');
+  t.is(accounts.active, 0, 'account 0 is active');
+  t.alike(
+    accounts.list.map((account) => account.index),
+    [0, 1, 2],
+    'lists accounts 0..2'
+  );
+
+  // switch to account 1 (live re-wire, same seed → a distinct address)
+  engine.exec({ type: 'set-account', index: 1 });
+  await settle();
+  const afterSwitch = sent
+    .filter((msg) => msg.type === 'wallet' && !msg.error)
+    .pop();
+  t.is(afterSwitch.accountIndex, 1, 'switched to account 1');
+  t.is(afterSwitch.address, 'TMe1', 'account 1 has a distinct address');
+  t.ok(
+    wave.calls.some((call) => call[0] === 'setWallet' && call[1] === 'TMe1'),
+    'the new account was wired into the wave protocol (setWallet)'
+  );
+
+  // a bad index is rejected (not a re-wire)
+  engine.exec({ type: 'set-account', index: -1 });
+  await settle();
+  t.ok(
+    sent.some((msg) => msg.type === 'error' && msg.command === 'set-account'),
+    'a negative index raises a command error'
+  );
 });
 
 test('createEngine threads a host-supplied Hyperswarm to the wave protocol', async (t) => {
