@@ -503,6 +503,99 @@ test('multi-account: list-accounts + a live set-account re-wire the wallet', asy
   );
 });
 
+// A mint-based (Cashu-like) wallet mock: exposes `mintUrl`, `fund`, and `receive`, and records
+// the mint it was built with, so the mint-wallet command paths are testable without a live mint.
+function mintPayMock(opts = {}) {
+  const calls = { funded: [], received: [] };
+  return {
+    calls,
+    type: 'cashu',
+    unit: 'sat',
+    fee: 2,
+    address: 'cashupub',
+    mintUrl: opts.mint || 'https://mint.default',
+    balances: async () => ({ address: 'cashupub', amount: 0, unit: 'sat' }),
+    fund: async (amount) => {
+      calls.funded.push(amount);
+      return { amount, minted: 1, invoice: 'lnbc-' + amount };
+    },
+    receive: async (token) => {
+      calls.received.push(token);
+      return { amount: 4, mint: opts.mint || 'https://mint.default' };
+    },
+    send: async () => ({ hash: 'tok' }),
+    transactions: async () => [],
+    dispose: () => {}
+  };
+}
+
+test('mint wallet: mint rides the wallet msg; set-wallet-options / fund / redeem', async (t) => {
+  const sent = [];
+  const wave = fakeWave();
+  let builtMint = null;
+  const engine = createEngine({
+    storageDir: '/tmp/e',
+    config: { walletOptions: { mint: 'https://mint.a' } },
+    emit: (msg) => sent.push(msg),
+    log: () => {},
+    deps: {
+      createWave: (opts) => {
+        wave.opts = opts;
+        return wave;
+      },
+      createPayments: async (opts) => {
+        builtMint = opts.mint;
+        return mintPayMock({ mint: opts.mint });
+      }
+    }
+  });
+  t.teardown(() => engine.close());
+  await settle();
+
+  t.is(
+    builtMint,
+    'https://mint.a',
+    'the wallet factory got the configured mint'
+  );
+  const first = sent.find((msg) => msg.type === 'wallet' && !msg.error);
+  t.is(first.mint, 'https://mint.a', 'the active mint rides the wallet msg');
+  t.is(first.unit, 'sat', 'the unit rides too');
+
+  // switch the mint live (re-wire through the factory with merged options)
+  engine.exec({
+    type: 'set-wallet-options',
+    walletOptions: { mint: 'https://mint.b' }
+  });
+  await settle();
+  t.is(
+    builtMint,
+    'https://mint.b',
+    'set-wallet-options re-wired to the new mint'
+  );
+  const afterSwitch = sent
+    .filter((msg) => msg.type === 'wallet' && !msg.error)
+    .pop();
+  t.is(
+    afterSwitch.mint,
+    'https://mint.b',
+    'the wallet msg reflects the new mint'
+  );
+
+  // fund → fund-result with the invoice
+  engine.exec({ type: 'fund-wallet', amount: 32 });
+  await settle();
+  const funded = sent.find((msg) => msg.type === 'fund-result' && !msg.error);
+  t.is(funded.invoice, 'lnbc-32', 'fund-wallet returns the bolt11 invoice');
+
+  // redeem a received token → redeem-result
+  engine.exec({ type: 'redeem', token: 'sometoken' });
+  await settle();
+  const redeemed = sent.find(
+    (msg) => msg.type === 'redeem-result' && !msg.error
+  );
+  t.is(redeemed.amount, 4, 'redeem credits the received amount');
+});
+
 test('createEngine threads a host-supplied Hyperswarm to the wave protocol', async (t) => {
   const wave = fakeWave();
   const hostSwarm = { marker: 'host-owned-swarm' }; // a stand-in; createWave decides how to use it

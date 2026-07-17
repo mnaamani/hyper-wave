@@ -112,6 +112,10 @@ function createEngine({
     ? config.accountIndex
     : 0;
   let activateSeq = 0;
+  // Live, mutable wallet-specific options forwarded to the factory (opaque to the engine —
+  // network/provider/mint/fee/…). A `set-wallet-options` command merges into this and re-wires
+  // the wallet, so a host can switch e.g. the Cashu mint without a currency-specific engine path.
+  let walletOptions = { ...(config.walletOptions || {}) };
 
   // Bring up (or switch to) the wallet at `accountIndex`: dispose the previous wallet + stop its
   // balance poll, derive the new account from the SAME seed (a distinct BIP-44 address), wire it
@@ -131,8 +135,8 @@ function createEngine({
       storageDir,
       seed: config.seed,
       log: (...args) => log('[wallet]', ...args),
-      // Opaque, wallet-specific config forwarded to the factory (network / provider / usdtContract).
-      ...(config.walletOptions || {}),
+      // Opaque, wallet-specific config forwarded to the factory (network / provider / mint / …).
+      ...walletOptions,
       accountIndex // the live/active index wins over any static walletOptions.accountIndex
     });
     if (seq !== activateSeq) {
@@ -158,6 +162,9 @@ function createEngine({
         type: 'wallet',
         walletType: pay.type, // the host can label / branch on the payment mechanism
         accountIndex, // which account (address) is active, for the host's picker
+        // The active "account" for a mint-based wallet (Cashu) is its mint URL — surfaced so the
+        // host's picker can show/persist it. Absent for chain wallets (no mintUrl getter).
+        ...(pay.mintUrl ? { mint: pay.mintUrl } : {}),
         ...(await pay
           .balances()
           .catch(() => ({ address: pay.address, amount: 0, unit: pay.unit })))
@@ -207,6 +214,69 @@ function createEngine({
       .accounts(count)
       .then((list) => emit({ type: 'accounts', list, active: activeAccount }))
       .catch((err) => emit({ type: 'accounts', error: err.message }));
+  }
+
+  // Merge new wallet-specific options and re-wire the wallet live (same seed). Currency-agnostic:
+  // the host passes an opaque `walletOptions` (e.g. `{ mint }` for Cashu) and the engine re-builds
+  // the wallet through the factory. No-op wallet-less.
+  function handleSetWalletOptions(command) {
+    if (config.wallet === false) {
+      return;
+    }
+    const options = command.walletOptions;
+    if (!options || typeof options !== 'object') {
+      emitBadCommand(
+        'set-wallet-options needs a walletOptions object',
+        command
+      );
+      return;
+    }
+    walletOptions = { ...walletOptions, ...options };
+    activateWallet(activeAccount).catch((err) =>
+      emit({ type: 'wallet', error: err.message })
+    );
+  }
+
+  // Fund the wallet (mint-based wallets only, e.g. Cashu): mint `amount` at the active mint and
+  // return a `fund-result` — its `invoice` is a bolt11 the host surfaces (QR) when the mint isn't
+  // an auto-paying test mint. A chain wallet has no `fund` (funded by a faucet) → clear error.
+  async function handleFundWallet(command) {
+    if (!payments || typeof payments.fund !== 'function') {
+      emit({
+        type: 'fund-result',
+        id: command.id,
+        error: 'funding not supported by this wallet'
+      });
+      return;
+    }
+    const amount = Number(command.amount);
+    if (!(amount > 0)) {
+      emit({ type: 'fund-result', id: command.id, error: 'invalid amount' });
+      return;
+    }
+    try {
+      const result = await payments.fund(amount);
+      emit({ type: 'fund-result', id: command.id, ...result });
+      pushBalance?.();
+    } catch (err) {
+      emit({ type: 'fund-result', id: command.id, error: err.message });
+    }
+  }
+
+  // Redeem a bearer token received out-of-band (a Cashu tip carried in a wave-note). Mint-based
+  // wallets implement `receive`; a chain wallet has none (a tip settles on-chain), so this is a
+  // no-op there. The token is P2PK-locked to us, so redeeming someone else's is refused by the wallet.
+  async function handleRedeem(command) {
+    if (!payments || typeof payments.receive !== 'function') {
+      return; // chain wallet: nothing to redeem (the transfer already settled)
+    }
+    try {
+      const result = await payments.receive(command.token);
+      emit({ type: 'redeem-result', id: command.id, ...result });
+      pushBalance?.();
+    } catch (err) {
+      emit({ type: 'redeem-result', id: command.id, error: err.message });
+    }
   }
 
   // Participation fee (wallet.js), burned to the black hole. The `burn-result` message carries a
@@ -405,6 +475,11 @@ function createEngine({
     // active one live (re-wire, same seed → a distinct BIP-44 address).
     'list-accounts': (command) => handleListAccounts(command),
     'set-account': (command) => handleSetAccount(command),
+    // Mint-based wallet (Cashu): switch the active mint (live re-wire), mint funds, and redeem a
+    // received bearer token (a tip). Currency-agnostic — no-ops / errors on a chain wallet.
+    'set-wallet-options': (command) => handleSetWalletOptions(command),
+    'fund-wallet': (command) => handleFundWallet(command),
+    redeem: (command) => handleRedeem(command),
     // Broadcast an opaque note on a wave (roster-member announcement; a tip notification is the
     // app's first use). The engine stays theme-agnostic — `note` is host-owned JSON.
     note: (command) =>

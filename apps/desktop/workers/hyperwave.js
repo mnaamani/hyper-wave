@@ -12,7 +12,7 @@
 const FramedStream = require('framed-stream');
 const goodbye = require('graceful-goodbye');
 const env = require('bare-env');
-const { createEngine } = require('hyperwave-engine');
+const { createEngine, createCashuWallet } = require('hyperwave-engine');
 const { serveEngine } = require('hyperwave-engine/lib/rpc');
 
 const pipe = new FramedStream(Bare.IPC);
@@ -35,8 +35,18 @@ const seam = serveEngine({
         // Injected by main from the keychain-encrypted store; undefined → the engine persists its
         // own plaintext seed files (headless/dev fallback), same as before secure storage.
         seed: injected.seed,
-        swarmSeed: injected.swarmSeed
+        swarmSeed: injected.swarmSeed,
+        // Cashu (ecash) is the desktop's default payment mechanism. The active mint rides here
+        // (persisted by main as the peer's chosen mint; undefined → the wallet's default test
+        // mint). A `set-wallet-options {mint}` command switches it live at runtime.
+        walletOptions: {
+          mint: injected.mint || env.HYPERWAVE_MINT || undefined
+        }
       },
+      // Inject Cashu as the payment factory (createEngine's default is the Tron wallet). The
+      // engine wires it through the same `Wallet` interface — burns, tips, and the paid gate are
+      // mechanism-agnostic.
+      deps: { createPayments: createCashuWallet },
       emit: seam.emit // engine -> host: raised over the seam's EVENT channel
     });
     seam.attach(engine);
