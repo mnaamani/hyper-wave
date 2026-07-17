@@ -19,13 +19,18 @@
     "test:e2e:local": "node e2e/wave.local.e2e.js",
     "test:e2e:onchain": "node e2e/wave.onchain.e2e.js",
     "test:e2e:onchain:usdt": "node e2e/wave.usdt.onchain.e2e.js",
-    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/messages.js lib/sweep.js lib/feed.js lib/feed-crdt.js lib/flood.js lib/rate-limiter.js lib/peer-table.js lib/entry.js lib/wave.js lib/wallet.js lib/tron-wallet.js lib/tron-usdt-wallet.js lib/payments.js lib/engine.js lib/rpc.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/messages.js lib/sweep.js lib/feed.js lib/feed-crdt.js lib/flood.js lib/rate-limiter.js lib/peer-table.js lib/entry.js lib/wave.js lib/wallet.js lib/tron-wallet.js lib/tron-usdt-wallet.js lib/cashu-wallet.js lib/cashu-burn.js lib/nums.js lib/proof-store.js lib/bare-web-shims.js lib/payments.js lib/engine.js lib/rpc.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
   },
   "dependencies": {
+    "@cashu/cashu-ts": "^4.7.2",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@tetherto/wdk": "^1.0.0-beta.13",
     "@tetherto/wdk-wallet-tron": "^1.0.0-beta.8",
     "b4a": "^1.8.1",
+    "bare-crypto": "^1.15.3",
     "bare-env": "^3.0.1",
+    "bare-fetch": "^3.1.0",
     "bare-fs": "^4.7.4",
     "bare-os": "^3.9.3",
     "bare-path": "^3.0.1",
@@ -35,7 +40,8 @@
     "framed-stream": "^1.0.1",
     "hypercore-crypto": "^3.7.0",
     "hyperswarm": "^4.17.0",
-    "protomux": "^3.11.0"
+    "protomux": "^3.11.0",
+    "text-decoder": "^1.2.7"
   },
   "devDependencies": {
     "@hyperswarm/testnet": "^3.1.4",

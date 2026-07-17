@@ -310,9 +310,19 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
 
 ## Sequencing (PRs)
 
-1. **Part 0 rename** — mechanical, all suites green. Ships alone.
-2. **Part 1+2 `CashuWallet` + burn/verify** — engine, unit tests with fixtures,
-   promote spike modules. Tron stays default.
+1. ✅ **Part 0 rename** — mechanical, all suites green. Ships alone. _(done)_
+2. ✅ **Part 1+2 `CashuWallet` + burn/verify** — engine, unit tests, promoted
+   spike modules (`nums.js`, `bare-web-shims.js`, `proof-store.js`,
+   `cashu-burn.js`, `cashu-wallet.js`). Tron stays default. Network-smoked
+   fund→burn→verify against testnut. _(done)_
+   - Added `fund(amountSats)` to the wallet (mint quote → mint into the store),
+     beyond the plan: a Cashu wallet must be able to receive to burn/tip, and it
+     enables the end-to-end smoke. Real (non-auto-pay) mints return the bolt11
+     `invoice` for external payment (the desktop QR flow is Part 4).
+   - `fix-bare-engines` extended: also normalizes a `node` engines range that
+     Bare's emulated node (20.0.0) fails to satisfy (cashu-ts needs `>=22.4.0`) —
+     otherwise the desktop crashes under pear-runtime on cashu-ts import.
 3. **Part 3 tips + multimint** — send/receive/consolidate + the multimint spike.
+   (`send` exists; `receive` + cross-mint consolidate still to build.)
 4. **Part 4 desktop** — inject as default, mint picker, top-up UX, proof store.
 5. **Part 6/7** — e2e verify + docs. Flip the desktop default to Cashu.

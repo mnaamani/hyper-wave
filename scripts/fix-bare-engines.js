@@ -35,9 +35,11 @@ const SAFE = '>=0.0.0'; // always satisfied — removes the (advisory) constrain
 // hyphen ranges, etc. — no need to enumerate the syntaxes by hand.
 let semver = null;
 let probe = null; // a high version so `satisfies` reaches (and eagerly parses) the range
+let nodeProbe = null; // the node version Bare EMULATES (bare-node-runtime → 20.0.0)
 try {
   semver = require('bare-semver');
   probe = new semver.Version(999, 0, 0);
+  nodeProbe = new semver.Version(20, 0, 0);
 } catch {}
 
 // Belt-and-suspenders: the oracle reflects the bare-semver in *these* node_modules, but the GUI
@@ -49,7 +51,11 @@ try {
 // (`>= 16`, `< 20`) — the last is the one that regressed the desktop wallet.
 const TRICKY = /[\^~*]|\|\||\bx\b|\s-\s|[<>=]=?\s/i;
 
-function needsNormalizing(range) {
+// A `node` range can ALSO trip the resolver by being parseable but UNSATISFIED: Bare emulates a
+// node version (bare-node-runtime reports 20.0.0), so a package requiring e.g. `>=22.4.0`
+// (cashu-ts) is rejected with UNSUPPORTED_ENGINE even though it runs fine under Bare. Strip those
+// too — `engines` is advisory. Only for `node` (npm/other engines don't gate the Bare resolver).
+function needsNormalizing(range, engineName) {
   if (TRICKY.test(range)) {
     return true;
   }
@@ -58,10 +64,18 @@ function needsNormalizing(range) {
   } // no oracle and not obviously tricky — leave it alone
   try {
     semver.satisfies(probe, range); // throws INVALID_VERSION iff the range is unparseable
-    return false;
   } catch {
+    return true; // unparseable — the original failure mode
+  }
+  // Parseable but the emulated node floor doesn't satisfy it → the resolver rejects it.
+  if (
+    engineName === 'node' &&
+    nodeProbe &&
+    !semver.satisfies(nodeProbe, range)
+  ) {
     return true;
   }
+  return false;
 }
 
 function walk(dir, depth = 0) {
@@ -110,7 +124,7 @@ function fixPackage(pkgDir) {
   }
   let changed = false;
   for (const [engineName, range] of Object.entries(eng)) {
-    if (typeof range === 'string' && needsNormalizing(range)) {
+    if (typeof range === 'string' && needsNormalizing(range, engineName)) {
       eng[engineName] = SAFE;
       changed = true;
     }
