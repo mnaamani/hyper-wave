@@ -395,6 +395,13 @@ function createWave({
   // slots keep replicating (and latecomers keep pulling) past the deterministic end, so closing
   // there would race convergence. Lifecycle is join/leave (subscribe/unsubscribe), per scaling.md.
   const subscriptions = new Set(); // waveId
+  // The roster (participant peerIds) per wave, kept ALIVE past the FSM's WaveState. `wave.writers`
+  // is deleted with the WaveState at goIdle, but the wave-note gate (a roster-member broadcast, e.g.
+  // a tip announcement) must still work while the idle gallery is browsable — tips happen post-wave.
+  // So the roster is mirrored here, tied to the FEED lifetime (populated as writers are ingested,
+  // freed with the cores on unsubscribe/close/closeWave), so it outlives the WaveState exactly as
+  // the feed does. Used to gate BOTH originating a wave-note and relaying/processing one.
+  const rosters = new Map(); // waveId -> Set<peerId>
   // When a revivable idle (lobby-timeout) abandons a wave I had JOINED, remember my join state so
   // a late wave-start can re-adopt the wave with my slot still arming + my entry still posting.
   // Keyed by waveId (concurrent waves each get their own memo). See REVIVABLE_IDLE_REASONS.
@@ -561,8 +568,9 @@ function createWave({
       // can't inject notes onto a wave, and the flood dies at the edge of who can vouch for it. The
       // envelope sig already proved `origin` is the real author; this adds "and it's a participant".
       if (msg.kind === 'wave-note') {
-        const wave = waves.get(msg.waveId);
-        if (!wave || !wave.writers.has(msg.origin)) {
+        // Gate on the feed-lifetime roster (not the FSM WaveState, which is gone once the wave goes
+        // idle) — so a tip note broadcast while browsing the idle gallery is still relayed/processed.
+        if (!isRosterMember(msg.waveId, msg.origin)) {
           return;
         }
         relayWave(msg.waveId, msg, fromId);
@@ -1024,6 +1032,32 @@ function createWave({
     return [initiatorId, ...ids];
   }
 
+  /**
+   * Remember `peerId` as a roster member of `waveId` (feed-lifetime, outlives the WaveState) — the
+   * gate for the wave-note broadcast primitive. Freed with the cores (unsubscribe/close/closeWave).
+   * @param {string} waveId The wave.
+   * @param {string} peerId The participant's ring id.
+   */
+  function rememberRosterMember(waveId, peerId) {
+    let roster = rosters.get(waveId);
+    if (!roster) {
+      roster = new Set();
+      rosters.set(waveId, roster);
+    }
+    roster.add(peerId);
+  }
+
+  /**
+   * Is `peerId` a known roster member of `waveId`? True for the whole time the wave's feed is held
+   * (past the wave's end), so a tip note can be broadcast/relayed while the idle gallery is browsable.
+   * @param {string} waveId The wave.
+   * @param {string} peerId The candidate participant.
+   * @returns {boolean} True if `peerId` is a roster member.
+   */
+  function isRosterMember(waveId, peerId) {
+    return !!rosters.get(waveId)?.has(peerId);
+  }
+
   // Learn a participant's feed core: verify its join attestation (binds peerId →
   // writerKey, so a relayed credential can't be forged or substituted), then count it
   // into the writers map (the roster) and open its core (feed-crdt.js). Idempotent; the
@@ -1061,6 +1095,7 @@ function createWave({
       writerKey: cred.writerKey,
       joinSig: cred.joinSig
     });
+    rememberRosterMember(wave.id, cred.peerId); // roster that outlives the WaveState (wave-note gate)
     // The writers map is cheap roster metadata (kept even when merely aware, so the browse count
     // is right and a later subscribe can open every core). Opening the participant's CORE — the
     // expensive, O(subscribed) part — happens only when subscribed.
@@ -1308,6 +1343,7 @@ function createWave({
     }
     leaveWaveTransport(waveId); // Phase 3: leave sub-topic + close per-wave channels
     session.closeWave(waveId).catch(() => {});
+    rosters.delete(waveId); // free the wave-note roster with the feed cores
     emitEvent({ event: 'unsubscribed', waveId });
   }
 
@@ -1384,8 +1420,9 @@ function createWave({
    * @returns {boolean} True if broadcast, false if I'm not a roster member of that wave.
    */
   function broadcastNote({ waveId, note }) {
-    const wave = waveId ? waves.get(waveId) : null;
-    if (!wave || !wave.writers.has(me.id)) {
+    // Gate on the feed-lifetime roster, so a tip can be announced post-wave (browsing the idle
+    // gallery — the common case). floodWave scopes to subscribed neighbours, independent of the FSM.
+    if (!waveId || !isRosterMember(waveId, me.id)) {
       return false; // I'm not a participant of this wave — I can't broadcast on it
     }
     floodWave(waveId, makeWaveNote({ waveId, note }));
@@ -1418,6 +1455,7 @@ function createWave({
         }
         // remember myself so my own wave-sync shares my core with newcomers
         wave.writers.set(me.id, { writerKey, joinSig: wave.joinSig });
+        rememberRosterMember(waveId, me.id); // roster survives the WaveState (wave-note gate)
         floodWave(
           waveId,
           makeWaveJoin({
@@ -1998,6 +2036,7 @@ function createWave({
       for (const wave of waves.values()) {
         teardownWave(wave);
       }
+      rosters.clear();
       // close our gossip channels (they ride the connections; harmless if the conn is going away)
       for (const channel of channels) {
         try {

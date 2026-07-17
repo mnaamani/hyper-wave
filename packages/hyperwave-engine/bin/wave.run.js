@@ -7,6 +7,8 @@
 //   env START=<n>                      -> announce a wave once >= n peers are present
 //   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
 //   env AUTOENTRY=1                   -> stage a fake entry in the lobby (posted at my sweep slot, if joined)
+//   env SPECTATE=1                    -> subscribe to an announced wave WITHOUT joining (non-member)
+//   env NOTE=1                        -> broadcast a wave-note on `completed` (roster-gated); logs NOTE-SENT ok=<bool>
 //   env HYPERWAVE_LOBBY_MS=<ms>        -> shorten the lobby for tests
 //   env HYPERWAVE_MAX_PEERS=<n>        -> Hyperswarm connection cap (lower to force a partial mesh)
 const env = require('bare-env');
@@ -111,6 +113,18 @@ const wave = createWave({
       // opaque to the engine — this CLI puts a {caption} object in it.
       if (env.AUTOENTRY && msg.event === 'wave-active' && msg.joined) {
         wave.stageEntry({ payload: { caption: `${name} was here` } });
+      }
+      // NOTE=1: broadcast a wave-note on `wave-idle` — emitted by goIdle AFTER it deletes the
+      // WaveState, so this is the real tip-note timing (post-wave, browsing the idle gallery) and
+      // it exercises the feed-lifetime roster (the FSM's writers are already gone). Log whether the
+      // engine accepted it: the roster gate returns true for a participant, false for a spectator.
+      // The received note surfaces on other peers as a `note` EVENT (asserted by the e2e).
+      if (env.NOTE && msg.event === 'wave-idle') {
+        const ok = wave.note({
+          waveId: msg.waveId,
+          note: { kind: 'test', from: name }
+        });
+        console.log(`[${name}] NOTE-SENT ok=${ok} waveId=${msg.waveId}`);
       }
     } else if (msg.type === 'feed') {
       console.log(

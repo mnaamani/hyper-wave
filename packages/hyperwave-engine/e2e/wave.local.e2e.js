@@ -289,3 +289,74 @@ test(
     );
   }
 );
+
+// wave-note (a roster-member broadcast — the tip-notification primitive): the engine relays and
+// processes a note ONLY if its author is a roster member of the wave, and lets you originate one
+// only if you are. This scenario proves both: a fixed 3-peer set — two roster members + one
+// spectator (subscribed, never joined) — each broadcasts a note on `wave-idle` (post-wave, so it
+// exercises the feed-lifetime roster after the FSM's WaveState is gone). The roster members' notes
+// reach the others; the spectator's is refused at origination and never appears anywhere.
+test(
+  'wave-note reaches roster members and a non-member cannot broadcast',
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const cluster = await new Cluster({ lobbyMs: LOBBY_MS }).start();
+    t.teardown(() => cluster.destroy());
+
+    // p1 (initiator) + p2 join and broadcast (roster members); p3 only SPECTATEs (subscribed via
+    // the default autoSubscribe, never joins → not a roster member) and attempts to broadcast.
+    const p1 = cluster.launch('p1', {
+      START: '2',
+      AUTOJOIN: '1',
+      AUTOENTRY: '1',
+      NOTE: '1'
+    });
+    await sleep(400);
+    const p2 = cluster.launch('p2', {
+      AUTOJOIN: '1',
+      AUTOENTRY: '1',
+      NOTE: '1'
+    });
+    await sleep(400);
+    const p3 = cluster.launch('p3', { SPECTATE: '1', NOTE: '1' });
+
+    // the wave runs and every peer returns to idle (where the notes are broadcast)
+    t.ok(await p1.waitForEvent('started', WAIT_MS), 'the wave started');
+
+    // origination gate: a roster member's broadcast is accepted; the spectator's is refused
+    t.ok(
+      await p1.waitForLine(/NOTE-SENT ok=true/, WAIT_MS),
+      'a roster member (p1) originated its note'
+    );
+    t.ok(
+      await p2.waitForLine(/NOTE-SENT ok=true/, WAIT_MS),
+      'a roster member (p2) originated its note'
+    );
+    t.ok(
+      await p3.waitForLine(/NOTE-SENT ok=false/, WAIT_MS),
+      'the spectator (p3) was refused at origination (not a roster member)'
+    );
+
+    // relay/process: each roster member receives the OTHER roster member's note (author is on the
+    // roster), post-wave — proving the feed-lifetime roster gate works after the WaveState is gone
+    t.ok(
+      await p2.waitForEvent('note', WAIT_MS, (evt) => evt.note?.from === 'p1'),
+      'p2 received p1’s note (roster → roster)'
+    );
+    t.ok(
+      await p1.waitForEvent('note', WAIT_MS, (evt) => evt.note?.from === 'p2'),
+      'p1 received p2’s note (roster → roster)'
+    );
+
+    // the spectator's note never went on the wire, so it appears NOWHERE. Check the roster members
+    // both saw p1↔p2 before asserting absence, so the flood window has clearly elapsed.
+    t.absent(
+      await p1.waitForEvent('note', 8000, (evt) => evt.note?.from === 'p3'),
+      'no peer received the non-member (p3) note — it was dropped at origination'
+    );
+    t.absent(
+      await p2.waitForEvent('note', 1, (evt) => evt.note?.from === 'p3'),
+      'p2 never saw the non-member note either'
+    );
+  }
+);
