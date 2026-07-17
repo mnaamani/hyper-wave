@@ -36,7 +36,17 @@
 // wave-sync is unicast (join-time catch-up) and heartbeat/subs are one-hop; none carry
 // a `mid`. wave-announce floods the whole directory; wave-join/wave-start flood only the
 // subscribed subgraph of their wave (Phase 3 scoping) — the `mid` dedup is identical either way.
-const FLOODED_KINDS = new Set(['wave-announce', 'wave-join', 'wave-start']);
+const FLOODED_KINDS = new Set([
+  'wave-announce',
+  'wave-join',
+  'wave-start',
+  'wave-note'
+]);
+
+// Max bytes for a wave-note's opaque payload (JSON) — announcements are tiny (a tip note is a few
+// dozen bytes), so cap them small so the roster-broadcast primitive can't be turned into a bulk
+// data channel. Belt-and-suspenders alongside the frame cap + per-author flood cap (protocol.md §11).
+const MAX_NOTE_BYTES = 2048;
 
 const HEX_RE = /^[0-9a-f]+$/;
 
@@ -97,6 +107,22 @@ function isOptionalWalletType(value) {
  */
 function isOptionalFee(value) {
   return value === undefined || (Number.isFinite(value) && value > 0);
+}
+
+/**
+ * @param {*} value - Candidate.
+ * @returns {boolean} A plain, non-null object (not an array) whose JSON is within MAX_NOTE_BYTES —
+ *   the opaque app payload of a wave-note (an authenticated roster-member broadcast).
+ */
+function isNote(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  try {
+    return JSON.stringify(value).length <= MAX_NOTE_BYTES;
+  } catch {
+    return false; // non-serializable (e.g. a cycle) — reject
+  }
 }
 
 /** @param {*} value - Candidate. @returns {boolean} Absent/null, or a short tag code. */
@@ -188,7 +214,13 @@ const VALIDATORS = {
     isMillis(msg.lobbyMsLeft) &&
     isOptionalObject(msg.paid) &&
     isOptionalWalletType(msg.walletType) &&
-    isOptionalFee(msg.fee)
+    isOptionalFee(msg.fee),
+
+  // wave-note: an authenticated broadcast from a wave participant — `note` is an opaque app payload
+  // (the app owns its meaning; a tip announcement is the first use). Flooded to the wave's
+  // subscribers, but relayed/processed ONLY when `origin` is a roster member (wave.js) — so a
+  // non-participant can't inject notes onto a wave. `origin` (envelope) is the author.
+  'wave-note': (msg) => isWaveId(msg.waveId) && isNote(msg.note)
 };
 
 /**
@@ -365,14 +397,29 @@ function makeWaveSync({
   };
 }
 
+/**
+ * Build a wave-note: an authenticated broadcast from a wave participant (flooded to the wave's
+ * subscribers; relayed/processed only when `origin` is a roster member — see wave.js). `origin` (the
+ * envelope) is the author.
+ * @param {Object} fields - The note fields.
+ * @param {string} fields.waveId - The wave the note is broadcast on.
+ * @param {Object} fields.note - Opaque app payload (the app owns its meaning; ≤ MAX_NOTE_BYTES).
+ * @returns {GossipMessage} The wave-note message (pre-envelope).
+ */
+function makeWaveNote({ waveId, note }) {
+  return { kind: 'wave-note', waveId, note };
+}
+
 module.exports = {
   FLOODED_KINDS,
   MAX_WRITERS,
+  MAX_NOTE_BYTES,
   validGossip,
   makeHeartbeat,
   makeSubs,
   makeWaveAnnounce,
   makeWaveJoin,
   makeWaveStart,
-  makeWaveSync
+  makeWaveSync,
+  makeWaveNote
 };

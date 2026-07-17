@@ -56,7 +56,8 @@ const {
   makeWaveAnnounce,
   makeWaveJoin,
   makeWaveStart,
-  makeWaveSync
+  makeWaveSync,
+  makeWaveNote
 } = require('./messages');
 const { Flood } = require('./flood');
 const { RateLimiter, KeyedRateLimiter } = require('./rate-limiter');
@@ -268,6 +269,7 @@ function loadOrCreateSwarmSeed(
  * @property {(waveId?: string) => string|null} join Opt into a lobby (the given wave, or the newest joinable one); implies subscribe; returns the joined waveId, or null on a no-op.
  * @property {(tag: string) => void} setTag Set the tag (cosmetic, rides the heartbeat).
  * @property {(entry: {payload?: *, waveId?: string}) => void} stageEntry Stage my opaque entry payload to post at my sweep slot (for the given wave, or the newest one I've joined).
+ * @property {(input: {waveId: string, note: Object}) => boolean} note Broadcast an opaque note on a wave (a roster-member announcement); floods to its subscribers only if I'm a participant. Returns whether it was broadcast.
  * @property {(address: string|null, verifier?: Function, walletType?: string, fee?: number) => void} setWallet Wire the payment layer (address + on-chain burn verifier + wallet type + my fee — type and fee ride the waves I initiate).
  * @property {(waveId: string) => number|null} feeFor The initiator-set participation fee a wave requires (announced), or null if none — the host's fee flow burns exactly this.
  * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed start proof and announce (routed to the proof's waveId).
@@ -553,6 +555,20 @@ function createWave({
         handleWaveAnnounce(msg);
         return;
       }
+      // A wave-note is a roster-member broadcast: relay + process it ONLY if `origin` is a
+      // credentialed participant of the wave (in wave.writers). A peer that doesn't know the wave,
+      // or whose author isn't on the roster, drops it (no relay, no process) — so a non-participant
+      // can't inject notes onto a wave, and the flood dies at the edge of who can vouch for it. The
+      // envelope sig already proved `origin` is the real author; this adds "and it's a participant".
+      if (msg.kind === 'wave-note') {
+        const wave = waves.get(msg.waveId);
+        if (!wave || !wave.writers.has(msg.origin)) {
+          return;
+        }
+        relayWave(msg.waveId, msg, fromId);
+        handleWaveNote(msg);
+        return;
+      }
       // join / start flood only among the wave's subscribers (O(subscribed), not O(topic)).
       relayWave(msg.waveId, msg, fromId);
       if (msg.kind === 'wave-join') {
@@ -775,6 +791,20 @@ function createWave({
       rosterIds: canonicalRoster(msg.origin, msg.writers),
       t0: msg.t0,
       lapMs: msg.lapMs
+    });
+  }
+
+  /**
+   * A roster member broadcast a note on a wave (flooded, roster-gated by the caller). Surface it to
+   * the host as a `note` event; the app owns the opaque `note` payload's meaning.
+   * @param {Object} msg A wave-note message (origin = the participant who sent it).
+   */
+  function handleWaveNote(msg) {
+    emitEvent({
+      event: 'note',
+      waveId: msg.waveId,
+      from: msg.origin,
+      note: msg.note
     });
   }
 
@@ -1341,6 +1371,25 @@ function createWave({
       return;
     }
     wave.pipeline.stage(input);
+  }
+
+  /**
+   * Broadcast an opaque `note` on a wave (a roster-member announcement — the app owns its meaning;
+   * a tip announcement is the first use). Floods to the wave's subscribers, but ONLY if I'm a
+   * credentialed participant of it (in wave.writers) — the same gate every relayer re-checks on
+   * receipt (handleGossip), so a non-participant can't announce. No-op otherwise.
+   * @param {Object} input The note to broadcast.
+   * @param {string} input.waveId The wave to broadcast on.
+   * @param {Object} input.note Opaque app payload (≤ MAX_NOTE_BYTES; rejected by the receive edge if larger).
+   * @returns {boolean} True if broadcast, false if I'm not a roster member of that wave.
+   */
+  function broadcastNote({ waveId, note }) {
+    const wave = waveId ? waves.get(waveId) : null;
+    if (!wave || !wave.writers.has(me.id)) {
+      return false; // I'm not a participant of this wave — I can't broadcast on it
+    }
+    floodWave(waveId, makeWaveNote({ waveId, note }));
+    return true;
   }
 
   /**
@@ -1922,6 +1971,7 @@ function createWave({
     join,
     setTag,
     stageEntry,
+    note: broadcastNote,
     // Wire the payment layer once the wallet is up: my address (for feed tips / attestations), the
     // on-chain burn verifier (enables the paid-wave anti-spam gate), and my wallet TYPE (rides my
     // waves' announces so joiners can decide whether they support the payment mechanism).

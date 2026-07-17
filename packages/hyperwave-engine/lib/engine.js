@@ -337,6 +337,10 @@ function createEngine({
     'unsubscribe-wave': (command) => wave.unsubscribe(command.waveId),
     'set-tag': (command) => wave.setTag(command.tag),
     'stage-entry': (command) => wave.stageEntry(command.entry),
+    // Broadcast an opaque note on a wave (roster-member announcement; a tip notification is the
+    // app's first use). The engine stays theme-agnostic — `note` is host-owned JSON.
+    note: (command) =>
+      wave.note({ waveId: command.waveId, note: command.note }),
     tip: (command) => handleTip(command),
     'send-trx': (command) => handleSend(command),
     'fetch-transactions': (command) => handleTransactions(command),

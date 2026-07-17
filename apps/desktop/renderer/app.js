@@ -20,7 +20,8 @@ scrubber.init();
 const state = {
   countrySent: false, // one-shot: pushed our saved team to the worker once it came up
   peers: 0, // number of live peers in the ring (drives the status line)
-  lobbyDeadline: 0 // ~when the lobby closes (kickoff), for the capture countdown
+  lobbyDeadline: 0, // ~when the lobby closes (kickoff), for the capture countdown
+  myAddress: null // my wallet address — to recognise a tip note addressed to me
 };
 const setState = (patch) => Object.assign(state, patch);
 
@@ -105,6 +106,7 @@ ipc.on('feed', (msg) => {
 ipc.on('wallet', (msg) => {
   wallet.walletStatus(msg); // self-custodial TRX wallet address + balance (wallet-view modal)
   gallery.setMyAddress(msg.address); // so we don't offer to tip our own selfie
+  setState({ myAddress: msg.address }); // to recognise a tip note addressed to me
 });
 ipc.on('tip-result', (msg) => {
   gallery.tipResult(msg);
@@ -256,6 +258,23 @@ const EVENT_HANDLERS = {
   // live protocol progress only — ball animation is the replay sweep, not per-hop events
   position: (evt) => {
     hud.waveStatus(`wave rolling - hop ${evt.hopCount ?? ''}`);
+  },
+
+  // A roster member broadcast a note on the wave. Our only note kind is a tip announcement: if it's
+  // addressed to my wallet I got tipped (celebrate + refresh my balance); otherwise it's social
+  // proof that a selfie was tipped. Unknown kinds are ignored (forward-compatible).
+  note: (evt) => {
+    const payload = evt.note || {};
+    if (payload.kind !== 'tip') {
+      return;
+    }
+    if (payload.to && payload.to === state.myAddress) {
+      hud.waveStatus(`🎉 you got tipped ${payload.amount} TRX!`);
+      ring.startFlourish(); // golden pulse + confetti — same celebration as a completed wave
+      ipc.refreshWallet(); // the tip landed — re-check my balance
+    } else {
+      hud.waveStatus(`💸 a selfie was tipped ${payload.amount} TRX`);
+    }
   },
 
   // a completed wave always has ≥1 selfie (the initiator's) — it may land a beat after this

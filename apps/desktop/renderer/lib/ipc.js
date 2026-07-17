@@ -56,6 +56,10 @@ export const setCountry = (country) => send('set-tag', { tag: country });
 export const stageSelfie = (selfie) =>
   send('stage-entry', { entry: { payload: selfie } });
 export const tip = (to, amount, peerId) => send('tip', { to, amount, peerId });
+// Broadcast an opaque note on a wave (roster-member announcement). The app's use: announce a tip so
+// the recipient (and everyone) sees it. Only broadcasts if this peer is a participant of the wave.
+export const note = (waveId, payload) =>
+  send('note', { waveId, note: payload });
 export const sendTrx = (to, amount) => send('send-trx', { to, amount });
 export const refreshWallet = () => send('refresh-wallet');
 export const fetchTransactions = () => send('fetch-transactions');

@@ -122,7 +122,7 @@ sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
   (Protomux multiplexes them).
 
 **Wire encoding — JSON, and when to revisit.** Gossip messages are JSON (a baked-in design
-rule). This is deliberate and, today, correct: the six kinds are tiny and infrequent (hex ids,
+rule). This is deliberate and, today, correct: the seven kinds are tiny and infrequent (hex ids,
 one signature, a few integers — the only large payload, the selfie, rides a Hypercore block, not
 gossip), so a binary encoding would save almost nothing on the wire; JSON stays trivially
 loggable for debugging a flooded mesh; and signature safety is **independent of the wire** —
@@ -261,10 +261,11 @@ a `wave-sync` (§7.4), so the newcomer's map _and_ wave state converge immediate
 
 ## 5. Gossip message catalog
 
-The protocol has **six** message kinds, all JSON objects on the one `hyperwave/gossip`
+The protocol has **seven** message kinds, all JSON objects on the one `hyperwave/gossip`
 channel per connection. Unknown `kind`s are ignored. `wave-announce` floods the whole
-directory; `wave-join`/`wave-start` flood only a wave's subscribers (§3, scaling.md
-Phase 3); `heartbeat`/`subs`/`wave-sync` are one-hop.
+directory; `wave-join`/`wave-start`/`wave-note` flood only a wave's subscribers (§3, scaling.md
+Phase 3), with `wave-note` additionally gated on roster membership; `heartbeat`/`subs`/`wave-sync`
+are one-hop.
 
 ### 5.0 Uniform message envelope
 
@@ -545,6 +546,31 @@ everyone else. When the paid-wave gate is enforced, a `wave-sync` must carry the
 `paid` proof (§9.0) **for either phase** — including `racing` — and is adopted only if it
 verifies (§11), so a fabricated racing sync can't push a newcomer into a bogus wave. (`paid`
 is omitted from the schema line above for brevity.)
+
+### wave-note — flooded (a roster member's authenticated broadcast)
+
+```json
+{
+  "kind": "wave-note",
+  "waveId": "<hex16>",
+  "note": {
+    /* opaque app payload, ≤ MAX_NOTE_BYTES (2 KB) — the engine doesn't interpret it */
+  }
+}
+```
+
+A **participant-only broadcast**: any roster member can flood an opaque `note` to a wave's
+subscribers, and the app owns the payload's meaning (the desktop's first use is a **tip
+announcement** — `{ kind: 'tip', to, peerId, amount, hash }` — so a tipped peer is notified and
+everyone sees the tip). The envelope `sig` proves `origin` authored it; the novel gate is that a
+peer **relays and processes a `wave-note` only if `origin` is in that wave's roster** (`wave.writers`
+— the credentialed participants). A peer that doesn't know the wave, or whose author isn't a
+participant, **drops it** (no relay, no process), so the flood dies at the edge of who can vouch for
+it and a non-participant can't inject notes onto a wave. Origination is gated the same way — the
+engine only sends a `wave-note` for a wave you actually joined. The `note` is size-capped
+(`isNote` ≤ `MAX_NOTE_BYTES`) so the primitive can't become a bulk-data channel, on top of the
+per-author flood cap + frame cap (§11). It's the engine's generic "authenticated broadcast from a
+participant" primitive; theme-specific meaning stays in the app.
 
 ## 6. The sweep
 

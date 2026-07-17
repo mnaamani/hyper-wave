@@ -14,7 +14,8 @@ const {
   makeWaveAnnounce,
   makeWaveJoin,
   makeWaveStart,
-  makeWaveSync
+  makeWaveSync,
+  makeWaveNote
 } = require('./messages');
 
 const PEER = 'ab'.repeat(32); // origin (author) — a 32-byte ring id in hex
@@ -398,11 +399,39 @@ test('unknown extra fields are tolerated (forward compat)', (t) => {
   t.ok(validGossip({ ...msg, futureField: 42 }));
 });
 
+test('wave-note carries an opaque, size-capped note object', (t) => {
+  t.ok(
+    validGossip(
+      flooded(makeWaveNote({ waveId: WAVE, note: { kind: 'tip', amount: 1 } }))
+    ),
+    'a small note object is accepted'
+  );
+  const base = { waveId: WAVE, note: {} };
+  t.absent(
+    validGossip(flooded({ ...makeWaveNote(base), note: undefined })),
+    'a missing note is rejected'
+  );
+  t.absent(
+    validGossip(flooded({ ...makeWaveNote(base), note: 'hi' })),
+    'a non-object note is rejected'
+  );
+  t.absent(
+    validGossip(flooded({ ...makeWaveNote(base), note: [1, 2, 3] })),
+    'an array note is rejected'
+  );
+  t.absent(
+    validGossip(
+      flooded(makeWaveNote({ waveId: WAVE, note: { blob: 'x'.repeat(4096) } }))
+    ),
+    'an oversized note (> MAX_NOTE_BYTES) is rejected'
+  );
+});
+
 test('the flooded/direct classification matches the kinds', (t) => {
   t.alike(
     [...FLOODED_KINDS].sort(),
-    ['wave-announce', 'wave-join', 'wave-start'],
-    'three flooded kinds'
+    ['wave-announce', 'wave-join', 'wave-note', 'wave-start'],
+    'four flooded kinds (incl. the roster-member wave-note broadcast)'
   );
   t.absent(FLOODED_KINDS.has('heartbeat'), 'heartbeat is one-hop');
   t.absent(FLOODED_KINDS.has('subs'), 'subs is one-hop');

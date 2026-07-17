@@ -5,7 +5,7 @@
 // → ring.scrubTo → featureByFrac) to browse — no auto-cycle. Selfies are always hopCount-ordered
 // (buildGallery), so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js';
-import { tip } from './ipc.js';
+import { tip, note } from './ipc.js';
 import { txLink } from './explorer.js';
 
 const progressEl = document.getElementById('progress');
@@ -21,6 +21,7 @@ let expected = 0;
 let active = false;
 let closed = false; // gallery view closed (a new wave's lobby/capture owns the ring centre)
 let myAddress = null; // my own wallet — never tip myself
+let lastTip = null; // the entry we just tipped (captured at click; announced on success)
 let pendingReplay = false; // replay requested but waiting for the first selfie (see startReplay)
 const shownKeys = new Set(); // waveId|peerId already featured
 
@@ -47,6 +48,14 @@ tipBtn.onclick = () => {
   }
   tipBtn.disabled = true;
   tipBtn.innerText = '💸 sending…';
+  // Remember the target now — by the time the result comes back the user may have scrubbed to
+  // another selfie. Used to announce the tip on the wave once it confirms (tipResult).
+  lastTip = {
+    waveId: featured.waveId,
+    peerId: featured.peerId,
+    address: featured.address,
+    amount: TIP_TRX
+  };
   tip(featured.address, TIP_TRX, featured.peerId);
 };
 
@@ -77,9 +86,21 @@ function feature(index) {
 export function tipResult({ hash, error }) {
   if (hash) {
     toastEl.replaceChildren('✅ tipped — ', txLink(hash));
+    // Announce the tip on the wave so the recipient (and everyone) sees it. Roster-gated in the
+    // engine — a no-op if we only spectated this wave (the on-chain tip still went through).
+    if (lastTip) {
+      note(lastTip.waveId, {
+        kind: 'tip',
+        to: lastTip.address,
+        peerId: lastTip.peerId,
+        amount: lastTip.amount,
+        hash
+      });
+    }
   } else {
     toastEl.textContent = `⚠️ tip failed: ${error || 'unknown'}`;
   }
+  lastTip = null;
   setTimeout(() => toastEl.replaceChildren(), 6000);
   refreshTip();
 }
