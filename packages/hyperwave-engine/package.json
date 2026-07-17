@@ -18,6 +18,7 @@
     "test": "bare test.js",
     "test:e2e:local": "node e2e/wave.local.e2e.js",
     "test:e2e:onchain": "node e2e/wave.onchain.e2e.js",
+    "test:e2e:cashu": "E2E_CASHU=1 node e2e/wave.cashu.e2e.js",
     "test:e2e:onchain:usdt": "node e2e/wave.usdt.onchain.e2e.js",
     "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/ring.js lib/attest.js lib/messages.js lib/sweep.js lib/feed.js lib/feed-crdt.js lib/flood.js lib/rate-limiter.js lib/peer-table.js lib/entry.js lib/wave.js lib/wallet.js lib/tron-wallet.js lib/tron-usdt-wallet.js lib/cashu-wallet.js lib/cashu-burn.js lib/nums.js lib/proof-store.js lib/bare-web-shims.js lib/payments.js lib/engine.js lib/rpc.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
   },

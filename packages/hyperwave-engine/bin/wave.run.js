@@ -183,12 +183,12 @@ async function joinAndBurn() {
   }
 }
 
-// env WALLET=1 -> bring up the WDK wallet and print address + balances (needs network).
-// WALLET_TYPE=usdt (+ USDT_CONTRACT=<addr>) -> use the USDT/TRC-20 wallet instead of native TRX
-// (the same seed/address holds both — USDT for fees, TRX for gas). TRON_NETWORK=<name> (nile
-// default, mainnet, shasta) + optional TRON_PROVIDER=<url> -> pick the network (mainnet = real
-// funds). WALLET_FEE=<amt> -> override the participation fee. WALLET_SEND=<addr>:<amt> -> also do a
-// one-off transfer (funded wallets only).
+// env WALLET=1 -> bring up the wallet and print address + balances (needs network).
+// WALLET_TYPE=usdt (+ USDT_CONTRACT=<addr>) -> the USDT/TRC-20 wallet instead of native TRX.
+// WALLET_TYPE=cashu (+ CASHU_MINT=<url>, default testnut; WALLET_FUND=<sats> -> mint that many
+// sats up front so the paid gate has balance) -> the Cashu (ecash) wallet. TRON_NETWORK=<name>
+// (nile default, mainnet, shasta) + optional TRON_PROVIDER=<url> -> pick the Tron network.
+// WALLET_FEE=<amt> -> override the participation fee. WALLET_SEND=<addr>:<amt> -> a one-off transfer.
 if (env.WALLET) {
   const walletLog = (...args) => console.log(`[${name}] wallet`, ...args);
   const walletOpts = {
@@ -198,20 +198,36 @@ if (env.WALLET) {
     fee: env.WALLET_FEE ? Number(env.WALLET_FEE) : undefined, // -> default fee
     log: walletLog
   };
-  const ready =
-    env.WALLET_TYPE === 'usdt'
-      ? require('../lib/tron-usdt-wallet.js').createTronUsdtWallet({
-          ...walletOpts,
-          usdtContract: env.USDT_CONTRACT
-        })
-      : require('../lib/tron-wallet.js').createPayments(walletOpts);
+  const walletFactories = {
+    usdt: () =>
+      require('../lib/tron-usdt-wallet.js').createTronUsdtWallet({
+        ...walletOpts,
+        usdtContract: env.USDT_CONTRACT
+      }),
+    cashu: () =>
+      require('../lib/cashu-wallet.js').createCashuWallet({
+        ...walletOpts,
+        mint: env.CASHU_MINT // undefined -> the wallet's default test mint
+      })
+  };
+  const makeWallet = walletFactories[env.WALLET_TYPE];
+  const ready = makeWallet
+    ? makeWallet()
+    : require('../lib/tron-wallet.js').createPayments(walletOpts);
   ready
     .then(async (pay) => {
+      // A Cashu wallet starts empty (ecash is held locally) — mint up front so the paid gate has
+      // balance. testnut auto-pays; a real mint would return an invoice to settle. Done BEFORE
+      // `payments` is set so the START gate (which keys on `payments`) can't arm on an empty wallet.
+      if (env.WALLET_FUND && typeof pay.fund === 'function') {
+        const funded = await pay.fund(Number(env.WALLET_FUND));
+        console.log(`[${name}] WALLET FUNDED minted=${funded.minted}`);
+      }
       payments = pay;
-      wireWallet(wave, pay); // paid-wave gate (on-chain burn verifier)
+      wireWallet(wave, pay); // paid-wave gate (burn verifier)
       const b = await pay.balances();
-      // The on-chain e2e matches `WALLET T… amount=`: `amount` is the fee-currency balance and
-      // `unit` its label (TRX / USDT / …). The `pay.type` disambiguates the payment mechanism.
+      // The on-chain e2e matches `WALLET … amount=`: `amount` is the fee-currency balance and
+      // `unit` its label (TRX / USDT / sat). The `pay.type` disambiguates the payment mechanism.
       console.log(
         `[${name}] WALLET ${b.address} amount=${b.amount} unit=${b.unit} type=${pay.type} storage=${absStorageDir}`
       );
