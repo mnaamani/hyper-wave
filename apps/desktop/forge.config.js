@@ -178,6 +178,17 @@ module.exports = {
       childProcess.execSync(`node "${nsfwBuild}" "${buildPath}"`, {
         stdio: 'inherit'
       });
+      // Rebuild the QR bundle fresh into the packaged tree too (wallet top-up invoice QR).
+      const qrBuild = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'scripts',
+        'build-qr.mjs'
+      );
+      childProcess.execSync(`node "${qrBuild}" "${buildPath}"`, {
+        stdio: 'inherit'
+      });
     },
     readPackageJson: async (forgeConfig, packageJson) => {
       if (process.env.UPGRADE_KEY) {

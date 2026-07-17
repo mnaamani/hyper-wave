@@ -7,7 +7,7 @@
     "apps/*"
   ],
   "scripts": {
-    "postinstall": "node scripts/fix-bare-engines.js && node scripts/patch-secret-stream.js && node scripts/build-nsfw.mjs",
+    "postinstall": "node scripts/fix-bare-engines.js && node scripts/patch-secret-stream.js && node scripts/build-nsfw.mjs && node scripts/build-qr.mjs",
     "test": "npm test -w hyperwave-engine",
     "test:e2e:local": "npm run test:e2e:local -w hyperwave-engine",
     "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-engine",
@@ -34,6 +34,7 @@
     "lunte": "^1.6.0",
     "prettier": "^3.8.1",
     "prettier-config-holepunch": "^2.0.0",
+    "qrcode-generator": "^1.5.2",
     "typescript": "^5.4.5"
   },
   "license": "Apache-2.0",

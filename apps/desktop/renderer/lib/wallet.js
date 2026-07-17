@@ -14,6 +14,7 @@ import {
   fundWallet
 } from './ipc.js';
 import { isCashu, unitLabel, activeMint } from './wallet-meta.js';
+import { qrDataUrl } from './qr.js';
 import { openAddress, txLink } from './explorer.js';
 
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage';
@@ -53,6 +54,9 @@ const sendAmountInput = document.getElementById('send-amount');
 const sendBtn = document.getElementById('send-btn');
 const sendStatusEl = document.getElementById('send-status');
 const accountSelect = document.getElementById('wallet-account');
+const topupEl = document.getElementById('wallet-topup');
+const topupQrEl = document.getElementById('topup-qr');
+const topupCloseBtn = document.getElementById('topup-close');
 
 // Icon + label per kind of outgoing tx the app itself makes (worker events).
 const SENT_META = {
@@ -273,6 +277,8 @@ function open() {
 }
 function close() {
   viewEl.classList.remove('show');
+  topupEl.classList.remove('show'); // don't leave a stale invoice QR on reopen
+  topupQrEl.removeAttribute('src');
 }
 openBtn.onclick = open;
 closeBtn.onclick = close;
@@ -348,14 +354,32 @@ export function fundResult({ minted, invoice, amount, error }) {
     return;
   }
   if (invoice) {
-    // Not auto-paid (a real LN mint): copy the bolt11 + hand it to the OS's Lightning handler.
-    // (prompt()/alert() are blocked in the sandboxed renderer, so never use them.)
+    // Not auto-paid (a real LN mint): copy the bolt11, hand it to the OS's Lightning handler, AND
+    // show a QR so a wallet on ANOTHER device (a phone) can scan it. (prompt()/alert() are blocked
+    // in the sandboxed renderer — never use them.)
     window.bridge.copyText(invoice);
     window.bridge.openExternal('lightning:' + invoice);
-    faucetBtn.textContent = `📋 invoice copied — pay to add ${amount} sat`;
+    faucetBtn.textContent = `📋 invoice copied — add ${amount} sat`;
     setTimeout(() => (faucetBtn.textContent = '⬆ Top up'), 6000);
+    showTopupQr(invoice);
   }
 }
+
+// Render the invoice as a scannable QR in the modal. Fails soft — if the QR bundle isn't available
+// the invoice was still copied + handed to the OS handler above.
+async function showTopupQr(invoice) {
+  const dataUrl = await qrDataUrl(invoice);
+  if (!dataUrl) {
+    return;
+  }
+  topupQrEl.src = dataUrl;
+  topupEl.classList.add('show');
+}
+
+topupCloseBtn.onclick = () => {
+  topupEl.classList.remove('show');
+  topupQrEl.removeAttribute('src');
+};
 
 // --- send TRX ---------------------------------------------------------------
 // A plain transfer to any address — mainly to fund another peer's wallet (replacing the

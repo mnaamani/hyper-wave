@@ -303,6 +303,33 @@
       #wallet-send.show {
         display: block;
       }
+      #wallet-topup {
+        display: none;
+        margin-top: 12px;
+        text-align: center;
+      }
+      #wallet-topup.show {
+        display: block;
+      }
+      #wallet-topup .topup-title {
+        font-size: 13px;
+        color: #cfeeda;
+        margin-bottom: 8px;
+      }
+      #topup-qr {
+        width: 200px;
+        height: 200px;
+        image-rendering: pixelated; /* keep the QR modules crisp when scaled */
+        background: #fff; /* quiet zone must be light for scanners */
+        border-radius: 8px;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      #topup-hint {
+        font-size: 11px;
+        color: #8fbfa0;
+        margin: 8px 0;
+      }
       #wallet-send input {
         font-family: ui-monospace, Menlo, monospace;
         font-size: 13px;
@@ -769,6 +796,15 @@
             <button id="send-btn" class="pill send-go">Send</button>
           </div>
           <div id="send-status"></div>
+        </div>
+        <!-- top-up QR: shown when a (real-mint) top-up returns a bolt11 invoice to pay -->
+        <div id="wallet-topup">
+          <div class="topup-title">⚡ Top-up invoice — scan or pay</div>
+          <img id="topup-qr" alt="Lightning invoice QR code" />
+          <div id="topup-hint">
+            Scan with a Lightning wallet (also copied to your clipboard).
+          </div>
+          <button id="topup-close" class="pill">Done</button>
         </div>
         <div class="wallet-section">Transactions (this session)</div>
         <div id="wallet-txs"></div>
