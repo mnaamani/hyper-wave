@@ -49,7 +49,7 @@ function beginCapture() {
   setDim(false);
   ring.stopSweep();
   gallery.cancelReplay();
-  gallery.clearView();
+  gallery.close();
   lobby.close();
   proof.open(Math.max(0, state.lobbyDeadline - performance.now()));
 }
@@ -137,11 +137,12 @@ const EVENT_HANDLERS = {
     hud.waveStatus(''); // clear the previous wave's narration; this wave's fills in below
     gallery.hideProgress();
     if (evt.mine) {
-      // initiator: kicking off leaves the old gallery behind — close its view now, then
-      // capture once the wave is live (immediately if paid, else wait for wave-verified)
+      // initiator: kicking off leaves the old gallery behind — close its view now (and keep it
+      // closed through paying/capture so a lingering feed can't repaint behind the capture modal),
+      // then capture once the wave is live (immediately if paid, else wait for wave-verified)
       ring.stopSweep();
       gallery.cancelReplay();
-      gallery.clearView();
+      gallery.close();
       setDim(false);
       if (evt.paid === 'verified') {
         beginCapture();
@@ -206,11 +207,14 @@ const EVENT_HANDLERS = {
 
   'wave-active': (evt) => {
     hud.showStart(false);
-    gallery.setExpected(evt.count || 1);
-    gallery.setActive(true);
     setDim(false); // wave is racing — restore the ring (lobby may have timed out still dimmed)
     lobby.close();
-    proof.captureAndStage(); // snap + stage the lobby selfie, then free the centre
+    // Free the ring centre FIRST (snap + stage the lobby selfie, then close the capture modal),
+    // THEN reopen the gallery for the racing wave — so the gallery can't repaint behind a still-open
+    // capture in the gap.
+    proof.captureAndStage();
+    gallery.setExpected(evt.count || 1);
+    gallery.setActive(true);
     hud.waveStatus(
       evt.joined
         ? '📸 captured - here comes the wave!'

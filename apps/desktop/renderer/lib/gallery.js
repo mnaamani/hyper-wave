@@ -19,6 +19,7 @@ let items = [];
 let centerIdx = 0;
 let expected = 0;
 let active = false;
+let closed = false; // gallery view closed (a new wave's lobby/capture owns the ring centre)
 let myAddress = null; // my own wallet — never tip myself
 let pendingReplay = false; // replay requested but waiting for the first selfie (see startReplay)
 const shownKeys = new Set(); // waveId|peerId already featured
@@ -55,6 +56,9 @@ export function count() {
 
 export function setActive(on) {
   active = on;
+  // Any wave-lifecycle transition (racing → true, idle → false) means the forming/capture stage is
+  // over and the ring centre is the gallery's again — reopen it (close() sets this while capturing).
+  closed = false;
   updateProgress();
 }
 
@@ -107,8 +111,8 @@ export function cancelReplay() {
   pendingReplay = false;
 }
 
-// Close the gallery view entirely: drop the previous wave's selfies + centre image. Used when
-// this peer leaves the old gallery to take part in a new wave (initiator kick-off, or on join).
+// Drop the previous wave's selfies + centre image. Used when this peer leaves the old gallery to
+// take part in a new wave (initiator kick-off, or on join).
 export function clearView() {
   items = [];
   centerIdx = 0;
@@ -116,6 +120,16 @@ export function clearView() {
   pendingReplay = false;
   ring.setCenter(null);
   hideProgress();
+  refreshTip(); // no featured selfie now → hide the tip button (don't leave it over the capture)
+}
+
+// Close the gallery view: clear it AND stop rendering feed updates until the wave next races/idles
+// (setActive reopens it). The lobby/capture now owns the ring centre, and a lingering wave's feed
+// keeps ticking (the engine re-emits every held wave's feed periodically), so without this a stale
+// selfie would repaint onto the canvas BEHIND the capture modal. Called when we open the capture.
+export function close() {
+  clearView();
+  closed = true;
 }
 
 // Per-frame callback from the sweep: feature the last selfie whose seat the ball has passed.
@@ -140,6 +154,11 @@ function featureByFrac(frac, origin) {
 ring.onSweepFrame(featureByFrac);
 
 export function handle(newItems) {
+  // Closed (a new wave's lobby/capture owns the centre): ignore feed repaints so a lingering wave's
+  // periodic re-emit can't paint a selfie behind the capture modal. setActive() reopens.
+  if (closed) {
+    return;
+  }
   // during collection (before the replay), feature the newest arrival (highest unseen hop)
   let jumpTo = -1;
   let jumpHop = -Infinity;
