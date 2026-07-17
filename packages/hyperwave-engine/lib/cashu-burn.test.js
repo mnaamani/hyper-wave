@@ -4,7 +4,7 @@
 const test = require('brittle');
 const { installBareWebShims } = require('./bare-web-shims');
 const { numsBurnPubkey } = require('./nums');
-const { verifyBurnProofs, burnTags } = require('./cashu-burn');
+const { verifyBurnProofs, burnTags, p2pkLockPubkey } = require('./cashu-burn');
 const { burnMemo } = require('./payments');
 
 installBareWebShims();
@@ -88,5 +88,22 @@ test('verifyBurnProofs accepts an honest burn and rejects tampering', async (t) 
       .reason,
     'no-proofs',
     'an empty token is rejected'
+  );
+});
+
+test('p2pkLockPubkey reads the lock target (the received-tip guard)', async (t) => {
+  const cashu = await import('@cashu/cashu-ts');
+  const recipient = '02' + 'b'.repeat(64);
+  const locked = cashu.createP2PKsecret(recipient, []);
+  t.is(
+    p2pkLockPubkey(locked, cashu),
+    recipient,
+    'returns the pubkey a P2PK secret is locked to'
+  );
+  // A plain (non-P2PK) secret is just a random hex string — not a lock.
+  t.is(
+    p2pkLockPubkey('deadbeef', cashu),
+    null,
+    'a non-P2PK secret has no lock target'
   );
 });

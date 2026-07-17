@@ -60,4 +60,28 @@ function burnTags(memo) {
   return [[MEMO_TAG_KEY, memo]];
 }
 
-module.exports = { verifyBurnProofs, burnTags, MEMO_TAG_KEY };
+/**
+ * The P2PK pubkey a proof's secret is locked to, or null if the secret is not a
+ * P2PK lock. Used to confirm a received tip token is locked to us before we
+ * redeem it (a clean error beats a failed swap), and it's pure/unit-testable.
+ * @param {string} secret - The proof secret string.
+ * @param {Object} cashu - The cashu-ts module (getSecretKind/parseP2PKSecret/getSecretData).
+ * @returns {string|null} The locked pubkey (hex), or null if not P2PK.
+ */
+function p2pkLockPubkey(secret, cashu) {
+  try {
+    if (cashu.getSecretKind(secret) !== 'P2PK') {
+      return null;
+    }
+    return cashu.getSecretData(cashu.parseP2PKSecret(secret)).data || null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = {
+  verifyBurnProofs,
+  burnTags,
+  p2pkLockPubkey,
+  MEMO_TAG_KEY
+};

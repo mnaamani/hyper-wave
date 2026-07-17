@@ -322,7 +322,14 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
    - `fix-bare-engines` extended: also normalizes a `node` engines range that
      Bare's emulated node (20.0.0) fails to satisfy (cashu-ts needs `>=22.4.0`) —
      otherwise the desktop crashes under pear-runtime on cashu-ts import.
-3. **Part 3 tips + multimint** — send/receive/consolidate + the multimint spike.
-   (`send` exists; `receive` + cross-mint consolidate still to build.)
+3. ✅ **Part 3 tips + multimint** (wallet level) — `send` (P2PK-lock to
+   recipient), `receive` (P2PK-unlock a tip into the store, with an offline
+   not-locked-to-us guard), `consolidate` (melt-at-source → mint-at-home). Pure
+   `p2pkLockPubkey` guard unit-tested; `spike/cashu/multimint.mjs` smokes the
+   tip send→receive roundtrip + guard over the network. _(done)_
+   - **Cross-mint consolidation can't be smoked on fake mints** (testnut has no
+     real Lightning to route between mints) — the code path is built and the
+     no-op path verified; true settlement needs two LN-connected mints.
+   - Tip **delivery** (carrying the token in a `wave-note`) is Part 4 (desktop).
 4. **Part 4 desktop** — inject as default, mint picker, top-up UX, proof store.
 5. **Part 6/7** — e2e verify + docs. Flip the desktop default to Cashu.

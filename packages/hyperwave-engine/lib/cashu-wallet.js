@@ -16,7 +16,7 @@ const { Wallet } = require('./wallet');
 const { installBareWebShims } = require('./bare-web-shims');
 const { numsBurnPubkey } = require('./nums');
 const { ProofStore } = require('./proof-store');
-const { verifyBurnProofs, burnTags } = require('./cashu-burn');
+const { verifyBurnProofs, burnTags, p2pkLockPubkey } = require('./cashu-burn');
 
 // The on-the-wire payment-mechanism id. Generic (NOT per-mint): every
 // Lightning-connected Cashu peer interoperates regardless of its chosen mint —
@@ -186,8 +186,9 @@ class CashuWallet extends Wallet {
 
   // Send `amountSats` to `recipientPubkey`: swap home proofs into a token
   // P2PK-locked to the recipient (only they can redeem). Returns { hash } where
-  // `hash` is the encoded token (the bearer receipt the host delivers). The
-  // change stays in the store. (Cross-mint redeem on the recipient side is PR-2.)
+  // `hash` is the encoded token (the bearer receipt the host delivers, e.g. in a
+  // wave-note tip). The change stays in the store. Safe to broadcast — the P2PK
+  // lock means only the recipient can redeem it.
   async send(recipientPubkey, amountSats) {
     const token = await this.#lockedSend({
       amount: amountSats,
@@ -196,6 +197,107 @@ class CashuWallet extends Wallet {
       kind: 'send'
     });
     return { hash: token };
+  }
+
+  // Redeem a token that was P2PK-locked to THIS wallet's identity (a received
+  // tip): swap it into proofs we control, held under the token's source mint (it
+  // may be a foreign mint — consolidate() moves it home). Signs the P2PK lock
+  // with our identity key. Returns { amount, mint }. Rejects a token not locked
+  // to us (a clean error rather than a failed swap).
+  async receive(token) {
+    const mintUrl = this.#cashu.getTokenMetadata(token).mint;
+    const wallet = await this.#foreignWallet(mintUrl);
+    const keysetIds = (await wallet.mint.getKeySets()).keysets.map(
+      (keyset) => keyset.id
+    );
+    const decoded = this.#cashu.getDecodedToken(token, keysetIds);
+    for (const proof of decoded.proofs) {
+      const lock = p2pkLockPubkey(proof.secret, this.#cashu);
+      if (lock && lock !== this.#identityPub) {
+        return { amount: 0, mint: mintUrl, error: 'not-locked-to-us' };
+      }
+    }
+    const received = await wallet.receive(token, {
+      privkey: this.#identityPriv
+    });
+    this.#store.add(mintUrl, received);
+    const amount = Number(this.#cashu.sumProofs(received));
+    this.#store.addHistory({
+      kind: 'receive',
+      amount,
+      to: this.#identityPub,
+      memo: '',
+      token: '',
+      timestamp: null
+    });
+    this.#log('received', amount, 'sat from', mintUrl);
+    return { amount, mint: mintUrl };
+  }
+
+  // Multimint swap: move proofs held at a FOREIGN mint to the home mint over
+  // Lightning (melt at the source paying a home-mint invoice, then mint at home),
+  // so the whole balance is redeemable/cashable in one place. Requires BOTH mints
+  // to have real Lightning connectivity (the source can pay the home invoice) —
+  // it will NOT settle against fake test mints. Nets slightly less (LN routing +
+  // mint fees). Returns { moved, fee } (moved = sats credited at home).
+  async consolidate({ sourceMint } = {}) {
+    await this.#ensureLoaded();
+    const sources = sourceMint
+      ? [sourceMint]
+      : this.#store.mints().filter((mint) => mint !== this.#mintUrl);
+    let moved = 0;
+    let fee = 0;
+    for (const source of sources) {
+      const result = await this.#swapMintToHome(source);
+      moved += result.moved;
+      fee += result.fee;
+    }
+    return { moved, fee };
+  }
+
+  // Melt the proofs held at `sourceMint` and re-mint them at the home mint. The
+  // home mint issues an invoice for the net amount; the source mint pays it.
+  async #swapMintToHome(sourceMint) {
+    if (sourceMint === this.#mintUrl) {
+      return { moved: 0, fee: 0 }; // already home — nothing to swap
+    }
+    const sourceProofs = this.#store.get(sourceMint);
+    const available = Number(this.#cashu.sumProofs(sourceProofs));
+    if (available === 0) {
+      return { moved: 0, fee: 0 };
+    }
+    const source = await this.#foreignWallet(sourceMint);
+    // Mint at home for the net amount; a melt quote tells us the LN fee reserve,
+    // so pick the largest amount whose (amount + fee_reserve) fits `available`.
+    let mintAmount = available;
+    let mintQuote = await this.#wallet.createMintQuoteBolt11(mintAmount);
+    let meltQuote = await source.createMeltQuoteBolt11(mintQuote.request);
+    if (meltQuote.amount + meltQuote.fee_reserve > available) {
+      mintAmount = available - meltQuote.fee_reserve;
+      if (mintAmount <= 0) {
+        return { moved: 0, fee: 0 };
+      }
+      mintQuote = await this.#wallet.createMintQuoteBolt11(mintAmount);
+      meltQuote = await source.createMeltQuoteBolt11(mintQuote.request);
+    }
+    const melt = await source.meltProofsBolt11(meltQuote, sourceProofs);
+    this.#store.set(sourceMint, melt.change || []);
+    const minted = await this.#wallet.mintProofsBolt11(
+      mintAmount,
+      mintQuote.quote
+    );
+    this.#store.add(this.#mintUrl, minted);
+    const moved = Number(this.#cashu.sumProofs(minted));
+    this.#store.addHistory({
+      kind: 'consolidate',
+      amount: moved,
+      to: this.#mintUrl,
+      memo: sourceMint,
+      token: '',
+      timestamp: null
+    });
+    this.#log('consolidated', moved, 'sat', sourceMint, '->', this.#mintUrl);
+    return { moved, fee: meltQuote.fee_reserve };
   }
 
   // Burn `amountSats`: swap home proofs into a token P2PK-locked to the NUMS burn
