@@ -347,9 +347,25 @@ faucetBtn.onclick = () => {
   window.bridge.openExternal(NILE_FAUCET_URL);
 };
 
-// Worker reply to a top-up (fund-wallet). testnut auto-pays → minted>0 and the balance rises; a
-// real LN mint returns an `invoice` to pay externally.
-export function fundResult({ minted, invoice, amount, error }) {
+// Worker replies to a top-up (fund-wallet), in two phases:
+//   1. `pending` (immediate): the invoice is ready — show the QR NOW (don't wait for payment).
+//   2. final: `minted > 0` once paid+minted (balance rises), or minted:0 if the poll gave up, or
+//      an `error`. testnut auto-pays so phase 2 lands ~1-2s after phase 1; a real mint waits for
+//      you to scan + pay.
+export function fundResult({ minted, invoice, amount, error, pending }) {
+  if (pending) {
+    // The invoice exists — surface it immediately (copy + OS handler + QR). The background poll
+    // keeps running; the button is free again (the invoice is now displayed).
+    faucetBtn.disabled = false;
+    faucetBtn.textContent = '⬆ Top up';
+    if (invoice) {
+      window.bridge.copyText(invoice);
+      window.bridge.openExternal('lightning:' + invoice);
+      showTopupQr(invoice);
+    }
+    return;
+  }
+  // Final result.
   faucetBtn.disabled = false;
   faucetBtn.textContent = '⬆ Top up';
   if (error) {
@@ -358,20 +374,11 @@ export function fundResult({ minted, invoice, amount, error }) {
     return;
   }
   if (minted > 0) {
-    hideTopup(); // auto-paid (test mint) — no invoice to show; the balance just rose
-    refreshWallet(); // balance rises — pull it now
+    hideTopup(); // paid + minted — the balance just rose
+    refreshWallet();
     return;
   }
-  if (invoice) {
-    // Not auto-paid (a real LN mint): copy the bolt11, hand it to the OS's Lightning handler, AND
-    // show a QR so a wallet on ANOTHER device (a phone) can scan it. (prompt()/alert() are blocked
-    // in the sandboxed renderer — never use them.)
-    window.bridge.copyText(invoice);
-    window.bridge.openExternal('lightning:' + invoice);
-    faucetBtn.textContent = `📋 invoice copied — add ${amount} sat`;
-    setTimeout(() => (faucetBtn.textContent = '⬆ Top up'), 6000);
-    showTopupQr(invoice);
-  }
+  hideTopup(); // poll gave up (unpaid within the window) — the invoice was copyable meanwhile
 }
 
 // Render the invoice as a scannable QR in the modal. Fails soft — if the QR bundle isn't available

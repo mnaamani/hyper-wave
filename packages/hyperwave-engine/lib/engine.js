@@ -255,7 +255,19 @@ function createEngine({
       return;
     }
     try {
-      const result = await payments.fund(amount);
+      // The invoice is ready before payment — emit it as a `pending` fund-result so the host shows
+      // the QR immediately; fund() keeps polling + mints in the background, then we emit the final
+      // result (minted) + refresh the balance.
+      const result = await payments.fund(amount, {
+        onInvoice: (invoice) =>
+          emit({
+            type: 'fund-result',
+            id: command.id,
+            pending: true,
+            invoice,
+            amount
+          })
+      });
       emit({ type: 'fund-result', id: command.id, ...result });
       pushBalance?.();
     } catch (err) {

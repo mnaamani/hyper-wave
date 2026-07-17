@@ -118,13 +118,18 @@ class CashuWallet extends Wallet {
 
   // Fund the wallet by minting `amountSats` at the home mint: request a bolt11
   // mint quote, wait for it to be paid, then mint the proofs into the store.
-  // Returns `{ amount, minted, invoice }` — `invoice` is the bolt11 to pay when
-  // the mint is NOT an auto-paying test mint (a real LN-connected mint; the
-  // desktop surfaces it as a QR — plan Part 4). On an auto-paying test mint the
-  // poll resolves on its own. Throws if the quote never settles.
-  async fund(amountSats) {
+  // Resolves `{ amount, minted, invoice }` once minted (or when the poll times
+  // out, minted:0). The bolt11 `invoice` is available the moment the quote is
+  // created — long BEFORE payment — so `opts.onInvoice(invoice)` is called
+  // immediately, letting a host show a QR right away while this keeps polling +
+  // mints in the background. (A headless caller just `await`s and ignores
+  // onInvoice — the blocking contract is unchanged.)
+  async fund(amountSats, { onInvoice } = {}) {
     await this.#ensureLoaded();
     const quote = await this.#wallet.createMintQuoteBolt11(amountSats);
+    if (onInvoice) {
+      onInvoice(quote.request); // the invoice exists now — surface it before waiting
+    }
     const paid = await this.#awaitQuotePaid(quote.quote);
     if (!paid) {
       return { amount: amountSats, minted: 0, invoice: quote.request };
@@ -148,15 +153,16 @@ class CashuWallet extends Wallet {
   }
 
   // Poll a mint quote until PAID/ISSUED (bounded). Auto-paying test mints settle
-  // within a second; a real invoice settles when the payer pays it.
+  // within a second; a real invoice settles when the payer scans + pays it — so
+  // the window is generous (a paid quote resolves early, it doesn't wait it out).
   async #awaitQuotePaid(quoteId) {
     const states = this.#cashu.MintQuoteState;
-    for (let attempt = 0; attempt < 12; attempt++) {
+    for (let attempt = 0; attempt < 90; attempt++) {
       const quote = await this.#wallet.checkMintQuoteBolt11(quoteId);
       if (quote.state === states.PAID || quote.state === states.ISSUED) {
         return true;
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     return false;
   }

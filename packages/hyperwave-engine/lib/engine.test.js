@@ -515,8 +515,11 @@ function mintPayMock(opts = {}) {
     address: 'cashupub',
     mintUrl: opts.mint || 'https://mint.default',
     balances: async () => ({ address: 'cashupub', amount: 0, unit: 'sat' }),
-    fund: async (amount) => {
+    fund: async (amount, { onInvoice } = {}) => {
       calls.funded.push(amount);
+      if (onInvoice) {
+        onInvoice('lnbc-' + amount); // surface the invoice immediately (before payment)
+      }
       return { amount, minted: 1, invoice: 'lnbc-' + amount };
     },
     receive: async (token) => {
@@ -581,11 +584,25 @@ test('mint wallet: mint rides the wallet msg; set-wallet-options / fund / redeem
     'the wallet msg reflects the new mint'
   );
 
-  // fund → fund-result with the invoice
+  // fund → an immediate `pending` fund-result with the invoice (for the QR), then a final one
   engine.exec({ type: 'fund-wallet', amount: 32 });
   await settle();
-  const funded = sent.find((msg) => msg.type === 'fund-result' && !msg.error);
-  t.is(funded.invoice, 'lnbc-32', 'fund-wallet returns the bolt11 invoice');
+  const pendingFund = sent.find(
+    (msg) => msg.type === 'fund-result' && msg.pending
+  );
+  t.is(
+    pendingFund.invoice,
+    'lnbc-32',
+    'the invoice is emitted immediately (pending) so the host can show a QR'
+  );
+  const settledFund = sent.find(
+    (msg) => msg.type === 'fund-result' && !msg.error && !msg.pending
+  );
+  t.is(
+    settledFund.minted,
+    1,
+    'the final fund-result reports the minted proofs'
+  );
 
   // redeem a received token → redeem-result
   engine.exec({ type: 'redeem', token: 'sometoken' });
