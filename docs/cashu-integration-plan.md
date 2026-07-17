@@ -340,5 +340,10 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
    recipient `redeem`s it); chain-only UI hidden for Cashu. main.js persists the
    chosen mint (`cashu.mint`). _(done — GUI end-to-end still to verify on a
    display: two live desktop peers, a paid Cashu wave, a tip that redeems.)_
-5. **Part 6/7** — e2e verify (GUI + a headless two-peer paid-wave check) + docs
-   (protocol.md payments §, idea.md money model, CLAUDE.md, a cashu doc).
+5. ✅ **Part 6/7** — a **headless two-peer paid-wave e2e** on Cashu
+   (`npm run test:e2e:cashu`, gated `E2E_CASHU=1`) passes over a local DHT +
+   testnut: fund → paid gate → paid join → feed converges to 2 (~37s). Docs done:
+   protocol.md §2.3/§9 (rename + mechanism note), `apps/docs/cashu.md`, CLAUDE.md,
+   idea.md, docs/README.md. _(done — the only remaining item is the **GUI**
+   end-to-end on a display: two live desktop peers, a paid Cashu wave, a redeeming
+   tip; can't run headless here.)_
