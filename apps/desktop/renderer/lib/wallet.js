@@ -348,8 +348,12 @@ export function fundResult({ minted, invoice, amount, error }) {
     return;
   }
   if (invoice) {
-    // Not auto-paid: show the invoice so the user can pay it from any Lightning wallet.
-    window.prompt(`Pay this bolt11 to add ${amount} sat:`, invoice);
+    // Not auto-paid (a real LN mint): copy the bolt11 + hand it to the OS's Lightning handler.
+    // (prompt()/alert() are blocked in the sandboxed renderer, so never use them.)
+    window.bridge.copyText(invoice);
+    window.bridge.openExternal('lightning:' + invoice);
+    faucetBtn.textContent = `📋 invoice copied — pay to add ${amount} sat`;
+    setTimeout(() => (faucetBtn.textContent = '⬆ Top up'), 6000);
   }
 }
 

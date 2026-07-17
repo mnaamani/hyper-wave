@@ -13,6 +13,15 @@
 // are kept (a wallet view shows a recent window, full history isn't the store's job).
 const MAX_HISTORY = 200;
 
+// Sum the `amount` of a list of proofs (0 for a missing/empty list).
+function sumList(list) {
+  let sum = 0;
+  for (const proof of list || []) {
+    sum += Number(proof.amount) || 0;
+  }
+  return sum;
+}
+
 /**
  * A persistent per-mint proof store backing a CashuWallet.
  */
@@ -123,11 +132,19 @@ class ProofStore {
   total() {
     let sum = 0;
     for (const list of this.#byMint.values()) {
-      for (const proof of list) {
-        sum += Number(proof.amount) || 0;
-      }
+      sum += sumList(list);
     }
     return sum;
+  }
+
+  /**
+   * The amount held at a single mint (what's spendable there — burns/tips draw
+   * from the active mint, so this is the wallet's headline balance).
+   * @param {string} mintUrl - The mint URL.
+   * @returns {number} The total held at that mint.
+   */
+  totalFor(mintUrl) {
+    return sumList(this.#byMint.get(mintUrl) || []);
   }
 
   /**

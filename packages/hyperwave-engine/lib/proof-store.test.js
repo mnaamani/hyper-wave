@@ -21,6 +21,8 @@ test('proofs persist per mint across restarts, and total sums across mints', (t)
   store.add(MINT_A, [proof(2), proof(8)]);
   store.add(MINT_B, [proof(5)]);
   t.is(store.total(), 15, 'total sums proofs across all mints');
+  t.is(store.totalFor(MINT_A), 10, 'totalFor is the active mint only');
+  t.is(store.totalFor('https://unknown'), 0, 'totalFor of an unheld mint is 0');
   t.alike(store.mints().sort(), [MINT_A, MINT_B].sort(), 'tracks both mints');
 
   // A fresh instance over the same file sees the persisted proofs.

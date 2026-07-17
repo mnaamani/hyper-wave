@@ -174,12 +174,15 @@ class CashuWallet extends Wallet {
     return wallet;
   }
 
-  // The spendable balance = the local proof total (no network; the store IS the
-  // balance). Cross-mint proofs are summed together.
+  // The headline balance = ecash held at the ACTIVE mint (no network; the store IS
+  // the balance). Burns/tips draw from the active mint, so this is what's spendable
+  // right now — and it changes when the mint switches. Proofs held at OTHER mints
+  // (e.g. a tip received on a foreign mint) aren't counted here until consolidate()
+  // moves them home.
   async balances() {
     return {
       address: this.#identityPub,
-      amount: this.#store.total(),
+      amount: this.#store.totalFor(this.#mintUrl),
       unit: CASHU_UNIT
     };
   }
