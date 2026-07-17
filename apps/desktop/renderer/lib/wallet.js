@@ -56,6 +56,7 @@ const sendStatusEl = document.getElementById('send-status');
 const accountSelect = document.getElementById('wallet-account');
 const topupEl = document.getElementById('wallet-topup');
 const topupQrEl = document.getElementById('topup-qr');
+const topupHintEl = document.getElementById('topup-hint');
 const topupCloseBtn = document.getElementById('topup-close');
 
 // Icon + label per kind of outgoing tx the app itself makes (worker events).
@@ -67,6 +68,7 @@ const SENT_META = {
 
 let walletAddress = ''; // full address, for copy + faucet + explorer links
 let activeAccount = 0; // the active BIP-44 account index (multi-account wallet)
+let topupInvoice = ''; // the bolt11 currently shown as a QR (click the QR to re-copy it)
 const txById = new Map(); // hash -> { hash, dir, icon, label, amount, ts } — merged history
 
 // Worker `wallet` message (address + balance + which account): keep the modal live whether open or
@@ -372,13 +374,26 @@ async function showTopupQr(invoice) {
   if (!dataUrl) {
     return;
   }
+  topupInvoice = invoice;
   topupQrEl.src = dataUrl;
   topupEl.classList.add('show');
 }
 
+// Click the QR to copy the invoice to the clipboard again (handy if the initial copy was lost).
+topupQrEl.onclick = () => {
+  if (!topupInvoice) {
+    return;
+  }
+  window.bridge.copyText(topupInvoice);
+  const previous = topupHintEl.textContent;
+  topupHintEl.textContent = '📋 invoice copied to clipboard';
+  setTimeout(() => (topupHintEl.textContent = previous), 2000);
+};
+
 topupCloseBtn.onclick = () => {
   topupEl.classList.remove('show');
   topupQrEl.removeAttribute('src');
+  topupInvoice = '';
 };
 
 // --- send TRX ---------------------------------------------------------------

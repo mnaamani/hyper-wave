@@ -324,6 +324,7 @@
         border-radius: 8px;
         padding: 8px;
         box-sizing: border-box;
+        cursor: pointer; /* click to re-copy the invoice */
       }
       #topup-hint {
         font-size: 11px;
@@ -800,7 +801,11 @@
         <!-- top-up QR: shown when a (real-mint) top-up returns a bolt11 invoice to pay -->
         <div id="wallet-topup">
           <div class="topup-title">⚡ Top-up invoice — scan or pay</div>
-          <img id="topup-qr" alt="Lightning invoice QR code" />
+          <img
+            id="topup-qr"
+            alt="Lightning invoice QR code"
+            title="Click to copy the invoice to the clipboard"
+          />
           <div id="topup-hint">
             Scan with a Lightning wallet (also copied to your clipboard).
           </div>
