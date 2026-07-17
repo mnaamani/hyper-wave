@@ -8,13 +8,14 @@
   ],
   "scripts": {
     "postinstall": "node scripts/fix-bare-engines.js && node scripts/patch-secret-stream.js && node scripts/build-nsfw.mjs && node scripts/build-qr.mjs",
-    "test": "npm test -w hyperwave-engine",
+    "test": "npm test -w hyperwave-engine && npm test -w hyperwave-wallet-tron && npm test -w hyperwave-wallet-cashu",
     "test:e2e:local": "npm run test:e2e:local -w hyperwave-engine",
     "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-engine",
     "test:e2e:onchain:usdt": "npm run test:e2e:onchain:usdt -w hyperwave-engine",
+    "test:e2e:cashu": "npm run test:e2e:cashu -w hyperwave-engine",
     "start": "npm start -w hyperwave-desktop --",
     "make": "npm run make -w hyperwave-desktop",
-    "lint": "prettier --check . && lunte packages apps/desktop scripts && eslint . && npm run lint:jsdoc -w hyperwave-engine",
+    "lint": "prettier --check . && lunte packages apps/desktop scripts && eslint . && npm run lint:jsdoc -w hyperwave-engine && npm run lint:jsdoc -w hyperwave-wallet-tron && npm run lint:jsdoc -w hyperwave-wallet-cashu",
     "format": "prettier --write . && lunte --fix packages apps/desktop scripts"
   },
   "overrides": {

@@ -200,12 +200,12 @@ if (env.WALLET) {
   };
   const walletFactories = {
     usdt: () =>
-      require('../lib/tron-usdt-wallet.js').createTronUsdtWallet({
+      require('hyperwave-wallet-tron').createTronUsdtWallet({
         ...walletOpts,
         usdtContract: env.USDT_CONTRACT
       }),
     cashu: () =>
-      require('../lib/cashu-wallet.js').createCashuWallet({
+      require('hyperwave-wallet-cashu').createCashuWallet({
         ...walletOpts,
         mint: env.CASHU_MINT // undefined -> the wallet's default test mint
       })
@@ -213,7 +213,7 @@ if (env.WALLET) {
   const makeWallet = walletFactories[env.WALLET_TYPE];
   const ready = makeWallet
     ? makeWallet()
-    : require('../lib/tron-wallet.js').createPayments(walletOpts);
+    : require('hyperwave-wallet-tron').createPayments(walletOpts);
   ready
     .then(async (pay) => {
       // A Cashu wallet starts empty (ecash is held locally) — mint up front so the paid gate has

@@ -5,7 +5,7 @@ const test = require('brittle');
 const { installBareWebShims } = require('./bare-web-shims');
 const { numsBurnPubkey } = require('./nums');
 const { verifyBurnProofs, burnTags, p2pkLockPubkey } = require('./cashu-burn');
-const { burnMemo } = require('./payments');
+const { burnMemo } = require('hyperwave-engine');
 
 installBareWebShims();
 

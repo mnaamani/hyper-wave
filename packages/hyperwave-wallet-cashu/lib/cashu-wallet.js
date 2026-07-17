@@ -12,7 +12,7 @@
 // mint is loaded lazily (first network op) so construction stays offline.
 const fs = require('bare-fs');
 const b4a = require('b4a');
-const { Wallet } = require('./wallet');
+const { Wallet } = require('hyperwave-engine');
 const { installBareWebShims } = require('./bare-web-shims');
 const { numsBurnPubkey } = require('./nums');
 const { ProofStore } = require('./proof-store');

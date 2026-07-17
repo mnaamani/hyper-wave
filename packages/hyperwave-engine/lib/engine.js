@@ -8,7 +8,6 @@
 // (so the engine is unit-testable without a real swarm or a wallet). Unit-tested in engine.test.js.
 const path = require('bare-path');
 const { createWave, parseBootstrap } = require('./wave');
-const { createPayments } = require('./tron-wallet'); // the default wallet (deps can override)
 const { payFee, confirmBurn, wireWallet } = require('./payments');
 
 /**
@@ -45,7 +44,7 @@ const { payFee, confirmBurn, wireWallet } = require('./payments');
  * @param {EngineConfig} [options.config] - Host-supplied engine configuration.
  * @param {(msg: Object) => void} options.emit - Callback the engine calls to raise messages to the host.
  * @param {(...args: any[]) => void} [options.log] - Logger callback.
- * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories (tests / a custom wallet). `deps.createPayments` is an `async () => Wallet` returning any `Wallet` (wallet.js) subclass — an app supplies its own payment mechanism here.
+ * @param {{createWave?: Function, createPayments?: Function}} [options.deps] - Injected factories. `deps.createPayments` is an `async (opts) => Wallet` returning any `Wallet` (wallet.js) subclass — the engine ships NO wallet, so a host supplies one (e.g. `hyperwave-wallet-cashu`/`hyperwave-wallet-tron`); with none, it runs wallet-less.
  * @param {Object} [options.swarm] - An existing Hyperswarm the host already owns; the engine shares it instead of creating one (correct when the app also uses Hyperswarm — one instance per process) and NEVER destroys it. A live object, so it is passed here, not in the JSON `config`.
  * @returns {Engine} The engine handle (`exec`, `close`).
  */
@@ -58,7 +57,11 @@ function createEngine({
   swarm
 }) {
   const makeWave = deps.createWave || createWave;
-  const makePayments = deps.createPayments || createPayments;
+  // The engine ships NO wallet — payments are opt-in. A host injects a Wallet factory via
+  // `deps.createPayments` (e.g. `require('hyperwave-wallet-cashu').createCashuWallet` or
+  // `require('hyperwave-wallet-tron').createPayments`). With none, the engine runs wallet-less
+  // (join-attestation feed, no burns / paid-gate / tips) — the same as `config.wallet: false`.
+  const makePayments = deps.createPayments;
 
   // Log the resolved storage dir up front — every host routes through here, so this is the one
   // line that always tells you which dir this engine (and its wallet.seed) is really using. A
@@ -182,7 +185,7 @@ function createEngine({
     tBalance = setTimeout(balanceTick, 15000);
   }
 
-  if (config.wallet !== false) {
+  if (config.wallet !== false && makePayments) {
     activateWallet(activeAccount).catch((err) => {
       log('[wallet] init failed:', err.message);
       emit({ type: 'wallet', error: err.message }); // surface to the host (mobile has no console)

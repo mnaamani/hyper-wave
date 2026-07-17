@@ -126,13 +126,18 @@ module.exports = {
     // engines so pear-runtime's bare-semver doesn't choke on the freshly-installed tree.
     packageAfterCopy: async (_forgeConfig, buildPath) => {
       const childProcess = require('child_process');
-      const coreDir = path.resolve(
-        __dirname,
-        '..',
-        '..',
-        'packages',
-        'hyperwave-engine'
-      );
+      const packagesDir = path.resolve(__dirname, '..', '..', 'packages');
+      const coreDir = path.join(packagesDir, 'hyperwave-engine');
+      // Workspace packages the app depends on — rewritten to file: links so the fresh production
+      // install in the bundle resolves them from the monorepo (they aren't published).
+      const workspaceLinks = {
+        'hyperwave-engine': coreDir,
+        'hyperwave-wallet-cashu': path.join(
+          packagesDir,
+          'hyperwave-wallet-cashu'
+        ),
+        'hyperwave-wallet-tron': path.join(packagesDir, 'hyperwave-wallet-tron')
+      };
       const shim = path.resolve(
         __dirname,
         '..',
@@ -149,7 +154,12 @@ module.exports = {
       );
       const pjPath = path.join(buildPath, 'package.json');
       const packageJson = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
-      packageJson.dependencies['hyperwave-engine'] = 'file:' + coreDir;
+      // Point every workspace dep the app declares at its file: link (only those present).
+      for (const [name, dir] of Object.entries(workspaceLinks)) {
+        if (packageJson.dependencies[name]) {
+          packageJson.dependencies[name] = 'file:' + dir;
+        }
+      }
       delete packageJson.devDependencies;
       fs.writeFileSync(pjPath, JSON.stringify(packageJson, null, 2));
       childProcess.execSync(

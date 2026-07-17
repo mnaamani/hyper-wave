@@ -13,6 +13,9 @@ const path = require('bare-path');
 const FramedStream = require('framed-stream');
 const { createEngine } = require('../lib/engine');
 const { serveEngine } = require('../lib/rpc');
+// The engine ships no wallet — this host picks one. Mobile uses the WDK Tron wallet (its verified
+// path); a separate package, so it's a host (bundle) dependency, not an engine one.
+const { createPayments } = require('hyperwave-wallet-tron');
 
 // On mobile the process cwd is the (read-only) app bundle, so a relative storageDir like
 // 'hyperwave' resolves somewhere bare-fs can't write — Corestore then fails with "Corestore is
@@ -39,6 +42,7 @@ const seam = serveEngine({
       engine = createEngine({
         storageDir: resolveStorage(command.storageDir),
         config: command.config || {},
+        deps: { createPayments }, // inject the Tron wallet (engine ships none)
         emit: seam.emit // engine -> RN: raised over the seam's EVENT channel
       });
       seam.attach(engine);

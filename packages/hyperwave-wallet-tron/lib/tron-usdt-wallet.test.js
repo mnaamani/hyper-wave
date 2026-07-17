@@ -5,7 +5,7 @@
 //   bare lib/tron-usdt-wallet.test.js   (or `npm test`)
 const test = require('brittle');
 const fs = require('bare-fs');
-const { Wallet } = require('./wallet');
+const { Wallet } = require('hyperwave-engine');
 const { TronWallet } = require('./tron-wallet');
 const {
   TronUsdtWallet,

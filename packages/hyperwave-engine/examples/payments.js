@@ -3,7 +3,7 @@
 // network. This example derives + prints the address and attempts a balance read (which
 // needs network + a funded wallet to be interesting). Run:  bare examples/payments.js
 const fs = require('bare-fs');
-const { createPayments } = require('hyperwave-engine');
+const { createPayments } = require('hyperwave-wallet-tron'); // the Tron wallet (a separate package)
 
 async function main() {
   const dir = '/tmp/hw-example-wallet-' + Date.now();

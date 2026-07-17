@@ -12,8 +12,10 @@
 const FramedStream = require('framed-stream');
 const goodbye = require('graceful-goodbye');
 const env = require('bare-env');
-const { createEngine, createCashuWallet } = require('hyperwave-engine');
+const { createEngine } = require('hyperwave-engine');
 const { serveEngine } = require('hyperwave-engine/lib/rpc');
+// The engine ships no wallet — the desktop host picks Cashu (a separate package).
+const { createCashuWallet } = require('hyperwave-wallet-cashu');
 
 const pipe = new FramedStream(Bare.IPC);
 

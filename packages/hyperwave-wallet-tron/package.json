@@ -1,0 +1,28 @@
+{
+  "name": "hyperwave-wallet-tron",
+  "version": "0.2.0",
+  "description": "HyperWave Tron wallet: self-custodial WDK Tron (native TRX + TRC-20 USDT) implementations of the hyperwave-engine Wallet interface, runs under Bare.",
+  "license": "Apache-2.0",
+  "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mnaamani/hyper-wave.git"
+  },
+  "homepage": "https://github.com/mnaamani/hyper-wave#readme",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "bare test.js",
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/tron-wallet.js lib/tron-usdt-wallet.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+  },
+  "dependencies": {
+    "@tetherto/wdk": "^1.0.0-beta.13",
+    "@tetherto/wdk-wallet-tron": "^1.0.0-beta.8",
+    "b4a": "^1.8.1",
+    "bare-fs": "^4.7.4",
+    "hyperwave-engine": "^0.2.0"
+  },
+  "devDependencies": {
+    "brittle": "^4.0.2"
+  }
+}
