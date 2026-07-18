@@ -35,7 +35,14 @@ function getWindowsKitVersion() {
 let packagerConfig = {
   icon: 'build/icon',
   protocols: [{ name: appName, schemes: [pkg.name] }],
-  derefSymlinks: true
+  derefSymlinks: true,
+  // This app lives in an npm workspace, so its third-party runtime deps are hoisted to the REPO
+  // ROOT node_modules — apps/desktop/node_modules is nearly empty. electron-packager's default
+  // prune step walks the production dependency tree from this app dir (flora-colossus) to decide
+  // what to keep, and throws "Failed to locate module" on every hoisted dep. Disable it: copy
+  // node_modules verbatim (tiny here), then the packageAfterCopy hook below assembles the real
+  // self-contained production install inside the bundle.
+  prune: false
 };
 
 if (process.env.MAC_CODESIGN_IDENTITY) {
@@ -138,6 +145,13 @@ module.exports = {
         ),
         'hyperwave-wallet-tron': path.join(packagesDir, 'hyperwave-wallet-tron')
       };
+      // The abstract Wallet interface is NOT a direct dep of the app, but the concrete wallets
+      // (cashu/tron) depend on hyperwave-wallet@^0.2.0, which is unpublished. Add it as a
+      // top-level file: dep so the bundle's standalone install resolves it locally and npm
+      // dedups it to satisfy the wallets' transitive requirement (0.2.0 satisfies ^0.2.0) —
+      // no registry fetch, and node finds it at the top level at runtime, which is what the
+      // wallets need.
+      const walletInterfaceDir = path.join(packagesDir, 'hyperwave-wallet');
       const shim = path.resolve(
         __dirname,
         '..',
@@ -160,6 +174,9 @@ module.exports = {
           packageJson.dependencies[name] = 'file:' + dir;
         }
       }
+      // Add the transitive interface package as a top-level file: dep (see above) so the
+      // wallets' unpublished hyperwave-wallet requirement resolves locally.
+      packageJson.dependencies['hyperwave-wallet'] = 'file:' + walletInterfaceDir;
       delete packageJson.devDependencies;
       fs.writeFileSync(pjPath, JSON.stringify(packageJson, null, 2));
       childProcess.execSync(
@@ -220,6 +237,25 @@ module.exports = {
         recursive: true,
         force: true
       });
+
+      // The dmg maker loads native addons (macos-alias + fs-xattr, via appdmg) under the Node
+      // running `make`. If those were last built against a different Node ABI (e.g. installed
+      // under a different Volta/nvm version), the maker throws NODE_MODULE_VERSION mismatch.
+      // Self-heal: rebuild them against the current Node before the maker loads them. Best-effort
+      // — if the rebuild can't run, warn and let the maker try the existing binary.
+      if (process.platform === 'darwin') {
+        try {
+          require('child_process').execSync(
+            'npm rebuild macos-alias fs-xattr',
+            { cwd: path.resolve(__dirname, '..', '..'), stdio: 'inherit' }
+          );
+        } catch (err) {
+          console.warn(
+            '[preMake] could not rebuild dmg native addons:',
+            err.message
+          );
+        }
+      }
 
       const manifest = path.join(__dirname, 'build', 'AppxManifest.xml');
       const msixVersion = pkg.version.replace(/^(\d+\.\d+\.\d+)$/, '$1.0');
