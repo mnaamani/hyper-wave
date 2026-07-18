@@ -402,7 +402,7 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
 — headless/tests — enforcement is off and waves announce immediately, unpaid.)
 
 **Payment-mechanism type (`walletType`).** The engine talks to payments through an abstract
-`Wallet` interface (a base class in `wallet.js`), so an app can plug in its own wallet — a
+`Wallet` interface (a base class in the `hyperwave-wallet` package), so an app can plug in its own wallet — a
 different chain, a custodial service, a mock. Each wallet declares a `type` id (the default Tron
 wallet is `"tron-nile"`). A **paid** wave carries its initiator's `walletType` on `wave-announce`
 (and `wave-start`/`wave-sync`), authenticated by the envelope `sig` (§5.0). A joiner can only pay
@@ -912,7 +912,7 @@ paid-wave gate, §9.3), and a **join** burn gates whether peers will ingest that
 feed core (the ingest gate, §8.2). (Wire details: the paid-wave gate on
 `wave-announce`/`wave-start`/`wave-sync` §5; the ingest gate rides `wave-join` §8.2.)
 
-**The payment mechanism is pluggable** (the abstract `Wallet` interface, wallet.js). This
+**The payment mechanism is pluggable** (the abstract `Wallet` interface, the `hyperwave-wallet` package). This
 section describes the flow with the default **Tron** wallet (native TRX burned to a black-hole
 address, verified on-chain). A second mechanism, **Cashu** (Chaumian ecash on a Lightning-connected
 mint — the desktop default), maps every concept below onto ecash: the black-hole address becomes a

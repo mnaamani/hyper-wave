@@ -24,10 +24,12 @@ The reusable, theme-agnostic P2P engine.
 
 ## Wallets (`packages/hyperwave-wallet-*/`)
 
-Concrete `Wallet` implementations, each its own package so the engine (and its
-consumers) carry no payment deps. A host injects one via
+The payment abstraction, split from the engine so it (and its consumers) carry no
+payment deps. A host injects a concrete wallet via
 `createEngine({ deps: { createPayments } })`.
 
+- **`hyperwave-wallet`** — the abstract `Wallet` base class (the pluggable payment
+  interface a concrete wallet implements and the engine composes over). No deps.
 - **`hyperwave-wallet-cashu`** — Chaumian ecash on a Lightning mint (the desktop
   default). See [cashu.md](../apps/docs/cashu.md).
 - **`hyperwave-wallet-tron`** — WDK self-custodial Tron: native TRX + TRC-20 USDT.

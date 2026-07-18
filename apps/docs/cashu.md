@@ -1,7 +1,7 @@
 # Cashu payments (the desktop default)
 
 HyperWave's payment layer is pluggable (the abstract `Wallet` interface,
-`packages/hyperwave-engine/lib/wallet.js`). The **desktop default** is **Cashu** —
+`packages/hyperwave-wallet/lib/wallet.js`). The **desktop default** is **Cashu** —
 Chaumian ecash on a Lightning-connected mint — implemented in its own package,
 **`packages/hyperwave-wallet-cashu/`** (the engine ships no wallet; a host injects
 one via `createEngine({ deps: { createPayments: createCashuWallet } })`). The Tron
