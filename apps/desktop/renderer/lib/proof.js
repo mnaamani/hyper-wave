@@ -93,6 +93,11 @@ function capture() {
     snapCtx.scale(-1, 1);
     snapCtx.drawImage(preview, -snap.width, 0, snap.width, snap.height);
     snapCtx.restore();
+    // Privacy: the frame is drawn from a live getUserMedia stream (raw pixels, no
+    // metadata) and re-encoded here through the canvas. A canvas JPEG carries only pixel
+    // data + a minimal JFIF header — no EXIF, GPS, device, OS, or timestamp tags. This
+    // re-encode IS the metadata strip; keep capture on this path (never post a camera
+    // file/blob directly) so nothing identifying can ride along with the selfie.
     image = snap.toDataURL('image/jpeg', 0.5);
   }
   stageSelfie({ image, caption: captionEl.value });
