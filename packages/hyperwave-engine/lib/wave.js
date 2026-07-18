@@ -57,7 +57,8 @@ const {
   makeWaveJoin,
   makeWaveStart,
   makeWaveSync,
-  makeWaveNote
+  makeWaveNote,
+  makeDirectedNote
 } = require('./messages');
 const { Flood } = require('./flood');
 const { RateLimiter, KeyedRateLimiter } = require('./rate-limiter');
@@ -163,6 +164,11 @@ const CLOCK_SKEW_MS = 60000; // 1 min
 // The burnTs is part of the signed burn tuple, so it can't be back-dated without the initiator's
 // key. Generous clock-skew allowance (peers aren't time-synchronized).
 const MAX_KICKOFF_AGE_MS = 300000; // 5 min
+// Directed-note (wave-dm) dial fallback: how long to keep a joinPeer dial + its queued notes alive
+// waiting for the connection, and how many notes to hold per peer (bounds a stuck dial). A note
+// still undelivered when the dial times out is dropped (the recipient is unreachable).
+const DM_DIAL_TIMEOUT_MS = 20000; // 20 s
+const DM_MAX_QUEUED = 8; // per peer
 
 /**
  * Short 8-char prefix of a hex id, for readable logs.
@@ -381,6 +387,11 @@ function createWave({
   // (via `subs`) — I forward a wave's join/start/sync only to neighbours whose set contains it.
   const neighborSubs = new Map(); // connId -> Set<waveId>
   const subTopics = new Set(); // waveIds whose sub-topic I've swarm.join()'d (subscribed waves)
+  // Directed-note (wave-dm) delivery: when I want to unicast to a peer I have no direct channel to,
+  // I swarm.joinPeer() to dial it and queue the note here; onConnection flushes the queue for that
+  // peer. `dmDialed` tracks peers I joinPeer'd so close() can leavePeer them. Bounded per peer.
+  const pendingDm = new Map(); // toId -> Array<{ waveId, note }> awaiting a connection
+  const dmDialed = new Set(); // peer ids I swarm.joinPeer()'d for a directed note
 
   // Wave lifecycle, MULTIPLEXED: idle -> lobby -> racing -> idle, per wave. `waves` holds every
   // currently-engaged wave keyed by its id; each WaveState owns its own timers, EntryPipeline,
@@ -540,6 +551,10 @@ function createWave({
     }
     if (msg.kind === 'wave-sync') {
       handleWaveSync(msg);
+      return;
+    }
+    if (msg.kind === 'wave-dm') {
+      handleDirectedNote(msg);
       return;
     }
     // Flooded control kinds (announce / join / start): process once, relay on first sight.
@@ -816,6 +831,26 @@ function createWave({
     });
   }
 
+  /**
+   * A peer sent me a DIRECTED note (wave-dm), unicast over a direct connection. The envelope sig is
+   * already verified and the identity rule (handleGossip) already forced sender==origin, so this is
+   * an authenticated 1:1 message. Ignore it unless it's actually addressed to me (`to`), then surface
+   * it as a `dm` event. No roster gate: a directed note may come from a non-participant (e.g. a
+   * spectator tipping) — authenticity is the envelope, delivery is 1:1 + rate-limited, so it's bounded.
+   * @param {Object} msg A wave-dm message (origin = the sender, to = me).
+   */
+  function handleDirectedNote(msg) {
+    if (msg.to !== me.id) {
+      return; // not addressed to me (misrouted) — drop
+    }
+    emitEvent({
+      event: 'dm',
+      waveId: msg.waveId,
+      from: msg.origin,
+      note: msg.note
+    });
+  }
+
   // --- gossip transport (one channel per connection; wave gossip scoped by subs) ----
   // Every message I ORIGINATE is sealed with the uniform envelope here (origin = me, ts = now,
   // sig by my ring key) — the single signing choke point. Relays forward the sealed frame
@@ -971,6 +1006,83 @@ function createWave({
         )
       )
     );
+  }
+
+  /**
+   * Unicast a DIRECTED note (wave-dm) to one peer. Sends over an existing direct channel if I have
+   * one (the common case — roster peers share the wave sub-topic mesh); otherwise dials the peer
+   * (swarm.joinPeer) and queues the note until the connection opens (onConnection flushes it). Not
+   * flooded, so it never touches the mesh — only the recipient sees it. A no-op self-send is dropped.
+   * @param {Object} fields
+   * @param {string} fields.waveId The wave the note relates to (context).
+   * @param {string} fields.to The recipient's ring id (hex Noise public key).
+   * @param {Object} fields.note The opaque app payload (≤ MAX_NOTE_BYTES).
+   * @returns {boolean} True if sent or queued for delivery; false if it couldn't be attempted.
+   */
+  function sendDirect({ waveId, to, note }) {
+    if (!to || to === me.id) {
+      return false; // no recipient / would be a self-send
+    }
+    const send = table.senderOf(to);
+    if (send) {
+      try {
+        send(JSON.stringify(originate(makeDirectedNote({ waveId, to, note }))));
+      } catch {}
+      return true;
+    }
+    return dialForDm(to, { waveId, note });
+  }
+
+  /**
+   * No direct channel to `to` yet: dial it (swarm.joinPeer) and queue the note; onConnection flushes
+   * the queue when the connection opens. A per-peer cap bounds a stuck dial; a timeout drops the
+   * queue (and stops dialing) if the peer never connects — an unreachable recipient.
+   * @param {string} to The recipient's ring id (= its Noise public key, hex).
+   * @param {{ waveId: string, note: Object }} entry The queued note.
+   * @returns {boolean} True if queued for a dial.
+   */
+  function dialForDm(to, entry) {
+    const queue = pendingDm.get(to) || [];
+    if (queue.length >= DM_MAX_QUEUED) {
+      queue.shift(); // drop the oldest — bound the backlog for a stuck dial
+    }
+    queue.push(entry);
+    pendingDm.set(to, queue);
+    if (!dmDialed.has(to)) {
+      dmDialed.add(to);
+      try {
+        swarm.joinPeer(b4a.from(to, 'hex')); // directed dial (DHT lookup + hole-punch)
+      } catch {}
+      setTimeout(() => clearDmDial(to), DM_DIAL_TIMEOUT_MS);
+    }
+    return true;
+  }
+
+  /** Flush any queued directed notes to a peer that just connected (onConnection). */
+  function flushPendingDm(id, send) {
+    const queue = pendingDm.get(id);
+    if (!queue) {
+      return;
+    }
+    pendingDm.delete(id);
+    for (const { waveId, note } of queue) {
+      try {
+        send(
+          JSON.stringify(originate(makeDirectedNote({ waveId, to: id, note })))
+        );
+      } catch {}
+    }
+    clearDmDial(id); // delivered (or dropped) — stop holding the dial open
+  }
+
+  /** Drop a directed-dial's queue + leavePeer it (timeout, delivery, or close). */
+  function clearDmDial(to) {
+    pendingDm.delete(to);
+    if (dmDialed.delete(to)) {
+      try {
+        swarm.leavePeer(b4a.from(to, 'hex'));
+      } catch {}
+    }
   }
 
   /**
@@ -1929,6 +2041,7 @@ function createWave({
 
     const send = (str) => message.send(str);
     table.onConnect(id, send); // lift any churn cooldown, seat it, remember the channel
+    flushPendingDm(id, send); // deliver any directed notes queued while we dialed this peer
 
     // greet: my heartbeat (liveness + tag) so the newcomer seats me, and my subscription set so it
     // knows which waves' control gossip to forward here (Phase 3 scoping). Both are sealed
@@ -2010,6 +2123,7 @@ function createWave({
     setTag,
     stageEntry,
     note: broadcastNote,
+    dm: sendDirect, // unicast a directed note to one peer (private counterpart of note)
     // Wire the payment layer once the wallet is up: my address (for feed tips / attestations), the
     // on-chain burn verifier (enables the paid-wave anti-spam gate), and my wallet TYPE (rides my
     // waves' announces so joiners can decide whether they support the payment mechanism).
@@ -2044,6 +2158,14 @@ function createWave({
         } catch {}
       }
       channels.clear();
+      // Release any directed-note dials (swarm.joinPeer) we opened but never resolved.
+      for (const to of [...dmDialed]) {
+        try {
+          swarm.leavePeer(b4a.from(to, 'hex'));
+        } catch {}
+      }
+      dmDialed.clear();
+      pendingDm.clear();
       if (ownsSwarm) {
         await swarm.destroy(); // we made it → tear it down (closes every connection)
       } else {

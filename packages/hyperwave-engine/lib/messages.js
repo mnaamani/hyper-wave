@@ -17,7 +17,7 @@
 /**
  * Any gossip message: the envelope (`origin`/`ts`/`sig`) + `kind` + that kind's payload (protocol.md §5).
  * @typedef {Object} GossipMessage
- * @property {string} kind - The message kind (one of the six below).
+ * @property {string} kind - The message kind (one of those defined below).
  * @property {string} [origin] - The author's ring id (hex); stamped by wave.js at origination.
  * @property {number} [ts] - The author's timestamp (ms); enables the receive-edge age bound.
  * @property {string} [sig] - The envelope signature by `origin` (attest.signMessage / verifyMessage).
@@ -220,7 +220,12 @@ const VALIDATORS = {
   // (the app owns its meaning; a tip announcement is the first use). Flooded to the wave's
   // subscribers, but relayed/processed ONLY when `origin` is a roster member (wave.js) — so a
   // non-participant can't inject notes onto a wave. `origin` (envelope) is the author.
-  'wave-note': (msg) => isWaveId(msg.waveId) && isNote(msg.note)
+  'wave-note': (msg) => isWaveId(msg.waveId) && isNote(msg.note),
+
+  // wave-dm: an authenticated DIRECTED message to one peer (`to`). Unicast (NOT in FLOODED_KINDS, so
+  // no `mid`); the receive edge's identity rule then forces sender==origin (no relay). `origin`
+  // (envelope) is the sender, `to` the recipient's ring id. Private counterpart of wave-note.
+  'wave-dm': (msg) => isWaveId(msg.waveId) && isId(msg.to) && isNote(msg.note)
 };
 
 /**
@@ -410,6 +415,22 @@ function makeWaveNote({ waveId, note }) {
   return { kind: 'wave-note', waveId, note };
 }
 
+/**
+ * Build a wave-dm: an authenticated DIRECTED message to ONE peer (`to`), sent unicast over a direct
+ * connection — NOT flooded (no `mid`), so the receive edge's identity rule requires sender==origin
+ * (no relay). The private counterpart of wave-note: same opaque size-capped `note`, but only the
+ * addressee sees it. Its first use is delivering a Cashu tip token privately (vs. flooding a bearer
+ * token + the tip social-graph). `origin` (the envelope) is the sender; `to` is the recipient's id.
+ * @param {Object} fields - The directed-note fields.
+ * @param {string} fields.waveId - The wave the message relates to (context).
+ * @param {string} fields.to - The recipient's ring id (hex).
+ * @param {Object} fields.note - Opaque app payload (the app owns its meaning; ≤ MAX_NOTE_BYTES).
+ * @returns {GossipMessage} The wave-dm message (pre-envelope).
+ */
+function makeDirectedNote({ waveId, to, note }) {
+  return { kind: 'wave-dm', waveId, to, note };
+}
+
 module.exports = {
   FLOODED_KINDS,
   MAX_WRITERS,
@@ -421,5 +442,6 @@ module.exports = {
   makeWaveJoin,
   makeWaveStart,
   makeWaveSync,
-  makeWaveNote
+  makeWaveNote,
+  makeDirectedNote
 };

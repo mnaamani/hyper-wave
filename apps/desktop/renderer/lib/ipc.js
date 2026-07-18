@@ -60,6 +60,10 @@ export const tip = (to, amount, peerId) => send('tip', { to, amount, peerId });
 // the recipient (and everyone) sees it. Only broadcasts if this peer is a participant of the wave.
 export const note = (waveId, payload) =>
   send('note', { waveId, note: payload });
+// Directed (unicast) note to one peer — the private counterpart of `note`. Used to deliver a Cashu
+// tip token to just the recipient instead of flooding it (privacy). `to` is the recipient's ring id.
+export const dm = (waveId, to, payload) =>
+  send('dm', { waveId, to, note: payload });
 export const sendTrx = (to, amount) => send('send-trx', { to, amount });
 export const refreshWallet = () => send('refresh-wallet');
 // Multi-account wallet: list the derivable accounts (for the picker) + switch the active one

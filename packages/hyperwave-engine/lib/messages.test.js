@@ -15,7 +15,8 @@ const {
   makeWaveJoin,
   makeWaveStart,
   makeWaveSync,
-  makeWaveNote
+  makeWaveNote,
+  makeDirectedNote
 } = require('./messages');
 
 const PEER = 'ab'.repeat(32); // origin (author) — a 32-byte ring id in hex
@@ -427,6 +428,32 @@ test('wave-note carries an opaque, size-capped note object', (t) => {
   );
 });
 
+test('wave-dm is a directed note: waveId + recipient id + opaque note', (t) => {
+  t.ok(
+    validGossip(
+      sealed(
+        makeDirectedNote({ waveId: WAVE, to: OTHER, note: { kind: 'tip' } })
+      )
+    ),
+    'a directed note to a valid recipient is accepted'
+  );
+  const base = { waveId: WAVE, to: OTHER, note: {} };
+  t.absent(
+    validGossip(sealed({ ...makeDirectedNote(base), to: undefined })),
+    'a missing recipient (to) is rejected'
+  );
+  t.absent(
+    validGossip(sealed({ ...makeDirectedNote(base), to: 'nothex' })),
+    'a non-id recipient is rejected'
+  );
+  t.absent(
+    validGossip(sealed({ ...makeDirectedNote(base), note: 'hi' })),
+    'a non-object note is rejected'
+  );
+  // Unicast: NOT flooded, so it must NOT be treated as needing a mid.
+  t.absent(FLOODED_KINDS.has('wave-dm'), 'wave-dm is unicast (no mid)');
+});
+
 test('the flooded/direct classification matches the kinds', (t) => {
   t.alike(
     [...FLOODED_KINDS].sort(),
@@ -436,4 +463,5 @@ test('the flooded/direct classification matches the kinds', (t) => {
   t.absent(FLOODED_KINDS.has('heartbeat'), 'heartbeat is one-hop');
   t.absent(FLOODED_KINDS.has('subs'), 'subs is one-hop');
   t.absent(FLOODED_KINDS.has('wave-sync'), 'wave-sync is unicast');
+  t.absent(FLOODED_KINDS.has('wave-dm'), 'wave-dm is unicast');
 });

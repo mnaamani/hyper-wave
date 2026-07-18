@@ -38,6 +38,10 @@ function fakeWave() {
       calls.push(['note', input]);
       return true;
     },
+    dm: (input) => {
+      calls.push(['dm', input]);
+      return true;
+    },
     setWallet: (addr) => calls.push(['setWallet', addr]),
     close: async () => calls.push('close')
   };
@@ -83,15 +87,29 @@ test('the engine routes commands to the wave protocol and forwards its events to
   engine.exec({ type: 'stage-entry', entry: 'data:image/jpeg;base64,xxx' });
   engine.exec({ type: 'start-wave' });
   engine.exec({ type: 'note', waveId: 'w1', note: { kind: 'tip', amount: 1 } });
+  engine.exec({
+    type: 'dm',
+    waveId: 'w1',
+    to: 'cd'.repeat(32),
+    note: { kind: 'tip', token: 'cashuB…' }
+  });
   t.alike(
     wave.calls,
     [
       ['setTag', 'JP'],
       ['stageEntry', 'data:image/jpeg;base64,xxx'],
       'startWave',
-      ['note', { waveId: 'w1', note: { kind: 'tip', amount: 1 } }]
+      ['note', { waveId: 'w1', note: { kind: 'tip', amount: 1 } }],
+      [
+        'dm',
+        {
+          waveId: 'w1',
+          to: 'cd'.repeat(32),
+          note: { kind: 'tip', token: 'cashuB…' }
+        }
+      ]
     ],
-    'set-tag / stage-entry / start-wave / note routed to the wave protocol'
+    'set-tag / stage-entry / start-wave / note / dm routed to the wave protocol'
   );
 
   // a typo'd / unknown command surfaces an error instead of silently no-op'ing, and doesn't

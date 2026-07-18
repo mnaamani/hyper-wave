@@ -5,7 +5,7 @@
 // → ring.scrubTo → featureByFrac) to browse — no auto-cycle. Selfies are always hopCount-ordered
 // (buildGallery), so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js';
-import { tip, note } from './ipc.js';
+import { tip, note, dm } from './ipc.js';
 import { unitLabel, isCashu } from './wallet-meta.js';
 import { classify as classifyNsfw } from './nsfw.js';
 import { txLink } from './explorer.js';
@@ -150,16 +150,28 @@ export function tipResult({ hash, error }) {
     } else {
       toastEl.replaceChildren('✅ tipped — ', txLink(hash));
     }
-    // Announce the tip on the wave so the recipient (and everyone) sees it. Roster-gated in the
-    // engine — a no-op if we only spectated this wave (the on-chain tip still went through).
     if (lastTip) {
-      note(lastTip.waveId, {
-        kind: 'tip',
-        to: lastTip.address,
-        peerId: lastTip.peerId,
-        amount: lastTip.amount,
-        hash
-      });
+      if (isCashu()) {
+        // Cashu: deliver the bearer token PRIVATELY (unicast to the recipient) so the token + the
+        // who-tipped-whom don't hit the flood — Chaumian privacy at the network layer too. Then a
+        // STRIPPED social-proof note (no token, no recipient) for the gallery celebration.
+        dm(lastTip.waveId, lastTip.peerId, {
+          kind: 'tip',
+          token: hash,
+          amount: lastTip.amount
+        });
+        note(lastTip.waveId, { kind: 'tip', amount: lastTip.amount });
+      } else {
+        // Chain (Tron): the tip is public on-chain anyway — flood the full note (to + tx hash) so
+        // the recipient celebrates and everyone sees the social proof. (Roster-gated in the engine.)
+        note(lastTip.waveId, {
+          kind: 'tip',
+          to: lastTip.address,
+          peerId: lastTip.peerId,
+          amount: lastTip.amount,
+          hash
+        });
+      }
     }
   } else {
     toastEl.textContent = `⚠️ tip failed: ${error || 'unknown'}`;

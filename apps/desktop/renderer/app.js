@@ -280,9 +280,24 @@ const EVENT_HANDLERS = {
     hud.waveStatus(`wave rolling - hop ${evt.hopCount ?? ''}`);
   },
 
-  // A roster member broadcast a note on the wave. Our only note kind is a tip announcement: if it's
-  // addressed to my wallet I got tipped (celebrate + refresh my balance); otherwise it's social
-  // proof that a selfie was tipped. Unknown kinds are ignored (forward-compatible).
+  // A DIRECTED (private) note addressed to me — the engine already checked it's for me. Used to
+  // deliver a Cashu tip: a bearer token (P2PK-locked to me) I redeem to credit the funds. This is
+  // the private counterpart of the flooded `note` — the token + who-tipped-whom never hit the flood.
+  dm: (evt) => {
+    const payload = evt.note || {};
+    if (payload.kind !== 'tip' || !payload.token) {
+      return;
+    }
+    hud.waveStatus(`🎉 you got tipped ${payload.amount} ${unitLabel()}!`);
+    ring.startFlourish(); // golden pulse + confetti — same celebration as a completed wave
+    ipc.redeem(payload.token); // Cashu bearer token, locked to me — swap it into my wallet
+    ipc.refreshWallet();
+  },
+
+  // A roster member broadcast a note on the wave (flooded). For a CHAIN wallet (Tron) the tip is
+  // public anyway, so the note carries `to` + `hash`: if addressed to my wallet I got tipped
+  // (celebrate + refresh). For CASHU the note is a stripped social-proof announcement (no token, no
+  // recipient — the token comes via `dm`), so it falls through to the "a selfie was tipped" line.
   note: (evt) => {
     const payload = evt.note || {};
     if (payload.kind !== 'tip') {
@@ -290,14 +305,11 @@ const EVENT_HANDLERS = {
     }
     if (payload.to && payload.to === state.myAddress) {
       hud.waveStatus(`🎉 you got tipped ${payload.amount} ${unitLabel()}!`);
-      ring.startFlourish(); // golden pulse + confetti — same celebration as a completed wave
-      // A Cashu tip rides as a bearer token in `payload.hash` — redeem it (P2PK-locked to us) to
-      // credit the funds. A chain tip already settled on-chain (the engine no-ops redeem there),
-      // so a balance refresh is enough.
+      ring.startFlourish();
       if (payload.hash) {
-        ipc.redeem(payload.hash);
+        ipc.redeem(payload.hash); // chain tip: redeem is a no-op; settled on-chain
       }
-      ipc.refreshWallet(); // the tip landed — re-check my balance
+      ipc.refreshWallet();
     } else {
       hud.waveStatus(`💸 a selfie was tipped ${payload.amount} ${unitLabel()}`);
     }

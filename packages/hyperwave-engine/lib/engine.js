@@ -499,6 +499,15 @@ function createEngine({
     // app's first use). The engine stays theme-agnostic — `note` is host-owned JSON.
     note: (command) =>
       wave.note({ waveId: command.waveId, note: command.note }),
+    // Directed (unicast) note to one peer — the private counterpart of `note`. The engine stays
+    // theme-agnostic: `note` is opaque host JSON (the desktop's use is a Cashu tip token delivered
+    // privately instead of flooded). Surfaced on the recipient as a `dm` event.
+    dm: (command) =>
+      wave.dm({
+        waveId: command.waveId,
+        to: command.to,
+        note: command.note
+      }),
     tip: (command) => handleTip(command),
     'send-trx': (command) => handleSend(command),
     'fetch-transactions': (command) => handleTransactions(command),
