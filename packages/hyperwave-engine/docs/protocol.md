@@ -125,7 +125,7 @@ sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
   (Protomux multiplexes them).
 
 **Wire encoding — JSON, and when to revisit.** Gossip messages are JSON (a baked-in design
-rule). This is deliberate and, today, correct: the seven kinds are tiny and infrequent (hex ids,
+rule). This is deliberate and, today, correct: the message kinds are tiny and infrequent (hex ids,
 one signature, a few integers — the only large payload, the selfie, rides a Hypercore block, not
 gossip), so a binary encoding would save almost nothing on the wire; JSON stays trivially
 loggable for debugging a flooded mesh; and signature safety is **independent of the wire** —
@@ -574,6 +574,31 @@ engine only sends a `wave-note` for a wave you actually joined. The `note` is si
 (`isNote` ≤ `MAX_NOTE_BYTES`) so the primitive can't become a bulk-data channel, on top of the
 per-author flood cap + frame cap (§11). It's the engine's generic "authenticated broadcast from a
 participant" primitive; theme-specific meaning stays in the app.
+
+### wave-dm — directed (unicast to one peer)
+
+```json
+{
+  "kind": "wave-dm",
+  "waveId": "<hex16>",
+  "to": "<peerId>",
+  "note": {/* opaque app payload, ≤ MAX_NOTE_BYTES (2 KB) */}
+}
+```
+
+The **private counterpart of `wave-note`**: the same opaque size-capped `note`, but sent to ONE
+peer (`to`) over a **direct connection** rather than flooded. `wave-dm` is **not** a flooded kind
+(no `mid`), so the receive-edge identity rule (`origin` must equal the connection's authenticated
+peer) forces genuine direct delivery — it is never relayed, so only the addressee sees it. The
+recipient drops it unless `to` is its own id, then surfaces it as a `dm` event. **No roster gate**:
+a directed note may come from a non-participant (delivery is 1:1 and rate-limited, so it's already
+bounded); authenticity is the envelope `sig`. Delivery uses an existing direct channel when one
+exists (roster peers share the wave sub-topic mesh), else the sender **`swarm.joinPeer(peerId)`**s
+to dial the recipient (the `peerId` is its Noise public key) and flushes the queued note on connect
+(bounded queue + dial timeout + `leavePeer` cleanup). Its first use is **private tip delivery**: a
+Cashu tip token (a bearer instrument) is unicast to the recipient instead of flooded — so the token
+and the who-tipped-whom-how-much never hit the mesh, preserving Cashu's unlinkability at the network
+layer (the flooded `wave-note` is then reduced to a stripped, non-identifying social-proof note).
 
 ## 6. The sweep
 

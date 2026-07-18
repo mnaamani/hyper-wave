@@ -82,16 +82,28 @@ tip. `wallet.fund(sats)` requests a bolt11 **mint quote** and mints on payment:
 ## Tips — send, deliver, redeem
 
 A tip is ecash **P2PK-locked to the recipient's identity pubkey** (their
-`address`), so it's safe to broadcast — only they can redeem it.
+`address`), so even if seen it can't be stolen — but it's delivered **privately**
+so the token and the tip relationship don't leak (see the privacy note below).
 
 1. **Send** (`wallet.send(recipientPubkey, amount)`) produces the locked token.
-2. **Deliver** — the token rides the existing `wave-note` tip
-   (`{kind:'tip', to, peerId, amount, hash}`, `hash` = the token; ~950 B, within
-   `MAX_NOTE_BYTES` 2048). No protocol change.
-3. **Redeem** — the recipient sees the note addressed to it and sends
-   `redeem {token}`; the engine `receive()`s it (unlocks the P2PK with the
-   identity key) into the proof store. A chain tip settles on-chain instead, so
-   the engine no-ops `redeem` there.
+2. **Deliver privately** — the token is unicast to the recipient over a
+   **`wave-dm`** directed note (`{kind:'tip', token, amount}`), sent over a direct
+   channel or via a `joinPeer` dial — it never touches the flood. Separately, a
+   **stripped** `wave-note` (`{kind:'tip', amount}`, no token, no recipient) is
+   flooded for the gallery's "a selfie was tipped" social proof.
+3. **Redeem** — the recipient's `dm` handler sends `redeem {token}`; the engine
+   `receive()`s it (unlocks the P2PK with the identity key) into the proof store.
+   A chain (Tron) tip is public on-chain anyway, so it keeps the full flooded
+   `wave-note` and settles on-chain (the engine no-ops `redeem` there).
+
+**Privacy note.** Cashu blinds who-paid-whom at the mint; flooding the bearer
+token + `{to, amount}` over `wave-note` would re-open that at the network layer
+(a public tip social-graph). The `wave-dm` directed delivery keeps the token and
+the relationship off the mesh — only the two peers (and the blind mint) know.
+Trade-off: unicast needs the recipient online + dialable (a flood reaches a
+still-online non-neighbour more forgivingly). Delivery to an **offline** recipient
+fails in either model (the token stays locked); a proper fix is a P2PK
+refund-locktime so the tipper can reclaim an undelivered tip — a follow-up.
 
 The mint charges a small swap fee, so a 5-sat tip nets ~4 sat.
 
