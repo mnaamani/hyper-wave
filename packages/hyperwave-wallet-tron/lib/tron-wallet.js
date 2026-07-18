@@ -8,7 +8,7 @@
 // the on-the-wire wallet `type`, so the same implementation serves testnet and production.
 const fs = require('bare-fs');
 const b4a = require('b4a');
-const { Wallet } = require('hyperwave-engine');
+const { Wallet } = require('hyperwave-wallet');
 
 // Known Tron networks → their default JSON-RPC (TronGrid) endpoint. The network name also forms this
 // wallet's on-the-wire TYPE id (`tron-<network>`; `tron-usdt-<network>` for the USDT variant), so a

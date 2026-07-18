@@ -20,7 +20,7 @@
     "@tetherto/wdk-wallet-tron": "^1.0.0-beta.8",
     "b4a": "^1.8.1",
     "bare-fs": "^4.7.4",
-    "hyperwave-engine": "^0.2.0"
+    "hyperwave-wallet": "^0.2.0"
   },
   "devDependencies": {
     "brittle": "^4.0.2"

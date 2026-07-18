@@ -5,7 +5,7 @@
 //   bare lib/cashu-wallet.test.js   (or `npm test`)
 const test = require('brittle');
 const fs = require('bare-fs');
-const { Wallet } = require('hyperwave-engine');
+const { Wallet } = require('hyperwave-wallet');
 const {
   CashuWallet,
   createCashuWallet,

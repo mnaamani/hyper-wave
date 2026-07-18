@@ -3,7 +3,7 @@
 // here). Runs under Bare:  bare lib/tron-wallet.test.js   (or `npm test`)
 const test = require('brittle');
 const fs = require('bare-fs');
-const { Wallet } = require('hyperwave-engine');
+const { Wallet } = require('hyperwave-wallet');
 const { TronWallet, createPayments, toSun, fromSun } = require('./tron-wallet');
 
 const TRON_ADDRESS = /^T[1-9A-HJ-NP-Za-km-z]{33}$/; // base58check, 34 chars

@@ -24,10 +24,11 @@
     "bare-fetch": "^3.1.0",
     "bare-fs": "^4.7.4",
     "hypercore-crypto": "^3.7.0",
-    "hyperwave-engine": "^0.2.0",
+    "hyperwave-wallet": "^0.2.0",
     "text-decoder": "^1.2.7"
   },
   "devDependencies": {
-    "brittle": "^4.0.2"
+    "brittle": "^4.0.2",
+    "hyperwave-engine": "^0.2.0"
   }
 }

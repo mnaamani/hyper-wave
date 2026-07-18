@@ -1,5 +1,5 @@
 // The participation-fee flows the engine hosts (the GUI worker + the headless harness) compose
-// over ANY `Wallet` (wallet.js) — wallet-agnostic: these only call the Wallet interface
+// over ANY `Wallet` (the hyperwave-wallet interface) — wallet-agnostic: these only call the Wallet interface
 // (`fee`/`burn`/`verifyBurnTx`/`address`/`type`) + the wave handle (`recordBurn`/`setWallet`).
 // One home for the on-chain memo format + the confirmation poll, so a drift between hosts can't
 // silently break verification. Hosts do their own reporting (IPC toast vs console).
@@ -25,7 +25,7 @@ function burnMemo(waveId, peerId) {
  * initiator (announcePaid); a joiner's burn is its own anti-spam cost and ignores `proof`.
  * @param {Object} opts The fee to burn.
  * @param {Object} opts.wave - The createWave engine handle (`me.id`, `recordBurn`, `feeFor`).
- * @param {import('./wallet').Wallet} opts.payments - The wallet (provides `fee` + `burn`).
+ * @param {Object} opts.payments - The wallet (provides `fee` + `burn`).
  * @param {string} opts.waveId - The wave the fee is being burned for.
  * @param {string} opts.reason - Fee reason, e.g. `'start'` or `'join'`.
  * @returns {Promise<{hash: string, proof: Object, fee: number}>} The burn tx hash, the signed burn
@@ -51,7 +51,7 @@ async function payFee({ wave, payments, waveId, reason }) {
 /**
  * Wait (bounded) until the burn is readable on-chain, so peers' single verify check
  * succeeds the moment the wave is announced. Resolves true when confirmed.
- * @param {import('./wallet').Wallet} payments - The wallet (provides `verifyBurnTx`).
+ * @param {Object} payments - The wallet (provides `verifyBurnTx`).
  * @param {string} waveId - The wave whose burn memo is expected on-chain.
  * @param {string} hash - The burn tx hash to poll for.
  * @returns {Promise<boolean>} True once the burn is confirmed on-chain, false if it never confirms.
@@ -77,7 +77,7 @@ async function confirmBurn(payments, waveId, hash) {
  * decide whether they support this wave's payment mechanism), and my FEE (the amount I set on the
  * waves I initiate — rides their announces so every joiner burns the same).
  * @param {Object} wave - The createWave engine handle (provides `setWallet`).
- * @param {import('./wallet').Wallet} payments - Any Wallet (address + `verifyBurnTx` + `type` + `fee`).
+ * @param {Object} payments - Any Wallet (address + `verifyBurnTx` + `type` + `fee`).
  * @returns {void}
  */
 function wireWallet(wave, payments) {

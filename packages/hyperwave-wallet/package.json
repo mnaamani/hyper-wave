@@ -1,0 +1,21 @@
+{
+  "name": "hyperwave-wallet",
+  "version": "0.2.0",
+  "description": "HyperWave wallet interface: the abstract Wallet base class — the pluggable payment interface a concrete wallet implements and the engine composes over. No dependencies.",
+  "license": "Apache-2.0",
+  "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mnaamani/hyper-wave.git"
+  },
+  "homepage": "https://github.com/mnaamani/hyper-wave#readme",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "bare test.js",
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/wallet.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+  },
+  "devDependencies": {
+    "brittle": "^4.0.2"
+  }
+}
