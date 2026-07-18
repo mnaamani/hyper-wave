@@ -176,7 +176,8 @@ module.exports = {
       }
       // Add the transitive interface package as a top-level file: dep (see above) so the
       // wallets' unpublished hyperwave-wallet requirement resolves locally.
-      packageJson.dependencies['hyperwave-wallet'] = 'file:' + walletInterfaceDir;
+      packageJson.dependencies['hyperwave-wallet'] =
+        'file:' + walletInterfaceDir;
       delete packageJson.devDependencies;
       fs.writeFileSync(pjPath, JSON.stringify(packageJson, null, 2));
       childProcess.execSync(
