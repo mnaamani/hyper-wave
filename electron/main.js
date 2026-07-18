@@ -44,8 +44,8 @@ cmd.parse(app.isPackaged ? process.argv.slice(1) : process.argv.slice(2));
 
 // Resolve a relative --storage to absolute: app.setPath requires it, and the worker's
 // bare-fs/Corestore would otherwise resolve it against a different cwd. Resolve against the
-// directory the user ran the command from — npm switches cwd to the workspace (apps/desktop)
-// when `npm start` delegates, but preserves the original in INIT_CWD.
+// directory the user ran the command from — npm may switch cwd when `npm start` runs, but
+// preserves the original in INIT_CWD.
 const pearStore = cmd.flags.storage
   ? path.resolve(process.env.INIT_CWD || process.cwd(), cmd.flags.storage)
   : cmd.flags.storage;
@@ -100,7 +100,7 @@ function sendToAll(name, data) {
   }
 }
 
-// --- Secret store (apps/docs/secure-seed-storage.md) ---------------------------------------------
+// --- Secret store (docs/secure-seed-storage.md) ---------------------------------------------
 // The wallet + swarm seeds are long-lived secrets. Rather than the (Bare) worker writing them as
 // plaintext files, Electron main encrypts them with the OS keychain (safeStorage — a main-process-
 // only API) and injects the decrypted values into the worker over the IPC pipe. The engine is
@@ -179,7 +179,7 @@ function resolveSeeds(dir) {
   if (!encryptionSecure()) {
     console.warn(
       '[seed] OS keychain encryption unavailable — the engine will use plaintext seed files ' +
-        '(NOT encrypted). See apps/docs/secure-seed-storage.md.'
+        '(NOT encrypted). See docs/secure-seed-storage.md.'
     );
     return {};
   }

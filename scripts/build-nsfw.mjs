@@ -5,7 +5,7 @@
 //
 // Best-effort: if the classifier deps aren't installed (e.g. an engine-only checkout) it skips
 // rather than failing the whole install. Pass a target dir to write the bundle under
-// <dir>/apps/desktop/... (used by the electron-forge package hook, which assembles a fresh tree).
+// <dir>/renderer/... (used by the electron-forge package hook, which assembles a fresh tree).
 import * as esbuild from 'esbuild';
 import fs from 'fs';
 import path from 'path';
@@ -14,11 +14,8 @@ import { fileURLToPath } from 'url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const target = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 
-const entry = path.join(ROOT, 'apps/desktop/scripts/nsfw-entry.mjs');
-const outfile = path.join(
-  target,
-  'apps/desktop/renderer/vendor/nsfw.bundle.js'
-);
+const entry = path.join(ROOT, 'scripts/nsfw-entry.mjs');
+const outfile = path.join(target, 'renderer/vendor/nsfw.bundle.js');
 
 if (!fs.existsSync(entry)) {
   console.log('[build-nsfw] entry not found — skipping');
@@ -37,7 +34,7 @@ try {
     // browser (Buffer/process undefined) and never sets `HWNsfw`. `global` → globalThis; Buffer +
     // process come from the injected shim.
     define: { global: 'globalThis' },
-    inject: [path.join(ROOT, 'apps/desktop/scripts/nsfw-shims.mjs')],
+    inject: [path.join(ROOT, 'scripts/nsfw-shims.mjs')],
     outfile,
     logLevel: 'error'
   });

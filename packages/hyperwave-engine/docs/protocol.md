@@ -3,7 +3,7 @@
 A specification of the **on-wire protocol** and the per-peer **state machine**, detailed
 enough to implement a compatible client in another language/framework. Everything here is
 what peers exchange over the network; the Electron/renderer split (see
-[`architecture.md`](../../../apps/docs/hosting.md)) is one implementation and is **not** part of the
+[`architecture.md`](../../../docs/hosting.md)) is one implementation and is **not** part of the
 protocol.
 
 Reference implementation:
@@ -12,7 +12,7 @@ Reference implementation:
 > **The protocol is theme-agnostic.** It carries generic concepts — a **wave** that
 > **sweeps** a **ring**, an **entry** whose `payload` is **opaque** to the protocol, in a
 > per-wave **feed**, plus a cosmetic per-peer **tag**. The "stadium wave" is the reference
-> _application_ (`apps/desktop`), which fills the entry payload with a `{image, caption}`
+> _application_ (the desktop app), which fills the entry payload with a `{image, caption}`
 > selfie and uses the tag as a country code. Any turn-taking / coordinated-snapshot app can
 > speak this same protocol.
 
@@ -919,7 +919,7 @@ mint — the desktop default), maps every concept below onto ecash: the black-ho
 **NUMS pubkey** nobody can spend, the on-chain memo becomes a **mint-signed NUT-11 tag** in the
 locking secret, and `verifyBurnTx` becomes a decode + NUT-07 checkstate against the token's own
 mint. The wire — `walletType`, the `paid`/`burn` attestations, `burnRef`/`payerAddress` — is
-identical; only the mechanism behind the `Wallet` interface differs. See `apps/docs/cashu.md`.
+identical; only the mechanism behind the `Wallet` interface differs. See `docs/cashu.md`.
 
 ### 9.0 Fee-burn attestation
 

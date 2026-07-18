@@ -1,12 +1,12 @@
 # Skip generated build artifacts (gitignore-style; a bare name matches at any depth, and only
 # full-line `#` comments are supported). lunte already skips node_modules/ by default. Keeps
-# `npm run lint` off electron-forge output (apps/desktop/out) and any native/mobile build dirs.
+# `npm run lint` off electron-forge output (out/) and any native/mobile build dirs.
 out/
 bundles/
-apps/mobile/ios
-apps/mobile/android
+mobile/ios
+mobile/android
 Pods/
 .expo/
 .gradle/
 # Generated NSFW classifier bundle (esbuild: tfjs + nsfwjs + mobilenet_v2 model), rebuilt on install.
-apps/desktop/renderer/vendor
+renderer/vendor

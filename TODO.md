@@ -1,7 +1,7 @@
 # HyperWave — task list
 
-Refinement backlog, roughly prioritized. Design context in `apps/docs/idea.md`;
-engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `apps/docs/`; demo script in `DEMO.md`.
+Refinement backlog, roughly prioritized. Design context in `docs/idea.md`;
+engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`; demo script in `DEMO.md`.
 
 ## Done
 
@@ -342,7 +342,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       cross-user, **not** same-user malware (needs a signed build + keychain ACL, ultimately a hardware
       wallet). **Still pending: manual GUI verification** (no headless Electron in CI) — first-run
       `.enc` creation + no plaintext, restart reuse, migration, stable wallet address across restarts.
-      **Design + as-built: [`apps/docs/secure-seed-storage.md`](apps/docs/secure-seed-storage.md).**
+      **Design + as-built: [`docs/secure-seed-storage.md`](docs/secure-seed-storage.md).**
 - [ ] **Bitcoin on-chain payments via `OP_RETURN`.** Add BTC alongside Tron (WDK already has
       `wdk-wallet-btc`). The burn/attestation model ports directly: instead of the Tron memo,
       commit `hyperwave:<waveId>:<peerId>` in an **`OP_RETURN`** output (≤ 80 bytes, with the

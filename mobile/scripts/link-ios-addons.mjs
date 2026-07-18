@@ -4,7 +4,7 @@
 // react-native-bare-kit ships this exact step as its podspec `prepare_command` (`ios/link.mjs`),
 // but (a) CocoaPods skips prepare_command for local path pods — how node_modules pods install —
 // and (b) that script scans from the *repo root*, which in this npm-workspaces monorepo has no
-// addon dependencies. So we run `bare-link` ourselves from apps/mobile (which reaches the addons
+// addon dependencies. So we run `bare-link` ourselves from mobile/ (which reaches the addons
 // via hyperwave) and write into the hoisted react-native-bare-kit. bare-link just
 // packages the iOS prebuilds the addon packages already ship — no compiler needed, runs anywhere.
 import link from 'bare-link';
@@ -12,8 +12,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); // apps/mobile
-const rnbk = path.resolve(appDir, '../../node_modules/react-native-bare-kit');
+const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); // mobile/
+const rnbk = path.resolve(appDir, '../node_modules/react-native-bare-kit');
 const out = path.join(rnbk, 'ios', 'addons');
 
 if (!fs.existsSync(rnbk)) {

@@ -1,0 +1,42 @@
+name: Packaging test
+
+# Unsigned packaging smoke test on macOS, Ubuntu and Windows. Runs the full `npm run make`
+# pipeline — including the forge packageAfterCopy hook (workspace file: install, secret-stream
+# patch, NSFW/QR bundle rebuilds) — which is where packaging regressions hide. HYPERWAVE_BUILD_TEST
+# makes forge build a single unsigned zip on every platform (see forge.config.js), so this needs no
+# signing certs and none of the Linux installer toolchains. For real signed installers, see
+# release.yml.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json # single source of truth (volta.node / engines)
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package (unsigned zip, full make pipeline)
+        run: npm run make
+        env:
+          HYPERWAVE_BUILD_TEST: '1'
+
+      - name: Upload packaged app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.os }}
+          path: out/make/**
+          if-no-files-found: warn

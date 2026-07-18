@@ -1,0 +1,175 @@
+name: Build Release
+
+# Signed, distributable installers for macOS (arm64 + x64), Windows (MSIX) and Linux
+# (AppImage + Snap + Flatpak, x64 + arm64), built with holepunch's make-pear-app action — usable
+# now that the desktop app is the repo-root package (npm ci + npm run make + out/make/**, which the
+# action assumes). Manual: runs on a version tag push (v*) or workflow_dispatch.
+#
+# READY BUT DORMANT: the macOS/Windows jobs need code-signing secrets (see below). Until those are
+# configured they will fail at the signing step — the Linux jobs need no secrets and build fine.
+# Add these repository secrets to enable signing/notarization:
+#   macOS:   CERTIFICATE_P12, CERTIFICATE_PASSWORD, MAC_CODESIGN_IDENTITY, APPLE_ID,
+#            APPLE_PASSWORD, APPLE_TEAM_ID
+#   Windows: WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      upgrade-key:
+        description: 'Value for package.json upgrade field (optional)'
+        required: false
+
+env:
+  CHANNEL: production
+
+jobs:
+  prebuild:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      package-name: ${{ steps.meta.outputs.package_name }}
+      package-name-lower: ${{ steps.meta.outputs.package_name_lower }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Prepare build metadata
+        id: meta
+        run: |
+          name=$(jq -r '.name' package.json)
+          product_name=$(jq -r '.productName // empty' package.json)
+          package_name="${product_name:-$name}"
+          package_name_lower=$(printf '%s' "$package_name" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "package_name=$package_name"
+            echo "package_name_lower=$package_name_lower"
+            echo "version=$(jq -r '.version' package.json)"
+          } >> "$GITHUB_OUTPUT"
+
+  build-linux-x64:
+    needs: [prebuild]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: holepunchto/actions/make-pear-app@v1
+        with:
+          channel: ${{ env.CHANNEL }}
+          upgrade_key: ${{ inputs['upgrade-key'] }}
+          linux_appimage: >-
+            ${{ format('{0}-{1}-{2}.AppImage',
+                needs.prebuild.outputs.package-name,
+                needs.prebuild.outputs.version, 'x64') }}
+          linux_snap: >-
+            ${{ format('{0}_{1}_{2}.snap',
+                needs.prebuild.outputs.package-name-lower,
+                needs.prebuild.outputs.version, 'amd64') }}
+          linux_flatpak: >-
+            ${{ format('{0}_{1}_{2}_flatpak.tar.gz',
+                needs.prebuild.outputs.package-name-lower,
+                needs.prebuild.outputs.version, 'x64') }}
+
+  build-linux-arm:
+    needs: [prebuild]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-24.04-arm
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: holepunchto/actions/make-pear-app@v1
+        with:
+          channel: ${{ env.CHANNEL }}
+          upgrade_key: ${{ inputs['upgrade-key'] }}
+          linux_appimage: >-
+            ${{ format('{0}-{1}-{2}.AppImage',
+                needs.prebuild.outputs.package-name,
+                needs.prebuild.outputs.version, 'arm64') }}
+          linux_snap: >-
+            ${{ format('{0}_{1}_{2}.snap',
+                needs.prebuild.outputs.package-name-lower,
+                needs.prebuild.outputs.version, 'arm64') }}
+          linux_flatpak: >-
+            ${{ format('{0}_{1}_{2}_flatpak.tar.gz',
+                needs.prebuild.outputs.package-name-lower,
+                needs.prebuild.outputs.version, 'arm64') }}
+
+  build-macos:
+    needs: [prebuild]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: holepunchto/actions/make-pear-app@v1
+        with:
+          channel: ${{ env.CHANNEL }}
+          upgrade_key: ${{ inputs['upgrade-key'] }}
+          macos_dmg: >-
+            ${{ format('{0}-{1}-{2}.dmg',
+                needs.prebuild.outputs.package-name,
+                needs.prebuild.outputs.version, 'arm64') }}
+          macos_certificate_base64: ${{ secrets.CERTIFICATE_P12 }}
+          macos_p12_password: ${{ secrets.CERTIFICATE_PASSWORD }}
+          macos_codesign_identity: ${{ secrets.MAC_CODESIGN_IDENTITY }}
+          macos_notarization_method: apple_id_password
+          macos_apple_id: ${{ secrets.APPLE_ID }}
+          macos_apple_password: ${{ secrets.APPLE_PASSWORD }}
+          macos_apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
+
+  build-macos-x64:
+    needs: [prebuild]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    runs-on: macos-13
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: holepunchto/actions/make-pear-app@v1
+        with:
+          channel: ${{ env.CHANNEL }}
+          upgrade_key: ${{ inputs['upgrade-key'] }}
+          macos_dmg: >-
+            ${{ format('{0}-{1}-{2}.dmg',
+                needs.prebuild.outputs.package-name,
+                needs.prebuild.outputs.version, 'x64') }}
+          macos_certificate_base64: ${{ secrets.CERTIFICATE_P12 }}
+          macos_p12_password: ${{ secrets.CERTIFICATE_PASSWORD }}
+          macos_codesign_identity: ${{ secrets.MAC_CODESIGN_IDENTITY }}
+          macos_notarization_method: apple_id_password
+          macos_apple_id: ${{ secrets.APPLE_ID }}
+          macos_apple_password: ${{ secrets.APPLE_PASSWORD }}
+          macos_apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
+
+  build-win32:
+    needs: [prebuild]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    runs-on: windows-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: holepunchto/actions/make-pear-app@v1
+        with:
+          channel: ${{ env.CHANNEL }}
+          upgrade_key: ${{ inputs['upgrade-key'] }}
+          windows_msix: >-
+            ${{ format('{0}.msix', needs.prebuild.outputs.package-name) }}
+          windows_signing_method: windows_cert_pfx
+          windows_cert_pfx_base64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          windows_cert_password: ${{ secrets.WINDOWS_CERT_PASSWORD }}

@@ -18,7 +18,7 @@ state machine (the engine, enough to build a compatible client), see
 
 The repo is an **npm-workspaces monorepo**: the reusable Bare engine lives in
 `packages/hyperwave-engine/` and boots unchanged under two hosts — the desktop Electron
-app (`apps/desktop/`) and an Expo + react-native-bare-kit mobile app (`apps/mobile/`). Each
+app (at the repo root) and an Expo + react-native-bare-kit mobile app (`mobile/`). Each
 host is a ~20–40-line shim over the engine's host-agnostic entry, `lib/engine.js` `createEngine()`.
 
 The engine is **theme-agnostic** — it knows only generic concepts (a **wave** that
@@ -62,14 +62,14 @@ The three-process split is **desktop-specific**. The engine itself is host-abstr
 mobile the same `hyperwave` boots as a single Bare **worklet**
 (`packages/hyperwave-engine/worklet/app.js` under react-native-bare-kit, bundled by
 `bare-pack`), driven by the React Native UI over the identical JSON IPC surface
-(`apps/mobile/src/useEngine.js`) — no Electron main, no separate updater.
+(`mobile/src/useEngine.js`) — no Electron main, no separate updater.
 
-| Layer                                            | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------ | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Main** (`apps/desktop/electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                         |
-| **Renderer** (`apps/desktop/renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                  |
-| **Worker** (`apps/desktop/workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, gossip, the deterministic sweep, attestations, lifecycle, the CRDT feed, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
-| **Updater** (`apps/desktop/workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                |
+| Layer                               | Runtime             | Module format | Responsibility                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------- | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Main** (`electron/main.js`)       | Node.js (Electron)  | CJS           | Create the window; allow `media` (webcam); resolve + log the storage dir; spawn Bare workers via `PearRuntime.run`; relay IPC between renderer and workers; small helper IPC (`copy-text`, `open-external`, `isPackaged`). Template plus those additions.                                                                                                                                         |
+| **Renderer** (`renderer/`)          | Chromium, sandboxed | **ESM**       | All UI: ring `<canvas>`, lobby, webcam capture, gallery, HUD, country picker. No P2P, no crypto.                                                                                                                                                                                                                                                                                                  |
+| **Worker** (`workers/hyperwave.js`) | **Bare**            | CJS           | A thin (~40-line) host: wraps `Bare.IPC` in a `FramedStream` and calls `hyperwave`'s `createEngine()`. All protocol/state — Hyperswarm, gossip, the deterministic sweep, attestations, lifecycle, the CRDT feed, plus the WDK wallet (fee burns, tips) — lives in the **engine package** (`engine.js` + `wave.js` + `wallet.js`). WDK is ESM-only, so `wallet.js` bridges via dynamic `import()`. |
+| **Updater** (`workers/updater.js`)  | Bare                | CJS           | Template's OTA auto-update; unrelated to the wave.                                                                                                                                                                                                                                                                                                                                                |
 
 (Module format is a deliberate mix — see [Module format](#module-format).)
 
@@ -110,7 +110,7 @@ each message; `electron/main.js` relays the frames to/from the renderer, which u
 preload `bridge` (`onWorkerIPC` / `writeWorkerIPC`). See `electron/preload.js`.
 
 Transport (mobile): the worklet wraps `BareKit.IPC` in the **same** `FramedStream` + JSON
-framing (`worklet/app.js`), driven from `apps/mobile/src/useEngine.js` over `Worklet.IPC` —
+framing (`worklet/app.js`), driven from `mobile/src/useEngine.js` over `Worklet.IPC` —
 one message surface, two hosts. (The worklet additionally emits `engine-error` on an
 unhandled rejection, since mobile has no console.)
 
@@ -195,7 +195,7 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
     app.js           mobile bare-kit worklet entry (same createEngine() over BareKit.IPC)
   e2e/               end-to-end harness + suites (wave.local.e2e.js, wave.onchain.e2e.js)
 
-apps/desktop/        the Electron shell (npm workspace)
+(repo root)          the Electron shell lives at the repo root
   electron/
     main.js          Electron main: windows, storage-dir resolution, spawn workers, IPC relay
                      (+ media permission, copy-text/open-external helpers)
@@ -221,7 +221,7 @@ apps/desktop/        the Electron shell (npm workspace)
     hyperwave.js     thin worker host: FramedStream over Bare.IPC → hyperwave createEngine()
     updater.js       template OTA updater (unrelated)
 
-apps/mobile/         the Expo + react-native-bare-kit host (npm workspace)
+mobile/              the Expo + react-native-bare-kit host (npm workspace)
   App.js             RN UI (speaks the same JSON IPC protocol)
   src/useEngine.js   boots the worklet bundle over Worklet.IPC
   (npm run bundle → bare-pack on the engine's worklet entry)

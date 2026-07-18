@@ -209,7 +209,7 @@ Melt any held proofs to an external Lightning invoice — a future desktop butto
 
 ## Part 4 — Desktop wiring
 
-- **Default factory**: `apps/desktop/workers/hyperwave.js` injects
+- **Default factory**: `workers/hyperwave.js` injects
   `deps.createPayments = (opts) => createCashuWallet(opts)` and passes
   `walletOptions: { mint, fee }` in the `init` config. (Keep Tron reachable
   behind a build/config flag for fallback + the existing tests.)
@@ -279,12 +279,12 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
   walletType, burn semantics (NUMS domain string, memo tag), the renamed
   attestation keys (`burnRef`/`payerAddress`), verify path.
 - `packages/hyperwave-engine/docs/usage.md` — injecting `createCashuWallet`.
-- `apps/docs/idea.md` — money model in plain language (ecash burn + LN tips).
+- `docs/idea.md` — money model in plain language (ecash burn + LN tips).
 - `docs/README.md` — index this plan.
 - `CLAUDE.md` — payment stack, wallet-type list, the rename, the wipe-vs-proof-
   store caveat.
 - `TODO.md` — track the phases below.
-- New `apps/docs/cashu.md` (or a protocol §) — mint choice + multimint swap +
+- New `docs/cashu.md` (or a protocol §) — mint choice + multimint swap +
   funding UX + trust model.
 
 ---
@@ -343,7 +343,7 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
 5. ✅ **Part 6/7** — a **headless two-peer paid-wave e2e** on Cashu
    (`npm run test:e2e:cashu`, gated `E2E_CASHU=1`) passes over a local DHT +
    testnut: fund → paid gate → paid join → feed converges to 2 (~37s). Docs done:
-   protocol.md §2.3/§9 (rename + mechanism note), `apps/docs/cashu.md`, CLAUDE.md,
+   protocol.md §2.3/§9 (rename + mechanism note), `docs/cashu.md`, CLAUDE.md,
    idea.md, docs/README.md. _(done — the only remaining item is the **GUI**
    end-to-end on a display: two live desktop peers, a paid Cashu wave, a redeeming
    tip; can't run headless here.)_

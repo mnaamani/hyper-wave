@@ -2,14 +2,14 @@
 
 Worked examples for the HyperWave engine and its submodules. For _what_ the pieces are and how
 they interact, see [`protocol.md`](./protocol.md) (the engine spec) and the apps'
-[`hosting.md`](../../../apps/docs/hosting.md); this file is all _how do I call it_.
+[`hosting.md`](../../../docs/hosting.md); this file is all _how do I call it_.
 
 > **The engine is theme-agnostic.** It provides a generic primitive: peers join a shared
 > **topic**, map to seats on a DHT **ring**, and any peer triggers a **wave** that
 > **sweeps** the ring on a deterministic schedule; each participant contributes one
 > **entry** (an opaque `payload` the host owns) to a per-wave CRDT **feed**, optionally
 > gated by proof-of-burn, and carries a cosmetic **tag**. The football "stadium wave" app
-> (`apps/desktop`) is one host over this engine — it fills the payload with a selfie and
+> (the desktop app) is one host over this engine — it fills the payload with a selfie and
 > uses the tag as a country. Build any turn-taking / coordinated-snapshot app the same way.
 
 > **Runs under [Bare](https://github.com/holepunchto/bare), not Node.** Examples assume `bare`.
@@ -647,7 +647,7 @@ const keyPair = crypto.keyPair(seed); // the same identity every run (see protoc
 
 `createWave` calls `loadOrCreateSwarmSeed` for you; pass `createWave({ swarmSeed })` only to inject
 an identity (e.g. from mobile secure storage). It is a **separate** seed from the wallet seed
-(`createPayments({ seed })`) — see [`docs/secure-seed-storage.md`](../../../apps/docs/secure-seed-storage.md).
+(`createPayments({ seed })`) — see [`docs/secure-seed-storage.md`](../../../docs/secure-seed-storage.md).
 
 ---
 
@@ -710,8 +710,8 @@ lifecycle, so a high-frequency `position` stream can't leak request state). A re
 is **also** delivered through `onEvent`, so an event-oriented UI (`ipc.on('tip-result', …)`) needs no
 change. **Desktop is a main-split**: the renderer is bundler-free and can't load bare-rpc, so the
 worker speaks the seam to Electron **main**, which runs the client and re-exposes it to the renderer
-over Electron's own `invoke`/event IPC (`apps/desktop/electron/main.js`). **Mobile** runs it
-end-to-end (`apps/mobile/src/useEngine.js` ↔ `worklet/app.js`). See `lib/rpc.test.js` for the
+over Electron's own `invoke`/event IPC (`electron/main.js`). **Mobile** runs it
+end-to-end (`mobile/src/useEngine.js` ↔ `worklet/app.js`). See `lib/rpc.test.js` for the
 full-stack contract (concurrent-reply correlation, the FramedStream transport, lazy bootstrap).
 
 ---

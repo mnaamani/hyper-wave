@@ -73,7 +73,7 @@ few sats to a key nobody holds (the ecash equivalent of an unspendable address),
 which wave it paid for; a tip is a little ecash token handed straight to the selfie-taker, who
 redeems it. Each player picks which "mint" (the service that issues the ecash) they use, and
 tips still work across different mints. The Tron wallet is still there as an option. It's all
-testnet — play money, not real funds. (Details: `apps/docs/cashu.md`.)
+testnet — play money, not real funds. (Details: `docs/cashu.md`.)
 
 ## Nobody is special
 

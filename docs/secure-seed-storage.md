@@ -170,7 +170,7 @@ would be worse than today — it would _imply_ security we don't have. Also gate
 - `workers/hyperwave.js` — now **init-message-driven** (builds the engine in serveEngine's
   `onBootstrap` on the `init` command), mirroring `worklet/app.js`. **No** report-seed round-trip
   (option B: main generates).
-- `apps/desktop/package.json` — adds `bip39@3.1.0` (main's mnemonic generator; the same lib WDK uses).
+- `package.json` — adds `bip39@3.1.0` (main's mnemonic generator; the same lib WDK uses).
 - **No engine change at all** — `engine.js` already forwards `config.seed`/`config.swarmSeed`, and
   `wave.js`/`wallet.js` already take the injected, non-persisted branch. (Option B avoided the
   report-seed/host-persist-mode plumbing option A would have needed.)
@@ -189,5 +189,5 @@ would be worse than today — it would _imply_ security we don't have. Also gate
 ## 11. References
 
 - Electron `safeStorage`: https://www.electronjs.org/docs/latest/api/safe-storage
-- Mobile secure-storage seam: `apps/mobile/README.md`, `packages/hyperwave-engine/worklet/app.js`
+- Mobile secure-storage seam: `mobile/README.md`, `packages/hyperwave-engine/worklet/app.js`
 - Seed persistence today: `loadOrCreateSwarmSeed` (`wave.js`), `createPayments` (`wallet.js`)

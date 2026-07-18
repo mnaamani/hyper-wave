@@ -31,23 +31,23 @@ payment deps. A host injects a concrete wallet via
 - **`hyperwave-wallet`** — the abstract `Wallet` base class (the pluggable payment
   interface a concrete wallet implements and the engine composes over). No deps.
 - **`hyperwave-wallet-cashu`** — Chaumian ecash on a Lightning mint (the desktop
-  default). See [cashu.md](../apps/docs/cashu.md).
+  default). See [cashu.md](./cashu.md).
 - **`hyperwave-wallet-tron`** — WDK self-custodial Tron: native TRX + TRC-20 USDT.
 
-## Apps (`apps/docs/`)
+## Apps (in this `docs/` folder)
 
 The "stadium Mexican wave" product and how the two hosts wrap the engine.
 
-- [idea.md](../apps/docs/idea.md) — **the idea, in plain language** (read first). What
+- [idea.md](./idea.md) — **the idea, in plain language** (read first). What
   HyperWave (the product) is, how a wave works, the money model (burned fees + tips), why
   P2P, and the limitations — non-technical.
-- [hosting.md](../apps/docs/hosting.md) — the app-hosting architecture: the desktop Electron
+- [hosting.md](./hosting.md) — the app-hosting architecture: the desktop Electron
   three-process split (main · renderer · Bare worker), the mobile bare-kit worklet, the
   renderer↔worker IPC seam, the module map, and where logic lives. (Formerly `architecture.md`.)
-- [cashu.md](../apps/docs/cashu.md) — the **Cashu (ecash) payment mechanism**, the desktop
+- [cashu.md](./cashu.md) — the **Cashu (ecash) payment mechanism**, the desktop
   default: NUMS-pubkey burns, mint-signed memos, per-peer mint choice, redeemable multimint
   tips, funding, and the (custodial) trust model. The protocol is unchanged (see protocol.md §9).
-- [secure-seed-storage.md](../apps/docs/secure-seed-storage.md) — design for moving desktop
+- [secure-seed-storage.md](./secure-seed-storage.md) — design for moving desktop
   secret storage (wallet + swarm seeds) to the OS keychain (planned, not built).
 
 ## Project (`docs/`)
@@ -60,5 +60,5 @@ The "stadium Mexican wave" product and how the two hosts wrap the engine.
   `CashuWallet`, tips + multimint, the desktop wiring, and what remains.
 
 Project overview, quickstart, and the local demo walkthrough: [`../README.md`](../README.md).
-Desktop app shell: [`../apps/desktop/README.md`](../apps/desktop/README.md). Mobile host:
-[`../apps/mobile/README.md`](../apps/mobile/README.md).
+Desktop app shell: [`../README.md`](../README.md). Mobile host:
+[`../mobile/README.md`](../mobile/README.md).

@@ -3,17 +3,17 @@
 node_modules
 package-lock.json
 
-# Build output: electron-forge distributables (apps/desktop/out) + bare-pack worklet bundles.
+# Build output: electron-forge distributables (out/) + bare-pack worklet bundles.
 out/
 bundles/
 
 # Generated NSFW classifier bundle (esbuild: tfjs + nsfwjs + mobilenet_v2 model), rebuilt on install.
-apps/desktop/renderer/vendor
+renderer/vendor
 
-# Generated native mobile projects (apps/mobile/ios|android are gitignored + regenerated):
+# Generated native mobile projects (mobile/ios|android are gitignored + regenerated):
 # CocoaPods, Xcode/Gradle build dirs, Expo cache. Never hand-edited, so never format them.
-apps/mobile/ios
-apps/mobile/android
+mobile/ios
+mobile/android
 Pods/
 .expo/
 .gradle/

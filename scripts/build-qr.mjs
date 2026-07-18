@@ -5,8 +5,8 @@
 // lazy-injects it (renderer/lib/qr.js). Mirrors build-nsfw.mjs.
 //
 // Best-effort: if the dep isn't installed (an engine-only checkout) it skips rather than failing
-// the whole install. Pass a target dir to write under <dir>/apps/desktop/... (the forge hook, which
-// assembles a fresh tree).
+// the whole install. Pass a target dir to write the bundle under <dir>/renderer/... (the forge
+// hook, which assembles a fresh tree).
 import * as esbuild from 'esbuild';
 import fs from 'fs';
 import path from 'path';
@@ -15,8 +15,8 @@ import { fileURLToPath } from 'url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const target = process.argv[2] ? path.resolve(process.argv[2]) : ROOT;
 
-const entry = path.join(ROOT, 'apps/desktop/scripts/qr-entry.mjs');
-const outfile = path.join(target, 'apps/desktop/renderer/vendor/qr.bundle.js');
+const entry = path.join(ROOT, 'scripts/qr-entry.mjs');
+const outfile = path.join(target, 'renderer/vendor/qr.bundle.js');
 
 if (!fs.existsSync(entry)) {
   console.log('[build-qr] entry not found — skipping');
