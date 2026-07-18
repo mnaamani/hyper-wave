@@ -16,29 +16,35 @@ they interact, see [`protocol.md`](./protocol.md) (the engine spec) and the apps
 > The pure submodules (`ring`/`sweep`/`attest`/`messages`/`flood`/`feed`) do no I/O and
 > also run fine under Node if you just want to play with the math/crypto.
 
-**Two import surfaces:**
+**Import surfaces.** The engine is **payment-agnostic** and ships **no wallet** — the `Wallet`
+interface and the concrete wallets are separate packages you add as needed:
 
 ```js
-// 1. The package entry re-exports the host-level building blocks:
+// 1. The engine entry re-exports the host-level building blocks + the wallet-agnostic fee flows
+//    (NO Wallet class, NO concrete wallet — those moved to their own packages):
 const {
   createEngine,
   createWave,
-  createPayments,
   parseBootstrap,
   loadOrCreateSwarmSeed,
+  payFee,
+  confirmBurn,
+  wireWallet,
+  burnMemo, // the wallet-agnostic fee flows (payments.js)
   serveEngine,
   createRpcClient // the host<->UI IPC seam (rpc.js) — §12
 } = require('hyperwave-engine');
-const {
-  Wallet, // the abstract wallet interface (base class) — extend it for a custom wallet
-  TronWallet, // the default self-custodial Tron wallet (a Wallet subclass)
-  FEE_TRX,
-  payFee,
-  confirmBurn,
-  wireWallet
-} = require('hyperwave-engine'); // wallet.js
 
-// 2. The pure submodules are imported by subpath (not re-exported from the index):
+// 2. The payment abstraction — its own packages (install only what you use):
+const { Wallet } = require('hyperwave-wallet'); // the abstract interface — extend it for a custom wallet
+const {
+  createPayments, // the default Tron wallet (native TRX)
+  createTronUsdtWallet, // the USDT/TRC-20 variant
+  FEE_TRX
+} = require('hyperwave-wallet-tron');
+const { createCashuWallet } = require('hyperwave-wallet-cashu'); // Chaumian ecash (the desktop default)
+
+// 3. The pure submodules are imported by subpath (not re-exported from the index):
 const ring = require('hyperwave-engine/lib/ring');
 const sweep = require('hyperwave-engine/lib/sweep');
 const attest = require('hyperwave-engine/lib/attest');
@@ -46,7 +52,7 @@ const messages = require('hyperwave-engine/lib/messages');
 const { Flood } = require('hyperwave-engine/lib/flood');
 const feed = require('hyperwave-engine/lib/feed');
 
-// 3. The stateful classes wave.js composes (also subpath imports — see §11):
+// 4. The stateful classes wave.js composes (also subpath imports — see §11):
 const { PeerTable } = require('hyperwave-engine/lib/peer-table');
 const { EntryPipeline } = require('hyperwave-engine/lib/entry');
 const { CrdtFeed } = require('hyperwave-engine/lib/feed-crdt');
@@ -55,7 +61,7 @@ const { CrdtFeed } = require('hyperwave-engine/lib/feed-crdt');
 Contents: [Host the engine](#1-host-the-whole-engine-createengine) · [Drive it headless](#2-drive-a-wave-headless-createwave) ·
 [ring.js](#3-ringjs--seats--the-ring) · [sweep.js](#4-sweepjs--the-deterministic-schedule) · [attest.js](#5-attestjs--attestations) ·
 [messages.js](#6-messagesjs--the-gossip-message-seam) · [flood.js](#7-floodjs--the-flood-graph) · [feed.js](#8-feedjs--the-multicore-crdt-feed) ·
-[payments](#9-payments--walletjs) · [seeds & bootstrap](#10-seed--bootstrap-helpers) ·
+[payments](#9-payments--the-wallet-interface--injected-wallets) · [seeds & bootstrap](#10-seed--bootstrap-helpers) ·
 [stateful classes](#11-the-stateful-classes-wavejs-composes) ·
 [rpc.js IPC seam](#12-rpcjs--the-hostui-ipc-seam-bare-rpc)
 
@@ -69,15 +75,19 @@ syscall). This is the entire surface a host (the desktop worker / mobile worklet
 
 ```js
 const { createEngine } = require('hyperwave-engine');
+const { createCashuWallet } = require('hyperwave-wallet-cashu'); // or hyperwave-wallet-tron
 
 const engine = createEngine({
   storageDir: '/tmp/hyperwave/a', // one dir per peer (the hyperwave/ store is wiped on startup)
   config: {
     topicId: 'hyperwave:my-match:v1', // peers on the same topicId share one ring
     bootstrap: '127.0.0.1:49737', // optional host:port → local DHT (instant same-machine discovery)
-    wallet: true, // default; false → wallet-less (join-attestation feed, no fees/tips)
+    wallet: false, // set false to force wallet-less; else a wallet activates IFF deps.createPayments is given
     autoSubscribe: true // default; false → browse-then-pick (hold cores only for waves you subscribe to)
   },
+  // The engine ships NO wallet — inject a payment factory to enable fees/tips (else it runs
+  // wallet-less: join-attestation feed, no burns/paid-gate/tips). This is where you pick a mechanism.
+  deps: { createPayments: createCashuWallet },
   // Optional: share an existing Hyperswarm the host already owns (a LIVE object, so it rides the
   // top-level option, NOT `config`). When set, the engine joins its topics on that instance and
   // NEVER destroys it (on close it only leaves those topics + detaches its listeners), and
@@ -112,24 +122,35 @@ engine.exec({
   // payload is opaque application content — the host owns its shape
   entry: { payload: { image: '<jpeg-data-url>', caption: 'hi' } }
 });
-engine.exec({ type: 'tip', to: 'T...', amount: 5 }); // real testnet TRX to an entry owner
-engine.exec({ type: 'send-trx', to: 'T...', amount: 10 });
+engine.exec({ type: 'tip', to: '<addr>', amount: 5 }); // pay an entry owner (mechanism-agnostic)
+engine.exec({ type: 'dm', waveId, to: '<peerId>', note: {} }); // DIRECTED (private) note to one peer → a `dm` event
+engine.exec({ type: 'note', waveId, note: {} }); // FLOODED note to a wave's subscribers → a `note` event
+engine.exec({ type: 'send-trx', to: '<addr>', amount: 10 }); // a plain transfer
 engine.exec({ type: 'fetch-transactions' }); // → { type:'transactions', list }
-engine.exec({ type: 'refresh-wallet' }); // → a fresh { type:'wallet', address, trx }
+engine.exec({ type: 'refresh-wallet' }); // → a fresh { type:'wallet', address, amount, unit }
+
+// Mint-based wallet (Cashu) — currency-agnostic, no-ops/errors on a chain wallet:
+engine.exec({
+  type: 'set-wallet-options',
+  walletOptions: { mint: 'https://…' }
+}); // switch mint live
+engine.exec({ type: 'fund-wallet', amount: 100 }); // mint funds → { type:'fund-result', invoice?, minted }
+engine.exec({ type: 'redeem', token: '<cashuB…>' }); // redeem a received bearer token → { type:'redeem-result' }
+// Multi-account wallet (Tron): list-accounts + set-account (see §9).
 
 await engine.close();
 ```
 
 Command / event reference: `protocol.md` §5; the state-machine `event` names (`started`,
-`joined`, `roster`, `holding`, `position`, `completed`, …) in §5 as well.
+`joined`, `roster`, `holding`, `position`, `completed`, `note`, `dm`, …) in §5 as well.
 
 ---
 
 ## 2. Drive a wave headless (`createWave`)
 
-`createEngine` wraps `createWave` + the wallet. If you want the engine without the payment layer (tests,
-a custom host), call `createWave` directly. It builds the Hyperswarm/Corestore transport and
-returns the wave controls.
+`createEngine` wraps `createWave` + the fee flows over an injected wallet. If you want the wave
+protocol without any payment layer (tests, a custom host), call `createWave` directly. It builds the
+Hyperswarm/Corestore transport and returns the wave controls.
 
 ```js
 const { createWave, parseBootstrap } = require('hyperwave-engine');
@@ -164,13 +185,16 @@ wave.stageEntry({ payload: { label: 'me' } }); // opaque payload; posts at my sw
 await wave.close();
 ```
 
-`createWave` returns: `{ me, startWave, subscribe, unsubscribe, join, setTag, stageEntry,
-setWallet, announcePaid, recordBurn, close }`. Concurrent waves are allowed — `startWave()`
-never returns null and there is no "busy" guard. `join(waveId?)` / `stageEntry({payload, waveId?})`
-default to the newest joinable / joined wave; `subscribe(waveId)` / `unsubscribe(waveId)` open /
-close a wave's feed (holding cores only for waves you subscribed to — see §11 CrdtFeed). There is
-no routing surface — the wave is a deterministic sweep. The payment methods
-(`setWallet`/`announcePaid`/`recordBurn`) are wired by `wallet.js` — see §9.
+`createWave` returns: `{ me, startWave, subscribe, unsubscribe, join, setTag, stageEntry, note,
+dm, setWallet, feeFor, announcePaid, recordBurn, close }`. Concurrent waves are allowed —
+`startWave()` never returns null and there is no "busy" guard. `join(waveId?)` /
+`stageEntry({payload, waveId?})` default to the newest joinable / joined wave; `subscribe(waveId)` /
+`unsubscribe(waveId)` open / close a wave's feed (holding cores only for waves you subscribed to —
+see §11 CrdtFeed). `note({waveId, note})` floods an authenticated note to the wave's subscribers;
+`dm({waveId, to, note})` unicasts a **directed** note to one peer (private counterpart of `note` —
+protocol.md §5). There is no routing surface — the wave is a deterministic sweep. The payment
+methods (`setWallet`/`feeFor`/`announcePaid`/`recordBurn`) are driven by the fee flows over an
+injected `Wallet` — see §9.
 
 ---
 
@@ -241,8 +265,9 @@ message.
 The pure Ed25519 crypto behind the paid-wave gate and the feed write credential. Every function
 is stateless.
 
-**Burn attestation** — bridges a peer's ring identity to its on-chain fee burn; authorizes a
-feed write and binds the tip address:
+**Burn attestation** — bridges a peer's ring identity to its fee burn; authorizes a feed write and
+binds the tip address. Mechanism-agnostic: `burnRef` is the burn reference (a chain tx hash, or a
+Cashu ecash token) and `payerAddress` the wallet/identity that funded it:
 
 ```js
 const {
@@ -259,8 +284,8 @@ const fields = {
   peerId,
   reason: 'start',
   amount: 1,
-  txHash: 'deadbeef…',
-  tronAddress: 'T…',
+  burnRef: 'deadbeef…', // chain tx hash | cashu token
+  payerAddress: 'T…', // the wallet/identity that paid
   burnTs: Date.now()
 };
 const proof = { ...fields, sig: signBurn(kp, fields) };
@@ -284,8 +309,9 @@ verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed t
 
 ## 6. `messages.js` — the gossip message seam
 
-The single definition point for the six on-wire message kinds (`protocol.md` §5: `heartbeat`,
-`subs`, `wave-announce`, `wave-join`, `wave-start`, `wave-sync`): one `make*` factory per kind
+The single definition point for the on-wire message kinds (`protocol.md` §5: `heartbeat`, `subs`,
+`wave-announce`, `wave-join`, `wave-start`, `wave-sync`, `wave-note` (flooded roster-member
+broadcast), `wave-dm` (directed/unicast note to one peer)): one `make*` factory per kind
 (builds the KIND + PAYLOAD; the uniform envelope — `origin`/`ts`/`sig`, §5.0 — is stamped at
 origination by wave.js via `attest.signMessage`) and one shape validator per kind, run once at the
 receive edge via `validGossip` (which checks the envelope + payload shape) before the envelope-sig
@@ -396,19 +422,20 @@ buildFeed([op]); // → [op]
 
 ---
 
-## 9. Payments — `wallet.js` / `tron-wallet.js` / `payments.js`
+## 9. Payments — the `Wallet` interface + injected wallets
 
-The payment layer is three modules: **`wallet.js`** (the abstract **`Wallet`** base class — the
-interface), **`tron-wallet.js`** (the default **`TronWallet`** implementation + `createPayments`),
-and **`payments.js`** (the wallet-agnostic fee flows: `payFee`/`confirmBurn`/`wireWallet`).
+The payment abstraction spans **four packages**: **`hyperwave-wallet`** (the abstract **`Wallet`**
+base class — the interface), **`hyperwave-wallet-tron`** (`TronWallet`/`TronUsdtWallet` +
+`createPayments`, WDK), **`hyperwave-wallet-cashu`** (`CashuWallet` + `createCashuWallet`, ecash),
+and the engine's own **`payments.js`** — the wallet-agnostic fee flows (`payFee`/`confirmBurn`/
+`wireWallet`/`burnMemo`) it composes over any wallet.
 
-The engine talks to payments only through the **`Wallet`** interface — the members any wallet must
-implement (`type`, `fee`, `address`, `balances`, `send`, `burn`, `verifyBurnTx`, `transactions`,
-`dispose`) plus two optional multi-account members (`accountIndex`, `accounts(count)` — default to a
-single account 0). The default is **`TronWallet`** (self-custodial Tron, WDK), built by
-`createPayments` (`async` because WDK is ESM-only). An app plugs in its **own** payment mechanism by
-injecting a factory returning any `Wallet` subclass — `createEngine({ deps: { createPayments: async
-() => new MyWallet() } })`.
+**The engine ships no wallet** — it talks to payments only through the **`Wallet`** interface: the
+members any wallet must implement (`type`, `unit`, `fee`, `address`, `balances`, `send`, `burn`,
+`verifyBurnTx`, `transactions`, `dispose`) plus optional ones (`accountIndex`/`accounts(count)`
+default to a single account; a mint wallet adds `fund`/`receive`/`consolidate`/`mintUrl`). A host
+**injects** a factory returning any `Wallet` subclass — `createEngine({ deps: { createPayments:
+createCashuWallet } })` — with none, the engine runs wallet-less. (The desktop default is Cashu.)
 
 **Multiple accounts (one seed, distinct addresses).** `createPayments({ accountIndex })` derives a
 distinct BIP-44 address per index (`m/44'/195'/0'/0/i` for Tron) from the same seed. The engine
@@ -425,11 +452,14 @@ The **`TronWallet` type is network-derived** — `tron-<network>` (`tron-nile`, 
 so testnet and mainnet are automatically distinct mechanisms and their waves never mix.
 
 ```js
-const { Wallet } = require('hyperwave-engine'); // the base class to extend for a custom wallet
+const { Wallet } = require('hyperwave-wallet'); // the base class to extend for a custom wallet
 
 class MyWallet extends Wallet {
   get type() {
-    return 'my-chain';
+    return 'my-chain'; // rides the wire; a peer only joins a wave whose type it supports
+  }
+  get unit() {
+    return 'COIN'; // currency label for host-side amount formatting
   }
   get fee() {
     return 5;
@@ -438,21 +468,26 @@ class MyWallet extends Wallet {
     return this._addr;
   }
   async balances() {
-    return { address: this._addr, trx: await this._fetchBalance() };
+    return {
+      address: this._addr,
+      amount: await this._fetchBalance(),
+      unit: this.unit
+    };
   }
   async send(to, amount) {
-    /* … */
+    /* … → { hash, fee? } */
   }
   async burn(amount, memo) {
-    /* … */
+    /* … → { hash, fee? } (irrecoverable, memo binds waveId|peerId) */
   }
-  async verifyBurnTx(txHash, expect) {
-    /* … → { ok, reason? } */
+  async verifyBurnTx(burnRef, expect) {
+    /* expect = { waveId?, from?, minAmount? } → { ok, reason? } (fail closed) */
   }
   async transactions(limit) {
-    /* … */
+    /* … newest first, [] on error */
   }
 }
+// inject it: createEngine({ ..., deps: { createPayments: async (opts) => new MyWallet(opts) } })
 ```
 
 **Bundled alternative — `TronUsdtWallet` (USDT / TRC-20).** A second Tron wallet that pays in USDT
@@ -463,7 +498,7 @@ and a TRX wave don't mix (a TRX-wallet peer can't join a USDT wave, and vice ver
 by injecting it:
 
 ```js
-const { createTronUsdtWallet } = require('hyperwave-engine');
+const { createTronUsdtWallet } = require('hyperwave-wallet-tron');
 
 createEngine({
   storageDir,
@@ -481,26 +516,47 @@ Two caveats: USDT is a TRC-20 **token, so a transfer costs TRX for gas** — the
 **pending Nile verification** (like the native path, de-risked by the on-chain tier, not offline
 tests). Supply the real Nile USDT `usdtContract` (there is no safe default).
 
-The default `TronWallet` (via `createPayments`):
+The default `TronWallet` (via `createPayments`, from `hyperwave-wallet-tron`):
 
 ```js
-const { createPayments } = require('hyperwave-engine');
+const { createPayments } = require('hyperwave-wallet-tron');
 
 const pay = await createPayments({
   storageDir: '/tmp/hw/a' /*, seed: '<mnemonic>' */
 });
 console.log(pay.address); // T… (derived offline from the seed at <storage>/wallet.seed)
 
-await pay.balances(); // → { address, trx }  (network call)
+await pay.balances(); // → { address, amount, unit: 'TRX' }  (network call)
 await pay.send('T…recipient', 5); // → { hash, fee }  a real testnet transfer
 await pay.burn(1, `hyperwave:${'w1'}:${pay.address}`); // → { hash, fee }  send to the black hole + memo
 await pay.verifyBurnTx('deadbeef…', {
   waveId: 'w1',
   from: pay.address,
-  minTrx: 1
+  minAmount: 1
 }); // → { ok, reason? }
 await pay.transactions(10); // → recent on-chain txs, both directions
 pay.dispose();
+```
+
+**Cashu ecash (the desktop default)** — from `hyperwave-wallet-cashu`. Chaumian ecash on a
+Lightning mint: burns lock ecash to a NUMS pubkey (the black-hole analog), tips are bearer tokens.
+It's **stateful** (proofs held locally) so it must be **funded** before it can burn/tip, and the
+`walletType` is the generic `'cashu'` (any mint interoperates):
+
+```js
+const { createCashuWallet } = require('hyperwave-wallet-cashu');
+
+const pay = await createCashuWallet({
+  storageDir: '/tmp/hw/a',
+  mint: 'https://testnut.cashu.space' // else the default test mint
+});
+console.log(pay.type, pay.unit); // 'cashu' 'sat'
+await pay.fund(100, { onInvoice: (bolt11) => showQr(bolt11) }); // mint quote → mint into the store
+await pay.balances(); // → { address, amount, unit: 'sat' } (local proof total at the active mint)
+await pay.burn(2, `hyperwave:${'w1'}:${pay.address}`); // lock ecash to the NUMS key + memo → { hash: token }
+await pay.verifyBurnTx('<cashuB…>', { waveId: 'w1', minAmount: 2 }); // decode + NUT-07 checkstate → { ok }
+const { hash: token } = await pay.send('<recipientPubkey>', 5); // P2PK-locked bearer token (deliver via `dm`)
+await pay.receive(token); // redeem a received tip (unlock P2PK into the store)
 ```
 
 **Selecting the network (testnet → mainnet).** The same `TronWallet`/`TronUsdtWallet` implementation
@@ -543,11 +599,11 @@ Wire it into a `createWave` instance and run the fee flow:
 ```js
 const {
   createWave,
-  FEE_TRX,
   payFee,
   confirmBurn,
   wireWallet
 } = require('hyperwave-engine');
+const { FEE_TRX } = require('hyperwave-wallet-tron');
 
 const wave = createWave({ storageDir: '/tmp/hw/a', emit() {} });
 wireWallet(wave, pay); // sets the wallet address (tips) + the on-chain burn verifier (paid gate)
@@ -558,8 +614,8 @@ const { hash, proof } = await payFee({
   wave,
   payments: pay,
   waveId,
-  reason: 'kickoff'
-}); // FEE_TRX burned + attestation signed
+  reason: 'start' // 'start' (initiator) | 'join' (participant) — the start gate requires 'start'
+}); // the fee burned + attestation signed
 if (await confirmBurn(pay, waveId, hash)) {
   wave.announcePaid(proof); // peers verify this before they'll join
 }
@@ -663,8 +719,8 @@ full-stack contract (concurrent-reply correlation, the FramedStream transport, l
 ## Running the examples & tests
 
 ```bash
-bare bin/wave.run.js A /tmp/hw/a     # a headless wave host (dev CLI)
+bare bin/wave.run.js A /tmp/hw/a     # a headless wave host (dev CLI; WALLET_TYPE=cashu|usdt selects a wallet)
 bare bin/dht-local.js                # a local DHT bootstrap (prints host:port)
-npm test                             # unit suites (from repo root; delegates here)
-bare lib/sweep.test.js               # a single suite
+npm test                             # from repo root: runs every package (engine + the wallet packages)
+bare lib/sweep.test.js               # a single engine suite (from packages/hyperwave-engine)
 ```
