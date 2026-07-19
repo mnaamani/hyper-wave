@@ -18,8 +18,12 @@ const PEER_COUNT = Number(process.env.E2E_PEERS || 8);
 // (The sweep itself is a chosen constant — lapMs is clamped in the engine — so the wave's own
 // duration no longer scales with N.) At the default 8 these come out a whisker above the
 // historical fixed values (90s wait / 150s test), so small runs behave as before.
-const WAIT_MS = 90000 + PEER_COUNT * 4000;
-const TEST_TIMEOUT_MS = 150000 + PEER_COUNT * 9000;
+// E2E_WAIT_SCALE multiplies the time budgets (default 1). The public DHT (E2E_PUBLIC=1) is much
+// slower to discover/replicate than the local testnet — a single-IP CI runner especially — so CI
+// runs the public tier with a larger scale to absorb that latency without touching local runs.
+const WAIT_SCALE = Number(process.env.E2E_WAIT_SCALE || 1);
+const WAIT_MS = Math.round((90000 + PEER_COUNT * 4000) * WAIT_SCALE);
+const TEST_TIMEOUT_MS = Math.round((150000 + PEER_COUNT * 9000) * WAIT_SCALE);
 
 // The initiator's start trigger, capped for scale. At small N the initiator waits to SEE the whole
 // roster in its live ring — the strictest start. But past Phase 4 the live ring is deliberately a

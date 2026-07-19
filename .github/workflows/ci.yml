@@ -7,7 +7,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Headroom for the public-DHT e2e tier, which runs with a 2x time budget (E2E_WAIT_SCALE
+    # below) to absorb real-network discovery/replication latency on a single-IP runner.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
 
@@ -52,3 +54,4 @@ jobs:
         env:
           E2E_PUBLIC: 1
           E2E_PEERS: 8
+          E2E_WAIT_SCALE: 2 # public DHT is slower than the local testnet — double the budgets
