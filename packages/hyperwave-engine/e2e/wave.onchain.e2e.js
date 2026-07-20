@@ -28,13 +28,15 @@ test(
 
     // stagger the launches (with the DHT warm-up in start(), this is what makes discovery
     // reliable — otherwise a peer can join a half-formed DHT and stay isolated). P2 first, then
-    // the initiator P1 (which kicks off once it sees P2).
+    // the initiator P1 (which kicks off once it sees P2). A 2-peer cluster has NO discovery
+    // redundancy, so on a constrained CI runner an isolated peer never recovers — give P2 a longer
+    // head start (1.5s, was 0.6s) to fully announce onto the warmed DHT before P1 looks it up.
     const p2 = cluster.launch(
       'p2',
       { AUTOJOIN: '1', AUTOENTRY: '1', WALLET: '1' },
       P2_SEED
     );
-    await sleep(600);
+    await sleep(1500);
     const p1 = cluster.launch(
       'p1',
       { START: '1', AUTOJOIN: '1', AUTOENTRY: '1', WALLET: '1' },

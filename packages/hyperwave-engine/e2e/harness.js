@@ -31,6 +31,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const LIVE_PROCS = new Set();
 let exitHooksInstalled = false;
 
+/** One line per live peer with its current connectivity — printed on a wait timeout (see #wait). */
+function allPeersConnSummary() {
+  const lines = [];
+  for (const proc of LIVE_PROCS) {
+    if (typeof proc.lastConn === 'function') {
+      lines.push(`#   ${proc.name}: ${proc.lastConn()}`);
+    }
+  }
+  return lines.length ? lines.join('\n') : '#   (no live peers)';
+}
+
 /** SIGKILL a detached child's whole process group (wrapper + native bare child); falls back to the pid. */
 function killProcGroup(proc) {
   try {
@@ -141,14 +152,30 @@ class Proc {
       const waiter = { ready, value, resolve };
       waiter.timer = setTimeout(() => {
         this.#waiters.delete(waiter);
+        // Dump EVERY live peer's connection state, not just the one that timed out — a
+        // discovery failure (e.g. a peer stuck at peers=0) is rarely explained by the waiting
+        // peer alone (was the OTHER side connected? did it drop?). This is what made the on-chain
+        // p2-discovery flake undiagnosable: only the failing peer's tail was logged.
         console.error(
           `# ${this.name}: timed out (${ms}ms) waiting for ${what}\n` +
+            `# live-peer connection state:\n` +
+            allPeersConnSummary() +
+            '\n' +
             this.tail()
         );
         resolve(false);
       }, ms);
       this.#waiters.add(waiter);
     });
+  }
+
+  // The last `peers=<n> connected=<n>` line this peer printed — its current connectivity, for the
+  // all-peers dump on a wait timeout.
+  lastConn() {
+    const matches = [...this.out.matchAll(/peers=\d+ connected=\d+/g)];
+    return matches.length
+      ? matches[matches.length - 1][0]
+      : '(no peers= line yet)';
   }
 
   // Resolve when the accumulated stdout matches `re`; returns the match, or `false` on timeout.
@@ -224,8 +251,10 @@ class Cluster {
     this.port = bootMatch[1];
     // Let the local DHT fully warm up before peers join. Without this the very first peer can
     // announce onto a half-formed DHT and end up isolated (found by nobody). Staggering the
-    // peer launches (see the tests) is the matching half of reliable discovery.
-    await sleep(2500);
+    // peer launches (see the tests) is the matching half of reliable discovery. 4s (was 2.5s) buys
+    // constrained CI runners more slack — a small 2-peer cluster has no discovery redundancy, so an
+    // isolated peer there never recovers (the on-chain e2e's intermittent p2 peers=0 on CI).
+    await sleep(4000);
     return this;
   }
 
