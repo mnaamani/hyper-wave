@@ -37,7 +37,11 @@ test('mergeFeed keeps join-attested ops, hop-ordered; drops the rest', (t) => {
   const p1 = crypto.keyPair();
   const p2 = crypto.keyPair();
   const forged = entry(crypto.keyPair(), 3);
-  forged.joinSig = forged.joinSig.replace(/^../, '00');
+  // Corrupt the first signature byte to a value guaranteed to differ from the original — a plain
+  // '00' prefix is a no-op when the signature already starts with '00' (~1/256 of keypairs), which
+  // left the "forged" sig valid and flaked this test. Any single-byte change invalidates Ed25519.
+  const head = forged.joinSig.slice(0, 2);
+  forged.joinSig = (head === '00' ? '11' : '00') + forged.joinSig.slice(2);
   const oversized = entry(crypto.keyPair(), 4);
   oversized.payload = 'x'.repeat(256 * 1024 + 1);
   const merged = mergeFeed([entry(p2, 1), entry(p1, 0), forged, oversized]);
