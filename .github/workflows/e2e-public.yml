@@ -50,6 +50,9 @@ jobs:
         env:
           E2E_PUBLIC: 1
           E2E_PEERS: ${{ inputs.peers }}
+          # Public-DHT cold discovery is much slower than the local testnet the budgets are sized
+          # for, so double the wait/timeout windows (see wave.local.e2e.js E2E_WAIT_SCALE).
+          E2E_WAIT_SCALE: 2
           E2E_DUMP: /tmp/e2e-dump
 
       - name: Upload per-peer logs (only exists on failure)

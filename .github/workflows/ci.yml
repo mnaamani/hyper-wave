@@ -7,10 +7,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Headroom for the public-DHT e2e tier: a 2x time budget (E2E_WAIT_SCALE) plus up to two
-    # attempts (each capped at 16m) to ride out real-network discovery flakiness on a single-IP
-    # runner. Normal runs finish in ~15m (one passing attempt); the cap only bites on a retry.
-    timeout-minutes: 42
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
@@ -32,46 +29,19 @@ jobs:
       - name: Unit tests (brittle, under Bare)
         run: npm test
 
-      # Real end-to-end, run TWICE — once per network scenario — so a regression in either layer
-      # is caught and localized in one CI run. No wallets / no on-chain in either mode (the
-      # paid-wave on-chain suite runs separately: funded-wallet secrets, gated to manual/nightly).
+      # Real end-to-end over the LOCAL DHT (@hyperswarm/testnet): offline, deterministic, exercises
+      # the loopback path. This is the per-push e2e gate. No wallets / no on-chain (the paid-wave
+      # on-chain suite runs separately, gated to manual/nightly).
       #
-      #  1. Local DHT (@hyperswarm/testnet): offline, deterministic, exercises the loopback path.
-      #  2. Public DHT (E2E_PUBLIC=1): the production path — real discovery, NAT/holepunch code,
-      #     isolated by a random per-run match topic; needs outbound UDP from the runner.
+      # The PUBLIC-DHT run (E2E_PUBLIC=1 — real discovery, NAT/holepunch) is NOT run here: on a
+      # single-IP CI runner, repeated cold full-roster discovery is too slow/nondeterministic to be
+      # a reliable per-push gate (timeout-bumping and retries couldn't stabilize it). It lives in
+      # the manual `e2e-public.yml` workflow instead — dispatch it for real-network validation.
       #
-      # Comparing the two localizes a failure instantly: local-only red = testnet/loopback
-      # networking (July 2026: hyperdht 6.33.0 silently regressed exactly that — flaky
-      # announce/lookup + silently-dying connections; pinned to 6.32.0 in root package.json
-      # overrides, see TODO.md "Dependency watch" and issue.md); public-only red = runner
-      # UDP/internet or real-DHT trouble; both red = suspect the protocol itself.
+      # (Historical note: local-only red = testnet/loopback networking — July 2026: hyperdht 6.33.0
+      # silently regressed exactly that; pinned to 6.32.0 in root package.json overrides, see
+      # TODO.md "Dependency watch".)
       - name: End-to-end tests (local DHT)
         run: npm run test:e2e:local
         env:
           E2E_PEERS: 8
-
-      # The public-DHT tier hits the real Hyperswarm DHT: each of its tests does a fresh cold
-      # discovery whose tail, on a single-IP runner, occasionally blows any fixed budget — and a
-      # different test flakes each run. The 2x budget (below) handles slow-but-progressing runs;
-      # this retry (up to 2 attempts, each capped so both fit the job timeout) rides out the
-      # remaining nondeterminism so one unlucky discovery doesn't red the whole run. The
-      # deterministic tiers above (unit + local-DHT e2e) are the hard gate; this is real-network
-      # signal made resilient, not weakened.
-      - name: End-to-end tests (public DHT)
-        run: |
-          for attempt in 1 2; do
-            echo "::group::public-DHT e2e (attempt $attempt/2)"
-            if timeout 16m npm run test:e2e:local; then
-              echo "::endgroup::"
-              echo "public-DHT e2e passed on attempt $attempt"
-              exit 0
-            fi
-            echo "::endgroup::"
-            echo "public-DHT e2e attempt $attempt failed"
-          done
-          echo "public-DHT e2e failed after 2 attempts"
-          exit 1
-        env:
-          E2E_PUBLIC: 1
-          E2E_PEERS: 8
-          E2E_WAIT_SCALE: 2 # public DHT is slower than the local testnet — double the budgets
