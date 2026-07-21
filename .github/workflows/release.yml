@@ -175,6 +175,11 @@ jobs:
         with:
           node-version: '24'
       - name: Build (unsigned) + OTA payload
+        # The unsigned .msix maker (makeappx) fails with an empty error, and an unsigned MSIX can't
+        # be installed anyway — build a portable ZIP instead (HYPERWAVE_BUILD_TEST → forge
+        # maker-zip). The package step still runs, so the OTA payload is produced either way.
+        env:
+          HYPERWAVE_BUILD_TEST: '1'
         run: |
           npm ci
           npm run make
