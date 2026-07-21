@@ -386,7 +386,11 @@ class CashuWallet extends Wallet {
       }
       return { ok: true };
     } catch (err) {
-      return { ok: false, reason: err.message };
+      // Couldn't complete the check (the token's mint — often a FOREIGN, per-peer mint — was
+      // unreachable / slow, or the token failed to decode). This is NOT proof of an invalid burn,
+      // so mark it transient: the engine retries these rather than rejecting the wave. The
+      // definitive rejections above (structural / spent) return without `transient`.
+      return { ok: false, transient: true, reason: err.message };
     }
   }
 

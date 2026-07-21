@@ -150,6 +150,11 @@ const MAX_MESSAGE_BYTES = 1024 * 1024; // 1 MB
 // the wave back to idle (paid-wave gate). Generous: the burn broadcasts in ~2s but on-chain
 // read-back can lag; must exceed the worker's confirmation poll budget.
 const PAY_TIMEOUT_MS = 60000;
+// A TRANSIENT start-burn verify failure (couldn't reach/decode the initiator's mint — common when
+// it's a FOREIGN Cashu mint) is retried with linear backoff rather than rejecting the wave, so a
+// momentary foreign-mint blip can't permanently kill an honest cross-mint wave (verifyStartProof).
+const VERIFY_MAX_RETRIES = 3; // 3 retries at 1.5s / 3s / 4.5s ≈ 9s, well within the lobby window
+const VERIFY_RETRY_MS = 1500;
 // Envelope age bound (protocol.md §5.0): a message whose signed `ts` is older than this is
 // dropped at the receive edge (and never relayed). This is a HARD cap on how long any flooded
 // message can circulate — independent of `mid` dedup — so a routing loop / dedup-set bug can't
@@ -1867,18 +1872,26 @@ function createWave({
   /**
    * Verify a wave's start burn with the payment mechanism, then settle wave.paid. Abandons the
    * wave if the burn isn't real (anti-spam). No-op if enforcement is off or no verifier is wired.
+   * A TRANSIENT verifier failure (`res.transient` — e.g. the initiator's FOREIGN Cashu mint was
+   * momentarily unreachable) is RETRIED with backoff rather than rejected, so a foreign-mint blip
+   * doesn't permanently kill an honest cross-mint wave. Fails closed: the wave stays `pending`
+   * (never joined/paid) until a definitive result, so a stuck verify gives an attacker nothing.
    * @param {string} waveId The wave whose start burn to verify.
    * @param {Object} proof The start burn attestation (carries burnRef / payerAddress / amount).
+   * @param {number} [attempt] Retry counter (internal — grows on transient failures).
    */
-  function verifyStartProof(waveId, proof) {
+  function verifyStartProof(waveId, proof, attempt = 0) {
     if (!enforcePaid || !verifyBurnOnChain) {
       return;
+    }
+    const wave = waves.get(waveId);
+    if (!wave || wave.phase !== 'lobby') {
+      return; // the wave ended/started before this (retried) async verify could run
     }
     // Enforce the initiator's ANNOUNCED fee as the settled minimum: the start burn must really be
     // ≥ the fee the wave advertises (catches an initiator that announces a high fee but underpays).
     // Fall back to the proof's own claimed amount when no fee was announced (older/unpaid-shape).
-    const wave = waves.get(waveId);
-    const minAmount = (wave && wave.fee) || proof.amount;
+    const minAmount = wave.fee || proof.amount;
     verifyBurnOnChain(proof.burnRef, {
       waveId,
       from: proof.payerAddress,
@@ -1892,15 +1905,25 @@ function createWave({
         if (res && res.ok) {
           wave.paid = 'verified';
           emitEvent({ event: 'wave-verified', waveId });
-        } else {
-          wave.paid = 'rejected';
-          emitEvent({
-            event: 'wave-unpaid',
-            waveId,
-            reason: res && res.reason
-          });
-          goIdle(waveId, 'unpaid-rejected');
+          return;
         }
+        // Transient (couldn't reach/decode the initiator's mint) → retry with linear backoff,
+        // keeping the wave pending. Only a DEFINITIVE invalid burn (bad structure / spent /
+        // wrong memo / amount too low) is rejected.
+        if (res && res.transient && attempt < VERIFY_MAX_RETRIES) {
+          setTimeout(
+            () => verifyStartProof(waveId, proof, attempt + 1),
+            VERIFY_RETRY_MS * (attempt + 1)
+          );
+          return;
+        }
+        wave.paid = 'rejected';
+        emitEvent({
+          event: 'wave-unpaid',
+          waveId,
+          reason: res && res.reason
+        });
+        goIdle(waveId, 'unpaid-rejected');
       })
       .catch(() => {});
   }

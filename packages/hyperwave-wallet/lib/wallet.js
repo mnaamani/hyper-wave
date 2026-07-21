@@ -102,9 +102,12 @@ class Wallet {
   /**
    * Verify that `burnRef` is a burn matching `expect` (fails closed on missing burn / error).
    * `burnRef` is the mechanism's burn reference — a chain tx hash, an ecash token, etc.
+   * Set `transient: true` when the check couldn't be COMPLETED (e.g. the backing mint/chain was
+   * unreachable) as opposed to a definitive invalid burn — the engine retries transient failures
+   * rather than rejecting the wave. Omit it (definitive) for a structural / spent / mismatch fail.
    * @param {string} burnRef - The burn reference to verify.
    * @param {{waveId?: string, from?: string, minAmount?: number}} [expect] - Expected fields.
-   * @returns {Promise<{ok: boolean, reason?: string}>} Whether it verifies.
+   * @returns {Promise<{ok: boolean, reason?: string, transient?: boolean}>} Whether it verifies.
    */
   async verifyBurnTx(burnRef, expect) {
     throw new Error('Wallet#verifyBurnTx not implemented');

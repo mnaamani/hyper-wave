@@ -79,3 +79,24 @@ test('a generated seed persists to disk and survives a restart', async (t) => {
     'address survives a restart (seed file)'
   );
 });
+
+test('verifyBurnTx flags an uncompletable check as transient, not a rejection', async (t) => {
+  const dir = tempDir();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const wallet = await createCashuWallet({ storageDir: dir, seed: SEED });
+  // A burnRef we can't decode/reach fails the check WITHOUT proving the burn invalid, so it must
+  // be flagged transient — the engine retries these (a foreign per-peer mint being momentarily
+  // unreachable shouldn't permanently reject an honest cross-mint wave) rather than rejecting.
+  const res = await wallet.verifyBurnTx('not-a-real-cashu-token', {
+    waveId: 'w1',
+    minAmount: 1
+  });
+  t.is(res.ok, false, 'does not verify');
+  t.is(
+    res.transient,
+    true,
+    'transient → engine retries instead of rejecting the wave'
+  );
+  wallet.dispose();
+});

@@ -224,7 +224,9 @@ class TronWallet extends Wallet {
       }
       return { ok: true };
     } catch (err) {
-      return { ok: false, reason: err.message };
+      // Couldn't complete the on-chain read (RPC unreachable / rate-limited) — not proof of an
+      // invalid burn, so mark it transient (the engine retries rather than rejecting the wave).
+      return { ok: false, transient: true, reason: err.message };
     }
   }
 
