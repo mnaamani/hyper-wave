@@ -1,13 +1,15 @@
 name: Build Release
 
-# Signed, distributable installers for macOS (arm64 + x64), Windows (MSIX) and Linux
-# (AppImage + Snap + Flatpak, x64 + arm64), built with holepunch's make-pear-app action — usable
-# now that the desktop app is the repo-root package (npm ci + npm run make + out/make/**, which the
-# action assumes). Manual: runs on a version tag push (v*) or workflow_dispatch.
+# Build the distributable INSTALLERS on native runners — macOS (arm64 + x64), Windows (MSIX), Linux
+# (AppImage/Snap/Flatpak, x64 + arm64) — with holepunch's make-pear-app (installer makers are
+# OS-bound, so each platform builds on its own runner). Each build ALSO uploads its raw app in the
+# pear-runtime OTA layout as an `ota-<platform-arch>` artifact.
 #
-# READY BUT DORMANT: the macOS/Windows jobs need code-signing secrets (see below). Until those are
-# configured they will fail at the signing step — the Linux jobs need no secrets and build fine.
-# Add these repository secrets to enable signing/notarization:
+# SEEDING IS NOT DONE HERE. A Hyperdrive is single-writer and CI storage is ephemeral, so the OTA
+# update is staged + seeded by an ALWAYS-ON HOST that downloads these artifacts (`scripts/seed.mjs`)
+# — see RELEASE.md. Runs on a version tag push (v*) or manual dispatch.
+#
+# Optional signing secrets (unset ⇒ unsigned builds, fine for alpha):
 #   macOS:   CERTIFICATE_P12, CERTIFICATE_PASSWORD, MAC_CODESIGN_IDENTITY, APPLE_ID,
 #            APPLE_PASSWORD, APPLE_TEAM_ID
 #   Windows: WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD
@@ -74,6 +76,8 @@ jobs:
             ${{ format('{0}_{1}_{2}_flatpak.tar.gz',
                 needs.prebuild.outputs.package-name-lower,
                 needs.prebuild.outputs.version, 'x64') }}
+      - name: Assemble + upload this platform's OTA payload
+        uses: ./.github/actions/ota-payload
 
   build-linux-arm:
     needs: [prebuild]
@@ -101,6 +105,8 @@ jobs:
             ${{ format('{0}_{1}_{2}_flatpak.tar.gz',
                 needs.prebuild.outputs.package-name-lower,
                 needs.prebuild.outputs.version, 'arm64') }}
+      - name: Assemble + upload this platform's OTA payload
+        uses: ./.github/actions/ota-payload
 
   build-macos:
     needs: [prebuild]
@@ -127,6 +133,8 @@ jobs:
           macos_apple_id: ${{ secrets.APPLE_ID }}
           macos_apple_password: ${{ secrets.APPLE_PASSWORD }}
           macos_apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Assemble + upload this platform's OTA payload
+        uses: ./.github/actions/ota-payload
 
   build-macos-x64:
     needs: [prebuild]
@@ -153,6 +161,8 @@ jobs:
           macos_apple_id: ${{ secrets.APPLE_ID }}
           macos_apple_password: ${{ secrets.APPLE_PASSWORD }}
           macos_apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Assemble + upload this platform's OTA payload
+        uses: ./.github/actions/ota-payload
 
   build-win32:
     needs: [prebuild]
@@ -173,3 +183,5 @@ jobs:
           windows_signing_method: windows_cert_pfx
           windows_cert_pfx_base64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
           windows_cert_password: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      - name: Assemble + upload this platform's OTA payload
+        uses: ./.github/actions/ota-payload

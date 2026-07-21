@@ -1,0 +1,29 @@
+# HyperWave OTA seeder — the always-on process that serves the upgrade Hyperdrive so installed
+# apps can auto-update. Install on a persistent host (VPS / home box / Pi):
+#
+#   sudo cp deploy/hyperwave-seeder.service /etc/systemd/system/
+#   # edit User / WorkingDirectory / the pear bin path in PATH below to match the host, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hyperwave-seeder
+#   journalctl -u hyperwave-seeder -f
+#
+# This host is the SOLE writer of the drive — publish a release with:
+#   node scripts/seed.mjs stage --run <github-actions-run-id>
+# (run as the same user, so it shares this service's Pear store). See RELEASE.md.
+[Unit]
+Description=HyperWave OTA seeder (pear seed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hyperwave
+WorkingDirectory=/home/hyperwave/hyperwave
+# `pear` must be on PATH — adjust the pear bin dir for this host (e.g. ~/.config/pear/bin on Linux).
+Environment=PATH=/home/hyperwave/.config/pear/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node scripts/seed.mjs seed
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

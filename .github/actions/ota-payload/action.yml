@@ -1,0 +1,27 @@
+name: OTA payload
+description: >-
+  Wrap this runner's freshly-built app (out/<App>-<platform>-<arch>, left by make-pear-app's
+  `npm run make`) into the pear-runtime OTA deploy layout and upload it as a per-platform artifact.
+  The publish-ota job later merges every platform's artifact and stages it with pear-ci.
+runs:
+  using: composite
+  steps:
+    - name: Assemble OTA deploy folder
+      id: assemble
+      shell: bash
+      run: |
+        node scripts/ota-deploy.mjs
+        app=$(jq -r '.productName // .name' package.json)
+        arch=$(ls out | grep -E "^${app}-(darwin|win32|linux)-" | head -1)
+        if [ -z "$arch" ]; then
+          echo "No packaged app found in out/ (expected ${app}-<platform>-<arch>)." >&2
+          exit 1
+        fi
+        # Unique artifact name per platform-arch; the publish job downloads `ota-*` and merges them.
+        echo "name=ota-$arch" >> "$GITHUB_OUTPUT"
+    - name: Upload OTA payload
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.assemble.outputs.name }}
+        path: out/ota-deploy
+        if-no-files-found: error
