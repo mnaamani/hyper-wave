@@ -283,10 +283,18 @@ const DIRECTORY_PATCH = {
 
 function updateDirectory(evt) {
   const patch = DIRECTORY_PATCH[evt.event]?.(evt);
-  if (evt.waveId && patch) {
+  // Only wave-announce (the authoritative "aware" event — the only one carrying `by`) may CREATE
+  // a directory entry; every other event only UPDATES a wave we already know. Otherwise an echoed
+  // `unsubscribed` (after we removed a wave), a late `roster`, or a racing-sync `wave-active` —
+  // none of which carry `by` — would spawn a phantom by-less bubble at the top of the ring.
+  if (
+    evt.waveId &&
+    patch &&
+    (evt.event === 'wave-announce' || waves.has(evt.waveId))
+  ) {
     upsertWave(evt.waveId, patch);
   }
-  if (evt.event === 'wave-idle' && evt.waveId) {
+  if (evt.event === 'wave-idle' && waves.has(evt.waveId)) {
     scheduleWaveExpiry(evt.waveId); // ended → linger, then fade out after the grace period
   }
 }
