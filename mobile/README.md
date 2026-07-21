@@ -24,7 +24,7 @@ Expo RN app (this package)                 Bare worklet (hyperwave-engine)
 Verified end-to-end on the iOS 26.5 simulator, **interoperating with a desktop peer over the
 public DHT**: a headless desktop peer (`bare bin/wave.run.js` on the same `matchId`) and the
 phone discovered each other (`peers 2` on the phone), the desktop kicked off a wave, and the
-desktop peers' selfie cores **replicated into the phone's CRDT gallery** (`Gallery (2)`,
+desktop peers' moment cores **replicated into the phone's CRDT gallery** (`Gallery (2)`,
 "desktop was here"). Same engine, same protocol, mobile ↔ desktop.
 
 What works:
@@ -73,10 +73,10 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 
 ## What's left (none of which touch the engine)
 
-- **Rich UI** — the ring canvas, the rolling ⚽, and the centre-selfie player (desktop's
+- **Rich UI** — the ring canvas, the rolling spark, and the centre-moment player (desktop's
   `renderer/app.js`) reimplemented in RN (`react-native-svg` or Skia). This scaffold shows a
   plain status + gallery list.
-- **Camera capture** — wire `expo-camera` to take the lobby selfie → JPEG data URL →
+- **Camera capture** — wire `expo-camera` to take the lobby moment → JPEG data URL →
   `engine.stageSelfie(...)` (the worklet already handles the rest, incl. the gallery blob).
 - **Wallet persistence + funding** — WDK works in the worklet (wallet is **on**), but the seed
   currently persists in the tmp dir (wiped per run → fresh unfunded wallet each launch). Inject

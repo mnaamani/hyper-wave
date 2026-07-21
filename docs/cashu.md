@@ -90,7 +90,7 @@ so the token and the tip relationship don't leak (see the privacy note below).
    **`wave-dm`** directed note (`{kind:'tip', token, amount}`), sent over a direct
    channel or via a `joinPeer` dial — it never touches the flood. Separately, a
    **stripped** `wave-note` (`{kind:'tip', amount}`, no token, no recipient) is
-   flooded for the gallery's "a selfie was tipped" social proof.
+   flooded for the gallery's "a moment was tipped" social proof.
 3. **Redeem** — the recipient's `dm` handler sends `redeem {token}`; the engine
    `receive()`s it (unlocks the P2PK with the identity key) into the proof store.
    A chain (Tron) tip is public on-chain anyway, so it keeps the full flooded

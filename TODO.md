@@ -22,10 +22,10 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`
       silent successor and re-forward; `seen` per wave + `endedWaves` anti-revival
 - [x] Gallery: per-wave Autobase (namespaced by `waveId`), writer admission gated on a valid
       hop receipt, `apply()` verifies every entry signature deterministically
-- [x] Renderer: ring canvas, rolling ⚽ on every screen, country flags + intro picker,
-      centre-selfie gallery, collection progress
-- [x] Fast dwell (250ms) + **lobby selfie capture**: selfies are framed/captured during the
-      lobby (camera + countdown), staged to the worker, and posted when the ball reaches the
+- [x] Renderer: ring canvas, an orange spark ⚡ rolling on every screen, country flags + intro picker,
+      centre-moment gallery, collection progress
+- [x] Fast dwell (250ms) + **lobby moment capture**: moments are framed/captured during the
+      lobby (camera + countdown), staged to the worker, and posted when the orange spark reaches the
       peer — the token never waits on a human; gallery fills in ring order
 - [x] **Persistent peer identity across runs.** The swarm keypair is derived from a seed
       persisted at `<storage>/swarm.seed` (`loadOrCreateSwarmSeed` in `wave.js`, passed as
@@ -61,7 +61,7 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`
       failures: the O(N) mid-race admission funnel and the fresh-`mid` re-flood storm.
 - [x] **The deterministic sweep replaces the token walk** (sweep Phases 2+3):
       `wave-start` carries `t0` + `lapMs`; every roster peer derives the identical
-      angle-ordered schedule (`sweep.js`) and self-triggers at its own slot; the ball is
+      angle-ordered schedule (`sweep.js`) and self-triggers at its own slot; the orange spark is
       rendered from the schedule (no `wave-pos`); the wave ends deterministically at
       `t0 + lapMs + grace` on every peer (no `wave-end`). Deleted: token race, healing,
       receipts + chain accumulator (`token.js` → `attest.js`), `pickReachable`. Wire
@@ -116,9 +116,9 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`
       💰 chip in the renderer. WDK is ESM-only → CJS worker bridges via dynamic `import()`
 - [x] Gallery tipping: `wave-selfie` carries the poster's address; 💵 Tip → real transfer.
       **The only way to make money** — there are no sponsor rewards.
-- [x] Participation fees **burned** to Tron's black hole (kick-off + join, 1 TRX each) —
+- [x] Participation fees **burned** to Tron's black hole (start + join, 1 TRX each) —
       skin in the game with no beneficiary; on-chain memo `hyperwave:<waveId>:<peerId>`
-- [x] Paid-wave anti-spam gate: no announce until the kick-off burn is on-chain (carried as
+- [x] Paid-wave anti-spam gate: no announce until the start burn is on-chain (carried as
       the signed `paid` proof); peers ignore unproven announces and verify before joining
 - [x] **Optimistic gallery admission** (scales without a Tron node/indexer): `add-writer`
       carries the join burn attestation; the admitter checks only the _signature_
@@ -127,7 +127,7 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`
       (`MAX_IMAGE_BYTES`/`MAX_CAPTION_BYTES`). Soft, publicly-detectable gate; verified live.
 - [x] **Signed gallery key**: originator signs `(waveId, autobaseKey)` (`signGalleryKey`);
       peers verify before opening — a relay can't swap the unsigned key to a rogue Autobase
-- [x] **Tip address bound to the burn**: `apply()` keeps a selfie's tip `address` only if a
+- [x] **Tip address bound to the burn**: `apply()` keeps a moment's tip `address` only if a
       signed burn names that wallet — a tip always reaches the wallet that paid in (§8.2)
 - [x] **One gallery entry per peer at write** (`apply()` dedup) — a paid seat can't bloat the
       log with unbounded self-signed entries (was display-only dedup before)
@@ -147,8 +147,8 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`
       / no on-chain, deterministic): 8-peer gallery convergence, self-healing under 2 mid-race
       kills. `npm run test:e2e:local`; runs in GitHub Actions
       (`.github/workflows/ci.yml`) alongside unit tests. **On-chain tier** (`wave.onchain.e2e.js`,
-      `npm run test:e2e:onchain`): enforced wave on Nile — paid gate → real kick-off/join burns →
-      on-chain kick-off verification → optimistic admission. Gated on funded-wallet secrets, runs manual/nightly
+      `npm run test:e2e:onchain`): enforced wave on Nile — paid gate → real start/join burns →
+      on-chain start verification → optimistic admission. Gated on funded-wallet secrets, runs manual/nightly
       (`.github/workflows/e2e-onchain.yml`). Verified live (8/8 asserts, ~38s).
 
 ### Adversarial hardening (against a modified client) — `packages/hyperwave-engine/docs/protocol.md` §11.2
@@ -159,7 +159,7 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`
 - [x] Authenticated `wave-end`: completion signed by the originator (`signWaveEnd`), stall
       carries the staller's hop receipt — an outsider can't force-terminate a live wave
 - [x] Paid-gate on every adoption path (`wave-announce`/`wave-start`/`wave-sync`, incl. a
-      **racing** sync) — closes the `wave-sync` bypass; kick-off proof now rides `wave-start`
+      **racing** sync) — closes the `wave-sync` bypass; start proof now rides `wave-start`
 - [x] Completion self-guard (only for a wave I'm running) + heal-ACK precision (only my
       actual successor's `wave-pos`) + cheap-checks-before-Ed25519-verify in token processing
 
@@ -235,7 +235,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       (d) a burn confirming after the wave ends still binds the tip address on the posted
       entry. Optionally extend `e2e/` with a mock-payments mode so the paid gate gets
       end-to-end coverage too.
-- [x] **Reject a wave whose kick-off burn is stale (replay-attack prevention) — DONE (2026-07-16).**
+- [x] **Reject a wave whose start burn is stale (replay-attack prevention) — DONE (2026-07-16).**
       Two layers now: (1) the uniform envelope's signed `ts` — the receive edge drops any message
       whose `ts` is older than `GOSSIP_MAX_AGE_MS` (5 min), so a captured `wave-announce` replayed
       later is dropped BEFORE adoption (its `ts` can't be refreshed without the initiator's key);
@@ -243,18 +243,18 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       (`MAX_KICKOFF_AGE_MS`), so a still-valid old burn reused in a fresh frame is rejected too.
       Both allow generous clock-skew. The stronger on-chain-tx-timestamp anchor (below) is a
       possible future tightening. Original analysis kept below.
-- [ ] **(future tightening) Anchor kick-off freshness to the on-chain tx timestamp.** `canAdopt()`
+- [ ] **(future tightening) Anchor start freshness to the on-chain tx timestamp.** `canAdopt()`
       only refuses a `waveId` already in `endedWaves`, and `validStartProof()` checks the burn
       **replay a captured, still-validly-signed `wave-announce`** later: a peer that never saw the
       original end (a freshly joined or **restarted** peer has an empty `endedWaves`) will adopt the
-      stale wave, since the signed kick-off proof still verifies. Fix: enforce a **freshness
+      stale wave, since the signed start proof still verifies. Fix: enforce a **freshness
       window** on adoption. The burn attestation already carries a **signed `burnTs`** (part of
-      `burnHash`, so it can't be back-dated without the initiator's key) — reject a kick-off whose
+      `burnHash`, so it can't be back-dated without the initiator's key) — reject a start whose
       `burnTs` is older than a bound (`MAX_KICKOFF_AGE_MS`, e.g. a few minutes) in `validStartProof`/`canAdopt`. For a stronger, unforgeable anchor, gate on the **on-chain tx timestamp**
       via `verifyBurnTx` (already fetched at the paid-gate verify step) rather than the
       self-reported `burnTs`. Allow generous clock-skew (peers aren't synchronized). Ties into the
       envelope `ts` item (§5.0) — a per-message timestamp would let the same freshness check apply
-      to every flooded message, not just the kick-off.
+      to every flooded message, not just the start.
 - [ ] Per-connection rate limiting (token buckets per message kind) + bounds on the
       auxiliary sets (the flood `seen` set is capped; `endedWaves` grows unbounded over a
       long session). A gallery seat costs only a signature check, so the rate limit caps
@@ -266,7 +266,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       `swarm.leavePeer` by remote key; consider IP-level so a peer can't just rekey). Turns the
       per-message drops above into an escalating penalty, so a modified client that keeps
       sending garbage gets cut off rather than re-processed each time.
-- [ ] Kick-off verification rate: every joiner still reads the _same_ kick-off burn on-chain
+- [ ] Start verification rate: every joiner still reads the _same_ start burn on-chain
       (N reads of 1 immutable tx). Not a concentration bottleneck (distributed, 1 read/joiner)
       and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
       the anti-_wave_-spam gate; making it optimistic would re-open free wave-spam).
@@ -308,9 +308,9 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       `protocol.md` §5 `wave-start`. Likewise, `writers` can't be dropped in favour of deriving the
       roster from received `wave-join` floods: flood delivery is racy, so per-peer rosters would
       diverge and desync the deterministic sweep — the initiator's snapshot is the consensus. Note
-      the bigger byte win at scale is orthogonal to gossip: the feed selfie is a base64 dataURL
+      the bigger byte win at scale is orthogonal to gossip: the feed moment is a base64 dataURL
       (raw JPEG bytes would save ~33%), but that rides a Hypercore block, not gossip. **Latent — not
-      worth it at per-match topic sizes (tens of peers).**
+      worth it at per-room topic sizes (tens of peers).**
 - [x] **Typed RPC seam between renderer/host and worker (`bare-rpc`).** Done — the host↔UI IPC now
       speaks **`bare-rpc`** through a single shared seam (`packages/hyperwave-engine/lib/rpc.js`:
       `serveEngine` host side + `createRpcClient` UI side, JSON-encoded over the existing pipe).
@@ -364,15 +364,15 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       the frame layer, avoids a new dependency/codegen, and the win is mostly from raw-byte
       ids/sigs. Keep JSON available behind a version byte for debug/interop. Measure first — the
       lifecycle floods are infrequent; the real target is the heartbeat + `writers` at scale.
-- [ ] **Bloom filter to minimize selfie re-use.** A peer can re-post the same image across
+- [ ] **Bloom filter to minimize moment re-use.** A peer can re-post the same image across
       waves (or lift someone else's). Maintain a space-efficient bloom filter of seen
-      selfie-image hashes (per-peer, and/or gossiped) and reject a `wave-entry`
+      moment-image hashes (per-peer, and/or gossiped) and reject a `wave-entry`
       whose image hash is probably-already-seen — cheap "have I seen this image?" at scale
       without storing every hash. False positives (rare) just ask the peer to re-shoot; no false
       negatives. Complements the per-entry byte cap + one-per-peer dedup (bounds _content_ reuse,
       not just count). Pairs well with a lightweight perceptual hash to catch near-duplicates.
 - [~] **Automatic NSFW filter (desktop) — DONE (2026-07-17).** A **local, on-device** image-safety
-  classifier (NSFWJS / MobileNetV2) blurs flagged gallery selfies behind a "Show anyway" cover —
+  classifier (NSFWJS / MobileNetV2) blurs flagged gallery moments behind a "Show anyway" cover —
   the coherent moderation model for a CRDT gallery (each peer filters its OWN view; the entry
   stays in the log). Runs entirely in the renderer via an esbuild bundle (tfjs + nsfwjs + the
   mobilenet_v2 model **embedded**, so it loads from memory — no fetch, which a sandboxed file://
@@ -381,14 +381,14 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
   Tether's QVAC but its "vision" is a multimodal **VLM** (GB RAM, seconds/image) — overkill for
   binary NSFW, especially P2P-every-peer + mobile; MobileNet is ~100–1000× cheaper. The
   **report/downvote** mechanism below still complements it for the tail (false negatives).
-- [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) selfies.** A `wave-entry` is
+- [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) moments.** A `wave-entry` is
       an inline image any admitted participant can post, so a peer could post something NSFW or
       abusive. Add a **report/downvote** signal that propagates so each peer can **choose not to
       display** a flagged entry (client-side moderation, not censorship — the entry stays in the
       log; hiding it is a local decision). Design: a signed `downvote` op appended to the
       reporter's own per-wave gallery core (block 1+ — would need relaxing the block-0-only
       download for tiny non-image ops), referencing the target entry (`waveId` + `peerId`, or its
-      image hash), **join-attested + one-per-reporter** exactly like a selfie (so `mergeGallery`
+      image hash), **join-attested + one-per-reporter** exactly like a moment (so `mergeGallery`
       tallies at most one downvote per reporter — a sybil can't brigade, and the whole tally is
       deterministic + replicated so every peer converges on the same counts). The renderer hides
       an entry whose downvote count crosses a threshold (with a per-user "show anyway" toggle, and
@@ -465,7 +465,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 
 ### Demo polish / wow factor
 
-- [ ] World map with flags lighting up as selfies arrive (the original design's wow factor)
+- [ ] World map with flags lighting up as moments arrive (the original design's wow factor)
 - [ ] "Past waves" browser (would need galleries to persist across runs — currently a wave
       initiator only retains its own wave's gallery in-run)
 - [ ] Tipping UX polish (a "you were tipped" toast for the recipient)

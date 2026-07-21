@@ -36,7 +36,7 @@ payment deps. A host injects a concrete wallet via
 
 ## Apps (in this `docs/` folder)
 
-The "stadium Mexican wave" product and how the two hosts wrap the engine.
+The global "wave of moments" product and how the two hosts wrap the engine.
 
 - [idea.md](./idea.md) — **the idea, in plain language** (read first). What
   HyperWave (the product) is, how a wave works, the money model (burned fees + tips), why

@@ -10,8 +10,8 @@ contributes to the design. Deeper context for the choices documented in
   <https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf>
   The idea under the ring: hashing participants onto a circle so membership changes only
   perturb neighbours. It's why a peer's seat is stable and permissionless — "seat on the
-  ring derived from your key" is a hash-to-circle node id, doubling as the stadium
-  seating chart.
+  ring derived from your key" is a hash-to-circle node id, doubling as the map of
+  participants around the world.
 
 - **Chord: A Scalable Peer-to-peer Lookup Service for Internet Applications** — Stoica,
   Morris, Karger, Kaashoek, Balakrishnan (SIGCOMM 2001).
@@ -36,7 +36,7 @@ contributes to the design. Deeper context for the choices documented in
   Mazières (IPTPS 2002).
   <https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf>
   The DHT design family behind Hyperswarm's HyperDHT, which gives us discovery ("who is
-  on this match topic?") and NAT hole-punching for free.
+  on this room topic?") and NAT hole-punching for free.
 
 - **CRDTs: Conflict-free Replicated Data Types** — Shapiro, Preguiça, Baquero, Zawirski
   (SSS 2011). <https://hal.inria.fr/inria-00609399/document>
@@ -89,12 +89,13 @@ contributes to the design. Deeper context for the choices documented in
   The handshake/encryption under every Hyperswarm connection; also what gives us an
   authenticated remote identity per connection (the basis of the identity-binding check).
 
-## The game itself
+## The wave itself
 
 - **The Mexican wave (La Ola)** — Farkas, Helbing, Vicsek, "Social behaviour: Mexican
   waves in an excitable medium" (Nature 419, 2002).
   <https://www.nature.com/articles/419131a>
-  A lovely aside: stadium waves really are a self-organising relay in an excitable
-  medium, needing only ~25–35 people to trigger and travelling at a characteristic speed
-  — no conductor. HyperWave is that phenomenon, moved onto a network: everyone fires at
-  their own moment of a shared schedule, global spectacle.
+  A lovely aside (and the physics HyperWave borrows from): crowd waves really are a
+  self-organising relay in an excitable medium, needing only ~25–35 people to trigger and
+  travelling at a characteristic speed — no conductor. HyperWave is that phenomenon, moved
+  onto a network: everyone fires at their own moment of a shared schedule — a global wave
+  of moments captured around the world.

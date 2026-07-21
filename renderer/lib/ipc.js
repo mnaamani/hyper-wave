@@ -3,9 +3,9 @@
 // typed command senders. The rest of the renderer talks to the worker only via this.
 //
 // This is the theme boundary: the engine is theme-agnostic (it speaks entries / feed /
-// tag / opaque payload), while this football app UI speaks selfies / gallery / country.
+// tag / opaque payload), while this app UI speaks moments / gallery / country.
 // The senders below translate the app's vocabulary into the engine's generic commands
-// (a selfie is just an opaque {image, caption} payload; a country is just a tag).
+// (a moment is just an opaque {image, caption} payload; a country is just a tag).
 const bridge = window.bridge;
 const decoder = new TextDecoder('utf-8');
 const HYPERWAVE = '/workers/hyperwave.js';
@@ -52,9 +52,9 @@ export const startWave = () => send('start-wave');
 export const joinWave = () => send('join-wave');
 // the app's "country" is the engine's cosmetic peer `tag`
 export const setCountry = (country) => send('set-tag', { tag: country });
-// the app's selfie {image, caption} is just the engine entry's opaque `payload`
-export const stageSelfie = (selfie) =>
-  send('stage-entry', { entry: { payload: selfie } });
+// the app's moment {image, caption} is just the engine entry's opaque `payload`
+export const stageMoment = (moment) =>
+  send('stage-entry', { entry: { payload: moment } });
 export const tip = (to, amount, peerId) => send('tip', { to, amount, peerId });
 // Broadcast an opaque note on a wave (roster-member announcement). The app's use: announce a tip so
 // the recipient (and everyone) sees it. Only broadcasts if this peer is a participant of the wave.

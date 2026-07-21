@@ -41,7 +41,7 @@ export function update(newCount) {
   paint();
 }
 
-// Gate the join button on the wave's kick-off payment being verified (anti-spam): show a
+// Gate the join button on the the wave start payment being verified (anti-spam): show a
 // "verifying…" state until the initiator's burn is confirmed, then enable joining.
 export function setJoinable(ok) {
   if (joined) {

@@ -24,8 +24,16 @@ export function setWalletMeta(meta = {}) {
   }
 }
 
-/** @returns {string} The active currency unit label (e.g. 'sat', 'TRX'). */
-export function unitLabel() {
+/**
+ * The active currency unit label. Pass an `amount` to get the correctly
+ * pluralized form — only 'sat' inflects (1 sat / 5 sats); TRX/USDT don't.
+ * @param {number} [amount] - Amount, to choose singular vs plural.
+ * @returns {string} The unit label (e.g. 'sat', 'sats', 'TRX').
+ */
+export function unitLabel(amount) {
+  if (unit === 'sat' && amount !== undefined && amount !== 1) {
+    return 'sats';
+  }
   return unit;
 }
 

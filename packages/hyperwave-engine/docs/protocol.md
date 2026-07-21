@@ -11,10 +11,10 @@ Reference implementation:
 
 > **The protocol is theme-agnostic.** It carries generic concepts — a **wave** that
 > **sweeps** a **ring**, an **entry** whose `payload` is **opaque** to the protocol, in a
-> per-wave **feed**, plus a cosmetic per-peer **tag**. The "stadium wave" is the reference
-> _application_ (the desktop app), which fills the entry payload with a `{image, caption}`
-> selfie and uses the tag as a country code. Any turn-taking / coordinated-snapshot app can
-> speak this same protocol.
+> per-wave **feed**, plus a cosmetic per-peer **tag**. The "moments around the world" app
+> is the reference _application_ (the desktop app), which fills the entry payload with a
+> `{image, caption}` moment and uses the tag as a country code. Any turn-taking /
+> coordinated-snapshot app can speak this same protocol.
 
 ---
 
@@ -126,7 +126,7 @@ sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
 
 **Wire encoding — JSON, and when to revisit.** Gossip messages are JSON (a baked-in design
 rule). This is deliberate and, today, correct: the message kinds are tiny and infrequent (hex ids,
-one signature, a few integers — the only large payload, the selfie, rides a Hypercore block, not
+one signature, a few integers — the only large payload, the moment image, rides a Hypercore block, not
 gossip), so a binary encoding would save almost nothing on the wire; JSON stays trivially
 loggable for debugging a flooded mesh; and signature safety is **independent of the wire** —
 attestations sign a canonical `|`-delimited tuple hash (`attest.js`), never the JSON envelope, so
@@ -134,7 +134,7 @@ JSON's non-canonicity (key order/whitespace) never touches verification. The one
 versioned binary encoding (e.g. `hyperschema`/`compact-encoding`) would add that JSON lacks is
 **append-only cross-version wire compatibility** — but that only pays off once there is real
 version skew on a shared topic: **independent client implementations, or rolling upgrades across a
-long-lived (non-per-match) topic**. That is the trigger to revisit. Until then the codegen build
+long-lived (non-per-session) topic**. That is the trigger to revisit. Until then the codegen build
 step, the loss of loggability, and reopening the one-encoding rule outweigh it. Even when
 revisited, only the message **envelope** would change encoding; the signed attestation tuple in
 `attest.js` stays its own canonical format regardless. (The internal app IPC made the opposite
@@ -310,7 +310,7 @@ are one-hop.
   dedup — so a routing loop / dedup-set bug can't amplify into unbounded flooding; and it is
   **replay-attack prevention**: a captured message can't be re-injected later because its `ts` is
   signed and can't be refreshed without the author's key (§11.2). Generous clock-skew tolerance
-  (peers aren't time-synchronized). The kick-off burn additionally carries a signed `burnTs` with
+  (peers aren't time-synchronized). The start burn additionally carries a signed `burnTs` with
   its own freshness window (§9.0) — belt-and-suspenders against reusing an old burn in a fresh frame.
 
 **Shape enforcement.** The schemas below are code, not just documentation: `lib/messages.js`
@@ -544,7 +544,7 @@ _sent_ the sync — any subscriber — while **`by` is the wave INITIATOR** (the
 every participant's feed-core credential — so a newcomer (in either phase) learns every
 core without needing to have seen the lobby's `wave-join`s; each is re-verified (`verifyJoin`)
 before its core is opened. `t0`/`lapMs` (racing phase) let a mid-race newcomer derive the
-schedule, animate the ball from the right point, and end at the same deterministic moment as
+schedule, animate the travelling marker from the right point, and end at the same deterministic moment as
 everyone else. When the paid-wave gate is enforced, a `wave-sync` must carry the start
 `paid` proof (§9.0) **for either phase** — including `racing` — and is adopted only if it
 verifies (§11), so a fabricated racing sync can't push a newcomer into a bogus wave. (`paid`
@@ -641,10 +641,10 @@ countdown; the captured frame is **staged** to the worker (`stage-entry`), and p
 peer's slot. Everyone captures around the same moment, at a relaxed pace — independent of
 ring size.
 
-### 6.3 Ball animation (position events)
+### 6.3 Marker animation (position events)
 
 Every peer — roster member or spectator — walks the schedule locally and emits a `position`
-event as each slot's time passes (`{ holder, angle, hopCount }`). The ⚽ on every screen is
+event as each slot's time passes (`{ holder, angle, hopCount }`). The travelling marker on every screen is
 rendered from this local walk; **there is no position gossip**. A mid-race newcomer that
 adopts via `wave-sync` flushes the already-past slots at once and animates from the current
 point.
@@ -679,7 +679,7 @@ flowchart TD
   CL -- no --> D["ignore"]
   CL -- yes --> SCH["derive schedule from canonical roster<br/>(sort by angle, slot = t0 + rank/count × lapMs)"]
   SCH --> MY["arm MY slot (roster members):<br/>record slot → post staged entry"]
-  SCH --> POS["walk schedule locally:<br/>position events (the ⚽ on every screen)"]
+  SCH --> POS["walk schedule locally:<br/>position events (the travelling marker on every screen)"]
   SCH --> END["local timer at t0 + lapMs + grace:<br/>completed → idle (every peer)"]
 ```
 
@@ -691,7 +691,7 @@ Each peer holds at most one `wave = { id, phase, by, writers:Map, joined:bool }`
 ```mermaid
 stateDiagram-v2
   [*] --> idle
-  idle --> lobby: kick off (idle only), or hear wave-announce / wave-sync(lobby)
+  idle --> lobby: start a wave (idle only), or hear wave-announce / wave-sync(lobby)
   lobby --> racing: lobby timer (originator), or wave-start / wave-sync(racing)
   lobby --> idle: lobby timeout (start never arrived)
   racing --> idle: deterministic end timer (t0 + lapMs + grace)
@@ -720,7 +720,7 @@ sequenceDiagram
   Note over O,C: racing — every peer derives the same schedule
   Note over O: t = t0 — O's slot fires, posts staged entry
   Note over B: t = t0 + lapMs/2 — B's slot fires, posts staged entry
-  Note over O,C: every screen animates the ⚽ locally (no messages)
+  Note over O,C: every screen animates the travelling marker locally (no messages)
   Note over O,C: t = t0 + lapMs + grace — every peer's end timer fires: completed → idle
 ```
 
@@ -757,7 +757,7 @@ Among **subscribed** peers there are still no lasting roles:
   lasting asymmetry: its slot is wherever its angle falls, it posts its own entry, and there
   is no indexer, admission, or retention role. (Every _subscriber_ holds every core during
   the wave — §8 — so a departing peer's entry survives; a subscribed wave's feed stays open
-  until `unsubscribe()` or `close()` — the post-race idle gallery + latecomer replication rely
+  until `unsubscribe()` or `close()` — the post-race idle feed + latecomer replication rely
   on it; it is **not** auto-closed at wave-end, since final-slot entries keep replicating past
   the deterministic end.)
 - **Joiner (roster):** subscribed **and** opted in during the lobby (`wave-join` publishes its
@@ -895,7 +895,7 @@ The op lives at **block 0** of the poster's own core. `hopCount` is the poster's
 rank** (its slot index in the schedule, §6.1) — the feed ordering key, so entries present
 in ring order. `writerKey` + `joinSig` are the write-gate credential `mergeFeed()` verifies
 (§8.2). `payload` is **opaque to the protocol** — arbitrary JSON the host owns, transported
-and byte-capped but never interpreted (the reference app puts a `{image, caption}` selfie,
+and byte-capped but never interpreted (the reference app puts a `{image, caption}` moment,
 where `image` is an inline JPEG data-URL thumbnail; Hyperblobs is the scaling path). `tag`
 is a cosmetic short string (the reference app uses an ISO country code). `address` is the poster's Tron (TRX) wallet, carried so a
 viewer can **tip** this entry with a real testnet transfer (renderer `tip` → worker
@@ -949,7 +949,7 @@ keypair from the ring identity, so both are needed):
    burn replayed for another wave (each carries its own random `waveId`, unguessable in advance).
 2. **Ring attestation.** `sig` = Ed25519 by `peerId` over
    `(waveId, peerId, reason, amount, burnRef, payerAddress, burnTs)` (§2.3) — binds the ring
-   participant to the burn. `validKickoff` admits the proof only if `sig` verifies, and a peer
+   participant to the burn. `validStartProof` admits the proof only if `sig` verifies, and a peer
    then cross-checks the `burnRef` with the mechanism (`verifyBurnTx`) before joining (§9.2).
    (Cashu note: ecash is anonymous, so `payerAddress` is **not** re-checkable from the token —
    the payer binding rests on the memo's `peerId` + this ring signature.)
@@ -1063,7 +1063,7 @@ following guards keep a hostile peer running a modified app from disrupting hone
 - **Message age bound / replay prevention (§5.0).** The receive edge drops (and never relays) any
   message whose signed `ts` is older than `GOSSIP_MAX_AGE_MS` — a hard cap on flood circulation
   (independent of `mid` dedup) AND replay prevention (a captured message can't have its `ts`
-  refreshed without the key). The kick-off burn carries its own signed `burnTs` freshness window
+  refreshed without the key). The start burn carries its own signed `burnTs` freshness window
   (`validStartProof`), so a stale burn reused in a fresh frame is also rejected.
 - **Self-certifying feed cores.** A `wave-join`'s credential is signed over
   `(waveId, peerId, writerKey)` (§2.2), so a relay can't forge or substitute a core key under
@@ -1170,8 +1170,8 @@ interop surface.
 `unsubscribe-wave {waveId}` (browse-then-pick: hold / free a wave's feed cores without
 joining — relevant when the host runs `autoSubscribe:false`), `set-tag {tag}`,
 `stage-entry {entry:{payload}}` (stage the opaque entry payload; the worker pairs it with
-the peer's sweep slot and posts it when the slot fires — the football app puts a
-`{image, caption}` selfie in the payload), `tip {to, amount}` (send a real TRX tip to an
+the peer's sweep slot and posts it when the slot fires — the reference app puts a
+`{image, caption}` moment in the payload), `tip {to, amount}` (send a real TRX tip to an
 entry owner's wallet), `send-trx {to, amount}`, `fetch-transactions`, `refresh-wallet`
 (manual balance re-check after funding).
 
@@ -1189,5 +1189,5 @@ announcing), `wave-verified` (start burn proven — join is now allowed), `wave-
 before the start is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {angle,hopCount,...}` (my sweep slot fired — my staged entry
 posts now), `position {holder,angle,hopCount}` (locally generated from the schedule as each
-slot passes — this is what animates the ⚽; there is no position gossip), `completed
+slot passes — this is what animates the travelling marker; there is no position gossip), `completed
 {waveId,hops,angle}` (fires on **every** peer at the deterministic end).

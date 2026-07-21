@@ -8,8 +8,8 @@ they interact, see [`protocol.md`](./protocol.md) (the engine spec) and the apps
 > **topic**, map to seats on a DHT **ring**, and any peer triggers a **wave** that
 > **sweeps** the ring on a deterministic schedule; each participant contributes one
 > **entry** (an opaque `payload` the host owns) to a per-wave CRDT **feed**, optionally
-> gated by proof-of-burn, and carries a cosmetic **tag**. The football "stadium wave" app
-> (the desktop app) is one host over this engine — it fills the payload with a selfie and
+> gated by proof-of-burn, and carries a cosmetic **tag**. The "moments around the world" app
+> (the desktop app) is one host over this engine — it fills the payload with a moment and
 > uses the tag as a country. Build any turn-taking / coordinated-snapshot app the same way.
 
 > **Runs under [Bare](https://github.com/holepunchto/bare), not Node.** Examples assume `bare`.
@@ -254,7 +254,7 @@ const slot = mySlot(schedule, rosterIds[0]);
 // self-trigger: setTimeout(fireMyEntry, slot.at - Date.now())
 ```
 
-The ⚽ on every screen is rendered from this same schedule (renderer-local, no gossip), and the
+The travelling marker on every screen is rendered from this same schedule (renderer-local, no gossip), and the
 wave ends deterministically on every peer at `t0 + lapMs + END_GRACE_MS` — there is no completion
 message.
 

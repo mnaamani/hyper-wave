@@ -1,17 +1,17 @@
 // HUD: the DOM chrome around the field — version label, status line, country picker,
-// and the Kick-off button (which docks below the ring once there's a gallery). The wallet
+// and the Start button (which docks below the ring once there is a gallery). The wallet
 // view lives in its own module (wallet.js).
 import { COUNTRIES, flagOf } from './countries.js';
 import { startWave, setCountry, appVersion } from './ipc.js';
 
 const statusEl = document.getElementById('status');
+const statusPillEl = document.getElementById('status-pill');
 const waveEl = document.getElementById('wave-status');
 const updaterEl = document.getElementById('updater');
 const startBtn = document.getElementById('start');
 const introEl = document.getElementById('intro');
 const introCountryEl = document.getElementById('intro-country');
 const enterBtn = document.getElementById('enter');
-const globeBtn = document.getElementById('globe');
 const myFlagEl = document.getElementById('myflag');
 
 let country = localStorage.getItem('hyperwave-country') || '';
@@ -19,9 +19,15 @@ let country = localStorage.getItem('hyperwave-country') || '';
 document.getElementById('v').innerText = 'v' + appVersion();
 
 // --- status lines + start button --------------------------------------------
-// The persistent network status line (peer count).
-export function networkStatus(text) {
-  statusEl.innerText = text;
+// The persistent connection pill: a live/searching dot + peer count. Steady once
+// peers are connected, pinging while we're still reaching out across the network.
+export function networkStatus({ peers }) {
+  const live = peers > 0;
+  statusPillEl.classList.toggle('live', live);
+  statusPillEl.classList.toggle('searching', !live);
+  statusEl.innerText = live
+    ? `${peers} around the world · connected`
+    : 'reaching the network…';
 }
 // The live wave narration, on its own line (paying / lobby / racing / result). Pass '' to clear it
 // (the element collapses via #wave-status:empty). Kept separate from networkStatus() so the two
@@ -47,19 +53,19 @@ export function dockStart(docked) {
 startBtn.onclick = () => startWave();
 
 // --- country picker + intro screen ------------------------------------------
-// The intro overlay (pick your team) shows only on first launch — if a team is
-// already saved we skip straight to the ring. The top-right 🌐 button reopens it.
+// The intro overlay (pick your country) shows only on first launch — if a country is
+// already saved we skip straight to the ring. The country button reopens it.
 
-// Show the user's team flag next to the globe (hidden until a team is picked).
+// The country button: the picked country's flag, or a 🌐 globe prompting a first pick.
 function renderMyFlag() {
-  myFlagEl.innerText = country ? flagOf(country) : '';
+  myFlagEl.innerText = country ? flagOf(country) : '🌐';
 }
 
 // Fill the picker: a placeholder plus one option per country.
 function buildCountryPicker() {
   const placeholder = document.createElement('option');
   placeholder.value = '';
-  placeholder.text = '🏳️ pick your team';
+  placeholder.text = '🏳️ pick your country';
   introCountryEl.appendChild(placeholder);
   for (const [code, name] of COUNTRIES) {
     const option = document.createElement('option');
@@ -87,8 +93,7 @@ function applyCountry(code) {
 
 introCountryEl.onchange = () => applyCountry(introCountryEl.value);
 enterBtn.onclick = () => introEl.classList.remove('show');
-globeBtn.onclick = () => introEl.classList.add('show');
-myFlagEl.onclick = () => introEl.classList.add('show'); // click your flag to change team too
+myFlagEl.onclick = () => introEl.classList.add('show'); // globe/flag → open the picker
 
 // push our stored country to the worker (called once it's up)
 export function sendCountry() {

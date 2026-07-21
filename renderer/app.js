@@ -1,5 +1,5 @@
 // HyperWave renderer - orchestrator. Wires worker events (ipc) to the views:
-// ring (canvas), gallery (centre selfie + progress), lobby, proof (webcam), hud.
+// ring (canvas), gallery (centre moment + progress), lobby, proof (webcam), hud.
 import * as ipc from './lib/ipc.js';
 import * as ring from './lib/ring.js';
 import * as gallery from './lib/gallery.js';
@@ -8,10 +8,10 @@ import * as lobby from './lib/lobby.js';
 import * as proof from './lib/proof.js';
 import * as hud from './lib/hud.js';
 import * as wallet from './lib/wallet.js';
-import { setWalletMeta, unitLabel } from './lib/wallet-meta.js';
+import { setWalletMeta, unitLabel, isCashu } from './lib/wallet-meta.js';
 import { txLink } from './lib/explorer.js';
 
-// Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the ⚽
+// Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the spark
 // around the ring to browse the gallery once the completion replay has run).
 ring.start();
 scrubber.init();
@@ -19,9 +19,9 @@ scrubber.init();
 // The orchestrator's UI state - a single source of truth. Mutate only via setState() so updates
 // are explicit and in one place; the views below are still driven imperatively off the ipc events.
 const state = {
-  countrySent: false, // one-shot: pushed our saved team to the worker once it came up
+  countrySent: false, // one-shot: pushed our saved country to the worker once it came up
   peers: 0, // number of live peers in the ring (drives the status line)
-  lobbyDeadline: 0, // ~when the lobby closes (kickoff), for the capture countdown
+  lobbyDeadline: 0, // ~when the lobby closes (wave start), for the capture countdown
   myAddress: null // my wallet address — to recognise a tip note addressed to me
 };
 const setState = (patch) => Object.assign(state, patch);
@@ -45,13 +45,13 @@ function setDim(on) {
 // "Not now" in the lobby: un-dim and let the peer keep browsing the gallery they were viewing.
 lobby.onCancel(() => setDim(false));
 
-// Capturing the selfie closes the camera preview, so confirm it on the status line (it'll post to
+// Capturing the moment closes the camera preview, so confirm it on the status line (it'll post to
 // the gallery when this peer's sweep slot fires).
 proof.onCaptured(() =>
-  hud.waveStatus('📸 selfie captured — get ready for the wave!')
+  hud.waveStatus('📸 moment captured — get ready for the wave!')
 );
 
-// Swap the join panel for the camera and start framing the lobby selfie. Leaving the old wave's
+// Swap the join panel for the camera and start framing the lobby moment. Leaving the old wave's
 // gallery to take part in a new one: close its view and clear the frozen replay/scrubber.
 function beginCapture() {
   setDim(false);
@@ -63,26 +63,22 @@ function beginCapture() {
 }
 
 // Update the HUD's persistent chrome from state: the network status line (peer count) + the
-// docked kick-off button. The live wave narration is a separate element (hud.waveStatus /
+// docked start button. The live wave narration is a separate element (hud.waveStatus /
 // #wave-status), so this runs freely — even mid-wave — without clobbering it.
 function updateHud() {
-  hud.networkStatus(
-    state.peers === 0
-      ? 'in the ring - waiting for peers...'
-      : `${state.peers} peer${state.peers === 1 ? '' : 's'} in the ring.`
-  );
-  // keep the kickoff button off the gallery
+  hud.networkStatus({ peers: state.peers });
+  // keep the start button off the gallery
   hud.dockStart(gallery.count() > 0);
 }
 
 // The engine is theme-agnostic: a peer's cosmetic `tag` is this app's country code, and a
-// feed entry carries an opaque `payload` this app fills with a {image, caption} selfie.
-// Map the engine's generic shape back to the football UI's shape right here at the inbound
+// feed entry carries an opaque `payload` this app fills with a {image, caption} moment.
+// Map the engine's generic shape back to the app UI's shape right here at the inbound
 // boundary, so the rest of the UI keeps reading `.country` / `.image` / `.caption`.
-function asFootballPeer(peer) {
+function withCountry(peer) {
   return { ...peer, country: peer.tag };
 }
-function asSelfie(item) {
+function asMoment(item) {
   return {
     ...item,
     image: item.payload?.image || '',
@@ -98,22 +94,22 @@ ipc.on('state', (msg) => {
   }
   ring.setState({
     ...msg,
-    me: asFootballPeer(msg.me),
-    peers: msg.peers.map(asFootballPeer)
+    me: withCountry(msg.me),
+    peers: msg.peers.map(withCountry)
   });
   setState({ peers: msg.peers.length });
   updateHud();
 });
 
 ipc.on('feed', (msg) => {
-  gallery.handle(msg.items.map(asSelfie));
-  updateHud(); // dock the kick-off button below a non-empty gallery (when idle)
+  gallery.handle(msg.items.map(asMoment));
+  updateHud(); // dock the start button below a non-empty gallery (when idle)
 });
 
 ipc.on('wallet', (msg) => {
   setWalletMeta(msg); // active mechanism + unit + mint, for labels across the UI
   wallet.walletStatus(msg); // self-custodial wallet address + balance (wallet-view modal)
-  gallery.setMyAddress(msg.address); // so we don't offer to tip our own selfie
+  gallery.setMyAddress(msg.address); // so we do not offer to tip our own moment
   setState({ myAddress: msg.address }); // to recognise a tip note addressed to me
 });
 // Cashu top-up (fund-wallet) and tip redeem (receive) results — surfaced as toasts.
@@ -134,12 +130,15 @@ ipc.on('tip-result', (msg) => {
 ipc.on('send-result', (msg) => wallet.sendResult(msg));
 ipc.on('transactions', (msg) => wallet.setTransactions(msg.list));
 ipc.on('burn-result', (msg) => {
-  // participation fee (kick-off or join), burned to the black hole (skin in the game). `stage`
+  // participation fee (start or join), burned to the black hole (skin in the game). `stage`
   // keeps us from claiming "burned" before the tx is actually confirmed on-chain.
-  const what = msg.reason === 'join' ? 'join' : 'kick-off';
-  const tx = msg.hash ? [' (', txLink(msg.hash), ')'] : [];
+  const what = msg.reason === 'join' ? 'join' : 'start';
+  // A chain burn links to its block explorer + confirms on-chain; a Cashu burn is a
+  // bearer token (no explorer) that settles instantly, so drop both for ecash.
+  const tx = msg.hash && !isCashu() ? [' (', txLink(msg.hash), ')'] : [];
+  const onChain = isCashu() ? '' : ' on-chain';
   if (msg.stage === 'confirming') {
-    hud.waveStatusNodes(`⏳ confirming ${what} burn on-chain…`, ...tx);
+    hud.waveStatusNodes(`⏳ confirming ${what} burn${onChain}…`, ...tx);
   } else if (msg.stage === 'failed') {
     hud.waveStatus(`⚠️ ${what} fee burn failed: ${msg.error}`);
   } else {
@@ -169,12 +168,12 @@ const EVENT_HANDLERS = {
       if (evt.paid === 'verified') {
         beginCapture();
       } else {
-        hud.waveStatus('🔥 paying the kick-off fee…');
+        hud.waveStatus('🔥 paying the start fee…');
       }
     } else {
       // joiner-candidate: fade the previous gallery so the countdown reads clearly, but keep
       // it browsable underneath. Join → capture (clears it); "Not now" → un-dim + keep browsing.
-      // The join button stays disabled until the kick-off payment verifies (anti-spam).
+      // The join button stays disabled until the start payment verifies (anti-spam).
       setDim(true);
       lobby.open(evt);
       lobby.setJoinable(evt.paid === 'verified');
@@ -182,14 +181,14 @@ const EVENT_HANDLERS = {
   },
 
   paying: () => {
-    hud.waveStatus('🔥 paying the kick-off fee…');
+    hud.waveStatus('🔥 paying the start fee…');
   },
 
   'wave-verified': (evt) => {
     if (evt.mine) {
       beginCapture(); // initiator's wave is now live + paid
     } else {
-      lobby.setJoinable(true); // safe to join - kick-off is proven paid
+      lobby.setJoinable(true); // safe to join - the start fee is proven paid
     }
   },
 
@@ -208,8 +207,8 @@ const EVENT_HANDLERS = {
       'wallet-unsupported': evt.walletType
         ? `💸 can’t join — this wave needs a ${evt.walletType} wallet`
         : '💸 can’t join — no compatible wallet',
-      pending: '⏳ verifying the wave’s kick-off payment…',
-      rejected: '⚠️ the wave’s kick-off payment was rejected'
+      pending: '⏳ verifying the wave’s start payment…',
+      rejected: '⚠️ the wave’s start payment was rejected'
     };
     hud.waveStatus(messageByReason[evt.reason] || '🚫 can’t join this wave');
     if (evt.reason !== 'pending') {
@@ -231,7 +230,7 @@ const EVENT_HANDLERS = {
     hud.showStart(false);
     setDim(false); // wave is racing — restore the ring (lobby may have timed out still dimmed)
     lobby.close();
-    // Free the ring centre FIRST (snap + stage the lobby selfie, then close the capture modal),
+    // Free the ring centre FIRST (snap + stage the lobby moment, then close the capture modal),
     // THEN reopen the gallery for the racing wave — so the gallery can't repaint behind a still-open
     // capture in the gap.
     proof.captureAndStage();
@@ -239,7 +238,7 @@ const EVENT_HANDLERS = {
     gallery.setActive(true);
     hud.waveStatus(
       evt.joined
-        ? '📸 captured - here comes the wave!'
+        ? '📸 captured — here comes the wave!'
         : '👀 spectating this wave'
     );
   },
@@ -264,14 +263,14 @@ const EVENT_HANDLERS = {
   },
 
   started: () => {
-    hud.waveStatus('⚽ the wave is off!');
+    hud.waveStatus('⚡ the wave is off!');
   },
 
-  // the ball reached me - my staged selfie posts now (worker-side). The race is near-instant
-  // (network speed); the visible ⚽ roll is the completion replay below, not this event.
+  // the spark reached me - my staged moment posts now (worker-side). The race is near-instant
+  // (network speed); the visible spark roll is the completion replay below, not this event.
   holding: (evt) => {
     hud.waveStatus(
-      `📸 your selfie joins the wave! - hop ${evt.hopCount ?? ''}`
+      `📸 your moment joins the wave! — hop ${evt.hopCount ?? ''}`
     );
   },
 
@@ -297,7 +296,7 @@ const EVENT_HANDLERS = {
   // A roster member broadcast a note on the wave (flooded). For a CHAIN wallet (Tron) the tip is
   // public anyway, so the note carries `to` + `hash`: if addressed to my wallet I got tipped
   // (celebrate + refresh). For CASHU the note is a stripped social-proof announcement (no token, no
-  // recipient — the token comes via `dm`), so it falls through to the "a selfie was tipped" line.
+  // recipient — the token comes via `dm`), so it falls through to the "a moment was tipped" line.
   note: (evt) => {
     const payload = evt.note || {};
     if (payload.kind !== 'tip') {
@@ -311,18 +310,16 @@ const EVENT_HANDLERS = {
       }
       ipc.refreshWallet();
     } else {
-      hud.waveStatus(`💸 a selfie was tipped ${payload.amount} ${unitLabel()}`);
+      hud.waveStatus(`💸 a moment was tipped ${payload.amount} ${unitLabel()}`);
     }
   },
 
-  // a completed wave always has ≥1 selfie (the initiator's) — it may land a beat after this
-  // event, so gallery.startReplay() defers until it arrives. Show the browse hint regardless.
+  // a completed wave always has ≥1 moment (the initiator's) — it may land a beat after this
+  // event, so gallery.startReplay() defers until it arrives.
   completed: (evt) => {
-    hud.waveStatus(
-      `✅ wave completed - ${evt.hops} hops · 🔎 drag the ⚽ around the ring to browse`
-    );
+    hud.waveStatus(`✅ wave completed - ${evt.hops} hops`);
     ring.startFlourish(); // golden ring pulse + confetti — the wave made it all the way around
-    gallery.startReplay(); // roll the ⚽ once around the ring, featuring selfies in hop order
+    gallery.startReplay(); // roll the spark once around the ring, featuring moments in hop order
   }
 };
 

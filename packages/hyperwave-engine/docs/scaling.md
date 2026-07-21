@@ -108,7 +108,7 @@ Each phase is independently shippable and testable:
 
 1. ✅ **Multiplex the FSM** (still one topic) — **done.** Concurrent waves work end-to-end; control
    still floods. Unblocks the "pick and choose" UX immediately at small scale. (Engine-internal;
-   the host UI still shows one gallery per wave, keyed by the feed's `waveId`.)
+   the host UI still shows one feed per wave, keyed by the feed's `waveId`.)
 2. ✅ **Subscription layer + per-wave feed lifecycle** — **done.** A wave you're merely AWARE of
    (saw its announce) opens no cores; `subscribe()` opens its feed and `unsubscribe()` closes it
    (join/leave lifecycle) — `autoSubscribe` (default true) subscribes on awareness for the demo UX,
@@ -127,8 +127,8 @@ Each phase is independently shippable and testable:
 
 ## 6. What we give up / tensions
 
-- **The global "stadium" ring visualization weakens** — with no global membership, the ring becomes
-  per-wave. Is the stadium one wave, or a stadium _of_ waves? A product/theme call.
+- **The global ring visualization weakens** — with no global membership, the ring becomes
+  per-wave. Is there one global ring of participants, or a ring _per_ wave? A product/theme call.
 - **Drops the "exactly one wave at a time" rule** and the singleton FSM.
 - **Drops "every peer holds every core" as a _global_ property** — it is preserved _per wave_.
 - **The directory-at-scale problem is new** (§4.4).

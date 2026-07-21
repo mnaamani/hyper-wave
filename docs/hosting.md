@@ -3,12 +3,12 @@
 How the two app hosts (the desktop Electron shell and the mobile bare-kit worklet) wrap the
 theme-agnostic engine, and the seam between the UI and the P2P worker.
 
-HyperWave (the product) is a peer-to-peer "global stadium wave": peers join a match swarm, a
-⚽ sweeps around a ring of participants (each peer fires its own moment on a shared,
-deterministic schedule), each participant takes a selfie into a
-shared gallery, their supported-country flag rides along — and real (testnet) money
+HyperWave (the product) is a peer-to-peer "global wave of moments": peers join a room swarm, an
+orange spark ⚡ sweeps around a ring of participants around the world (each peer fires its own moment on a shared,
+deterministic schedule), each participant captures a moment into a
+shared gallery, their country flag rides along — and real (testnet) money
 flows through it: participation fees are **burned** on-chain (anti-spam, no beneficiary),
-and viewers **tip** selfies directly. No sponsor rewards. No servers — discovery,
+and viewers **tip** moments directly. No sponsor rewards. No servers — discovery,
 state, and storage are all peer-to-peer (Hyperswarm + Corestore/Hypercore), and payments are
 self-custodial (WDK, Tron Nile testnet).
 
@@ -23,8 +23,8 @@ host is a ~20–40-line shim over the engine's host-agnostic entry, `lib/engine.
 
 The engine is **theme-agnostic** — it knows only generic concepts (a **wave** that
 **sweeps** a **ring**, an **entry** with an opaque **payload** in a per-wave **feed**, a
-cosmetic **tag**). The football "stadium wave" is entirely in the desktop app's UI, which
-maps its selfies/countries onto the engine's entries/tags at the IPC boundary. The engine
+cosmetic **tag**). The "global wave of moments" is entirely in the desktop app's UI, which
+maps its moments/countries onto the engine's entries/tags at the IPC boundary. The engine
 could host any turn-taking / coordinated-snapshot application unchanged.
 
 ## Processes & layers
@@ -79,8 +79,8 @@ Everything crosses a single boundary — the IPC bridge. The worker emits **even
 renderer sends **commands**. The renderer never touches the network or keys.
 
 The engine is **theme-agnostic**, so these messages use its generic vocabulary — an
-`entry` with an opaque `payload`, a cosmetic `tag`, a `feed`. The football UI maps its
-own concepts to these at the boundary (`renderer/lib/ipc.js` + `app.js`): a selfie
+`entry` with an opaque `payload`, a cosmetic `tag`, a `feed`. The moments UI maps its
+own concepts to these at the boundary (`renderer/lib/ipc.js` + `app.js`): a moment
 `{image, caption}` is just the entry payload; a country is just the tag.
 
 ```
@@ -90,7 +90,7 @@ renderer  ──(commands)──▶  worker
   { type: 'subscribe-wave', waveId }                  // hold a wave's feed cores (browse-then-pick)
   { type: 'unsubscribe-wave', waveId }                // free its cores, stay aware of it
   { type: 'set-tag', tag }                            // cosmetic per-peer tag (app: country)
-  { type: 'stage-entry', entry: { payload } }         // opaque payload (app: a {image, caption} selfie)
+  { type: 'stage-entry', entry: { payload } }         // opaque payload (app: a {image, caption} moment)
   { type: 'tip', to, amount }                         // real TRX to an entry owner
   { type: 'send-trx', to, amount }                    // plain transfer to any address (wallet Send form)
   { type: 'refresh-wallet' }                          // manual balance re-check (after funding)
@@ -127,7 +127,7 @@ unhandled rejection, since mobile has no console.)
   UI state (e.g. `waveActive` to hide a button); the worker remains the source of truth.
 - **Borderline, intentionally renderer-side:** country **persistence** (`localStorage`)
   and the proof-window **capture timing** are user/UI preferences; the worker only stores
-  the country _code_ and doesn't care when a selfie is taken (selfies are optional).
+  the country _code_ and doesn't care when a moment is taken (moments are optional).
 
 The worker computes ring **angles** (from peer public keys) and
 sends them in `state`; the renderer consumes them for drawing and never recomputes them —
@@ -140,15 +140,15 @@ so there's no duplicated protocol logic across the seam.
 ## No roles — every peer is equal
 
 There are no peer roles: every instance runs the same code and behaves identically. Every peer
-participates fully (pays fees, joins waves, selfies, relays), and every peer's
+participates fully (pays fees, joins waves, captures moments, relays), and every peer's
 `storageDir/hyperwave` store is **wiped on startup**, so galleries are ephemeral per run —
 keyed by the random `waveId`, nothing persists across runs.
 
 The gallery is a **multicore CRDT** — one Hypercore per participant, merged locally (no
 indexer, no coordinator; see `protocol.md` §8) — so every participant already holds every
 core and could serve the whole gallery of a subscribed wave. There is not even a per-wave
-asymmetry: the initiator is an ordinary participant (posts its own selfie, publishes its own core,
-no indexer/admission/retention role). A departing peer's selfie survives in everyone's view because
+asymmetry: the initiator is an ordinary participant (posts its own moment, publishes its own core,
+no indexer/admission/retention role). A departing peer's moment survives in everyone's view because
 they already replicated it. Concurrent waves coexist; a wave's feed cores stay open while the peer
 is **subscribed** to that wave (freed on unsubscribe or engine close), so a peer holds cores only
 for the waves it subscribed to — the O(subscribed) core budget (scaling.md Phases 2–3).
@@ -207,12 +207,12 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
     lib/
       ipc.js         worker channel: route state/event/feed/wallet/tip/burn/send/
                      transactions + command senders
-      ring.js        all <canvas> drawing (ring, dots, flags, football, centre selfie)
-      gallery.js     centre-selfie slideshow + collection progress + 💵 tip button
+      ring.js        all <canvas> drawing (ring, dots, flags, orange spark, centre moment)
+      gallery.js     centre-moment slideshow + collection progress + 💵 tip button
       lobby.js       lobby panel (countdown + join, gated on payment verification)
-      proof.js       lobby webcam capture (staged selfie)
-      scrubber.js    circular scrubber: drag the frozen ⚽ around the ring to browse the gallery
-      hud.js         status line, Kick-off button, country picker + intro
+      proof.js       lobby webcam capture (staged moment)
+      scrubber.js    circular scrubber: drag the frozen spark around the ring to browse the gallery
+      hud.js         status line, Start button, country picker + intro
       wallet.js      💰 wallet view modal: balance/address, copy/faucet, Send form (send-trx),
                      merged tx history (app events + on-chain transactions)
       explorer.js    Tronscan links (openAddress, txLink)

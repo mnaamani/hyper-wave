@@ -424,6 +424,7 @@ function createEngine({
     try {
       const { hash } = await payments.send(to, amount);
       emit({ type: 'tip-result', id, hash, to, amount });
+      pushBalance?.(); // tipping spends from our balance — reflect it
     } catch (err) {
       emit({ type: 'tip-result', id, error: err.message, to });
     }

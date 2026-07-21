@@ -1,7 +1,7 @@
 // The circular scrubber: once the completion replay is running (or has frozen), the ring
-// canvas itself is a circular slider and the ⚽ is its handle. Dragging around the ring maps
-// the pointer angle to a progress fraction and parks the ball there (ring.scrubTo), so the
-// gallery features the selfie at that point in the ring order. Only active while a replay
+// canvas itself is a circular slider and the spark is its handle. Dragging around the ring maps
+// the pointer angle to a progress fraction and parks the spark there (ring.scrubTo), so the
+// gallery features the moment at that point in the ring order. Only active while a replay
 // exists (ring.sweepOrigin() !== null); otherwise the ring is just a display.
 import * as ring from './ring.js';
 

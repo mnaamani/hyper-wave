@@ -1,9 +1,9 @@
-// Wallet view: the self-custodial TRX wallet modal, opened from the top-right 💰. Shows the
-// balance + address (with refresh / copy / faucet / send) and a transaction history that merges
-// two sources by tx hash: the app's own events (burns / tips / sends — instant,
-// optimistic) and the wallet's on-chain history fetched from the worker (which also surfaces
-// funds/tips RECEIVED — things the app never sees as events). Each row links to Tronscan; a
-// "full history" link deep-links to the address page. Extracted from hud.js.
+// Wallet view: the self-custodial wallet modal, opened from the top-right ₿. Shows the
+// balance + address (with refresh / copy / faucet / send) and a transaction history.
+// Chain wallet: merges the app's own events (burns / tips / sends — instant, optimistic)
+// with the on-chain history fetched from the worker (which also surfaces funds/tips
+// RECEIVED); each row links to Tronscan. Cashu: renders the persisted proof-store ledger
+// (survives restarts — shows PAST sessions too), no explorer. Extracted from hud.js.
 import {
   refreshWallet,
   sendTrx,
@@ -40,12 +40,15 @@ const TOPUP_SATS = 100;
 const viewEl = document.getElementById('wallet-view');
 const openBtn = document.getElementById('wallet-btn');
 const closeBtn = document.getElementById('wallet-close');
+const titleEl = document.getElementById('wallet-title');
 const balanceEl = document.getElementById('wallet-balance');
+const kindEl = document.getElementById('wallet-kind');
 const addressEl = document.getElementById('wallet-address');
 const refreshBtn = document.getElementById('wallet-refresh');
 const copyBtn = document.getElementById('wallet-copy');
 const faucetBtn = document.getElementById('wallet-faucet');
 const txsEl = document.getElementById('wallet-txs');
+const txsTitleEl = document.getElementById('wallet-txs-title');
 const explorerEl = document.getElementById('wallet-explorer');
 const sendToggleBtn = document.getElementById('wallet-send-toggle');
 const sendEl = document.getElementById('wallet-send');
@@ -54,6 +57,9 @@ const sendAmountInput = document.getElementById('send-amount');
 const sendBtn = document.getElementById('send-btn');
 const sendStatusEl = document.getElementById('send-status');
 const accountSelect = document.getElementById('wallet-account');
+const accountLabel = document.querySelector(
+  '#wallet-account-row .account-label'
+);
 const topupEl = document.getElementById('wallet-topup');
 const topupQrEl = document.getElementById('topup-qr');
 const topupHintEl = document.getElementById('topup-hint');
@@ -62,8 +68,18 @@ const topupCloseBtn = document.getElementById('topup-close');
 // Icon + label per kind of outgoing tx the app itself makes (worker events).
 const SENT_META = {
   burn: { icon: '🔥', label: 'Burned participation fee' },
-  tip: { icon: '💵', label: 'Tipped a selfie' },
+  tip: { icon: '⚡', label: 'Tipped a moment' },
   send: { icon: '📤', label: 'Sent' }
+};
+
+// Icon + label + direction per Cashu ledger `kind` (the persisted proof-store
+// history — survives restarts, so it shows PAST sessions, not just this one).
+const CASHU_META = {
+  mint: { icon: '⬆', label: 'Topped up', dir: 'in' },
+  receive: { icon: '📥', label: 'Received a tip', dir: 'in' },
+  send: { icon: '⚡', label: 'Tipped a moment', dir: 'out' },
+  burn: { icon: '🔥', label: 'Burned participation fee', dir: 'out' },
+  consolidate: { icon: '🔄', label: 'Consolidated', dir: 'neutral' }
 };
 
 let walletAddress = ''; // full address, for copy + faucet + explorer links
@@ -92,17 +108,56 @@ export function walletStatus({ address, amount, unit, accountIndex, mint }) {
   balanceEl.innerText =
     `${shown} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
+  // A chain address deep-links to its block explorer; a Cashu identity pubkey has
+  // no explorer, so drop the link affordance + the misleading Tronscan tooltip.
+  addressEl.classList.toggle('plain', isCashu());
+  addressEl.title = isCashu()
+    ? 'Your ecash wallet identity (no block explorer — use Copy)'
+    : 'View this address on Tronscan';
+  renderWalletKind(mint || activeMint());
   // Cashu reuses the account <select> as a MINT picker (no BIP-44 accounts), the faucet button as
   // a "Top up" (mint-funded), and hides the chain-only Send form + explorer links.
   if (isCashu()) {
     applyCashuChrome(mint || activeMint());
+    // A balance push follows every money op — re-pull the persisted ledger so a
+    // just-made top-up/tip/burn shows without a manual refresh (local, no network).
+    if (viewEl.classList.contains('show')) {
+      fetchTransactions();
+    }
   }
+}
+
+// Host of a mint URL (e.g. "testnut.cashu.space"), or '' if it isn't a URL.
+function mintHost(mintUrl) {
+  if (!mintUrl) {
+    return '';
+  }
+  try {
+    return new URL(mintUrl).host;
+  } catch {
+    return mintUrl;
+  }
+}
+
+// Title the modal by wallet type ("Cashu wallet" / "Tron wallet") and show the
+// active mint (Cashu) or network (chain) as the subtitle beneath it.
+function renderWalletKind(mintUrl) {
+  if (isCashu()) {
+    titleEl.textContent = 'Cashu wallet';
+    kindEl.textContent = mintHost(mintUrl);
+    txsTitleEl.textContent = 'Recent transactions';
+    return;
+  }
+  titleEl.textContent = 'Tron wallet';
+  kindEl.textContent = 'Nile testnet';
+  txsTitleEl.textContent = 'Transactions (this session)';
 }
 
 // Repurpose the modal's chain-wallet chrome for Cashu: mint picker, top-up, no explorer/send.
 function applyCashuChrome(currentMint) {
   faucetBtn.textContent = '⬆ Top up';
   faucetBtn.title = `Mint ${TOPUP_SATS} sat at the selected mint`;
+  accountLabel.textContent = 'Mint'; // the picker chooses a mint, not a BIP-44 account
   sendToggleBtn.style.display = 'none'; // the modal can't deliver a bearer token
   explorerEl.style.display = 'none'; // ecash has no block explorer (no Tronscan link)
   renderMintPicker(currentMint);
@@ -174,6 +229,11 @@ accountSelect.onchange = () => {
 // Record an outgoing tx the app just made (burn / tip / send), from a worker event — instant,
 // with a specific label. Wins over the generic on-chain view for the same hash.
 export function record({ kind, hash, amount }) {
+  // Cashu history comes from the persisted proof-store ledger (renderCashuHistory),
+  // which already logs every op — so the chain-style optimistic merge is unused here.
+  if (isCashu()) {
+    return;
+  }
   if (!hash) {
     return;
   }
@@ -204,6 +264,12 @@ function chainTxMeta(tx) {
 // already logged from its own event keeps that richer label; everything else — crucially funds
 // and tips RECEIVED — is added here.
 export function setTransactions(list) {
+  // Cashu: the list is the persisted proof-store ledger (all sessions), already
+  // newest-first — render it directly (no hash to key/merge, no block explorer).
+  if (isCashu()) {
+    renderCashuHistory(list);
+    return;
+  }
   for (const tx of list || []) {
     if (txById.get(tx.hash)?.fromEvent) {
       continue; // keep the app's own labelled entry
@@ -218,6 +284,37 @@ export function setTransactions(list) {
     });
   }
   renderHistory();
+}
+
+// Render the Cashu proof-store ledger (persisted across sessions). Entries keep
+// store order (newest first); timestamps are null in the store, so age is blank.
+function renderCashuHistory(list) {
+  const rows = (list || []).slice(0, 10);
+  txsEl.replaceChildren(
+    ...rows.map((entry) => {
+      const meta = CASHU_META[entry.kind] || {
+        icon: '•',
+        label: entry.kind,
+        dir: 'out'
+      };
+      const row = document.createElement('div');
+      row.className = 'tx-row';
+      const label = document.createElement('span');
+      label.className = 'tx-label';
+      label.textContent = `${meta.icon} ${meta.label}`;
+      const time = document.createElement('span');
+      time.className = 'tx-time';
+      time.textContent = ago(entry.timestamp); // blank when the store has no ts
+      const amt = document.createElement('span');
+      amt.className = meta.dir === 'in' ? 'tx-amt in' : 'tx-amt';
+      if (typeof entry.amount === 'number') {
+        const sign = meta.dir === 'in' ? '+' : meta.dir === 'out' ? '−' : '';
+        amt.textContent = `${sign}${entry.amount} ${unitLabel()}`;
+      }
+      row.append(label, time, amt);
+      return row;
+    })
+  );
 }
 
 // "5m", "3h", "2d" — compact age; blank if we have no timestamp (optimistic just-sent entry).
@@ -269,10 +366,11 @@ function renderHistory() {
 // --- modal open/close -------------------------------------------------------
 function open() {
   refreshWallet(); // grab a fresh balance each time it's opened
-  // Chain wallet: pull on-chain history + the BIP-44 account picker. Cashu has neither (the mint
-  // picker is rendered from the wallet msg; history is the app's own recorded events).
+  // Pull the transaction history: chain = on-chain (incl. received); Cashu = the
+  // persisted proof-store ledger (past sessions too). The BIP-44 account picker is
+  // chain-only (Cashu's picker is a mint list, rendered from the wallet msg).
+  fetchTransactions();
   if (!isCashu()) {
-    fetchTransactions();
     listAccounts();
   }
   viewEl.classList.add('show');
@@ -321,9 +419,7 @@ copyBtn.onclick = async () => {
 // updates when the fresh `wallet` message lands; the spin is click feedback.
 refreshBtn.onclick = () => {
   refreshWallet();
-  if (!isCashu()) {
-    fetchTransactions(); // also re-pull the on-chain history (chain wallets only)
-  }
+  fetchTransactions(); // re-pull history too (Cashu: local ledger; chain: on-chain)
   refreshBtn.classList.remove('spin');
   void refreshBtn.offsetWidth; // restart the animation if clicked again mid-spin
   refreshBtn.classList.add('spin');

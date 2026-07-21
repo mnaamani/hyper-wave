@@ -10,9 +10,9 @@ participant, merged locally, byte-identical on every peer), optionally gated by
 proof-of-burn, and carries a cosmetic **tag**. Payments (fees, tips) run on self-custodial
 WDK wallets. Host-agnostic; runs under [Bare](https://github.com/holepunchto/bare).
 
-The engine is **theme-agnostic** — it never interprets the entry payload. The "stadium
-Mexican wave" (`apps/`) is one host: it fills each entry with a selfie and uses the tag as
-a country. Any turn-taking / coordinated-snapshot app can host it the same way.
+The engine is **theme-agnostic** — it never interprets the entry payload. The "wave of
+moments" (`apps/`) is one host: it fills each entry with a moment (a webcam photo) and uses
+the tag as a country. Any turn-taking / coordinated-snapshot app can host it the same way.
 
 ```js
 const { createEngine } = require('hyperwave-engine');

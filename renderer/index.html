@@ -12,68 +12,96 @@
         min-height: 100vh;
         background: radial-gradient(
           circle at 50% 20%,
-          #0e4f15 0%,
-          #041007 100%
+          #241606 0%,
+          #0a0a0a 100%
         );
-        color: #eafff0;
+        color: #f5f5f5;
         display: flex;
         flex-direction: column;
         align-items: center;
       }
-      header {
+      /* the app bar: a full-width top bar — brand on the left, controls on the
+         right — so the title and buttons read as one piece of chrome instead of
+         two floating elements. */
+      #appbar {
+        width: 100%;
+        box-sizing: border-box;
         display: flex;
-        align-items: baseline;
+        align-items: center;
+        justify-content: space-between;
         gap: 12px;
-        margin: 16px 0 4px;
+        padding: 12px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        background: linear-gradient(
+          180deg,
+          rgba(12, 9, 4, 0.55),
+          rgba(12, 9, 4, 0)
+        );
       }
-      h1 {
-        font-size: 26px;
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .brand-mark {
+        font-size: 20px;
+        line-height: 1;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+      }
+      .brand-name {
+        font-size: 20px;
+        font-weight: 700;
         margin: 0;
-        letter-spacing: 1px;
+        letter-spacing: 0.4px;
       }
       #v {
-        opacity: 0.6;
-        font-size: 13px;
+        opacity: 0.5;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        align-self: flex-end;
+        margin-bottom: 2px;
       }
-      /* top-right controls: wallet, team flag, globe — a flex row so items collapse cleanly
-         (e.g. #myflag hides until a team is picked) instead of juggling fixed offsets */
+      /* right-side controls: wallet + the country button (globe → flag) — a flex row. */
       #topbar {
-        position: fixed;
-        top: 12px;
-        right: 12px;
-        z-index: 15;
         display: flex;
         align-items: center;
         gap: 8px;
       }
-      #globe,
       #wallet-btn,
       #myflag {
-        width: 38px;
-        height: 38px;
+        width: 36px;
+        height: 36px;
         border-radius: 50%;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        background: rgba(0, 0, 0, 0.35);
-        color: #eafff0;
-        font-size: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.06);
+        color: #f5f5f5;
+        font-size: 17px;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease;
       }
-      #globe:hover,
       #wallet-btn:hover,
       #myflag:hover {
-        background: rgba(0, 0, 0, 0.6);
+        background: rgba(255, 255, 255, 0.14);
+        border-color: rgba(255, 255, 255, 0.3);
       }
-      /* the user's team flag (a little bigger emoji), hidden until a team is picked */
+      /* the country button: a globe until a country is picked, then the flag
+         (a little bigger emoji) — one button, always opens the picker. */
       #myflag {
         font-size: 20px;
       }
-      #myflag:empty {
-        display: none;
+      /* the wallet button is the money button — a bitcoin-orange ₿ glyph, so it
+         reads as "money" rather than a neutral control. */
+      #wallet-btn {
+        color: #f7931a;
+        font-weight: 700;
+        font-size: 19px;
       }
-      /* intro / onboarding: pick your team before entering the ring */
+      /* intro / onboarding: pick your country before entering the ring */
       #intro {
         display: none;
         position: fixed;
@@ -81,8 +109,8 @@
         z-index: 20;
         background: radial-gradient(
           circle at 50% 30%,
-          #0e4f15 0%,
-          #041007 100%
+          #241606 0%,
+          #0a0a0a 100%
         );
         align-items: center;
         justify-content: center;
@@ -109,7 +137,7 @@
         max-width: 360px;
         width: 100%;
         background: rgba(0, 0, 0, 0.35);
-        color: #eafff0;
+        color: #f5f5f5;
         border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 22px;
         padding: 14px 20px;
@@ -123,24 +151,64 @@
         font-weight: 600;
         border: none;
         border-radius: 28px;
-        background: #ffd166;
-        color: #06210d;
+        background: #f7931a;
+        color: #0a0a0a;
         cursor: pointer;
       }
       #enter:hover {
-        background: #ffe08a;
+        background: #ffb04d;
       }
-      #status {
-        font-size: 14px;
-        opacity: 0.85;
-        min-height: 20px;
+      /* connection status — a rounded pill with a live/searching dot, not a bare line */
+      #status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.28);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 13px;
+        color: #dddddd;
       }
-      /* live wave narration — its own line, more prominent than the status line; hidden when idle */
+      #conn-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #f7931a; /* orange; pings while searching */
+        flex: 0 0 auto;
+      }
+      #status-pill.live #conn-dot {
+        background: #f7931a; /* steady (no ping) once connected */
+      }
+      #status-pill.searching #conn-dot {
+        animation: hw-ping 1.6s ease-out infinite;
+      }
+      @keyframes hw-ping {
+        0% {
+          box-shadow: 0 0 0 0 rgba(247, 147, 26, 0.55);
+        }
+        70%,
+        100% {
+          box-shadow: 0 0 0 7px rgba(247, 147, 26, 0);
+        }
+      }
+      /* live wave narration — a warm, orange-tinted "ticker" chip above the status
+         pill, with a soft bitcoin-orange glow; hidden when idle */
       #wave-status {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 600;
-        min-height: 20px;
-        margin-top: 2px;
+        color: #ffedd6;
+        padding: 7px 16px;
+        border-radius: 999px;
+        background: linear-gradient(
+          180deg,
+          rgba(247, 147, 26, 0.18),
+          rgba(20, 12, 4, 0.85)
+        );
+        border: 1px solid rgba(247, 147, 26, 0.55);
+        box-shadow:
+          0 4px 18px rgba(0, 0, 0, 0.35),
+          0 0 16px rgba(247, 147, 26, 0.15);
       }
       #wave-status:empty {
         display: none;
@@ -148,31 +216,29 @@
       /* OTA update notice (from updater.js) — amber, own line, hidden unless updating */
       #updater {
         font-size: 12px;
-        color: #ffd479;
+        color: #f7931a;
         min-height: 14px;
       }
       #updater:empty {
         display: none;
       }
-      #me {
-        font-size: 12px;
-        opacity: 0.6;
-        font-family: ui-monospace, Menlo, monospace;
-      }
-      /* status lines, docked at the bottom of the page (margin-top:auto pushes them down) */
+      /* status area, docked at the bottom of the page (margin-top:auto pushes it down) */
       #hud {
         margin-top: auto;
-        padding: 14px 0 16px;
-        text-align: center;
+        padding: 14px 0 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
       }
-      /* wallet view: a modal (brought up by the top-right 💰) holding balance, address,
+      /* wallet view: a modal (brought up by the top-right ₿) holding balance, address,
          faucet, and this session's transaction history */
       #wallet-view {
         display: none;
         position: fixed;
         inset: 0;
         z-index: 20;
-        background: rgba(2, 8, 4, 0.72);
+        background: rgba(0, 0, 0, 0.72);
         align-items: center;
         justify-content: center;
       }
@@ -183,8 +249,8 @@
         width: min(440px, 92vw);
         max-height: 86vh;
         overflow-y: auto;
-        background: #0b1f12;
-        border: 1px solid #2f5f43;
+        background: #141414;
+        border: 1px solid #3a3a3a;
         border-radius: 18px;
         padding: 18px 22px 22px;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
@@ -205,18 +271,29 @@
       #wallet-close {
         border: none;
         background: none;
-        color: #9fe8b8;
+        color: #cccccc;
         font-size: 20px;
         line-height: 1;
         cursor: pointer;
       }
       #wallet-close:hover {
-        color: #eafff0;
+        color: #f5f5f5;
       }
       #wallet-balance {
         font-size: 22px;
         font-weight: 700;
-        color: #7fe3a0;
+        color: #f7931a;
+      }
+      /* wallet subtitle: the active mint (Cashu) so it's clear where the ecash
+         lives; a chain wallet shows its network here instead. */
+      #wallet-kind {
+        margin: 2px 0 10px;
+        font-size: 11px;
+        letter-spacing: 0.4px;
+        color: #999999;
+      }
+      #wallet-kind:empty {
+        display: none;
       }
       /* account picker: label + dropdown of the seed's BIP-44 accounts */
       #wallet-account-row {
@@ -233,10 +310,10 @@
         font-family: ui-monospace, Menlo, monospace;
         font-size: 12px;
         padding: 6px 10px;
-        border: 1px solid #2f5f43;
+        border: 1px solid #3a3a3a;
         border-radius: 10px;
         background: rgba(0, 0, 0, 0.35);
-        color: #eafff0;
+        color: #f5f5f5;
         cursor: pointer;
       }
       #wallet-balance:empty::after {
@@ -256,14 +333,14 @@
         font-family: inherit;
         font-size: 11px;
         padding: 3px 10px;
-        border: 1px solid #2f5f43;
+        border: 1px solid #3a3a3a;
         border-radius: 999px;
-        background: #123020;
-        color: #9fe8b8;
+        background: #241606;
+        color: #cccccc;
         cursor: pointer;
       }
       .wallet-row .pill:hover {
-        background: #1a4530;
+        background: #33240e;
       }
       /* refresh is an icon-only button (no pill), so the spin reads cleanly */
       #wallet-refresh {
@@ -286,14 +363,22 @@
       }
       /* the address is a link to the block explorer */
       #wallet-address {
-        color: #7fe3a0;
+        color: #f7931a;
         text-decoration: underline;
         text-underline-offset: 2px;
         cursor: pointer;
         word-break: break-all;
       }
       #wallet-address:hover {
-        color: #b6f5cd;
+        color: #ffcc80;
+      }
+      /* Cashu: the address is an ecash identity, not a chain address — no block
+         explorer to open, so render it as plain (non-link) monospace text. */
+      #wallet-address.plain,
+      #wallet-address.plain:hover {
+        color: #cccccc;
+        text-decoration: none;
+        cursor: default;
       }
       /* send form (revealed by the "Send ▸" pill) */
       #wallet-send {
@@ -313,7 +398,7 @@
       }
       #wallet-topup .topup-title {
         font-size: 13px;
-        color: #cfeeda;
+        color: #dddddd;
         margin-bottom: 8px;
       }
       #topup-spinner {
@@ -322,7 +407,7 @@
         height: 40px;
         margin: 80px auto; /* centre it in the ~200px QR footprint */
         border: 4px solid rgba(255, 255, 255, 0.15);
-        border-top-color: #5fd08a;
+        border-top-color: #f7931a;
         border-radius: 50%;
         animation: hw-spin 0.8s linear infinite;
       }
@@ -344,17 +429,17 @@
       }
       #topup-hint {
         font-size: 11px;
-        color: #8fbfa0;
+        color: #999999;
         margin: 8px 0;
       }
       #wallet-send input {
         font-family: ui-monospace, Menlo, monospace;
         font-size: 13px;
         padding: 7px 10px;
-        border: 1px solid #2f5f43;
+        border: 1px solid #3a3a3a;
         border-radius: 10px;
         background: rgba(0, 0, 0, 0.35);
-        color: #eafff0;
+        color: #f5f5f5;
         box-sizing: border-box;
       }
       #send-to {
@@ -375,13 +460,13 @@
       }
       .send-go {
         margin-left: auto;
-        background: #2fbf6b;
-        color: #06210d;
-        border-color: #2fbf6b;
+        background: #f7931a;
+        color: #0a0a0a;
+        border-color: #f7931a;
         font-weight: 700;
       }
       .send-go:hover {
-        background: #46d17f;
+        background: #ffb04d;
       }
       .send-go:disabled {
         opacity: 0.5;
@@ -393,10 +478,10 @@
         min-height: 14px;
       }
       #send-status.err {
-        color: #ff9b8a;
+        color: #ff7a68;
       }
       #send-status.ok {
-        color: #7fe3a0;
+        color: #f7931a;
       }
       .wallet-section {
         margin-top: 18px;
@@ -430,23 +515,23 @@
         font-variant-numeric: tabular-nums;
       }
       .tx-row .tx-amt {
-        color: #ffd166; /* outgoing */
+        color: #f7931a; /* outgoing */
         font-variant-numeric: tabular-nums;
       }
       .tx-row .tx-amt.in {
-        color: #7fe3a0; /* incoming */
+        color: #f7931a; /* incoming */
       }
       #wallet-explorer {
         display: inline-block;
         margin-top: 14px;
-        color: #7fe3a0;
+        color: #f7931a;
         text-decoration: underline;
         text-underline-offset: 2px;
         cursor: pointer;
         font-size: 12px;
       }
       #wallet-explorer:hover {
-        color: #b6f5cd;
+        color: #ffcc80;
       }
       /* clickable tx hash inside a toast/status line — inherits the line's colour */
       .tx-link {
@@ -460,15 +545,26 @@
       }
       #tip {
         display: none;
-        margin: 8px auto 0;
+        position: absolute;
+        top: calc(
+          50% + 96px
+        ); /* overlap the bottom edge of the centre moment */
+        left: 50%;
+        transform: translate(-50%, -50%);
         padding: 7px 16px;
         border: 0;
         border-radius: 999px;
-        background: #2fbf6b;
-        color: #06210d;
+        background: #f7931a;
+        color: #0a0a0a;
         font-weight: 700;
         font-size: 13px;
         cursor: pointer;
+        box-shadow:
+          0 3px 16px rgba(247, 147, 26, 0.45),
+          0 0 0 3px rgba(10, 10, 10, 0.55);
+      }
+      #tip:hover:not(:disabled) {
+        background: #ffa733;
       }
       #tip:disabled {
         opacity: 0.55;
@@ -480,11 +576,11 @@
       #tip-toast {
         text-align: center;
         font-size: 12px;
-        color: #7fe3a0;
+        color: #f7931a;
         min-height: 14px;
         margin-top: 4px;
       }
-      /* the field: canvas ring with a centred overlay (kick-off / countdown) */
+      /* the field: canvas ring with a centred overlay (start / countdown) */
       .field {
         position: relative;
         width: 440px;
@@ -513,18 +609,27 @@
       #center > * {
         pointer-events: auto;
       }
+      /* primary CTA: a solid bitcoin-orange pill with a soft orange glow */
       #start {
-        padding: 12px 24px;
+        padding: 12px 26px;
         font-size: 17px;
-        border: 2px solid #ffd166;
+        font-weight: 700;
+        border: none;
         border-radius: 26px;
-        background: rgba(6, 33, 13, 0.6);
-        color: #ffd166;
+        background: linear-gradient(135deg, #f7931a, #ffb04d);
+        color: #0a0a0a;
         cursor: pointer;
+        box-shadow: 0 4px 22px rgba(247, 147, 26, 0.4);
+        transition:
+          box-shadow 0.15s ease,
+          transform 0.1s ease;
       }
       #start:hover {
-        background: #ffd166;
-        color: #06210d;
+        background: linear-gradient(135deg, #ffa733, #ffc266);
+        box-shadow: 0 6px 28px rgba(247, 147, 26, 0.55);
+      }
+      #start:active {
+        transform: translateY(1px);
       }
       /* after a wave, dock the button below the ring so it doesn't cover the gallery */
       #start.docked {
@@ -535,7 +640,7 @@
         padding: 8px 18px;
         font-size: 14px;
       }
-      /* gallery collection progress (selfies arrive after the ball finishes) */
+      /* gallery collection progress (moments arrive after the spark finishes) */
       #progress {
         display: none;
         width: 240px;
@@ -553,7 +658,7 @@
       #progress-fill {
         height: 100%;
         width: 0;
-        background: #39d98a;
+        background: #f7931a;
         transition: width 0.3s ease;
       }
       #progress-label {
@@ -575,7 +680,7 @@
         font-size: 72px;
         font-weight: 800;
         line-height: 1;
-        color: #ffd166;
+        color: #f7931a;
         text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
       }
       #lobby-msg {
@@ -592,8 +697,8 @@
         font-size: 15px;
         border: none;
         border-radius: 20px;
-        background: #39d98a;
-        color: #06210d;
+        background: #f7931a;
+        color: #0a0a0a;
         font-weight: 600;
         cursor: pointer;
       }
@@ -603,26 +708,42 @@
         border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 20px;
         background: rgba(0, 0, 0, 0.4);
-        color: #eafff0;
+        color: #f5f5f5;
         cursor: pointer;
       }
       #cancel:hover {
         background: rgba(0, 0, 0, 0.6);
       }
-      /* proof window: circular selfie capture in the centre of the ring */
+      /* proof window: circular moment capture in the centre of the ring */
+      /* capture: the webcam preview sits concentric with the ring (like the centre
+         gallery moment); its controls float just below it, so the preview stays
+         centred rather than being pushed up by the stack. */
       #proof {
         display: none;
+      }
+      #proof.show {
+        display: block;
+        position: absolute;
+        inset: 0;
+      }
+      #proof-wrap {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 200px;
+        height: 200px;
+      }
+      .proof-controls {
+        position: absolute;
+        top: calc(50% + 108px); /* just below the 200px (r=100) preview */
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        display: flex;
         flex-direction: column;
         align-items: center;
         gap: 8px;
-      }
-      #proof.show {
-        display: flex;
-      }
-      #proof-wrap {
-        position: relative;
-        width: 200px;
-        height: 200px;
       }
       #preview {
         width: 200px;
@@ -630,8 +751,8 @@
         border-radius: 50%;
         object-fit: cover;
         transform: scaleX(-1);
-        background: #04140a;
-        border: 3px solid #ffd166;
+        background: #0a0a0a;
+        border: 3px solid #f7931a;
         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
       }
       #countdown {
@@ -643,7 +764,7 @@
         padding: 0 6px;
         border-radius: 12px;
         background: rgba(0, 0, 0, 0.65);
-        color: #ffd166;
+        color: #f7931a;
         font-size: 14px;
         font-weight: 700;
         display: flex;
@@ -657,7 +778,7 @@
       #proof-hint {
         font-size: 14px;
         font-weight: 700;
-        color: #ffd166;
+        color: #f7931a;
         min-height: 18px;
       }
       #proof-hint:empty {
@@ -671,7 +792,7 @@
         border-radius: 16px;
         border: 1px solid rgba(255, 255, 255, 0.25);
         background: rgba(0, 0, 0, 0.4);
-        color: #eafff0;
+        color: #f5f5f5;
         text-align: center;
       }
       #proof-btns {
@@ -686,16 +807,16 @@
         cursor: pointer;
       }
       #capture {
-        background: #ffd166;
-        color: #06210d;
+        background: #f7931a;
+        color: #0a0a0a;
         font-weight: 600;
       }
       #skip {
         background: rgba(0, 0, 0, 0.4);
-        color: #eafff0;
+        color: #f5f5f5;
         border: 1px solid rgba(255, 255, 255, 0.3);
       }
-      /* NSFW safety cover: an opaque card over a flagged selfie in the ring centre */
+      /* NSFW safety cover: an opaque card over a flagged moment in the ring centre */
       #nsfw-cover {
         display: none;
         flex-direction: column;
@@ -708,7 +829,7 @@
         padding: 0 18px;
         text-align: center;
         border-radius: 18px;
-        background: rgba(4, 20, 10, 0.94);
+        background: rgba(15, 10, 4, 0.94);
         border: 1px solid #6b4a2f;
       }
       #nsfw-cover.show {
@@ -728,7 +849,7 @@
         border: 1px solid rgba(255, 255, 255, 0.3);
         border-radius: 18px;
         background: rgba(0, 0, 0, 0.4);
-        color: #eafff0;
+        color: #f5f5f5;
         cursor: pointer;
       }
       #nsfw-reveal:hover {
@@ -740,26 +861,21 @@
     <div id="intro">
       <div class="intro-card">
         <h1>HyperWave</h1>
-        <p>The global stadium wave. Who do you support?</p>
+        <p>A wave of moments, captured around the world. Where are you?</p>
         <select id="intro-country"></select>
         <br />
-        <button id="enter">Enter the stadium ⚽</button>
+        <button id="enter">Join the wave ⚡</button>
       </div>
     </div>
 
-    <div id="topbar">
-      <button id="wallet-btn" title="Wallet &amp; transactions">💰</button>
-      <span id="myflag" title="Your team — click to change"></span>
-      <button id="globe" title="Change your team">🌐</button>
-    </div>
-
-    <!-- wallet view: opened by the top-right 💰, dismissed by ✕ / backdrop / Esc -->
+    <!-- wallet view: opened by the top-right ₿, dismissed by ✕ / backdrop / Esc -->
     <div id="wallet-view">
       <div class="wallet-card">
         <div class="wallet-card-head">
-          <h2>💰 Wallet</h2>
+          <h2 id="wallet-title">Cashu wallet</h2>
           <button id="wallet-close" title="Close">✕</button>
         </div>
+        <div id="wallet-kind"></div>
         <div id="wallet-balance"></div>
         <!-- account picker: all accounts share the seed; each is a distinct BIP-44 address -->
         <div class="wallet-row" id="wallet-account-row">
@@ -828,7 +944,9 @@
           </div>
           <button id="topup-close" class="pill">Done</button>
         </div>
-        <div class="wallet-section">Transactions (this session)</div>
+        <div class="wallet-section" id="wallet-txs-title">
+          Transactions (this session)
+        </div>
         <div id="wallet-txs"></div>
         <a
           id="wallet-explorer"
@@ -839,14 +957,21 @@
       </div>
     </div>
 
-    <header>
-      <h1>HyperWave</h1>
-      <span id="v">v</span>
+    <header id="appbar">
+      <div class="brand">
+        <span class="brand-mark">⚡</span>
+        <h1 class="brand-name">HyperWave</h1>
+        <span id="v">v</span>
+      </div>
+      <div id="topbar">
+        <button id="wallet-btn" title="Wallet &amp; transactions">₿</button>
+        <button id="myflag" title="Your country — click to change"></button>
+      </div>
     </header>
     <div class="field">
       <canvas id="ring" width="440" height="440"></canvas>
       <div id="center">
-        <button id="start">⚽ Kick off the wave</button>
+        <button id="start">⚡ Start new wave</button>
         <div id="lobby">
           <div id="lobby-count"></div>
           <div id="lobby-msg">a wave is forming</div>
@@ -860,19 +985,23 @@
             <video id="preview" autoplay muted playsinline></video>
             <div id="countdown"></div>
           </div>
-          <div id="proof-hint"></div>
-          <input id="caption" placeholder="Say something… 🇧🇷" maxlength="60" />
-          <div id="proof-btns">
-            <button id="capture">📸 Capture</button>
-            <button id="skip">Skip</button>
+          <div class="proof-controls">
+            <div id="proof-hint"></div>
+            <input id="caption" placeholder="Say something…" maxlength="60" />
+            <div id="proof-btns">
+              <button id="capture">📸 Capture</button>
+              <button id="skip">Skip</button>
+            </div>
           </div>
         </div>
-        <!-- safety cover: shown over a featured selfie the local NSFW classifier flagged -->
+        <!-- safety cover: shown over a featured moment the local NSFW classifier flagged -->
         <div id="nsfw-cover">
           <div class="nsfw-icon">🚫</div>
-          <div class="nsfw-msg">This selfie was flagged as possibly unsafe</div>
+          <div class="nsfw-msg">This moment was flagged as possibly unsafe</div>
           <button id="nsfw-reveal">👁 Show anyway</button>
         </div>
+        <!-- tip: a floating action on the featured moment (overlaps its lower edge) -->
+        <button id="tip" title="Send a tip to this moment">⚡ Tip 1 TRX</button>
       </div>
     </div>
 
@@ -881,17 +1010,16 @@
       <div id="progress-label"></div>
     </div>
 
-    <button id="tip" title="Send a real testnet TRX tip to this selfie">
-      💵 Tip 1 TRX
-    </button>
     <div id="tip-toast"></div>
 
-    <!-- status lines live at the bottom so the top stays uncluttered -->
+    <!-- status area lives at the bottom so the top stays uncluttered -->
     <footer id="hud">
       <div id="updater"></div>
-      <div id="status">connecting…</div>
       <div id="wave-status"></div>
-      <div id="me"></div>
+      <div id="status-pill" class="searching">
+        <span id="conn-dot"></span>
+        <span id="status">connecting…</span>
+      </div>
     </footer>
 
     <canvas id="snap" width="240" height="180" style="display: none"></canvas>

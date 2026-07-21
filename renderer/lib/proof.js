@@ -1,9 +1,9 @@
-// Lobby selfie capture (shown in the centre of the ring while the wave is forming).
-// Opted-in peers frame their selfie during the lobby countdown; the frame is captured
-// — automatically at kickoff, or manually earlier — and STAGED to the worker, which
+// Lobby moment capture (shown in the centre of the ring while the wave is forming).
+// Opted-in peers frame their moment during the lobby countdown; the frame is captured
+// — automatically when the wave starts, or manually earlier — and STAGED to the worker, which
 // posts it to the gallery when this peer's sweep slot fires. This decouples the human
 // moment (leisurely, synchronized) from the fast sweep.
-import { stageSelfie } from './ipc.js';
+import { stageMoment } from './ipc.js';
 
 const proofEl = document.getElementById('proof');
 const preview = document.getElementById('preview');
@@ -21,13 +21,13 @@ let captured = false;
 let isOpen = false;
 let onCapturedCb = null; // host hook: confirm the capture (status line) as the preview closes
 
-// Register what happens right after a selfie is captured (app.js shows a status — the preview closes,
+// Register what happens right after a moment is captured (app.js shows a status — the preview closes,
 // so this is the user's confirmation the frame was taken).
 export function onCaptured(cb) {
   onCapturedCb = cb;
 }
 
-// Open the capture modal for the remaining lobby time (ms until kickoff).
+// Open the capture modal for the remaining lobby time (ms until the wave starts).
 export async function open(lobbyMsLeft) {
   if (isOpen) {
     return;
@@ -78,7 +78,7 @@ function paintLoop() {
 
 // Grab the current frame + caption and hand it to the worker, then CLOSE the preview — the frame is
 // staged (it posts to the gallery at this peer's sweep slot), so there's no reason to keep the camera
-// up until kickoff. The `onCaptured` hook lets the host confirm it on the status line.
+// up until the wave starts. The `onCaptured` hook lets the host confirm it on the status line.
 function capture() {
   if (captured) {
     return;
@@ -97,17 +97,17 @@ function capture() {
     // metadata) and re-encoded here through the canvas. A canvas JPEG carries only pixel
     // data + a minimal JFIF header — no EXIF, GPS, device, OS, or timestamp tags. This
     // re-encode IS the metadata strip; keep capture on this path (never post a camera
-    // file/blob directly) so nothing identifying can ride along with the selfie.
+    // file/blob directly) so nothing identifying can ride along with the moment.
     image = snap.toDataURL('image/jpeg', 0.5);
   }
-  stageSelfie({ image, caption: captionEl.value });
+  stageMoment({ image, caption: captionEl.value });
   if (onCapturedCb) {
     onCapturedCb();
   }
   close(); // frame staged — free the centre now (don't keep the camera on until the wave starts)
 }
 
-// Kickoff: ensure we've captured (auto if the person didn't press the button), then
+// Wave start: ensure we've captured (auto if the person didn't press the button), then
 // close so the ring centre is free for the gallery during the race.
 export function captureAndStage() {
   if (!isOpen) {
@@ -138,4 +138,4 @@ export function close() {
 }
 
 captureBtn.onclick = capture;
-skipBtn.onclick = close; // opt out of the photo (the ball still passes through you)
+skipBtn.onclick = close; // opt out of the photo (the spark still passes through you)

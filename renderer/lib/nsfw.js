@@ -1,9 +1,9 @@
 // Local NSFW image-safety classifier (nsfwjs / MobileNetV2, runs entirely on-device). Wraps the
 // esbuild bundle (vendor/nsfw.bundle.js — tfjs + nsfwjs + the model embedded, loaded from memory so
 // no fetch, which a sandboxed file:// renderer blocks). Used by the gallery as a LOCAL viewing
-// filter: each peer classifies the selfies it holds and blurs the ones flagged unsafe — the only
+// filter: each peer classifies the moments it holds and blurs the ones flagged unsafe — the only
 // coherent moderation model for a CRDT gallery (you can't delete an entry, only choose what to show
-// yourself). It's a MobileNet classifier (~ms/image), so every peer can afford it on every selfie.
+// yourself). It's a MobileNet classifier (~ms/image), so every peer can afford it on every moment.
 //
 // The bundle is lazy-injected on first use (it's a few MB), and the model warms up on first
 // classify — so nothing slows startup, and a wave with no gallery never loads it.
@@ -47,11 +47,11 @@ function loadImage(dataUrl) {
 }
 
 /**
- * Classify a selfie dataURL locally. Returns `{ unsafe, scores }`; `unsafe` is true when the summed
+ * Classify a moment dataURL locally. Returns `{ unsafe, scores }`; `unsafe` is true when the summed
  * probability of the adult classes (Porn / Hentai / Sexy) crosses the threshold. Never throws — on
  * any failure it returns `{ unsafe: false }` (fail-open: an unclassifiable image is shown, not
  * hidden), so a missing/broken bundle degrades to today's behaviour rather than blanking the gallery.
- * @param {string} dataUrl - The selfie image (data:image/jpeg;base64,…).
+ * @param {string} dataUrl - The moment image (data:image/jpeg;base64,…).
  * @returns {Promise<{unsafe: boolean, scores?: Array<{className: string, probability: number}>}>}
  */
 export async function classify(dataUrl) {
