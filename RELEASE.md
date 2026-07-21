@@ -82,8 +82,11 @@ hole-punches, but a reachable host is more reliable):
 4. Grab the installers from the run's artifacts and attach them to a GitHub Release for new
    downloads.
 
-Signing is optional (unsigned is fine for **alpha** — Gatekeeper/SmartScreen warnings; Linux
-unaffected). To sign, add the secrets listed atop `release.yml`; unset ⇒ unsigned.
+Signing (unsigned is fine for **alpha** — Gatekeeper/SmartScreen warnings; Linux unaffected, and an
+unsigned Windows `.msix` needs dev-mode/sideload to install). mac/win build unsigned via `forge`
+directly, because `make-pear-app` always runs its cert-import step and can't build unsigned. **To
+sign:** add the secrets listed atop `release.yml` **and** switch the mac/win jobs back to
+`make-pear-app`.
 
 ---
 

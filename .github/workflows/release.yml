@@ -1,15 +1,18 @@
 name: Build Release
 
-# Build the distributable INSTALLERS on native runners — macOS (arm64 + x64), Windows (MSIX), Linux
-# (AppImage/Snap/Flatpak, x64 + arm64) — with holepunch's make-pear-app (installer makers are
-# OS-bound, so each platform builds on its own runner). Each build ALSO uploads its raw app in the
-# pear-runtime OTA layout as an `ota-<platform-arch>` artifact.
+# Build the distributable INSTALLERS on native runners (installer makers are OS-bound):
+#   Linux (AppImage/Snap/Flatpak, x64 + arm64) via holepunch's make-pear-app;
+#   macOS (dmg, arm64 + x64) + Windows (MSIX) via forge directly, UNSIGNED — make-pear-app always
+#   runs its cert-import step and can't build unsigned, whereas forge skips signing when its env
+#   vars are unset (forge.config.js). To SIGN mac/win: add the secrets below and switch those jobs
+#   back to make-pear-app. Each job also uploads its raw app in the pear-runtime OTA layout as an
+#   `ota-<platform-arch>` artifact, plus its installer.
 #
 # SEEDING IS NOT DONE HERE. A Hyperdrive is single-writer and CI storage is ephemeral, so the OTA
 # update is staged + seeded by an ALWAYS-ON HOST that downloads these artifacts (`scripts/seed.mjs`)
 # — see RELEASE.md. Runs on a version tag push (v*) or manual dispatch.
 #
-# Optional signing secrets (unset ⇒ unsigned builds, fine for alpha):
+# Signing secrets (only used once mac/win are switched back to make-pear-app):
 #   macOS:   CERTIFICATE_P12, CERTIFICATE_PASSWORD, MAC_CODESIGN_IDENTITY, APPLE_ID,
 #            APPLE_PASSWORD, APPLE_TEAM_ID
 #   Windows: WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD
@@ -108,80 +111,78 @@ jobs:
       - name: Assemble + upload this platform's OTA payload
         uses: ./.github/actions/ota-payload
 
+  # macOS/Windows build UNSIGNED via forge directly — make-pear-app always runs its
+  # setup-certificates step and fails without a cert, so it can't do unsigned mac/win. forge skips
+  # signing when its env vars are unset (forge.config.js), so this produces unsigned installers +
+  # the OTA payload. Add the signing secrets + switch these back to make-pear-app to sign.
   build-macos:
     needs: [prebuild]
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: read
     runs-on: macos-latest
-    environment: release
     steps:
       - uses: actions/checkout@v5
-      - uses: holepunchto/actions/make-pear-app@v1
+      - uses: actions/setup-node@v4
         with:
-          channel: ${{ env.CHANNEL }}
-          upgrade_key: ${{ inputs['upgrade-key'] }}
-          macos_dmg: >-
-            ${{ format('{0}-{1}-{2}.dmg',
-                needs.prebuild.outputs.package-name,
-                needs.prebuild.outputs.version, 'arm64') }}
-          macos_certificate_base64: ${{ secrets.CERTIFICATE_P12 }}
-          macos_p12_password: ${{ secrets.CERTIFICATE_PASSWORD }}
-          macos_codesign_identity: ${{ secrets.MAC_CODESIGN_IDENTITY }}
-          macos_notarization_method: apple_id_password
-          macos_apple_id: ${{ secrets.APPLE_ID }}
-          macos_apple_password: ${{ secrets.APPLE_PASSWORD }}
-          macos_apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
+          node-version: '24'
+      - name: Build (unsigned) + OTA payload
+        run: |
+          npm ci
+          npm run make
       - name: Assemble + upload this platform's OTA payload
         uses: ./.github/actions/ota-payload
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos-arm64
+          path: out/make/**
+          if-no-files-found: warn
 
   build-macos-x64:
     needs: [prebuild]
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: read
     runs-on: macos-13
-    environment: release
     steps:
       - uses: actions/checkout@v5
-      - uses: holepunchto/actions/make-pear-app@v1
+      - uses: actions/setup-node@v4
         with:
-          channel: ${{ env.CHANNEL }}
-          upgrade_key: ${{ inputs['upgrade-key'] }}
-          macos_dmg: >-
-            ${{ format('{0}-{1}-{2}.dmg',
-                needs.prebuild.outputs.package-name,
-                needs.prebuild.outputs.version, 'x64') }}
-          macos_certificate_base64: ${{ secrets.CERTIFICATE_P12 }}
-          macos_p12_password: ${{ secrets.CERTIFICATE_PASSWORD }}
-          macos_codesign_identity: ${{ secrets.MAC_CODESIGN_IDENTITY }}
-          macos_notarization_method: apple_id_password
-          macos_apple_id: ${{ secrets.APPLE_ID }}
-          macos_apple_password: ${{ secrets.APPLE_PASSWORD }}
-          macos_apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
+          node-version: '24'
+      - name: Build (unsigned) + OTA payload
+        run: |
+          npm ci
+          npm run make
       - name: Assemble + upload this platform's OTA payload
         uses: ./.github/actions/ota-payload
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos-x64
+          path: out/make/**
+          if-no-files-found: warn
 
   build-win32:
     needs: [prebuild]
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: read
     runs-on: windows-latest
-    environment: release
     steps:
       - uses: actions/checkout@v5
-      - uses: holepunchto/actions/make-pear-app@v1
+      - uses: actions/setup-node@v4
         with:
-          channel: ${{ env.CHANNEL }}
-          upgrade_key: ${{ inputs['upgrade-key'] }}
-          windows_msix: >-
-            ${{ format('{0}.msix', needs.prebuild.outputs.package-name) }}
-          windows_signing_method: windows_cert_pfx
-          windows_cert_pfx_base64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-          windows_cert_password: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          node-version: '24'
+      - name: Build (unsigned) + OTA payload
+        run: |
+          npm ci
+          npm run make
       - name: Assemble + upload this platform's OTA payload
         uses: ./.github/actions/ota-payload
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-win32
+          path: out/make/**
+          if-no-files-found: warn
