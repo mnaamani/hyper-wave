@@ -2,11 +2,12 @@ name: Build Release
 
 # Build the distributable INSTALLERS on native runners (installer makers are OS-bound):
 #   Linux (AppImage/Snap/Flatpak, x64 + arm64) via holepunch's make-pear-app;
-#   macOS (dmg, arm64 + x64) + Windows (MSIX) via forge directly, UNSIGNED — make-pear-app always
-#   runs its cert-import step and can't build unsigned, whereas forge skips signing when its env
-#   vars are unset (forge.config.js). To SIGN mac/win: add the secrets below and switch those jobs
-#   back to make-pear-app. Each job also uploads its raw app in the pear-runtime OTA layout as an
-#   `ota-<platform-arch>` artifact, plus its installer.
+#   macOS (dmg, arm64 native + x64 cross-compiled) + Windows (portable ZIP) via forge directly,
+#   UNSIGNED — make-pear-app always runs its cert-import step and can't build unsigned, whereas forge
+#   skips signing when its env vars are unset (forge.config.js). Windows uses a ZIP, not the .msix
+#   maker, which fails unsigned (makeappx) and can't be installed unsigned anyway. To SIGN mac/win:
+#   add the secrets below and switch those jobs back to make-pear-app. Each job also uploads its raw
+#   app in the pear-runtime OTA layout as an `ota-<platform-arch>` artifact, plus its installer.
 #
 # SEEDING IS NOT DONE HERE. A Hyperdrive is single-writer and CI storage is ephemeral, so the OTA
 # update is staged + seeded by an ALWAYS-ON HOST that downloads these artifacts (`scripts/seed.mjs`)
@@ -139,21 +140,27 @@ jobs:
           path: out/make/**
           if-no-files-found: warn
 
+  # Intel macOS. GitHub RETIRED the macos-13 (Intel) runner image on 2025-12-04, so a job pinned to
+  # it queues forever. All GitHub-hosted mac runners are now arm64 — so cross-build the x64 app here
+  # (electron-packager downloads the x64 Electron binary for --arch=x64). This is safe because the
+  # only arch-specific code is Electron itself: the Bare native addons ship BOTH darwin-x64 and
+  # darwin-arm64 prebuilds (Bare selects at runtime) and the Electron main process has no node-gyp
+  # native modules. (x86_64 macOS support ends with the macos-15 image retirement in Fall 2027.)
   build-macos-x64:
     needs: [prebuild]
     timeout-minutes: 30
     permissions:
       contents: read
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Build (unsigned) + OTA payload
+      - name: Build (unsigned, cross-compiled x64) + OTA payload
         run: |
           npm ci
-          npm run make
+          npm run make -- --arch=x64
       - name: Assemble + upload this platform's OTA payload
         uses: ./.github/actions/ota-payload
       - name: Upload installer
