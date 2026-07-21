@@ -54,6 +54,62 @@
         margin: 0;
         letter-spacing: 0.4px;
       }
+      /* OTA update prompt — a floating bitcoin-orange pill under the app bar when a new
+         version is downloaded + ready to apply (updater.js). */
+      #update-prompt {
+        display: none;
+        position: fixed;
+        top: 64px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 8px 7px 16px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #f7931a, #ffb04d);
+        color: #0a0a0a;
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: 0 8px 28px rgba(247, 147, 26, 0.45);
+      }
+      #update-prompt.show {
+        display: flex;
+      }
+      #update-prompt .update-msg {
+        white-space: nowrap;
+      }
+      #update-apply {
+        border: none;
+        border-radius: 999px;
+        padding: 6px 14px;
+        background: #0a0a0a;
+        color: #ffb04d;
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      #update-apply:hover {
+        background: #1a1a1a;
+      }
+      #update-apply:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      #update-dismiss {
+        border: none;
+        background: transparent;
+        color: #0a0a0a;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.7;
+        padding: 2px 4px;
+      }
+      #update-dismiss:hover {
+        opacity: 1;
+      }
       /* alpha badge — signals the app is early/unstable (testnet only) */
       .brand-alpha {
         align-self: center;
@@ -1094,6 +1150,15 @@
         <button id="myflag" title="Your country — click to change"></button>
       </div>
     </header>
+
+    <!-- OTA update prompt: shown by updater.js when pear-runtime has downloaded a new version;
+         "Restart to update" applies it (swap) and relaunches into the new version. -->
+    <div id="update-prompt">
+      <span class="update-msg">⚡ A new version is ready</span>
+      <button id="update-apply">Restart to update</button>
+      <button id="update-dismiss" title="Later">✕</button>
+    </div>
+
     <div class="field">
       <canvas id="ring" width="440" height="440"></canvas>
       <!-- wave directory as orbiting bubbles: one small circle per live wave (scaling.md
