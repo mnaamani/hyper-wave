@@ -377,11 +377,11 @@ function createEngine({
   // Join: wave.join() is gated on the start being verified (returns null otherwise), so we only
   // burn the join fee for a wave that's proven paid. The join burn is fire-and-forget (no on-chain
   // confirmation), so it's reported as burned on broadcast.
-  async function handleJoin() {
+  async function handleJoin({ waveId: target } = {}) {
     if (payments && !(await fundedForFee('join', 'join the wave'))) {
       return;
     }
-    const waveId = wave.join();
+    const waveId = wave.join(target); // target waveId, or newest joinable lobby
     if (!waveId || !payments) {
       return;
     }
@@ -479,7 +479,7 @@ function createEngine({
   // engine -> host channel is `emit` (kernel raising events).
   const commandHandlers = {
     'start-wave': () => handleStartWave(),
-    'join-wave': () => handleJoin(),
+    'join-wave': (command) => handleJoin(command),
     // Subscription layer (scaling.md Phase 2): browse-then-pick. subscribe holds a wave's feed
     // cores (+ receives its control gossip); unsubscribe frees them but stays aware. A host running
     // with autoSubscribe:false drives these to bound its core budget.

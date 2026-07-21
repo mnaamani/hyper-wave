@@ -49,12 +49,18 @@ function send(type, extra = {}) {
 }
 
 export const startWave = () => send('start-wave');
-export const joinWave = () => send('join-wave');
+// Join a specific wave (from the directory), or the newest joinable lobby if omitted.
+export const joinWave = (waveId) => send('join-wave', { waveId });
+// Browse-then-pick (scaling.md Phase 2): subscribe holds a wave's feed cores (spectate/join);
+// unsubscribe frees them but stays aware. Driven by the wave directory UI.
+export const subscribeWave = (waveId) => send('subscribe-wave', { waveId });
+export const unsubscribeWave = (waveId) => send('unsubscribe-wave', { waveId });
 // the app's "country" is the engine's cosmetic peer `tag`
 export const setCountry = (country) => send('set-tag', { tag: country });
-// the app's moment {image, caption} is just the engine entry's opaque `payload`
-export const stageMoment = (moment) =>
-  send('stage-entry', { entry: { payload: moment } });
+// the app's moment {image, caption} is just the engine entry's opaque `payload`; `waveId`
+// targets a specific joined wave (default: newest joined).
+export const stageMoment = (moment, waveId) =>
+  send('stage-entry', { entry: { waveId, payload: moment } });
 export const tip = (to, amount, peerId) => send('tip', { to, amount, peerId });
 // Broadcast an opaque note on a wave (roster-member announcement). The app's use: announce a tip so
 // the recipient (and everyone) sees it. Only broadcasts if this peer is a participant of the wave.

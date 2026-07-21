@@ -43,7 +43,11 @@ const seam = serveEngine({
         // mint). A `set-wallet-options {mint}` command switches it live at runtime.
         walletOptions: {
           mint: injected.mint || env.HYPERWAVE_MINT || undefined
-        }
+        },
+        // Browse-then-pick (scaling.md Phase 2): stay merely AWARE of every announced wave
+        // (the directory) and hold cores only for waves the user opens/joins → O(subscribed).
+        // The renderer drives subscribe-wave / unsubscribe-wave from the wave directory UI.
+        autoSubscribe: false
       },
       // Inject Cashu as the payment factory (createEngine's default is the Tron wallet). The
       // engine wires it through the same `Wallet` interface — burns, tips, and the paid gate are

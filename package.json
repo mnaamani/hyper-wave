@@ -1,7 +1,7 @@
 {
   "name": "hyperwave-desktop",
   "productName": "HyperWave",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "upgrade": "pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y",
   "description": "HyperWave — global P2P stadium wave (Tether Developers Cup). Electron desktop host at the repo root + the reusable Bare engine and wallets in packages/*; the mobile host in mobile/.",
   "license": "Apache-2.0",

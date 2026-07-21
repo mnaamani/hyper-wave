@@ -54,6 +54,18 @@
         margin: 0;
         letter-spacing: 0.4px;
       }
+      /* alpha badge — signals the app is early/unstable (testnet only) */
+      .brand-alpha {
+        align-self: center;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: #f7931a;
+        border: 1px solid rgba(247, 147, 26, 0.6);
+        border-radius: 6px;
+        padding: 1px 6px;
+      }
       #v {
         opacity: 0.5;
         font-size: 12px;
@@ -94,12 +106,23 @@
       #myflag {
         font-size: 20px;
       }
-      /* the wallet button is the money button — a bitcoin-orange ₿ glyph, so it
-         reads as "money" rather than a neutral control. */
+      /* the wallet button is the money button — a bitcoin-orange ₿ pill showing the
+         active wallet's balance; clicking it opens the wallet. */
       #wallet-btn {
         color: #f7931a;
         font-weight: 700;
-        font-size: 19px;
+        font-size: 15px;
+        width: auto;
+        height: 36px;
+        border-radius: 999px;
+        padding: 0 12px;
+        gap: 5px;
+      }
+      #wallet-bal {
+        color: #f5f5f5;
+        font-weight: 600;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
       }
       /* intro / onboarding: pick your country before entering the ring */
       #intro {
@@ -221,6 +244,102 @@
       }
       #updater:empty {
         display: none;
+      }
+      /* wave directory as orbiting bubbles — one small circle per live wave, positioned
+         (from JS) at the initiator's ring angle, just outside the ring. */
+      #wave-orbit {
+        position: absolute;
+        inset: 0;
+        pointer-events: none; /* let ring/gallery clicks through; bubbles re-enable */
+      }
+      .wave-bubble {
+        position: absolute;
+        width: 46px;
+        height: 46px;
+        margin: -23px 0 0 -23px; /* centre the bubble on its (left,top) point */
+        border-radius: 50%;
+        border: 2px solid #666;
+        background: rgba(20, 12, 4, 0.92);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        pointer-events: auto;
+        transition:
+          transform 0.15s ease,
+          box-shadow 0.15s ease,
+          border-color 0.15s ease;
+      }
+      .wave-bubble:hover {
+        transform: scale(1.1);
+      }
+      /* phase colour: a forming lobby pulses (a joinable opportunity), racing is solid
+         orange, an ended wave is dim grey. */
+      .wave-bubble.lobby {
+        border-color: #f7931a;
+        animation: bub-pulse 1.6s ease-out infinite;
+      }
+      .wave-bubble.racing {
+        border-color: #f7931a;
+      }
+      .wave-bubble.ended {
+        border-color: #555;
+        opacity: 0.5;
+      }
+      .wave-bubble.active {
+        transform: scale(1.18);
+        border-color: #ffb04d;
+        box-shadow: 0 0 18px rgba(247, 147, 26, 0.6);
+        animation: none;
+      }
+      .wave-bubble.active:hover {
+        transform: scale(1.18);
+      }
+      /* grace period elapsed: fade + shrink away (the bubble is rebuilt with this class, so a
+         one-shot animation plays on mount; app.js drops the wave when it finishes). */
+      .wave-bubble.fading {
+        pointer-events: none;
+        animation: bub-fade 0.6s ease forwards;
+      }
+      @keyframes bub-fade {
+        from {
+          opacity: 0.5;
+          transform: scale(1);
+        }
+        to {
+          opacity: 0;
+          transform: scale(0.6);
+        }
+      }
+      .bub-flag {
+        font-size: 22px;
+        line-height: 1;
+      }
+      .bub-count {
+        position: absolute;
+        bottom: -4px;
+        right: -4px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 3px;
+        box-sizing: border-box;
+        border-radius: 8px;
+        background: #f7931a;
+        color: #0a0a0a;
+        font-size: 10px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      @keyframes bub-pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(247, 147, 26, 0.45);
+        }
+        70%,
+        100% {
+          box-shadow: 0 0 0 6px rgba(247, 147, 26, 0);
+        }
       }
       /* status area, docked at the bottom of the page (margin-top:auto pushes it down) */
       #hud {
@@ -641,31 +760,31 @@
         font-size: 14px;
       }
       /* gallery collection progress (moments arrive after the spark finishes) */
-      #progress {
+      /* stage status: a centred spinner + message shown in the ring centre while there's no
+         moment to feature yet (post-capture wait, and collecting moments as the wave syncs). */
+      #stage-status {
         display: none;
-        width: 240px;
-        margin-top: 12px;
-      }
-      #progress.show {
-        display: block;
-      }
-      #progress-bar {
-        height: 6px;
-        background: rgba(255, 255, 255, 0.15);
-        border-radius: 3px;
-        overflow: hidden;
-      }
-      #progress-fill {
-        height: 100%;
-        width: 0;
-        background: #f7931a;
-        transition: width 0.3s ease;
-      }
-      #progress-label {
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        width: 200px;
         text-align: center;
-        font-size: 12px;
-        opacity: 0.85;
-        margin-top: 5px;
+      }
+      #stage-status.show {
+        display: flex;
+      }
+      .stage-spinner {
+        width: 34px;
+        height: 34px;
+        border: 3px solid rgba(247, 147, 26, 0.2);
+        border-top-color: #f7931a;
+        border-radius: 50%;
+        animation: hw-spin 0.8s linear infinite;
+      }
+      #stage-status-text {
+        font-size: 13px;
+        font-weight: 600;
+        color: #ffedd6;
       }
       #lobby {
         display: none;
@@ -961,15 +1080,26 @@
       <div class="brand">
         <span class="brand-mark">⚡</span>
         <h1 class="brand-name">HyperWave</h1>
+        <span
+          class="brand-alpha"
+          title="Early alpha — testnet only, expect rough edges"
+          >alpha</span
+        >
         <span id="v">v</span>
       </div>
       <div id="topbar">
-        <button id="wallet-btn" title="Wallet &amp; transactions">₿</button>
+        <button id="wallet-btn" title="Wallet &amp; transactions">
+          ₿ <span id="wallet-bal">…</span>
+        </button>
         <button id="myflag" title="Your country — click to change"></button>
       </div>
     </header>
     <div class="field">
       <canvas id="ring" width="440" height="440"></canvas>
+      <!-- wave directory as orbiting bubbles: one small circle per live wave (scaling.md
+           browse-then-pick), sat at its initiator's seat angle just outside the ring. A
+           bubble selects (subscribes to) that wave. -->
+      <div id="wave-orbit"></div>
       <div id="center">
         <button id="start">⚡ Start new wave</button>
         <div id="lobby">
@@ -1000,14 +1130,15 @@
           <div class="nsfw-msg">This moment was flagged as possibly unsafe</div>
           <button id="nsfw-reveal">👁 Show anyway</button>
         </div>
+        <!-- stage status: fills the ring centre while there's no moment to show yet — post-capture
+             wait + collecting moments as the wave syncs (so the centre is never blank). -->
+        <div id="stage-status">
+          <div class="stage-spinner"></div>
+          <div id="stage-status-text"></div>
+        </div>
         <!-- tip: a floating action on the featured moment (overlaps its lower edge) -->
         <button id="tip" title="Send a tip to this moment">⚡ Tip 1 TRX</button>
       </div>
-    </div>
-
-    <div id="progress">
-      <div id="progress-bar"><div id="progress-fill"></div></div>
-      <div id="progress-label"></div>
     </div>
 
     <div id="tip-toast"></div>

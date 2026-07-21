@@ -4,6 +4,7 @@
 // posts it to the gallery when this peer's sweep slot fires. This decouples the human
 // moment (leisurely, synchronized) from the fast sweep.
 import { stageMoment } from './ipc.js';
+import { getActiveWave } from './active.js';
 
 const proofEl = document.getElementById('proof');
 const preview = document.getElementById('preview');
@@ -100,7 +101,7 @@ function capture() {
     // file/blob directly) so nothing identifying can ride along with the moment.
     image = snap.toDataURL('image/jpeg', 0.5);
   }
-  stageMoment({ image, caption: captionEl.value });
+  stageMoment({ image, caption: captionEl.value }, getActiveWave());
   if (onCapturedCb) {
     onCapturedCb();
   }

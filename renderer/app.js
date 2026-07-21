@@ -8,6 +8,8 @@ import * as lobby from './lib/lobby.js';
 import * as proof from './lib/proof.js';
 import * as hud from './lib/hud.js';
 import * as wallet from './lib/wallet.js';
+import * as directory from './lib/directory.js';
+import { getActiveWave, setActiveWave } from './lib/active.js';
 import { setWalletMeta, unitLabel, isCashu } from './lib/wallet-meta.js';
 import { txLink } from './lib/explorer.js';
 
@@ -34,7 +36,18 @@ const fieldEl = document.querySelector('.field'); // the ring + gallery canvas a
 // exactly why we DON'T in a packaged build (keeps a shipped app's global scope clean). `npm start`
 // is unpackaged, so the handle is present in dev only.
 if (window.bridge?.isPackaged && !window.bridge.isPackaged()) {
-  window.hw = { state, ring, gallery, scrubber, lobby, proof, hud, ipc };
+  window.hw = {
+    state,
+    ring,
+    gallery,
+    scrubber,
+    lobby,
+    proof,
+    hud,
+    ipc,
+    directory,
+    getActiveWave
+  };
 }
 
 // Fade the ring + gallery (a new wave's lobby is up) so the countdown reads clearly; the lobby
@@ -47,9 +60,11 @@ lobby.onCancel(() => setDim(false));
 
 // Capturing the moment closes the camera preview, so confirm it on the status line (it'll post to
 // the gallery when this peer's sweep slot fires).
-proof.onCaptured(() =>
-  hud.waveStatus('📸 moment captured — get ready for the wave!')
-);
+proof.onCaptured(() => {
+  hud.waveStatus('📸 moment captured — get ready for the wave!');
+  // fill the ring centre while the lobby finishes + moments sync (instead of a blank centre)
+  gallery.setWaiting('📸 captured — waiting for the wave…');
+});
 
 // Swap the join panel for the camera and start framing the lobby moment. Leaving the old wave's
 // gallery to take part in a new one: close its view and clear the frozen replay/scrubber.
@@ -87,23 +102,228 @@ function asMoment(item) {
   };
 }
 
+// --- concurrent waves: directory + active wave (scaling.md browse-then-pick) ----------------
+// The engine is aware of many waves at once (autoSubscribe:false → no cores until we pick one).
+// We keep lightweight metadata for every announced wave (the directory) and a cached feed per
+// wave; only the ACTIVE wave drives the ring centre (gallery / lobby / capture). Selecting a
+// directory row subscribes to that wave (holds its cores) and makes it active.
+const waves = new Map(); // waveId -> { waveId, by, mine, joined, subscribed, phase, count, fee, walletType, paid, lobbyDeadline }
+const feedByWave = new Map(); // waveId -> raw feed items (rendered when its wave is active)
+let ringState = { me: null, peers: [] }; // the global heartbeat ring, for the directory's flags
+
+// The directory shows the initiator's country flag; derive it from the global ring by id.
+directory.setCountryLookup((id) => {
+  if (ringState.me && ringState.me.id === id) {
+    return ringState.me.country;
+  }
+  const peer = ringState.peers.find((one) => one.id === id);
+  return peer ? peer.country : '';
+});
+directory.onSelect((waveId) => selectWave(waveId));
+
+// Merge a metadata patch into a wave and re-render the directory panel.
+function upsertWave(waveId, patch) {
+  const wave = waves.get(waveId) || {
+    waveId,
+    phase: 'lobby',
+    count: 1,
+    joined: false,
+    subscribed: false
+  };
+  Object.assign(wave, patch);
+  waves.set(waveId, wave);
+  directory.render(waves, getActiveWave());
+}
+
+// Make a wave active (engine already subscribed it, e.g. my own started wave). No view repaint —
+// the caller's event handler paints. Use selectWave() for a user-initiated directory pick.
+function activateWave(waveId) {
+  setActiveWave(waveId);
+  directory.render(waves, waveId);
+}
+
+// User picked a wave in the directory: subscribe (hold its cores) if not already, make it active,
+// and paint its current state (its gallery, or its lobby if it's still forming and I haven't joined).
+function selectWave(waveId) {
+  const wave = waves.get(waveId);
+  if (!wave || waveId === getActiveWave()) {
+    return;
+  }
+  // If I'm framing a moment for the wave I'm leaving, lock it in now (stage to the OLD active
+  // wave, before switching) — otherwise a wave that starts while I'm away would post nothing.
+  proof.captureAndStage();
+  setActiveWave(waveId);
+  if (!wave.subscribed) {
+    ipc.subscribeWave(waveId); // browse-then-pick: hold this wave's feed cores + control gossip
+    wave.subscribed = true; // optimistic; the 'subscribed' event confirms
+  }
+  directory.render(waves, waveId);
+  renderActiveWave();
+}
+
+// Paint the ring centre for whatever the active wave is right now (used when switching waves).
+function renderActiveWave() {
+  ring.stopSweep();
+  gallery.cancelReplay();
+  gallery.close();
+  lobby.close();
+  proof.close();
+  setDim(false);
+  hud.waveStatus('');
+  const wave = getActiveWave() ? waves.get(getActiveWave()) : null;
+  if (!wave) {
+    hud.showStart(true);
+    gallery.setActive(false);
+    updateHud();
+    return;
+  }
+  if (wave.phase === 'lobby') {
+    setState({
+      lobbyDeadline: wave.lobbyDeadline || performance.now() + 15000
+    });
+    hud.showStart(false);
+    if (wave.joined) {
+      // I'm in this lobby (my own wave, or one I joined) — reopen the camera so I can keep
+      // framing my moment until it starts (this is what was lost when switching away + back).
+      beginCapture();
+    } else {
+      // a forming lobby I only selected — offer to join it
+      setDim(true);
+      lobby.open({
+        count: wave.count,
+        mine: wave.mine,
+        joined: wave.joined,
+        fee: wave.fee,
+        lobbyMs: Math.max(0, (wave.lobbyDeadline || 0) - performance.now())
+      });
+      lobby.setJoinable(wave.paid === 'verified');
+    }
+  } else {
+    // racing / ended — show its (cached) gallery
+    const items = feedByWave.get(wave.waveId) || [];
+    gallery.handle(items.map(asMoment));
+    gallery.setActive(wave.phase === 'racing');
+    hud.showStart(wave.phase !== 'racing');
+  }
+  updateHud();
+}
+
+// An ended wave lingers in the orbit (its gallery still browsable) for a grace period, then
+// fades out and is dropped from the directory — and its cores are freed (O(subscribed)).
+const ENDED_TTL_MS = 180000; // ~3 minutes
+const FADE_MS = 600; // matches the bubble's CSS fade-out
+const expiryTimers = new Map(); // waveId -> one-shot timeout handle
+
+// Drop a wave from the UI now: free its cores, forget its metadata + cached feed, and if I was
+// viewing it, fall back to the empty ring. Used both by the grace-period fade and when my own
+// new wave supersedes a prior one.
+function removeWave(waveId) {
+  const wave = waves.get(waveId);
+  clearTimeout(expiryTimers.get(waveId));
+  expiryTimers.delete(waveId);
+  if (wave && wave.subscribed) {
+    ipc.unsubscribeWave(waveId); // free its feed cores now the wave is gone
+  }
+  waves.delete(waveId);
+  feedByWave.delete(waveId);
+  if (getActiveWave() === waveId) {
+    setActiveWave(null);
+    renderActiveWave(); // the wave I was viewing is gone → empty ring + Start
+  } else {
+    directory.render(waves, getActiveWave());
+  }
+}
+
+// Fade the bubble out (CSS), then remove the wave once the animation has run.
+function fadeOutWave(waveId) {
+  const wave = waves.get(waveId);
+  if (!wave) {
+    return;
+  }
+  wave.fading = true; // directory.render adds a .fading class → the CSS fade-out plays
+  directory.render(waves, getActiveWave());
+  setTimeout(() => removeWave(waveId), FADE_MS);
+}
+
+// Start the grace-period countdown for an ended wave (re-armed if wave-idle fires again).
+function scheduleWaveExpiry(waveId) {
+  clearTimeout(expiryTimers.get(waveId));
+  expiryTimers.set(
+    waveId,
+    setTimeout(() => fadeOutWave(waveId), ENDED_TTL_MS)
+  );
+}
+
+// Per-event metadata patch for the directory (missing kinds = no directory change).
+const DIRECTORY_PATCH = {
+  'wave-announce': (evt) => ({
+    by: evt.by,
+    mine: !!evt.mine,
+    joined: !!evt.joined,
+    subscribed: !!evt.subscribed,
+    count: evt.count,
+    fee: evt.fee,
+    walletType: evt.walletType,
+    paid: evt.paid,
+    phase: 'lobby',
+    lobbyDeadline: performance.now() + (evt.lobbyMs || 15000)
+  }),
+  subscribed: (evt) => ({ subscribed: true, joined: !!evt.joined }),
+  unsubscribed: () => ({ subscribed: false, joined: false }),
+  joined: (evt) => ({ joined: true, count: evt.count }),
+  roster: (evt) => ({ count: evt.count }),
+  'wave-active': (evt) => ({
+    phase: 'racing',
+    count: evt.count,
+    joined: !!evt.joined
+  }),
+  'wave-idle': () => ({ phase: 'ended' }),
+  'wave-verified': () => ({ paid: 'verified' })
+};
+
+function updateDirectory(evt) {
+  const patch = DIRECTORY_PATCH[evt.event]?.(evt);
+  if (evt.waveId && patch) {
+    upsertWave(evt.waveId, patch);
+  }
+  if (evt.event === 'wave-idle' && evt.waveId) {
+    scheduleWaveExpiry(evt.waveId); // ended → linger, then fade out after the grace period
+  }
+}
+
+// Auto-engage a wave I just started (the engine already subscribed it as the initiator), and
+// supersede my PRIOR own wave immediately — kicking off a new one drops the last one from the UI.
+function maybeAutoSelect(evt) {
+  if (evt.event !== 'wave-announce' || !evt.mine || !evt.waveId) {
+    return;
+  }
+  const priorMine = [...waves.values()]
+    .filter((wave) => wave.mine && wave.waveId !== evt.waveId)
+    .map((wave) => wave.waveId);
+  for (const waveId of priorMine) {
+    removeWave(waveId);
+  }
+  activateWave(evt.waveId);
+}
+
 ipc.on('state', (msg) => {
   if (!state.countrySent) {
     setState({ countrySent: true });
     hud.sendCountry(); // worker is up - tell it the nation we support
   }
-  ring.setState({
-    ...msg,
-    me: withCountry(msg.me),
-    peers: msg.peers.map(withCountry)
-  });
+  ringState = { me: withCountry(msg.me), peers: msg.peers.map(withCountry) };
+  ring.setState(ringState);
   setState({ peers: msg.peers.length });
   updateHud();
+  directory.render(waves, getActiveWave()); // flags resolve as peers appear on the ring
 });
 
 ipc.on('feed', (msg) => {
-  gallery.handle(msg.items.map(asMoment));
-  updateHud(); // dock the start button below a non-empty gallery (when idle)
+  feedByWave.set(msg.waveId, msg.items); // cache every subscribed wave's feed
+  if (msg.waveId === getActiveWave()) {
+    gallery.handle(msg.items.map(asMoment)); // only the active wave paints the ring centre
+    updateHud();
+  }
 });
 
 ipc.on('wallet', (msg) => {
@@ -236,6 +456,10 @@ const EVENT_HANDLERS = {
     proof.captureAndStage();
     gallery.setExpected(evt.count || 1);
     gallery.setActive(true);
+    // Start the spark tracing NOW (the wave is racing) so it sweeps the ring as moments sync in,
+    // featuring each as it passes — rather than as a replay after the wave has already completed.
+    // startReplay is pending-safe: it begins the moment the first entry lands.
+    gallery.startReplay();
     hud.waveStatus(
       evt.joined
         ? '📸 captured — here comes the wave!'
@@ -318,9 +542,24 @@ const EVENT_HANDLERS = {
   // event, so gallery.startReplay() defers until it arrives.
   completed: (evt) => {
     hud.waveStatus(`✅ wave completed - ${evt.hops} hops`);
-    ring.startFlourish(); // golden ring pulse + confetti — the wave made it all the way around
-    gallery.startReplay(); // roll the spark once around the ring, featuring moments in hop order
+    ring.startFlourish(); // orange ring pulse + confetti — the wave made it all the way around
+    // The spark is already sweeping (started at wave-active); ensure it's running in case the
+    // wave completed instantly before any moment landed to kick it off.
+    gallery.startReplay();
   }
 };
 
-ipc.on('event', (evt) => EVENT_HANDLERS[evt.event]?.(evt));
+// Wallet/celebration events touch MY wallet regardless of which wave I'm viewing (e.g. redeeming
+// a Cashu tip received on a wave I've since navigated away from), so they run unconditionally.
+const WAVE_AGNOSTIC_EVENTS = new Set(['dm', 'note']);
+
+// Route every engine event: keep the directory in sync for ALL waves, auto-engage my own new wave,
+// then drive the ring-centre view ONLY for the active wave (a background wave can't clobber it).
+ipc.on('event', (evt) => {
+  updateDirectory(evt);
+  maybeAutoSelect(evt);
+  const forActive = evt.waveId && evt.waveId === getActiveWave();
+  if (WAVE_AGNOSTIC_EVENTS.has(evt.event) || forActive) {
+    EVENT_HANDLERS[evt.event]?.(evt);
+  }
+});

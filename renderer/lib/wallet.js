@@ -42,6 +42,7 @@ const openBtn = document.getElementById('wallet-btn');
 const closeBtn = document.getElementById('wallet-close');
 const titleEl = document.getElementById('wallet-title');
 const balanceEl = document.getElementById('wallet-balance');
+const balChipEl = document.getElementById('wallet-bal'); // top-bar balance pill
 const kindEl = document.getElementById('wallet-kind');
 const addressEl = document.getElementById('wallet-address');
 const refreshBtn = document.getElementById('wallet-refresh');
@@ -107,6 +108,7 @@ export function walletStatus({ address, amount, unit, accountIndex, mint }) {
   const shown = isCashu() ? String(amount) : amount.toFixed(2);
   balanceEl.innerText =
     `${shown} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
+  balChipEl.textContent = `${shown} ${unitLabel(amount)}`; // top-bar pill
   addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
   // A chain address deep-links to its block explorer; a Cashu identity pubkey has
   // no explorer, so drop the link affordance + the misleading Tronscan tooltip.
@@ -308,7 +310,7 @@ function renderCashuHistory(list) {
       const amt = document.createElement('span');
       amt.className = meta.dir === 'in' ? 'tx-amt in' : 'tx-amt';
       if (typeof entry.amount === 'number') {
-        const sign = meta.dir === 'in' ? '+' : meta.dir === 'out' ? '−' : '';
+        const sign = { in: '+', out: '−' }[meta.dir] || ''; // neutral → no sign
         amt.textContent = `${sign}${entry.amount} ${unitLabel()}`;
       }
       row.append(label, time, amt);

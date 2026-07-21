@@ -2,6 +2,7 @@
 // in the centre of the ring while a wave is forming.
 import { joinWave } from './ipc.js';
 import { unitLabel } from './wallet-meta.js';
+import { getActiveWave } from './active.js';
 
 const lobbyEl = document.getElementById('lobby');
 const msgEl = document.getElementById('lobby-msg');
@@ -80,7 +81,7 @@ joinBtn.onclick = () => {
   joined = true;
   joinBtn.style.display = 'none';
   cancelBtn.style.display = 'none';
-  joinWave();
+  joinWave(getActiveWave()); // join the wave the lobby is showing
 };
 
 // "Not now": dismiss the lobby without joining. The wave still forms/runs (this peer just

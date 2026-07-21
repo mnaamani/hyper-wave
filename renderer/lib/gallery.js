@@ -1,18 +1,18 @@
-// The wave gallery: which moment to feature in the ring centre (one at a time), and
-// the collection-progress bar. During collection we feature each new arrival; once the wave
-// completes the host runs a fixed-duration REPLAY sweep (ring.js) and we feature the moment the
-// spark is passing (featureByFrac). When the sweep freezes, the user drags the spark (scrubber.js
-// → ring.scrubTo → featureByFrac) to browse — no auto-cycle. Moments are always hopCount-ordered
-// (buildGallery), so the sweep reproduces ring order regardless of arrival timing.
+// The wave gallery: which moment to feature in the ring centre (one at a time). While the wave
+// races, the spark sweeps the ring (started at wave-active) and we feature the moment it's passing
+// (featureByFrac); when there's no moment to show yet (post-capture wait, or before the first
+// arrival) a centred spinner + "collecting moments" status fills the centre instead of leaving it
+// blank (refreshStage). When the sweep freezes, the user drags the spark (scrubber.js → ring.scrubTo
+// → featureByFrac) to browse — no auto-cycle. Moments are always hopCount-ordered (buildGallery),
+// so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js';
 import { tip, note, dm } from './ipc.js';
 import { unitLabel, isCashu } from './wallet-meta.js';
 import { classify as classifyNsfw } from './nsfw.js';
 import { txLink } from './explorer.js';
 
-const progressEl = document.getElementById('progress');
-const progressFill = document.getElementById('progress-fill');
-const progressLabel = document.getElementById('progress-label');
+const stageEl = document.getElementById('stage-status');
+const stageTextEl = document.getElementById('stage-status-text');
 const tipBtn = document.getElementById('tip');
 const toastEl = document.getElementById('tip-toast');
 const nsfwCover = document.getElementById('nsfw-cover');
@@ -29,6 +29,7 @@ let closed = false; // gallery view closed (a new wave's lobby/capture owns the 
 let myAddress = null; // my own wallet — never tip myself
 let lastTip = null; // the entry we just tipped (captured at click; announced on success)
 let pendingReplay = false; // replay requested but waiting for the first moment (see startReplay)
+let waitingText = ''; // app-set centre message before racing (e.g. post-capture wait)
 const shownKeys = new Set(); // waveId|peerId already featured
 // Local NSFW safety filter (nsfw.js): waveId|peerId -> 'pending' | true (unsafe) | false (safe).
 // `revealed` holds keys the user chose to un-hide. A flagged, un-revealed featured moment is
@@ -85,12 +86,38 @@ export function setActive(on) {
   // Any wave-lifecycle transition (racing → true, idle → false) means the forming/capture stage is
   // over and the ring centre is the gallery's again — reopen it (close() sets this while capturing).
   closed = false;
-  updateProgress();
+  refreshStage();
 }
 
 export function setExpected(count) {
   expected = count;
-  updateProgress();
+  refreshStage();
+}
+
+// App-set centre message shown before racing (e.g. "captured — waiting for the wave…"), while
+// there's no moment to feature yet. Cleared when a moment appears or a new wave forms.
+export function setWaiting(text) {
+  waitingText = text || '';
+  refreshStage();
+}
+
+// Keep the ring centre useful when there's no moment to show: a spinner + message during the
+// post-capture wait and while moments are still syncing in — instead of a blank centre.
+function refreshStage() {
+  const hasFeatured = !!items[centerIdx];
+  let text = '';
+  if (!hasFeatured) {
+    if (active) {
+      const total = Math.max(expected, items.length, 1);
+      text = items.length
+        ? `collecting moments… ${items.length} / ${total}`
+        : 'the wave is rolling — moments incoming…';
+    } else if (waitingText) {
+      text = waitingText;
+    }
+  }
+  stageEl.classList.toggle('show', !!text);
+  stageTextEl.textContent = text;
 }
 
 function feature(index) {
@@ -98,6 +125,7 @@ function feature(index) {
   const item = items[centerIdx] || null;
   ring.setCenter(item);
   refreshTip();
+  refreshStage(); // a moment is featured now → hide the "collecting" placeholder
   classifyItem(item); // kick off (or reuse a cached) local NSFW check
   updateCover(item); // show/hide the "possibly unsafe" cover for this moment
 }
@@ -215,8 +243,9 @@ export function clearView() {
   centerIdx = 0;
   shownKeys.clear();
   pendingReplay = false;
+  waitingText = '';
   ring.setCenter(null);
-  hideProgress();
+  refreshStage();
   refreshTip(); // no featured moment now → hide the tip button (don't leave it over the capture)
   nsfwCover.classList.remove('show'); // no featured moment → no safety cover
 }
@@ -226,6 +255,7 @@ export function clearView() {
 // keeps ticking (the engine re-emits every held wave's feed periodically), so without this a stale
 // moment would repaint onto the canvas BEHIND the capture modal. Called when we open the capture.
 export function close() {
+  active = false; // capture/lobby owns the centre now — stop any "collecting" placeholder
   clearView();
   closed = true;
 }
@@ -275,7 +305,7 @@ export function handle(newItems) {
   tryStartReplay(); // a deferred post-completion replay starts as soon as the first moment lands
   // don't fight an active replay/scrub: the sweep owns featuring once it's running
   if (ring.sweepOrigin() !== null) {
-    updateProgress();
+    refreshStage();
     refreshTip();
     return;
   }
@@ -286,25 +316,12 @@ export function handle(newItems) {
   } else {
     ring.setCenter(items[centerIdx] || null);
   }
-  updateProgress();
+  refreshStage();
   refreshTip();
 }
 
+// Clear the centre placeholder (app.js calls this when a new wave forms).
 export function hideProgress() {
-  progressEl.classList.remove('show');
-}
-
-function updateProgress() {
-  const got = items.length;
-  if (!active && got === 0) {
-    hideProgress();
-    return;
-  }
-  const total = Math.max(expected, got, 1);
-  progressEl.classList.add('show');
-  progressFill.style.width = Math.round((got / total) * 100) + '%';
-  progressLabel.innerText =
-    got >= total
-      ? `📸 all ${got} moment${got === 1 ? '' : 's'} in!`
-      : `📸 collecting moments… ${got} / ${total}`;
+  waitingText = '';
+  refreshStage();
 }
