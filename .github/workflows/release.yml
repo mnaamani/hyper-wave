@@ -197,4 +197,49 @@ jobs:
         with:
           name: installer-win32
           path: out/make/**
+
+  # Attach the freshly-built INSTALLERS to the GitHub Release for this tag. The build jobs upload
+  # everything as workflow-run artifacts (which expire and never touch the release page); this job
+  # collects the installers and publishes them as release assets. The `ota-*` artifacts are the
+  # pear-runtime OTA payloads — those are staged/seeded by the always-on host (see RELEASE.md), NOT
+  # release downloads, so they're excluded here. Only runs for a real tag push.
+  publish-release:
+    needs:
+      - build-linux-x64
+      - build-linux-arm
+      - build-macos
+      - build-macos-x64
+      - build-win32
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Collect installers (exclude OTA payloads)
+        run: |
+          # Drop the pear-runtime OTA payload artifacts; keep installers only.
+          rm -rf dist/ota-*
+          mkdir -p release-assets
+          # Flatten remaining files into release-assets/. Release asset names are basenames and
+          # must be unique, so on a basename collision prefix with the source artifact folder.
+          find dist -type f | while read -r file; do
+            base=$(basename "$file")
+            dest="release-assets/$base"
+            if [ -e "$dest" ]; then
+              artifact=$(printf '%s' "$file" | cut -d/ -f2)
+              dest="release-assets/${artifact}-${base}"
+            fi
+            cp "$file" "$dest"
+          done
+          echo "Assets to publish:"
+          ls -la release-assets
+      - name: Attach installers to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: true
           if-no-files-found: warn
