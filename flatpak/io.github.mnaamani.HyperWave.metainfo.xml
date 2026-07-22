@@ -19,6 +19,7 @@
   <url type="bugtracker">https://github.com/mnaamani/hyper-wave/issues</url>
 
   <releases>
+    <release date="2026-07-23" version="0.2.0"/>
     <release date="2026-07-22" version="0.1.0"/>
   </releases>
 

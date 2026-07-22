@@ -17,6 +17,11 @@ const { installBareWebShims } = require('./bare-web-shims');
 const { numsBurnPubkey } = require('./nums');
 const { ProofStore } = require('./proof-store');
 const { verifyBurnProofs, burnTags, p2pkLockPubkey } = require('./cashu-burn');
+const {
+  KNOWN_MINTS,
+  networkOfMint,
+  crossNetworkMints
+} = require('./mint-networks');
 
 // The on-the-wire payment-mechanism id. Generic (NOT per-mint): every
 // Lightning-connected Cashu peer interoperates regardless of its chosen mint —
@@ -43,6 +48,7 @@ class CashuWallet extends Wallet {
   #cashu;
   #secp;
   #mintUrl;
+  #extraMints;
   #identityPriv;
   #identityPub;
   #fee;
@@ -57,6 +63,7 @@ class CashuWallet extends Wallet {
    * @param {Object} opts.cashu - The imported cashu-ts module.
    * @param {Object} opts.secp - The imported noble secp256k1 module.
    * @param {string} opts.mintUrl - The home mint URL.
+   * @param {Array<{url: string, network: string}>} [opts.extraMints] - App-added mints (url + network) to classify against too, so the cross-network paid-gate filter recognises mints beyond the package's built-in list.
    * @param {string} opts.identityPriv - The identity private key (hex).
    * @param {string} opts.identityPub - The identity public key (hex) = address.
    * @param {number} opts.fee - The participation fee in sats.
@@ -67,6 +74,7 @@ class CashuWallet extends Wallet {
     cashu,
     secp,
     mintUrl,
+    extraMints = [],
     identityPriv,
     identityPub,
     fee,
@@ -77,6 +85,7 @@ class CashuWallet extends Wallet {
     this.#cashu = cashu;
     this.#secp = secp;
     this.#mintUrl = mintUrl;
+    this.#extraMints = extraMints;
     this.#identityPriv = identityPriv;
     this.#identityPub = identityPub;
     this.#fee = fee;
@@ -106,6 +115,44 @@ class CashuWallet extends Wallet {
   /** The home mint URL (Cashu has no BIP-44 accounts — the "account" is the mint). */
   get mintUrl() {
     return this.#mintUrl;
+  }
+
+  /**
+   * This wallet's own settlement network ('testnet' | 'mainnet' | 'unknown'),
+   * classified from its active mint. The host relays it so a UI can show only
+   * same-network waves (and block cross-network tips), re-filtered on a mint
+   * switch.
+   * @returns {'testnet' | 'mainnet' | 'unknown'}
+   */
+  get network() {
+    return networkOfMint(this.#mintUrl, this.#extraMints);
+  }
+
+  /**
+   * Classify a burn proof's settlement network from the mint encoded in its token
+   * — offline, no network I/O. Lets the host tag each wave (via its start burn)
+   * with a network so a UI can filter to same-network waves. Returns 'unknown' if
+   * the token can't be decoded (permissive — never the basis for hiding a wave).
+   * @param {string} burnRef - An encoded Cashu burn token (a wave's `paid.burnRef`).
+   * @returns {'testnet' | 'mainnet' | 'unknown'}
+   */
+  networkOf(burnRef) {
+    try {
+      const mintUrl = this.#cashu.getTokenMetadata(burnRef).mint;
+      return networkOfMint(mintUrl, this.#extraMints);
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
+   * The mints this wallet knows (the package's curated list + any app-added
+   * `knownMints`), each `{ url, label, network }`. The host relays this to a UI
+   * so a mint picker and the cross-network filter share ONE list — no drift.
+   * @returns {Array<{url: string, label?: string, network: string}>}
+   */
+  get knownMints() {
+    return KNOWN_MINTS.concat(this.#extraMints);
   }
 
   // Load the home mint's keysets/keys once, lazily, so construction is offline.
@@ -357,12 +404,22 @@ class CashuWallet extends Wallet {
   // checkstate (still UNSPENT under an unspendable lock = burned). The token
   // carries its own mint, so a per-peer mint needs no coordination. `expect.from`
   // is ignored — ecash is anonymous (see cashu-burn.js). Fails closed.
+  //
+  // Network gate: the burn's mint (from the token) tells us which network the
+  // wave settles on. A burn on a DIFFERENT known network than our own mint (test
+  // vs main) is a DEFINITIVE rejection ('wrong-network', NOT transient) — so the
+  // paid gate abandons that wave. This is how a peer filters out waves not on its
+  // network: real money never mixes with test money. It's checked offline, before
+  // any mint call, so a cross-network wave costs nothing to reject.
   async verifyBurnTx(burnRef, expect = {}) {
     try {
       const nums = await numsBurnPubkey();
       // The token carries its own mint (metadata read needs no keysets); load
       // that mint so a per-peer / foreign mint verifies with no coordination.
       const mintUrl = this.#cashu.getTokenMetadata(burnRef).mint;
+      if (crossNetworkMints(mintUrl, this.#mintUrl, this.#extraMints)) {
+        return { ok: false, reason: 'wrong-network' };
+      }
       const wallet = await this.#foreignWallet(mintUrl);
       const keysetIds = (await wallet.mint.getKeySets()).keysets.map(
         (keyset) => keyset.id
@@ -440,6 +497,7 @@ function deriveIdentity(secp, sha256, seed) {
  * @param {string} options.storageDir - Directory for the proof store + seed file.
  * @param {string} [options.seed] - Injected seed (mnemonic/hex); else read/generate a file.
  * @param {string} [options.mint] - The home mint URL (LN-connected). Defaults to a test mint.
+ * @param {Array<{url: string, network: string}>} [options.knownMints] - App-added mints (url + network) the cross-network paid-gate filter should recognise beyond the package's built-in list (mint-networks.js). Lets an app that adds its own mints keep them classified correctly.
  * @param {number} [options.fee] - Participation fee in sats (default DEFAULT_FEE_SATS).
  * @param {(...args: any[]) => void} [options.log] - Logger.
  * @returns {Promise<CashuWallet>} The ready wallet.
@@ -449,6 +507,7 @@ async function createCashuWallet(options = {}) {
     storageDir,
     seed: injectedSeed,
     mint = DEFAULT_MINT,
+    knownMints = [],
     fee = DEFAULT_FEE_SATS,
     log = () => {}
   } = options;
@@ -485,6 +544,7 @@ async function createCashuWallet(options = {}) {
     cashu,
     secp,
     mintUrl: mint,
+    extraMints: knownMints,
     identityPriv,
     identityPub,
     fee,

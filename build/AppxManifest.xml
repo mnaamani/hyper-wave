@@ -6,7 +6,7 @@
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   IgnorableNamespaces="rescap desktop6"
 >
-  <Identity Name="io.github.mnaamani.HyperWave" Version="0.1.0.0" Publisher="CN=HyperWave" ProcessorArchitecture="x64" />
+  <Identity Name="io.github.mnaamani.HyperWave" Version="0.2.0.0" Publisher="CN=HyperWave" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>HyperWave</DisplayName>
     <PublisherDisplayName>HyperWave</PublisherDisplayName>

@@ -32,19 +32,96 @@ an auditor checks "is this burned?" by comparing against it.
 ## Each peer chooses its own mint
 
 `walletType` is the generic `cashu` (not `cashu-<mint>`), so **every
-Lightning-connected Cashu peer interoperates regardless of its chosen mint**:
+Lightning-connected Cashu peer on the same network interoperates regardless of its
+chosen mint** (the one exception — test vs mainnet — is enforced separately, from
+mint identity, see below):
 
 - **Burns self-verify per token.** A burn token carries its own mint URL, so a
   verifier loads _that_ mint — no cross-peer coordination, no canonical mint.
 - **Tips bridge mints** via multimint swap (below).
 
 The join-support gate still separates a Cashu wave from a Tron wave (a peer only
-joins a wave whose `walletType` its wallet matches), but never mint-A from mint-B.
+joins a wave whose `walletType` its wallet matches), but never mint-A from mint-B
+**on the same network**.
+
+### The one split the mint-agnostic type must NOT paper over: test vs main
+
+`sat` on the free `testnut` mint is fake money; `sat` on a real Lightning mint is
+real money — and a Cashu proof looks identical either way, so the network is
+knowable only from _which mint_ it is. Keeping `walletType` generic must not let
+those mix. So the split is enforced from the **mint identity carried by the burn
+proof**, not from the wire type:
+
+- Every paid wave's start burn (`paid.burnRef`) is a Cashu token that encodes its
+  own mint URL. A receiving peer's paid-gate verifier (`CashuWallet.verifyBurnTx`)
+  reads that mint (`getTokenMetadata().mint`) and classifies its network against
+  the canonical list (`mint-networks.js` — `networkOfMint` / `crossNetworkMints`).
+- If the burn's mint is on a **different known network** than the peer's own mint
+  (test vs main), `verifyBurnTx` returns a **definitive** `wrong-network`
+  rejection (not transient) — so `verifyStartProof` abandons the wave (it's never
+  joinable/spectated on this peer). This is the filter: a testnet peer drops
+  mainnet-settled announces/syncs, and vice versa. The check is offline (before
+  any mint call), so a foreign-network wave costs nothing to reject.
+- **Same network, different mint → still joinable.** The filter fires ONLY on a
+  known test-vs-main mismatch. Two peers on _different_ mints that share a network
+  (e.g. `testnut.cashu.space` and `nofee.testnut.cashu.space`, or `mint.minibits`
+  and `mint.coinos.io`) are not cross-network: `crossNetworkMints` returns false,
+  `verifyBurnTx` proceeds to load the burn's own mint and run the normal
+  structural + NUT-07 checks, and the wave verifies. Nothing gates join on mint
+  _equality_ — the join-support gate is `walletType` (generic `cashu` for every
+  mint), so any two same-network mints fully interoperate. (Pinned by the
+  `two mainnet mints → same network` / `two test mints → same network` cases in
+  `mint-networks.test.js`.)
+- **Unknown mints are permissive.** A mint not in the list (and not self-labelled
+  `testnut`/`testnet`) classifies as `unknown` and is never the basis for a
+  cross-network rejection — we exclude only networks we can positively identify,
+  so a custom mint is never wrongly filtered.
+
+### The display + tip filter (the renderer only shows same-network waves)
+
+The paid-gate `wrong-network` rejection covers _joining_, but a peer can also
+**spectate** a wave (subscribe without joining) and **tip** its gallery — and a
+tip is a wave-independent wallet send, so nothing above stops a cross-network tip
+(meaningless: a testnet token to a mainnet recipient, or vice versa). It also
+doesn't cover a **live mint switch** — a wave verified under the old network stays
+engaged after switching. So the renderer filters by network directly:
+
+- Each wave is **tagged with its settlement network** by the engine, derived from
+  its start burn via the wallet's sync `networkOf(burnRef)` (offline — decode the
+  token's mint, classify it). It rides the `wave-announce` / `wave-active` /
+  `wave-verified` engine events as `network` (null on unpaid/wallet-less waves).
+- The wallet's **own** network rides the `wallet` message (`network`, from its
+  active mint, alongside `mint`/`mints`).
+- The renderer (`wallet-meta.js` `networkMatches`) hides any wave whose known
+  network differs from the wallet's known network — so the directory shows only
+  same-network waves, and the gallery/tip button never appear for a cross-network
+  wave. My own waves and unknown-network waves always pass (permissive, mirroring
+  `crossNetworkMints`).
+- On a **live mint switch** the `wallet` message reports the new network; the
+  renderer re-filters the directory and **deselects the active wave if it's become
+  cross-network**, so its gallery + tip disappear immediately.
+
+`mint-networks.js` is the **single source of truth** — it holds both the curated
+mint list (`KNOWN_MINTS`, `{ url, label, network }`) and the `networkOfMint` /
+`crossNetworkMints` classifier. The worker uses it natively (the paid-gate
+filter). The sandboxed `file://` renderer can't `require` a CJS package, so
+instead of duplicating the list there, **the worker relays it**: the Cashu wallet
+exposes `get knownMints()` (the curated list + app extras), the engine surfaces it
+on the `wallet` message as `mints`, and the renderer's picker renders that. So the
+picker's label and the filter's classification come from one list — the SAME one
+the wallet classifies against — and cannot drift.
+
+An **app can add its own mints** in ONE place: `APP_EXTRA_MINTS` in
+`workers/hyperwave.js` (`{ url, label, network }`), passed to the wallet as
+`walletOptions.knownMints`. That single list feeds both the cross-network filter
+(the wallet classifies burns against it) and the picker (the wallet reports it,
+the engine relays it) — no second definition in the renderer.
 
 The desktop wallet modal offers a **curated mint picker** (the account dropdown,
 reused); switching sends `set-wallet-options {mint}` (a live re-wire) and main
-persists the choice to `<storage>/cashu.mint`. The curated list (`CASHU_MINTS` in
-`renderer/lib/wallet.js`):
+persists the choice to `<storage>/cashu.mint`. The picker renders the
+worker-relayed list (`KNOWN_MINTS` in `mint-networks.js`, above — not a separate
+renderer list):
 
 - **testnut** (`testnut.cashu.space`) + **testnut · no fees**
   (`nofee.testnut.cashu.space`) — the free TEST mints (auto-pay, no real

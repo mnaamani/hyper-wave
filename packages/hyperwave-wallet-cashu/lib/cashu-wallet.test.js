@@ -47,6 +47,46 @@ test('createCashuWallet builds an offline, spec-conforming Wallet', async (t) =>
   wallet.dispose();
 });
 
+test('network classification: own mint (get network) + a burn proof (networkOf)', async (t) => {
+  const dir = tempDir();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // Default mint is testnut → testnet.
+  const testWallet = await createCashuWallet({ storageDir: dir, seed: SEED });
+  t.is(testWallet.network, 'testnet', 'default (testnut) wallet is on testnet');
+  testWallet.dispose();
+
+  // A known mainnet mint → mainnet.
+  const mainWallet = await createCashuWallet({
+    storageDir: dir + '-m',
+    seed: SEED,
+    mint: 'https://mint.coinos.io'
+  });
+  t.is(mainWallet.network, 'mainnet', 'a known real mint → mainnet');
+
+  // An app-added mint is honoured via knownMints.
+  const appWallet = await createCashuWallet({
+    storageDir: dir + '-a',
+    seed: SEED,
+    mint: 'https://my.app.mint',
+    knownMints: [{ url: 'https://my.app.mint', network: 'mainnet' }]
+  });
+  t.is(
+    appWallet.network,
+    'mainnet',
+    'an app-added mint classifies its network'
+  );
+  appWallet.dispose();
+
+  // networkOf on an undecodable burnRef → 'unknown' (permissive, never throws).
+  t.is(
+    mainWallet.networkOf('not-a-real-cashu-token'),
+    'unknown',
+    'networkOf on garbage → unknown (never throws)'
+  );
+  mainWallet.dispose();
+});
+
 test('the identity key is deterministic from the seed', async (t) => {
   const dir = tempDir();
   t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));

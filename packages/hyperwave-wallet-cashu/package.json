@@ -1,6 +1,6 @@
 {
   "name": "hyperwave-wallet-cashu",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "HyperWave Cashu wallet: a Chaumian-ecash (Cashu, on a Lightning mint) implementation of the hyperwave-engine Wallet interface, runs under Bare.",
   "license": "Apache-2.0",
   "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "test": "bare test.js",
-    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/cashu-wallet.js lib/cashu-burn.js lib/nums.js lib/proof-store.js lib/bare-web-shims.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/cashu-wallet.js lib/cashu-burn.js lib/nums.js lib/proof-store.js lib/mint-networks.js lib/bare-web-shims.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
   },
   "dependencies": {
     "@cashu/cashu-ts": "^4.7.2",
@@ -34,6 +34,6 @@
   },
   "devDependencies": {
     "brittle": "^4.0.2",
-    "hyperwave-engine": "^0.2.0"
+    "hyperwave-engine": "^0.3.0"
   }
 }

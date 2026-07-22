@@ -42,7 +42,7 @@ function fakeWave() {
       calls.push(['dm', input]);
       return true;
     },
-    setWallet: (addr) => calls.push(['setWallet', addr]),
+    setWallet: ({ address }) => calls.push(['setWallet', address]),
     close: async () => calls.push('close')
   };
   return wave;

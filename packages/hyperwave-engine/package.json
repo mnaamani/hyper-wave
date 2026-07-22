@@ -1,6 +1,6 @@
 {
   "name": "hyperwave-engine",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "HyperWave engine: permissionless P2P coordinated-round primitive over Hyperswarm/Hypercore — deterministic ring sweep + per-wave multicore CRDT feed, payment-agnostic, host-agnostic, runs under Bare.",
   "license": "Apache-2.0",
   "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
@@ -48,7 +48,7 @@
   "devDependencies": {
     "@hyperswarm/testnet": "^3.1.4",
     "brittle": "^4.0.2",
-    "hyperwave-wallet-cashu": "^0.2.0",
+    "hyperwave-wallet-cashu": "^0.3.0",
     "hyperwave-wallet-tron": "^0.2.0"
   }
 }

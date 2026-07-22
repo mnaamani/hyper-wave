@@ -281,7 +281,7 @@ function loadOrCreateSwarmSeed(
  * @property {(tag: string) => void} setTag Set the tag (cosmetic, rides the heartbeat).
  * @property {(entry: {payload?: *, waveId?: string}) => void} stageEntry Stage my opaque entry payload to post at my sweep slot (for the given wave, or the newest one I've joined).
  * @property {(input: {waveId: string, note: Object}) => boolean} note Broadcast an opaque note on a wave (a roster-member announcement); floods to its subscribers only if I'm a participant. Returns whether it was broadcast.
- * @property {(address: string|null, verifier?: Function, walletType?: string, fee?: number) => void} setWallet Wire the payment layer (address + on-chain burn verifier + wallet type + my fee — type and fee ride the waves I initiate).
+ * @property {(opts: {address: string|null, verifier?: Function, walletType?: string, fee?: number, classifyNetwork?: (burnRef: string) => string}) => void} setWallet Wire the payment layer (address + on-chain burn verifier + wallet type + my fee + an optional sync burnRef→network classifier that tags waves with their settlement network — type and fee ride the waves I initiate).
  * @property {(waveId: string) => number|null} feeFor The initiator-set participation fee a wave requires (announced), or null if none — the host's fee flow burns exactly this.
  * @property {(proof: Object) => void} announcePaid Initiator: attach the confirmed start proof and announce (routed to the proof's waveId).
  * @property {(fields: Object) => Object} recordBurn Sign a fee-burn attestation (the paid-wave gate ticket) for its waveId.
@@ -376,6 +376,7 @@ function createWave({
   let myFee = null; // my wallet's fee — the fee I SET on the waves I initiate (rides their announces)
   let enforcePaid = false; // gate waves on a proven start burn (enabled once wallet is up)
   let verifyBurnOnChain = null; // on-chain burn check (set once the wallet is up, via setWallet)
+  let classifyBurnNetwork = null; // sync burnRef -> network classifier (set via setWallet); tags waves
   // Live peer bookkeeping (peer-table.js): seats + direct channels.
   const table = new PeerTable({ meId: me.id, staleMs: PEER_STALE_MS });
   const endedWaves = new Set(); // waves that finished — never re-adopt (prevents revival)
@@ -1409,7 +1410,8 @@ function createWave({
       lobbyMs: dur,
       paid: wave.paid, // 'verified' (enforcement off / already paid) | 'pending' (verifying)
       walletType: wave.walletType, // the payment mechanism (null on an unpaid/wallet-less wave)
-      fee: wave.fee // the initiator-set participation fee (null on an unpaid/wallet-less wave)
+      fee: wave.fee, // the initiator-set participation fee (null on an unpaid/wallet-less wave)
+      network: waveNetwork(wave) // settlement network (from the start burn) so the host filters same-network
     });
   }
 
@@ -1629,7 +1631,8 @@ function createWave({
       event: 'wave-active',
       waveId: wave.id,
       joined: wave.joined,
-      count: schedule.length
+      count: schedule.length,
+      network: waveNetwork(wave) // carry network on the racing event too (a mid-race adoption path)
     });
   }
 
@@ -1845,7 +1848,12 @@ function createWave({
     wave.startProof = proof;
     wave.paid = 'verified';
     doAnnounce(wave.id, proof);
-    emitEvent({ event: 'wave-verified', waveId: wave.id, mine: true });
+    emitEvent({
+      event: 'wave-verified',
+      waveId: wave.id,
+      mine: true,
+      network: waveNetwork(wave)
+    });
   }
 
   /**
@@ -1859,6 +1867,28 @@ function createWave({
    * @param {string} byId Hex id of the initiator it must be signed by.
    * @returns {boolean} True if structurally valid, correctly signed, and fresh.
    */
+  /**
+   * The settlement network of a wave, derived from its start burn proof via the wallet's sync
+   * classifier (set through setWallet). Cached on the wave. Null when there's no proof, no wallet
+   * classifier, or a non-classifying wallet — the host treats null as "don't filter" (permissive).
+   * The host uses this to show only same-network waves (and block cross-network tips).
+   * @param {Object} wave The wave state.
+   * @returns {string|null} 'testnet' | 'mainnet' | 'unknown', or null.
+   */
+  function waveNetwork(wave) {
+    if (!wave) {
+      return null;
+    }
+    if (wave.network) {
+      return wave.network;
+    }
+    if (!classifyBurnNetwork || !wave.startProof) {
+      return null;
+    }
+    wave.network = classifyBurnNetwork(wave.startProof.burnRef) || null;
+    return wave.network;
+  }
+
   function validStartProof(proof, waveId, byId) {
     return startProofValid({
       proof,
@@ -1904,7 +1934,11 @@ function createWave({
         }
         if (res && res.ok) {
           wave.paid = 'verified';
-          emitEvent({ event: 'wave-verified', waveId });
+          emitEvent({
+            event: 'wave-verified',
+            waveId,
+            network: waveNetwork(wave)
+          });
           return;
         }
         // Transient (couldn't reach/decode the initiator's mint) → retry with linear backoff,
@@ -2148,12 +2182,16 @@ function createWave({
     note: broadcastNote,
     dm: sendDirect, // unicast a directed note to one peer (private counterpart of note)
     // Wire the payment layer once the wallet is up: my address (for feed tips / attestations), the
-    // on-chain burn verifier (enables the paid-wave anti-spam gate), and my wallet TYPE (rides my
-    // waves' announces so joiners can decide whether they support the payment mechanism).
-    setWallet: (address, verifier, walletType, fee) => {
+    // on-chain burn verifier (enables the paid-wave anti-spam gate), my wallet TYPE (rides my waves'
+    // announces so joiners can decide whether they support the payment mechanism), and an optional
+    // sync `classifyNetwork(burnRef)` that tags each wave with its settlement network (from its
+    // start burn) so the host can show only same-network waves. Called again on a live wallet
+    // switch — clears the previous classifier so a switched-away network is re-derived.
+    setWallet: ({ address, verifier, walletType, fee, classifyNetwork }) => {
       walletAddress = address || null;
       myWalletType = walletType || null;
       myFee = typeof fee === 'number' ? fee : null;
+      classifyBurnNetwork = classifyNetwork || null;
       if (verifier) {
         verifyBurnOnChain = verifier;
         enforcePaid = true;

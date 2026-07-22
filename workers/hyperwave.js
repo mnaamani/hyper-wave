@@ -17,6 +17,14 @@ const { serveEngine } = require('hyperwave-engine/lib/rpc');
 // The engine ships no wallet — the desktop host picks Cashu (a separate package).
 const { createCashuWallet } = require('hyperwave-wallet-cashu');
 
+// Mints this APP adds beyond the package's built-in list — `{ url, label, network }`. This ONE list
+// feeds both (a) the cross-network paid-gate filter (via walletOptions.knownMints → the wallet
+// classifies burns against these, so an app-added mainnet mint is filtered from testnet peers and
+// vice versa) and (b) the renderer's mint picker (the wallet reports its full known list, which the
+// engine relays on the `wallet` message → no duplicated list in the renderer). Empty by default —
+// the package already knows the demo's mints.
+const APP_EXTRA_MINTS = [];
+
 const pipe = new FramedStream(Bare.IPC);
 
 let engine = null;
@@ -40,9 +48,11 @@ const seam = serveEngine({
         swarmSeed: injected.swarmSeed,
         // Cashu (ecash) is the desktop's default payment mechanism. The active mint rides here
         // (persisted by main as the peer's chosen mint; undefined → the wallet's default test
-        // mint). A `set-wallet-options {mint}` command switches it live at runtime.
+        // mint). A `set-wallet-options {mint}` command switches it live at runtime. `knownMints`
+        // gives the cross-network filter this app's extra mints (beyond the package's built-in list).
         walletOptions: {
-          mint: injected.mint || env.HYPERWAVE_MINT || undefined
+          mint: injected.mint || env.HYPERWAVE_MINT || undefined,
+          knownMints: APP_EXTRA_MINTS
         },
         // Browse-then-pick (scaling.md Phase 2): stay merely AWARE of every announced wave
         // (the directory) and hold cores only for waves the user opens/joins → O(subscribed).
