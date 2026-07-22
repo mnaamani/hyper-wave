@@ -6,6 +6,42 @@
 
 **A global wave of moments shared in a peer-to-peer network experience.**
 
+HyperWave is a desktop app for capturing a photo at the very same instant as people all
+around the world. You open it, say where you are, and join a **wave**. When someone starts
+the wave, a glowing orange spark races around a circle of everyone taking part — and as it
+reaches each person, their photo snaps and drops into a shared gallery that everyone sees
+fill up in real time. There's no server and no sign-up: the apps talk directly to each
+other. A tiny built-in bitcoin wallet keeps it fair — you spend a few play-money "sats" to
+join (so bots can't flood it), and you can tip the photos you like.
+
+## Installing with pear
+
+```sh
+# Requires npx 
+npx pear-install pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y
+```
+
+## Install pre-compiled package
+
+Download your platform's package from [releases](https://github.com/mnaamani/hyper-wave/releases) page.
+
+## Running from source
+
+```bash
+# bare commandline
+npm i -g bare-runtime
+
+git clone https://github.com/mnaamani/hyper-wave && cd hyper-wave
+
+# postinstall auto-fixes dep engines ranges for Bare (scripts/fix-bare-engines.js)
+npm install
+
+# run the desktop app
+npm start
+```
+
+## How it works
+
 HyperWave turns a worldwide wave of moments into a global P2P relay. Peers join a
 per-room [Hyperswarm](https://github.com/holepunchto/hyperswarm) topic; each peer's
 public key deterministically maps to a fixed seat on a 256-bit ring — the ring _is_ the
@@ -18,7 +54,7 @@ schedule. As a peer's slot fires it posts a Moment into a per-wave **multicore C
 merges the set locally and converges on a byte-identical gallery), with the newest Moment
 featured in the ring centre. A dead peer's slot simply passes — the wave ends deterministically on every screen at once.
 
-With a built-in **self-custodial [Cashu](https://cashu.space) wallet** — Chaumian
+Money runs on a built-in **self-custodial [Cashu](https://cashu.space) wallet** — Chaumian
 ecash on a Lightning-connected mint (the demo default is the free, auto-paying `testnut` test
 mint; unit: **sat**).
 
@@ -39,23 +75,15 @@ mint; unit: **sat**).
 | [`mobile/`](mobile/)                                                         | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                                                                                                                                |
 | Docs                                                                         | Engine: [`protocol.md`](packages/hyperwave-engine/docs/protocol.md) (on-wire spec) · [`usage.md`](packages/hyperwave-engine/docs/usage.md) (API). Apps: [`idea.md`](docs/idea.md) (the global wave of moments, plain language) · [`hosting.md`](docs/hosting.md) (app architecture) · [`cashu.md`](docs/cashu.md) (the payment layer). |
 
-## Quickstart
 
-```bash
-# bare commandline
-npm i -g bare-runtime
+## Running tests
 
-# postinstall auto-fixes dep engines ranges for Bare (scripts/fix-bare-engines.js)
-npm install
-
+```sh
 # optional sanity: all suites should pass
 npm test
 
 # optional end to end integration test
 npm run test:e2e:local
-
-# run the desktop app
-npm start
 ```
 
 ## Demo
