@@ -8,16 +8,15 @@
 
 HyperWave is a desktop app for capturing a photo at the very same instant as people all
 around the world. You open it, say where you are, and join a **wave**. When someone starts
-the wave, a glowing orange spark races around a circle of everyone taking part — and as it
+the wave, a glowing orange spark races around a ring of everyone taking part — and as it
 reaches each person, their photo snaps and drops into a shared gallery that everyone sees
 fill up in real time. There's no server and no sign-up: the apps talk directly to each
-other. A tiny built-in bitcoin wallet keeps it fair — you spend a few play-money "sats" to
+other. A built-in **bitcoin cashu** wallet keeps it fair — you spend a few "sats" to
 join (so bots can't flood it), and you can tip the photos you like.
 
-## Installing with pear
+## Pear-install
 
 ```sh
-# Requires npx 
 npx pear-install pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y
 ```
 
@@ -30,6 +29,9 @@ Download your platform's package from [releases](https://github.com/mnaamani/hyp
 ```bash
 # bare commandline
 npm i -g bare-runtime
+
+# pear runtime
+npm i -g pear-runtime
 
 git clone https://github.com/mnaamani/hyper-wave && cd hyper-wave
 
