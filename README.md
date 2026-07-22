@@ -4,7 +4,7 @@
 
 # HyperWave
 
-**A global wave of moments, rebuilt as a peer-to-peer network experience.**
+**A global wave of moments shared in a peer-to-peer network experience.**
 
 HyperWave turns a worldwide wave of moments into a global P2P relay. Peers join a
 per-room [Hyperswarm](https://github.com/holepunchto/hyperswarm) topic; each peer's
@@ -12,33 +12,22 @@ public key deterministically maps to a fixed seat on a 256-bit ring — the ring
 participants around the world.
 
 Anyone can **start a wave**: the initiator floods a start time and lap duration, and every
-peer derives the **same angle-ordered schedule** locally and self-triggers its own moment —
-no token, no per-hop messages. The ⚡ orange spark visible on every screen is rendered from that shared
+peer derives the **same angle-ordered schedule** locally and self-triggers its own moment. The ⚡ orange spark visible on every screen is rendered from that shared
 schedule. As a peer's slot fires it posts a Moment into a per-wave **multicore CRDT** gallery
 (each participant owns one [Hypercore](https://github.com/holepunchto/hypercore); every peer
 merges the set locally and converges on a byte-identical gallery), with the newest Moment
-featured in the ring centre. A dead peer's slot simply passes — the wave ends deterministically
-on every screen at once.
+featured in the ring centre. A dead peer's slot simply passes — the wave ends deterministically on every screen at once.
 
-Money runs on a built-in **self-custodial [Cashu](https://cashu.space) wallet** — Chaumian
+With a built-in **self-custodial [Cashu](https://cashu.space) wallet** — Chaumian
 ecash on a Lightning-connected mint (the demo default is the free, auto-paying `testnut` test
-mint; unit: **sat**). No accounts, no smart contracts, testnet only.
+mint; unit: **sat**).
 
 - **Participation fees are burned** — the initiator and every joiner lock a tiny ecash fee
-  (2 sat) to an unspendable **NUMS pubkey** (a secp256k1 point with no known private key),
+  (2 sats) to an unspendable **NUMS pubkey** (a secp256k1 point with no known private key),
   tagged with the wave id. Skin in the game with no beneficiary: it's the anti-spam gate
   (peers verify the start burn before joining).
-- **Gallery tips** — Tip a featured Moment a few sats (5 sat) in ecash straight to its owner.
-  The bearer token is delivered privately (off the flood) and the recipient redeems it.
-
-The payment layer is **pluggable** — the engine ships no wallet and stays theme- and
-money-agnostic; the desktop injects Cashu, while a Tron wallet (native TRX + TRC-20 USDT,
-via [WDK](https://docs.wdk.tether.io/)) is an alternate wallet package a host can plug in
-instead.
-
-Every peer runs the same code — the protocol is fully role-free (the initiator is an ordinary participant that just calls "start"). Every peer subscribed to a wave holds every participant's gallery core for it, so there is no indexer, no archivist, and no single point of failure; galleries are ephemeral per run. Waves run concurrently, and a peer holds cores only for the waves it subscribed to.
-
-A submission for the **Tether Developers Cup** (DoraHacks). The cup's brief — a _global tournament moment_ — is realized here as a worldwide **wave of moments**: peers around the world capture a moment together as a bitcoin-orange wave sweeps the ring.
+- **Gallery tips** — Tip a featured Moment a few sats (5 sats) in ecash straight to its owner.
+  The bearer token is delivered directly to the recipient who redeems it.
 
 ## Repo layout
 
