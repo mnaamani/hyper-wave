@@ -35,7 +35,7 @@ A submission for the **Tether Developers Cup** (DoraHacks). The cup's brief — 
 - Peers join a room-specific Hyperswarm topic. Each peer's Noise public key deterministically maps to a fixed **position on the DHT ring** (angle derived from the key's top bytes) — the ring _is_ the map of participants around the world. No registration, no server.
 - A **deterministic sweep** rolls the wave around that ring: the initiator floods a start time, and every joined peer fires at its own angle-ordered moment — like a ripple around a circle, choreography rather than a passed object. The wave takes a fixed few seconds no matter how many peers; a dead peer's moment simply passes.
 - Moments are captured **during the lobby** and posted, when each peer's sweep slot fires, to a per-wave **multicore CRDT** gallery — one Hypercore per participant, merged locally into one ordered view (no indexer, no admission; writes gated on a signed join attestation + burn attestation).
-- **WDK** powers all money: self-custodial wallets, burned participation fees, and gallery tipping.
+- **The money is bitcoin:** the desktop's self-custodial wallet is **Cashu** — Chaumian ecash on a Bitcoin **Lightning** mint (unit `sat`, the ⚡ motif) — powering burned participation fees and gallery tips. A Tron wallet (native TRX / USDT via **WDK**) is a pluggable alternative.
 
 ## Core Design Rules (baked-in decisions — do not re-litigate)
 
@@ -52,7 +52,7 @@ A submission for the **Tether Developers Cup** (DoraHacks). The cup's brief — 
 
 Two hosts over one engine (`packages/hyperwave-engine`):
 
-- **Desktop (primary): Electron forked from [`holepunchto/hello-pear-electron`](https://github.com/holepunchto/hello-pear-electron)** — run N peers on one laptop via `--storage <dir>`, reliable webcam via `getUserMedia`. Three-process split (respect it): **renderer** (Chromium, UI only, never touches the swarm), **Electron main** (window/lifecycle/IPC relay), **Bare worker** (all Holepunch P2P + WDK; a thin host over the engine's `createEngine()`).
+- **Desktop (primary): Electron forked from [`holepunchto/hello-pear-electron`](https://github.com/holepunchto/hello-pear-electron)** — run N peers on one laptop via `--storage <dir>`, reliable webcam via `getUserMedia`. Three-process split (respect it): **renderer** (Chromium, UI only, never touches the swarm), **Electron main** (window/lifecycle/IPC relay), **Bare worker** (all Holepunch P2P + the payment wallet — Cashu by default; a thin host over the engine's `createEngine()`).
 - **Mobile: Expo + react-native-bare-kit** (`mobile/`) — same engine as a Bare worklet, same JSON IPC surface. Runs on the iOS simulator; rich UI/camera still open.
 - **Spectator is just a peer instance.** The webcam moment is the proof-of-humanity (no sensor layers).
 
@@ -61,7 +61,7 @@ Two hosts over one engine (`packages/hyperwave-engine`):
 - **App shell:** Electron via hello-pear-electron (Electron Forge; `pear-runtime` for OTA updates).
 - **Networking:** Hyperswarm (DHT discovery, NAT hole-punching, Noise duplex streams) — in the Bare worker.
 - **Shared state:** a multicore CRDT moment gallery — one Hypercore per participant (merged locally, no Autobase/indexer; images inline as dataURLs — no Hyperblobs) over Corestore, in the worker.
-- **Payments:** the engine talks to payments through the abstract **`Wallet` base class** (`wallet.js`) — the concrete interface (`type`/`fee`/`address`/`balances`/`send`/`burn`/`verifyBurnTx`/`transactions`/`dispose`); an app plugs in its own by injecting a factory returning a `Wallet` subclass (`createEngine({ deps: { createPayments } })`). The default **`TronWallet`** (`tron-wallet.js`) = WDK, self-custodial, **native TRX on Tron Nile**, plain transfers (no contracts); runs **in the Bare worker** (WDK supports Bare). Packages: `@tetherto/wdk`, `@tetherto/wdk-wallet-tron`. WDK is ESM-only → `tron-wallet.js` bridges via dynamic `import()`. The wallet-agnostic fee flows live in `payments.js`. Each wallet declares a `type` (`'tron-nile'`) that rides paid waves' announces so a joiner only joins a wave whose payment mechanism it supports.
+- **Payments:** the engine talks to payments through the abstract **`Wallet` base class** (`hyperwave-wallet/lib/wallet.js`) — the concrete interface (`type`/`fee`/`address`/`balances`/`send`/`burn`/`verifyBurnTx`/`transactions`/`dispose`); an app plugs in its own by injecting a factory returning a `Wallet` subclass (`createEngine({ deps: { createPayments } })`). The **desktop default** is **`CashuWallet`** (`hyperwave-wallet-cashu`, cashu-ts) — self-custodial **Chaumian ecash on a Bitcoin Lightning mint** (unit `sat`; the free auto-paying `testnut` mint by default); it runs **in the Bare worker**. The pluggable alternative is **`TronWallet`** (`hyperwave-wallet-tron`) = WDK, native TRX on Tron Nile, plain transfers (no contracts); WDK is ESM-only → it bridges via dynamic `import()`. The wallet-agnostic fee flows live in `payments.js`. Each wallet declares a `type` (`'cashu'` / `'tron-nile'`) that rides paid waves' announces so a joiner only joins a wave whose payment mechanism it supports.
 
 ## Commands
 
