@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.mnaamani.HyperWave</id>
+
+  <name>HyperWave</name>
+  <summary>A worldwide peer-to-peer wave of moments</summary>
+
+  <metadata_license>Apache-2.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+
+  <developer id="io.github.mnaamani">
+    <name>HyperWave</name>
+  </developer>
+
+  <content_rating type="oars-1.1"/>
+
+  <url type="homepage">https://github.com/mnaamani/hyper-wave</url>
+  <url type="help">https://github.com/mnaamani/hyper-wave/issues/new/choose</url>
+  <url type="bugtracker">https://github.com/mnaamani/hyper-wave/issues</url>
+
+  <releases>
+    <release date="2026-07-22" version="0.1.0"/>
+  </releases>
+
+  <recommends>
+    <display_length compare="ge">600</display_length>
+  </recommends>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <description>
+    <p>HyperWave is a permissionless peer-to-peer relay where people around
+    the world capture a moment together as a bitcoin-orange wave sweeps a
+    ring of participants. No registration and no server: each peer joins a
+    room-specific swarm and takes a fixed position on a shared ring.</p>
+    <ul>
+      <li>A deterministic wave sweeps the ring so everyone captures together</li>
+      <li>Moments merge into a per-wave gallery with no indexer or admission</li>
+      <li>Self-custodial wallets power burned participation fees and tips</li>
+      <li>Peer-to-peer over-the-air updates with update-restart</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.mnaamani.HyperWave.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/mnaamani/hyper-wave/refs/heads/main/assets/flatpak-screenshot.png</image>
+    </screenshot>
+  </screenshots>
+</component>

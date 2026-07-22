@@ -13,14 +13,14 @@ grade: stable
 confinement: strict
 
 parts:
-  hellopear:
+  hyperwave:
     plugin: dump
     source: __SOURCE__
     stage-packages:
       - libatomic1
 
 apps:
-  hellopear:
+  hyperwave:
     command: __BIN__ --no-sandbox
     desktop: __DESKTOP__
     extensions: [gnome]

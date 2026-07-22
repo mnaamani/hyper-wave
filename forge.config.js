@@ -130,10 +130,11 @@ const releaseMakers = [
     name: 'pear-electron-forge-maker-flatpak',
     platforms: ['linux'],
     config: {
-      appId: 'com.pears.HelloPear',
+      appId: 'io.github.mnaamani.HyperWave',
       icon: `${packagerConfig.icon}.png`,
-      comment: 'Integrating Pear into a hello world electron desktop app',
-      categories: ['Development']
+      metainfo: 'flatpak/io.github.mnaamani.HyperWave.metainfo.xml',
+      comment: 'A worldwide peer-to-peer wave of moments',
+      categories: ['Network']
     }
   },
   {
@@ -141,13 +142,16 @@ const releaseMakers = [
     platforms: ['linux'],
     config: {
       snapcraftYamlPath: 'build/snapcraft.yaml',
-      summary: 'Integrating Pear into a hello world electron desktop app',
+      summary: 'A worldwide peer-to-peer wave of moments',
       description:
-        'End-to-end boilerplate for embedding pear-runtime into Electron apps and deploying peer-to-peer application updates.',
-      contact: 'hello@holepunchto.to',
+        'HyperWave is a permissionless P2P relay where peers around the ' +
+        'world capture a moment together as a wave sweeps a ring of ' +
+        'participants. Self-custodial wallets power burned participation ' +
+        'fees and gallery tips.',
+      contact: 'https://github.com/mnaamani/hyper-wave/issues',
       license: 'Apache-2.0',
-      issues: 'https://github.com/holepunchto/hello-pear-electron/issues',
-      website: 'https://github.com/holepunchto/hello-pear-electron',
+      issues: 'https://github.com/mnaamani/hyper-wave/issues',
+      website: 'https://github.com/mnaamani/hyper-wave',
       icon: `${packagerConfig.icon}.png`
     }
   }
