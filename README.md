@@ -77,7 +77,6 @@ mint; unit: **sat**).
 | [`mobile/`](mobile/)                                                         | Expo + react-native-bare-kit host running the same engine as a worklet.                                                                                                                                                                                                                                                                |
 | Docs                                                                         | Engine: [`protocol.md`](packages/hyperwave-engine/docs/protocol.md) (on-wire spec) · [`usage.md`](packages/hyperwave-engine/docs/usage.md) (API). Apps: [`idea.md`](docs/idea.md) (the global wave of moments, plain language) · [`hosting.md`](docs/hosting.md) (app architecture) · [`cashu.md`](docs/cashu.md) (the payment layer). |
 
-
 ## Running tests
 
 ```sh
