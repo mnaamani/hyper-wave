@@ -7,12 +7,22 @@ angle-ordered slots from a flooded start time + lap duration and self-triggers i
 moment (no token, no coordinator). Each participant contributes one **entry** — an opaque
 `payload` the host owns — to a per-wave **multicore CRDT feed** (one Hypercore per
 participant, merged locally, byte-identical on every peer), optionally gated by
-proof-of-burn, and carries a cosmetic **tag**. Payments (fees, tips) run on self-custodial
-WDK wallets. Host-agnostic; runs under [Bare](https://github.com/holepunchto/bare).
+proof-of-burn, and carries a cosmetic **tag**. Host-agnostic; runs under
+[Bare](https://github.com/holepunchto/bare).
+
+**Payments are pluggable** — the engine ships no wallet. It talks to money through the
+abstract `Wallet` interface ([`hyperwave-wallet`](https://www.npmjs.com/package/hyperwave-wallet))
+and only owns the wallet-agnostic fee flows (`payments.js`). A host injects a concrete wallet
+factory via `createEngine({ deps: { createPayments } })` — e.g.
+[`hyperwave-wallet-cashu`](https://www.npmjs.com/package/hyperwave-wallet-cashu) (Chaumian
+ecash on a Lightning mint) or
+[`hyperwave-wallet-tron`](https://www.npmjs.com/package/hyperwave-wallet-tron) (WDK, native
+TRX / USDT). With no wallet injected the engine runs unpaid (fees/tips are skipped).
 
 The engine is **theme-agnostic** — it never interprets the entry payload. The "wave of
-moments" (`apps/`) is one host: it fills each entry with a moment (a webcam photo) and uses
-the tag as a country. Any turn-taking / coordinated-snapshot app can host it the same way.
+moments" desktop/mobile app is one host: it fills each entry with a moment (a webcam photo)
+and uses the tag as a country. Any turn-taking / coordinated-snapshot app can host it the
+same way.
 
 ```js
 const { createEngine } = require('hyperwave-engine');
