@@ -9,6 +9,20 @@ Publishing is **two things**, both keyed by the same `pear://` link in `package.
 - **OTA update** — how an _already-installed_ app updates itself, served peer-to-peer by
   `pear-runtime` from a Hyperdrive at the upgrade link.
 
+## Tag convention — the desktop app and the packages release separately
+
+This repo has **two independent release tracks**, so every tag is namespaced by the package it
+releases. There is no bare `v*` tag.
+
+| Track                    | Tag                                                        | What it does                                                                                 |
+| ------------------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Desktop app (repo root)  | `hyperwave-desktop@<version>`                              | Triggers `desktop-release.yml` — installers + OTA payloads (this document)                   |
+| Libraries (`packages/*`) | `<package-name>@<version>` (e.g. `hyperwave-engine@0.3.1`) | Currently **manual**: `npm version` + `npm publish -w <pkg>` + tag by hand. No workflow yet. |
+
+The versions are **free-running, not coupled**: an engine patch release does not imply an installer
+rebuild, and a desktop release does not bump the packages. (`v0.1.0`, the one legacy bare tag,
+predates this convention.)
+
 ## Architecture — build in CI, seed on a persistent host
 
 A Hyperdrive is **single-writer**, and CI storage is ephemeral (a runner's `/tmp` is destroyed when
@@ -16,7 +30,7 @@ the job ends, and `pear-ci` doesn't wait for peers to replicate). So seeding **c
 CI durably. Split the two concerns:
 
 ```
-GitHub Actions (release.yml)                 Always-on host (the SOLE writer/seeder)
+GitHub Actions (desktop-release.yml)         Always-on host (the SOLE writer/seeder)
   ├─ make-pear-app per platform  ──────┐       ┌─ gh run download (ota-* artifacts)
   │   → installers (artifacts)         │       ├─ pear stage <link>   (append the new version)
   └─ ota-payload per platform  ────────┴──────►└─ pear seed  <link>   (serve forever, systemd)
@@ -66,8 +80,12 @@ hole-punches, but a reachable host is more reliable):
 2. Tag + push → CI builds installers on every platform and uploads the `ota-*` payloads:
 
    ```sh
-   git tag v0.1.0 && git push origin v0.1.0
+   git tag hyperwave-desktop@0.2.0 && git push origin hyperwave-desktop@0.2.0
    ```
+
+   The tag version should match the `package.json#version` you just bumped — the workflow reads the
+   built version from `package.json`, not from the tag, so a mismatch silently ships the wrong
+   number.
 
 3. On the seeder host, publish the OTA update from that run (as the same user as the service, so it
    shares the Pear store):
@@ -85,7 +103,7 @@ hole-punches, but a reachable host is more reliable):
 Signing (unsigned is fine for **alpha** — Gatekeeper/SmartScreen warnings; Linux unaffected, and an
 unsigned Windows `.msix` needs dev-mode/sideload to install). mac/win build unsigned via `forge`
 directly, because `make-pear-app` always runs its cert-import step and can't build unsigned. **To
-sign:** add the secrets listed atop `release.yml` **and** switch the mac/win jobs back to
+sign:** add the secrets listed atop `desktop-release.yml` **and** switch the mac/win jobs back to
 `make-pear-app`.
 
 ---
