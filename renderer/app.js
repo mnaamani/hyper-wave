@@ -205,10 +205,15 @@ function renderActiveWave() {
       lobby.setJoinable(wave.paid === 'verified');
     }
   } else {
-    // racing / ended — show its (cached) gallery
+    // racing / ended — show its (cached) gallery. setActive FIRST: the close() above left the
+    // gallery closed, and handle() ignores feed repaints while closed (it would otherwise paint
+    // nothing until the engine's next periodic re-emit).
     const items = feedByWave.get(wave.waveId) || [];
-    gallery.handle(items.map(asMoment));
     gallery.setActive(wave.phase === 'racing');
+    gallery.handle(items.map(asMoment));
+    if (wave.phase !== 'racing') {
+      gallery.restoreReplay(); // ended: bring the spark back, parked + draggable
+    }
     hud.showStart(wave.phase !== 'racing');
   }
   updateHud();

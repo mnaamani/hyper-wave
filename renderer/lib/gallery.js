@@ -220,6 +220,15 @@ export function startReplay() {
   tryStartReplay();
 }
 
+// Restore the spark for a wave whose replay ALREADY ran — switching back to an ended wave from
+// the directory. Re-playing the 8s lap on every switch would fight the user, so park the spark at
+// the lap's end instead: the same state the wave was left in, and immediately scrubbable. Deferred
+// like startReplay, since the cached feed may not have landed yet.
+export function restoreReplay() {
+  pendingReplay = 'frozen';
+  tryStartReplay();
+}
+
 function tryStartReplay() {
   if (!pendingReplay || !items.length) {
     return; // waiting for the first moment to arrive
@@ -227,8 +236,12 @@ function tryStartReplay() {
   if (ring.sweepOrigin() !== null) {
     return; // already replaying
   }
+  const frozen = pendingReplay === 'frozen';
   pendingReplay = false;
   ring.startSweep(ring.angleOfId(items[0].peerId));
+  if (frozen) {
+    ring.scrubTo(1); // skip the auto-play; hand the ring straight to the scrubber
+  }
 }
 
 // Cancel a not-yet-started replay (a new wave formed before moments for the old one arrived).
