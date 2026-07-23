@@ -5,7 +5,7 @@ name: Packaging test
 # patch, NSFW/QR bundle rebuilds) — which is where packaging regressions hide. HYPERWAVE_BUILD_TEST
 # makes forge build a single unsigned zip on every platform (see forge.config.js), so this needs no
 # signing certs and none of the Linux installer toolchains. For real signed installers, see
-# release.yml.
+# desktop-release.yml.
 on:
   pull_request:
   workflow_dispatch:

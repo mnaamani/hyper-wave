@@ -1,4 +1,4 @@
-name: Build Release
+name: Desktop Release
 
 # Build the distributable INSTALLERS on native runners (installer makers are OS-bound):
 #   Linux (AppImage/Snap/Flatpak, x64 + arm64) via holepunch's make-pear-app;
@@ -11,7 +11,12 @@ name: Build Release
 #
 # SEEDING IS NOT DONE HERE. A Hyperdrive is single-writer and CI storage is ephemeral, so the OTA
 # update is staged + seeded by an ALWAYS-ON HOST that downloads these artifacts (`scripts/seed.mjs`)
-# — see RELEASE.md. Runs on a version tag push (v*) or manual dispatch.
+# — see RELEASE.md.
+#
+# TRIGGER: a `hyperwave-desktop@<version>` tag push, or manual dispatch. The tag is namespaced to
+# the root app package so it can't be confused with a library release: `packages/*` are versioned
+# and published to npm MANUALLY and would tag as `<package-name>@<version>`. The desktop app's
+# version is free-running — an engine bump does not imply an installer/OTA rebuild.
 #
 # Signing secrets (only used once mac/win are switched back to make-pear-app):
 #   macOS:   CERTIFICATE_P12, CERTIFICATE_PASSWORD, MAC_CODESIGN_IDENTITY, APPLE_ID,
@@ -20,7 +25,7 @@ name: Build Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'hyperwave-desktop@*'
   workflow_dispatch:
     inputs:
       upgrade-key:
