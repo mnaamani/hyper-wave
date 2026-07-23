@@ -5,163 +5,12 @@ engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`
 
 ## Done
 
-### Core wave engine + UI
-
-- [x] Code structure: engine split into `ring.js` / `token.js` / `gallery.js` (+ later
-      `chord.js` / `flood.js` / `wallet.js`) with the `wave.js` orchestrator
-- [x] Derive ring angle from identity (never trust gossiped angle)
-- [x] Token race with Ed25519 receipts + constant-size blake2b chain accumulator
-- [x] Wave lifecycle: idle → lobby → racing → idle; single active wave; lower-`waveId`
-      tie-break; `wave-end` broadcast; timeout fallbacks; `busy` guard; join-time `wave-sync`
-      **Superseded (scaling.md Phases 1–3, 2026-07-16):** the FSM is now **multiplexed**
-      (`Map<waveId, WaveState>` — concurrent waves). Single-active-wave, the lower-`waveId`
-      tie-break, the `busy` guard, and `wave-end` are all **gone** (`shouldAdopt` → `canAdopt`;
-      the wave ends deterministically at `t0+lapMs+grace`, no completion message). `wave-sync`
-      survives but now fires on **mutual subscription**, not plain connect.
-- [x] Resilience / healing: forward to the next _reachable_ peer; `wave-pos` = ACK; skip a
-      silent successor and re-forward; `seen` per wave + `endedWaves` anti-revival
-- [x] Gallery: per-wave Autobase (namespaced by `waveId`), writer admission gated on a valid
-      hop receipt, `apply()` verifies every entry signature deterministically
-- [x] Renderer: ring canvas, an orange spark ⚡ rolling on every screen, country flags + intro picker,
-      centre-moment gallery, collection progress
-- [x] Fast dwell (250ms) + **lobby moment capture**: moments are framed/captured during the
-      lobby (camera + countdown), staged to the worker, and posted when the orange spark reaches the
-      peer — the token never waits on a human; gallery fills in ring order
-- [x] **Persistent peer identity across runs.** The swarm keypair is derived from a seed
-      persisted at `<storage>/swarm.seed` (`loadOrCreateSwarmSeed` in `wave.js`, passed as
-      Hyperswarm's `keyPair`) — the peer id, ring **seat**, and receipt/burn signing key are
-      now stable across restarts (before, `new Hyperswarm()` minted a fresh Noise keypair each
-      run). Independent of `wallet.seed` for **key isolation** (a leaked wallet seed shouldn't
-      also compromise the ring identity) — _not_ unlinkability: a fee burn already ties the wallet
-      address to the `peerId` on-chain via its `hyperwave:<waveId>:<peerId>` memo. A host may
-      inject a hex seed (mobile secure storage) — used verbatim, never written. A missing/corrupt
-      file regenerates rather than bricking startup. Suite: `swarm.seed.test.js`.
-
-### Scalable topology (Chord over Hyperswarm — since simplified away entirely)
-
-- [x] Phase 1: ring membership seeded from DHT discovery (`swarm.peers`), liveness-gated
-      (no phantom seats from stale announces)
-- [x] Phase 2: `joinPeer` pinning of successor-list (k=3) + predecessor — ring edges physical
-- [x] Phase 3: finger table + `findSuccessor` + `fixFingers` → O(log N) connections
-- [x] Phase 4: stabilize + churn handling (re-pin on close, churn cooldown) + slim
-      gossip (O(N) `peers` snapshot → a single neighbour-scoped `pointers` heartbeat)
-- [x] Control-plane flooding: `wave-announce/join/start/end` relayed with `mid` dedup
-      (`flood.js` + partial-topology reach harness `flood.test.js`)
-- [x] Distributed `findSuccessor` routing (`find-succ` RPC) — correct under partial
-      membership knowledge (64-node sim ≤5 hops); join-time placement + periodic repair
-- [x] Gallery over a partial mesh: transitive replication proven (line topology, no swarm);
-      the wave **initiator** retains its own wave's gallery (per-wave persistence — no peer
-      roles, no dedicated archivist hub)
-- [x] **Batch gallery admission at lobby close** (sweep Phase 1): `wave-join` carries the
-      joiner's writer key + signed **join attestation** (`attest.js signJoin`) + burn; the
-      initiator validates and batch-appends every `add-writer` op (`admitRoster`) before
-      `wave-start` — admission rides the bootstrap core sync everyone needs anyway. The
-      reactive `add-writer` flood + retry storm + `apply()`'s receipt gate are deleted
-      (the write-gate is now the join attestation). Killed the two measured 128-peer scale
-      failures: the O(N) mid-race admission funnel and the fresh-`mid` re-flood storm.
-- [x] **The deterministic sweep replaces the token walk** (sweep Phases 2+3):
-      `wave-start` carries `t0` + `lapMs`; every roster peer derives the identical
-      angle-ordered schedule (`sweep.js`) and self-triggers at its own slot; the orange spark is
-      rendered from the schedule (no `wave-pos`); the wave ends deterministically at
-      `t0 + lapMs + grace` on every peer (no `wave-end`). Deleted: token race, healing,
-      receipts + chain accumulator (`token.js` → `attest.js`), `pickReachable`. Wire
-      protocol 10 → 7 message kinds; wall-clock is a chosen constant regardless of N; a
-      live roster member can no longer be silently skipped.
-- [x] **128-peer scale campaign: seven bugs found+fixed by instrumented runs (2026-07-13).**
-      (1) a receiver's lobby-timeout blacklisted the wave, so a late `wave-start` could
-      never be adopted — lobby-timeout is now revivable; (2) the initiator ran the batch
-      admission BETWEEN lobby close and the start flood, delaying the start past every
-      receiver's fallback — the start now floods first; (3) admission was O(roster)
-      awaited appends (measured 277s at 127 writers, ~2.2s each, starving every poster's
-      writable-wait) — now ONE batched array append (0.6s); (4) the start trigger gated
-      on live connections, whose equilibrium (~46 with the pins ÷4 dial squeeze) sat at
-      the old 48 threshold — hosts now gate on the DHT-discovered count (new `discovered`
-      field in onState); (5) re-adopting a wave after a revivable timeout lost the
-      peer's joined flag + joinSig (its slot never armed) — join state is now memoized
-      and restored; (6) a credential-less `wave-join` took a roster seat (and sweep
-      slot) it could never fill, making full convergence unreachable by construction —
-      joins now only count WITH a credential, and `credentials()` gets the rest of the
-      lobby to resolve; (7) joins arriving after lobby close still grew the roster past
-      the frozen schedule — joins now count only during the lobby. Plus e2e calibration:
-      scale START_TARGET 48→32 (local discovery plateaus ~40-60/node), convergence
-      budgets scaled ×2-3 for the 16-peers-per-core environment.
-- [x] **Random-K pins replace the structured ring; `chord.js` deleted.** With the sweep,
-      nothing consumes successor/predecessor — pinning's only job is a flood-graph floor
-      the transport can't bias (pins dial with priority + bypass `maxPeers`). Harness at
-      N=128 (real Flood, 200 graphs/config, ±10% kills): random K=7 = 100% reach in every
-      trial and better diameter than the ring (4 rounds vs 4.9–6); cliff at K≤3. Now:
-      `PIN_BUDGET = 7` sticky random pins (`pins.js` `topUpPins` — keep live pins, top up
-      on churn, never reshuffle), `chord.js` + its suite deleted (~300 lines). Downside
-      (accepted): connectivity is probabilistic, not proven; escape hatch = raise
-      `PIN_BUDGET` or resurrect the ring rule from git history. **Superseded (2026-07-14):
-      the no-pinning endgame was taken — pinning was removed entirely (see below).**
-- [x] **Topology diet for the sweep** (sweep Phase 4): deleted `chord-routing.js` (the
-      distributed `find-succ` RPC/placement/repair — successor _precision_ is unneeded;
-      only flood connectivity matters); `pinTargets` now pins successor-list (k=3) +
-      predecessor + the **capped far fingers** (`FAR_FINGERS`=3 longest edges) → constant
-      pin budget ≈7; flood dedup evicts **oldest-first** instead of wholesale-clearing.
-- [x] **Peer pinning removed entirely (2026-07-14).** The final simplification step:
-      `pins.js` + `topUpPins` + `maintainNeighbours` + the pin/churn-cooldown bookkeeping
-      in `PeerTable` + the `pinBudget` option / `HYPERWAVE_PIN_BUDGET` knob are all
-      deleted. The topology is now just Hyperswarm's incidental topic mesh (degree ≈
-      `maxPeers`); the flood rides it unaided. Justified by the pins-off 128-peer run
-      (full lobby gathered over the local DHT with pinning disabled) and the 8-peer e2e
-      (convergence + mid-race kills) passing without pins. Accepted trade-off: flood
-      connectivity is entirely the transport's mesh quality — if a real deployment shows
-      ragged flood reach, resurrect `pins.js` + its wiring from git history.
-
-### Payment layer (WDK, Tron Nile testnet, native TRX) — burned fees + tips, no rewards
-
-- [x] Self-custodial wallet per instance (`wallet.js`; seed persists at `<storage>/wallet.seed`);
-      💰 chip in the renderer. WDK is ESM-only → CJS worker bridges via dynamic `import()`
-- [x] Gallery tipping: `wave-selfie` carries the poster's address; 💵 Tip → real transfer.
-      **The only way to make money** — there are no sponsor rewards.
-- [x] Participation fees **burned** to Tron's black hole (start + join, 1 TRX each) —
-      skin in the game with no beneficiary; on-chain memo `hyperwave:<waveId>:<peerId>`
-- [x] Paid-wave anti-spam gate: no announce until the start burn is on-chain (carried as
-      the signed `paid` proof); peers ignore unproven announces and verify before joining
-- [x] **Optimistic gallery admission** (scales without a Tron node/indexer): `add-writer`
-      carries the join burn attestation; the admitter checks only the _signature_
-      (`burnAuthorizes`) — **no on-chain call on the write path** (that was O(N) reads on the
-      admitter). The burn is verified where it pays off: by tippers via `burnTx`. Spam bounded by one-entry-per-peer + a byte-size cap
-      (`MAX_IMAGE_BYTES`/`MAX_CAPTION_BYTES`). Soft, publicly-detectable gate; verified live.
-- [x] **Signed gallery key**: originator signs `(waveId, autobaseKey)` (`signGalleryKey`);
-      peers verify before opening — a relay can't swap the unsigned key to a rogue Autobase
-- [x] **Tip address bound to the burn**: `apply()` keeps a moment's tip `address` only if a
-      signed burn names that wallet — a tip always reaches the wallet that paid in (§8.2)
-- [x] **One gallery entry per peer at write** (`apply()` dedup) — a paid seat can't bloat the
-      log with unbounded self-signed entries (was display-only dedup before)
-- [x] **Sponsor rewards removed** (simplification): dropped the interlocked payout, the
-      `wave-proof` receipt collection, the golden-rule chain-walk (`longestValidChain` /
-      `payableFromChain`), and the gallery `burn-proof` op. Kills the sybil-payout risk class
-      outright (nothing to steal).
-- [x] **Peer roles removed** (simplification): no more `validator`/`seed`/`sponsor` role, no
-      `role` option, no `HYPERWAVE_ROLE`, no `role` in the `pointers` heartbeat, no
-      seed-pinning. Every peer is equal. The only asymmetry is **per-wave and belongs to the
-      initiator**: it retains its own wave's gallery (archivist for that wave only). Accepted:
-      a gallery is lost if its initiator goes offline; nothing persists across runs.
-- [x] Bare/pear-runtime compat: `postinstall` normalizes dep `engines` ranges Bare's
-      semver can't parse (`scripts/fix-bare-engines.js`)
-- [x] **End-to-end integration tests** (`app/e2e/`): a Node+brittle harness spawns a local DHT + N real `wave.run.js` peers and drives full waves, asserting on the protocol's structured
-      event stream (poll-until-event, no sleeps; process-group teardown). Local suite (no wallet
-      / no on-chain, deterministic): 8-peer gallery convergence, self-healing under 2 mid-race
-      kills. `npm run test:e2e:local`; runs in GitHub Actions
-      (`.github/workflows/ci.yml`) alongside unit tests. **On-chain tier** (`wave.onchain.e2e.js`,
-      `npm run test:e2e:onchain`): enforced wave on Nile — paid gate → real start/join burns →
-      on-chain start verification → optimistic admission. Gated on funded-wallet secrets, runs manual/nightly
-      (`.github/workflows/e2e-onchain.yml`). Verified live (8/8 asserts, ~38s).
-
-### Adversarial hardening (against a modified client) — `packages/hyperwave-engine/docs/protocol.md` §11.2
-
-- [x] Identity binding: a self-describing gossip field (`pointers.id`, `wave-pos.holder`,
-      `token.senderPeerId`, `add-writer.peerId`) must match the authenticated connection id
-      — blocks ring pollution, heal suppression, and admission under a key you don't hold
-- [x] Authenticated `wave-end`: completion signed by the originator (`signWaveEnd`), stall
-      carries the staller's hop receipt — an outsider can't force-terminate a live wave
-- [x] Paid-gate on every adoption path (`wave-announce`/`wave-start`/`wave-sync`, incl. a
-      **racing** sync) — closes the `wave-sync` bypass; start proof now rides `wave-start`
-- [x] Completion self-guard (only for a wave I'm running) + heal-ACK precision (only my
-      actual successor's `wave-pos`) + cheap-checks-before-Ed25519-verify in token processing
+Completed work is not itemized here — the current system is described in
+`CLAUDE.md` + `packages/hyperwave-engine/docs/protocol.md`, and the full
+change history (the token walk → deterministic sweep, Chord → pinless mesh,
+Autobase indexer → multicore CRDT gallery, sponsor-rewards + peer-roles
+removal, the WDK/Cashu payment layer, the 128-peer scale campaign, adversarial
+hardening §11.2, e2e tiers) is in git.
 
 ## Backlog
 
@@ -210,31 +59,19 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 
 ### Adversarial hardening still open (`packages/hyperwave-engine/docs/protocol.md` §11.3)
 
-- [~] **Automated coverage for the paid gate — PARTIALLY DONE (2026-07-16).** Added: the pure
-  gate predicate `startProofValid` (extracted to `attest.js`) is unit-tested — signed/bound/
-  reason checks + the freshness/replay window (`attest.test.js`); `burnAuthorizes` was already
-  tested; and `engine.test.js` now covers the enforced START/JOIN fee ORCHESTRATION with a
+- [~] **Automated coverage for the paid gate — PARTIALLY DONE (2026-07-16).** Done: the pure
+  gate predicate `startProofValid` + the freshness/replay window (`attest.test.js`),
+  `burnAuthorizes`, and the enforced START/JOIN fee ORCHESTRATION in `engine.test.js` with a
   **mocked wallet** (burn → confirm → `announcePaid`; unfunded fail-fast; join burn; burn-result
-  staging). **Still open:** the wave-lifecycle timing scenarios — (a) mid-lobby join burn
-  re-floods + seats, (d) a burn confirming after the wave ends still binds the tip address —
-  need the wave running, so they remain covered only by the manual/nightly on-chain e2e (or a
-  future mock-payments mode in `e2e/`). Original note kept below.
-- [ ] **(remaining) Full lifecycle paid-gate coverage.** The
-      burn/attestation path — `enforcePaid`, `recordBurn`,
-      the per-peer `burnAuthorizes` check on `wave-join` ingest — is exercised in the enforced,
-      timing-dependent lifecycle only by the on-chain tier: the `e2e/` harness runs
-      wallet-less (`enforcePaid` off, join-attestation-only ingest), so this path is
-      exercised only by the manual/nightly on-chain e2e tier and two-peer runs. A fast wave
-      can end before a joiner's fee burn confirms, and the burn proof must survive that
-      (`recordBurn` accepts a late burn for its own waveId; the proof survives `goIdle` and
-      is cleared only in `enterLobby`). Add a **wallet-mocked engine test** (stub `payments`
-      with a controllable `burn`/`verifyBurnTx` whose confirmation can be delayed past wave
-      completion) asserting: (a) a joiner whose burn confirms mid-lobby re-floods its join
-      and gets seated; (b) an enforcing peer ignores a burn-less join and an unpaid
-      announce; (c) a stale burn for a superseded wave is dropped (the `recordBurn` guard);
-      (d) a burn confirming after the wave ends still binds the tip address on the posted
-      entry. Optionally extend `e2e/` with a mock-payments mode so the paid gate gets
-      end-to-end coverage too.
+  staging). **Still open — the timing-dependent lifecycle** (needs the wave running; today
+  covered only by the manual/nightly on-chain tier, since `e2e/` runs wallet-less): add a
+  **wallet-mocked engine test** (stub `payments` with a `burn`/`verifyBurnTx` whose confirmation
+  can be delayed past wave completion) asserting (a) a joiner whose burn confirms mid-lobby
+  re-floods its join and gets seated; (b) an enforcing peer ignores a burn-less join + an unpaid
+  announce; (c) a stale burn for a superseded wave is dropped (the `recordBurn` guard — the proof
+  survives `goIdle`, cleared only in `enterLobby`); (d) a burn confirming after the wave ends
+  still binds the tip address. Optionally add a mock-payments mode to `e2e/` for end-to-end
+  coverage too.
 - [x] **Reject a wave whose start burn is stale (replay-attack prevention) — DONE (2026-07-16).**
       Two layers now: (1) the uniform envelope's signed `ts` — the receive edge drops any message
       whose `ts` is older than `GOSSIP_MAX_AGE_MS` (5 min), so a captured `wave-announce` replayed
@@ -242,19 +79,11 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       (2) `validStartProof` also enforces a freshness window on the signed `burnTs`
       (`MAX_KICKOFF_AGE_MS`), so a still-valid old burn reused in a fresh frame is rejected too.
       Both allow generous clock-skew. The stronger on-chain-tx-timestamp anchor (below) is a
-      possible future tightening. Original analysis kept below.
-- [ ] **(future tightening) Anchor start freshness to the on-chain tx timestamp.** `canAdopt()`
-      only refuses a `waveId` already in `endedWaves`, and `validStartProof()` checks the burn
-      **replay a captured, still-validly-signed `wave-announce`** later: a peer that never saw the
-      original end (a freshly joined or **restarted** peer has an empty `endedWaves`) will adopt the
-      stale wave, since the signed start proof still verifies. Fix: enforce a **freshness
-      window** on adoption. The burn attestation already carries a **signed `burnTs`** (part of
-      `burnHash`, so it can't be back-dated without the initiator's key) — reject a start whose
-      `burnTs` is older than a bound (`MAX_KICKOFF_AGE_MS`, e.g. a few minutes) in `validStartProof`/`canAdopt`. For a stronger, unforgeable anchor, gate on the **on-chain tx timestamp**
-      via `verifyBurnTx` (already fetched at the paid-gate verify step) rather than the
-      self-reported `burnTs`. Allow generous clock-skew (peers aren't synchronized). Ties into the
-      envelope `ts` item (§5.0) — a per-message timestamp would let the same freshness check apply
-      to every flooded message, not just the start.
+      possible future tightening.
+- [ ] **(future tightening) Anchor start freshness to the on-chain tx timestamp.** The current
+      freshness check trusts the self-reported (but signed) `burnTs`. For an unforgeable anchor,
+      gate on the **on-chain tx timestamp** via `verifyBurnTx` (already fetched at the paid-gate
+      verify step) instead. Allow generous clock-skew (peers aren't synchronized).
 - [ ] Per-connection rate limiting (token buckets per message kind) + bounds on the
       auxiliary sets (the flood `seen` set is capped; `endedWaves` grows unbounded over a
       long session). A gallery seat costs only a signature check, so the rate limit caps
@@ -400,50 +229,13 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 ### Remaining hardening (scale validation)
 
 - [x] **Gallery-as-CRDT: DONE (2026-07-14, commits cd7f6e0 + 7d9b271).** Dropped the
-      single Autobase indexer for a multicore CRDT gallery — removes the O(N) funnel + the
-      live SPOF. Each participant owns one Hypercore (key rides its wave-join, self-certified
-      by the join attestation); every peer merges the set locally (mergeGallery); no indexer,
-      no admission, no shared gallery key. wave-start/wave-sync carry the full writers set so
-      late adopters are self-contained. 8-peer e2e green; 128-peer re-validation still
-      pending. Original analysis kept below.
-
-- [ ] **(historical) Gallery-as-CRDT design notes.** The gallery's displayed output (`buildGallery`) is a pure
-      function of the entry _set_ — dedupe by peerId, sort by rank — and never uses
-      Autobase's linearization ORDER. So the gallery is a conflict-free replicated data
-      type (a peerId→entry LWW-map): each entry is self-authenticating (join attestation),
-      self-ordering (rank), idempotent (one per peer), and commutative. The single indexer
-      (the wave initiator, `gallery.js`) exists only to produce a total order we compute
-      and discard — and it's the O(N) fan-in/out bottleneck (~0.3 entries/s at 128 on an
-      oversubscribed box) AND a live SPOF (initiator dies mid-wave → nobody can advance the
-      indexed view). K-archivist retention (DONE) mitigates the _post-wave_ archival SPOF
-      but not this. Real fix: replace the Autobase gallery with N per-participant Hypercores
-      in a shared Corestore namespace — each peer posts to its own core, everyone replicates
-      the cores they can reach (writer keys are ALREADY flooded on `wave-join`, so key
-      distribution is solved) and merges via `buildGallery` over the union. No indexer, no
-      quorum, no leader, no funnel; convergence becomes epidemic ("have I replicated core
-      X"). Costs: a real rewrite of `gallery.js` + `gallery-session.js` (~600 lines), and
-      re-proving that raw multi-core corestore replication spreads as well as Autobase's
-      over a real partial mesh (validate with a flood-harness-style sim BEFORE committing —
-      that's the load-bearing assumption). The committee/k-of-n-indexer alternative was
-      considered and rejected: it re-introduces the quorum-stall the single indexer
-      deliberately escaped, for only partial relief (Autobase's multi-indexer needs a
-      strict MAJORITY of indexers reachable — `consensus.js: (n>>>1)+1` — to advance the
-      indexed view; single-indexer is majority-of-1, trivially met).
-      **De-risked (2026-07-14) — the A/B replication bench** (since deleted along with the
-      whole Autobase baseline + the `autobase` dep, its job done — git history has it) compared both
-      strategies over the SAME synthetic partial mesh (real Corestore/Autobase/Hypercore,
-      degree-capped graph = maxPeers). Measured N=64, degree=16: both reach 64/64, but
-      the multicore CRDT converges in ~13.3s vs the single-indexer Autobase's ~18.4s
-      (~28% faster, and that excludes the ~1s admission the Autobase path also pays) —
-      the N-core replication overhead did NOT prevent or slow convergence; it was faster,
-      with no SPOF. Load-bearing finding baked into the harness: each node must ACTIVELY
-      `core.download()` every gallery core — the log LENGTH propagates for free but the
-      block DATA only arrives when requested (a length-only convergence check is
-      over-optimistic; the real design must drive downloads). Corestore-with-large-N is
-      also far cheaper than the old model: corestore 7 / hypercore-storage 3.x use ONE
-      shared RocksDB backend, not a file-set per core. Caveat: the bench is in-process
-      (no WAN latency) — the real-swarm absolute-latency complement is the
-      HYPERWAVE_MAX_PEERS-limited e2e (knob now plumbed; run E2E_MAX_PEERS=16 E2E_PEERS=64).
+      single Autobase indexer (O(N) funnel + live SPOF) for a multicore CRDT gallery — each
+      participant owns one Hypercore (key rides its wave-join, self-certified by the join
+      attestation); every peer merges the set locally (`mergeGallery`); no indexer/admission/
+      shared key. 8-peer e2e green; 128-peer re-validation still pending. (Design analysis +
+      the A/B replication bench that de-risked it are in git history. One finding still worth
+      knowing, now baked into the code: each node must ACTIVELY `core.download()` every gallery
+      core — log LENGTH propagates for free but block DATA arrives only when requested.)
 
 - [ ] **128-peer scale validation — DONE locally (2026-07-13); public-DHT variant needs
       multi-machine.** The local-testnet 128-peer run now PASSES end-to-end (130/130
