@@ -10,14 +10,18 @@ participant, merged locally, byte-identical on every peer), optionally gated by
 proof-of-burn, and carries a cosmetic **tag**. Host-agnostic; runs under
 [Bare](https://github.com/holepunchto/bare).
 
-**Payments are pluggable** — the engine ships no wallet. It talks to money through the
-abstract `Wallet` interface ([`hyperwave-wallet`](https://www.npmjs.com/package/hyperwave-wallet))
-and only owns the wallet-agnostic fee flows (`payments.js`). A host injects a concrete wallet
-factory via `createEngine({ deps: { createPayments } })` — e.g.
-[`hyperwave-wallet-cashu`](https://www.npmjs.com/package/hyperwave-wallet-cashu) (Chaumian
-ecash on a Lightning mint) or
-[`hyperwave-wallet-tron`](https://www.npmjs.com/package/hyperwave-wallet-tron) (WDK, native
-TRX / USDT). With no wallet injected the engine runs unpaid (fees/tips are skipped).
+**Payments are pluggable** — the engine ships no wallet and is indifferent to the payment
+mechanism. It talks to money only through the abstract `Wallet` interface
+([`hyperwave-wallet`](https://www.npmjs.com/package/hyperwave-wallet)) and owns just the
+wallet-agnostic fee flows (`payments.js`): a burned participation fee and peer-to-peer tips,
+in the wallet's own units. A host injects a concrete wallet factory via
+`createEngine({ deps: { createPayments } })`; any `Wallet` implementation works — on-chain,
+ecash, custodial, or a mock. With no wallet injected the engine runs unpaid (fees/tips are
+skipped).
+
+Existing `Wallet` implementations you can inject:
+[`hyperwave-wallet-cashu`](https://www.npmjs.com/package/hyperwave-wallet-cashu) and
+[`hyperwave-wallet-tron`](https://www.npmjs.com/package/hyperwave-wallet-tron).
 
 The engine is **theme-agnostic** — it never interprets the entry payload. The "wave of
 moments" desktop/mobile app is one host: it fills each entry with a moment (a webcam photo)
