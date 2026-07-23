@@ -20,7 +20,7 @@ await core.ready(); // persists the keypair's secret into the corestore
 ```
 
 - **`extract.js`** reads that persisted keypair out of the origin store.
-- **`inject.js`** runs the *same* `get({ keyPair })` registration on the
+- **`inject.js`** runs the _same_ `get({ keyPair })` registration on the
   target machine with the exported keypair — a faithful "touch with a
   supplied key". No rocksdb surgery.
 
@@ -51,28 +51,33 @@ again.** Keep the origin around only as a seeder/backup.
 Do a dry run with a throwaway link first (see below), then:
 
 1. **Origin machine** — stop Pear and extract:
+
    ```
    pear shutdown
    node scripts/pear-key-migrate/extract.js --link pear://<z32>
    ```
+
    Writes `~/pear-writekey-<prefix>.json` (chmod 600) and prints a secret
    fingerprint. Note it.
 
 2. **Transfer** the JSON to the target over an encrypted channel only
    (`scp`, or `age`-encrypt then copy). Never paste it anywhere.
 
-3. **Target machine** — stop Pear and inject into a *clean* store (no existing
+3. **Target machine** — stop Pear and inject into a _clean_ store (no existing
    core for the link; inject aborts otherwise):
+
    ```
    pear shutdown
    node scripts/pear-key-migrate/inject.js \
      --link pear://<z32> --in ./pear-writekey-<prefix>.json
    ```
+
    Confirm the printed secret fingerprint matches step 1.
 
 4. **Target machine** — restart Pear and sync the drive up to its current
    length, with the origin machine online and seeding
    (`pear seed pear://<z32>` on the origin):
+
    ```
    pear seed pear://<z32>       # pull content; leave running until synced
    pear info pear://<z32>       # sanity-check
@@ -112,5 +117,5 @@ this repo's `node_modules`).
 
 If you'd rather not depend on Pear's internal storage format, Pear's built-in
 `multisig`/`provision` flow is designed for releasing from a machine that does
-not hold a single master secret (portable *signer* keys, revocable, no secret
+not hold a single master secret (portable _signer_ keys, revocable, no secret
 copied). It's a bigger change to the OTA model but strictly more robust.
