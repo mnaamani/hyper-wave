@@ -18,21 +18,19 @@ import { qrDataUrl } from './qr.js';
 import { openAddress, txLink } from './explorer.js';
 
 const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage';
-// Curated Cashu mints for the picker (each peer chooses its own). The DEFAULT is testnut — a free
-// TEST mint (auto-pays mint quotes, no real Lightning), so the demo funds/burns/tips with no real
-// money, honouring the project's testnet-only rule. The two ⚠ MAINNET mints below are real,
-// reputable, Lightning-connected mints (verified live via /v1/info: bolt11 mint+melt, NUT-07/11/12)
-// — selecting one means REAL sats: Top up pays a real invoice, burns/tips move real funds. They're
-// the only way to actually settle cross-mint tips (consolidate), which fake mints can't do. Keep
-// testnut first so it stays the default.
-const CASHU_MINTS = [
-  { url: 'https://testnut.cashu.space', label: 'testnut (test · auto-pay)' },
-  { url: 'https://nofee.testnut.cashu.space', label: 'testnut · no fees' },
+// The curated Cashu mints for the picker are RELAYED from the worker on the `wallet` message
+// (`mints`, adopted in walletStatus below). That list is the SINGLE SOURCE OF TRUTH — the worker's wallet
+// reports the same `{url,label,network}` list it classifies against for the cross-network filter
+// (packages/hyperwave-wallet-cashu/lib/mint-networks.js) — so a mint's picker label and the filter's
+// testnet/mainnet classification can never drift, and an app-added mint appears in both with no
+// duplicated list here. Until the first `wallet` message arrives, this fallback (the default test
+// mint) keeps the picker non-empty.
+let cashuMints = [
   {
-    url: 'https://mint.minibits.cash/Bitcoin',
-    label: '⚠ Minibits — mainnet · REAL sats'
-  },
-  { url: 'https://mint.coinos.io', label: '⚠ Coinos — mainnet · REAL sats' }
+    url: 'https://testnut.cashu.space',
+    label: 'testnut (test · auto-pay)',
+    network: 'testnet'
+  }
 ];
 // How many sats a "Top up" mints at once (testnut auto-pays; a real mint returns an invoice).
 const TOPUP_SATS = 100;
@@ -91,9 +89,20 @@ const txById = new Map(); // hash -> { hash, dir, icon, label, amount, ts } — 
 // Worker `wallet` message (address + balance + which account): keep the modal live whether open or
 // not. A live account switch arrives here too (a new accountIndex + address) — clear the old
 // account's history and re-fetch for the new one.
-export function walletStatus({ address, amount, unit, accountIndex, mint }) {
+export function walletStatus({
+  address,
+  amount,
+  unit,
+  accountIndex,
+  mint,
+  mints
+}) {
   if (!address) {
     return;
+  }
+  // Adopt the worker-relayed mint list (Cashu) as the picker's source of truth.
+  if (Array.isArray(mints) && mints.length) {
+    cashuMints = mints;
   }
   if (Number.isInteger(accountIndex) && accountIndex !== activeAccount) {
     activeAccount = accountIndex;
@@ -168,7 +177,7 @@ function applyCashuChrome(currentMint) {
 // Render the curated mints into the account <select>, marking the active one. Includes the active
 // mint even if it's a custom one not in the list, so the selection always reflects reality.
 function renderMintPicker(currentMint) {
-  const known = CASHU_MINTS.slice();
+  const known = cashuMints.slice();
   if (currentMint && !known.some((mint) => mint.url === currentMint)) {
     known.unshift({ url: currentMint, label: currentMint });
   }

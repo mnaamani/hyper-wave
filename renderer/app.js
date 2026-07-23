@@ -10,7 +10,13 @@ import * as hud from './lib/hud.js';
 import * as wallet from './lib/wallet.js';
 import * as directory from './lib/directory.js';
 import { getActiveWave, setActiveWave } from './lib/active.js';
-import { setWalletMeta, unitLabel, isCashu } from './lib/wallet-meta.js';
+import {
+  setWalletMeta,
+  unitLabel,
+  isCashu,
+  activeNetwork,
+  networkMatches
+} from './lib/wallet-meta.js';
 import { txLink } from './lib/explorer.js';
 
 // Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the spark
@@ -107,7 +113,7 @@ function asMoment(item) {
 // We keep lightweight metadata for every announced wave (the directory) and a cached feed per
 // wave; only the ACTIVE wave drives the ring centre (gallery / lobby / capture). Selecting a
 // directory row subscribes to that wave (holds its cores) and makes it active.
-const waves = new Map(); // waveId -> { waveId, by, mine, joined, subscribed, phase, count, fee, walletType, paid, lobbyDeadline }
+const waves = new Map(); // waveId -> { waveId, by, mine, joined, subscribed, phase, count, fee, walletType, paid, network, lobbyDeadline }
 const feedByWave = new Map(); // waveId -> raw feed items (rendered when its wave is active)
 let ringState = { me: null, peers: [] }; // the global heartbeat ring, for the directory's flags
 
@@ -265,6 +271,7 @@ const DIRECTORY_PATCH = {
     fee: evt.fee,
     walletType: evt.walletType,
     paid: evt.paid,
+    network: evt.network, // settlement network (from the start burn) — for the same-network filter
     phase: 'lobby',
     lobbyDeadline: performance.now() + (evt.lobbyMs || 15000)
   }),
@@ -275,10 +282,14 @@ const DIRECTORY_PATCH = {
   'wave-active': (evt) => ({
     phase: 'racing',
     count: evt.count,
-    joined: !!evt.joined
+    joined: !!evt.joined,
+    ...(evt.network ? { network: evt.network } : {})
   }),
   'wave-idle': () => ({ phase: 'ended' }),
-  'wave-verified': () => ({ paid: 'verified' })
+  'wave-verified': (evt) => ({
+    paid: 'verified',
+    ...(evt.network ? { network: evt.network } : {})
+  })
 };
 
 function updateDirectory(evt) {
@@ -335,10 +346,23 @@ ipc.on('feed', (msg) => {
 });
 
 ipc.on('wallet', (msg) => {
-  setWalletMeta(msg); // active mechanism + unit + mint, for labels across the UI
+  const prevNetwork = activeNetwork();
+  setWalletMeta(msg); // active mechanism + unit + mint + network, for labels + the same-network filter
   wallet.walletStatus(msg); // self-custodial wallet address + balance (wallet-view modal)
   gallery.setMyAddress(msg.address); // so we do not offer to tip our own moment
   setState({ myAddress: msg.address }); // to recognise a tip note addressed to me
+  // A live mint switch can change my network — re-render the directory so now-cross-network waves are
+  // hidden, and DESELECT the active wave if it's become cross-network (its gallery + tip must go away,
+  // a cross-network tip is meaningless). Only when the network actually changed.
+  if (activeNetwork() !== prevNetwork) {
+    const activeId = getActiveWave();
+    const activeWave = activeId ? waves.get(activeId) : null;
+    if (activeWave && !activeWave.mine && !networkMatches(activeWave.network)) {
+      setActiveWave(null);
+    }
+    directory.render(waves, getActiveWave());
+    renderActiveWave();
+  }
 });
 // Cashu top-up (fund-wallet) and tip redeem (receive) results — surfaced as toasts.
 ipc.on('fund-result', (msg) => wallet.fundResult(msg));

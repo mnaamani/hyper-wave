@@ -6,7 +6,7 @@
 // directory -> subtopics model. Theme-agnostic engine fields (waveId, by) map to app concepts here
 // (the initiator's country flag, derived from the global ring).
 import { flagOf } from './countries.js';
-import { unitLabel } from './wallet-meta.js';
+import { unitLabel, networkMatches } from './wallet-meta.js';
 import { angleOfId } from './ring.js';
 
 const orbitEl = document.getElementById('wave-orbit');
@@ -86,13 +86,20 @@ function buildBubble(wave, activeId) {
 }
 
 /**
- * Render one orbiting bubble per known wave, marking `active`.
+ * Render one orbiting bubble per known wave, marking `active`. Cross-network waves
+ * are HIDDEN: a wave whose settlement network (from its start burn) is a known
+ * mismatch with the active wallet's network is dropped, so a testnet peer never
+ * sees (or can tip into) a mainnet wave, or vice versa — a cross-network tip is
+ * meaningless. My own waves + unpaid/unknown-network waves always pass
+ * (`networkMatches` is permissive).
  * @param {Map<string, Object>} waves The waveId -> meta map app.js maintains.
  * @param {string|null} active The active waveId.
  * @returns {void}
  */
 export function render(waves, active) {
   orbitEl.replaceChildren(
-    ...[...waves.values()].map((wave) => buildBubble(wave, active))
+    ...[...waves.values()]
+      .filter((wave) => wave.mine || networkMatches(wave.network))
+      .map((wave) => buildBubble(wave, active))
   );
 }

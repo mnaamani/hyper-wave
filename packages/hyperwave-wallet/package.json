@@ -11,6 +11,11 @@
   "homepage": "https://github.com/mnaamani/hyper-wave#readme",
   "type": "commonjs",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "lib",
+    "!**/*.test.js"
+  ],
   "scripts": {
     "test": "bare test.js",
     "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 lib/wallet.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"

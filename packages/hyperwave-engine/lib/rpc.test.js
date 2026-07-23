@@ -44,7 +44,7 @@ function fakeWave() {
     announcePaid: (paid) => calls.push(['announcePaid', paid]),
     setTag: (tag) => calls.push(['setTag', tag]),
     stageEntry: (entry) => calls.push(['stageEntry', entry]),
-    setWallet: (addr) => calls.push(['setWallet', addr]),
+    setWallet: ({ address }) => calls.push(['setWallet', address]),
     close: async () => calls.push('close')
   };
 }

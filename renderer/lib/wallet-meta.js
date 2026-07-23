@@ -6,10 +6,11 @@
 let unit = 'sat';
 let walletType = 'cashu';
 let mint = '';
+let network = ''; // the active wallet's settlement network ('testnet'/'mainnet'), '' if unknown/none
 
 /**
  * Update the active wallet metadata from a worker `wallet` message.
- * @param {{unit?: string, walletType?: string, mint?: string}} meta - The message.
+ * @param {{unit?: string, walletType?: string, mint?: string, network?: string}} meta - The message.
  * @returns {void}
  */
 export function setWalletMeta(meta = {}) {
@@ -21,6 +22,9 @@ export function setWalletMeta(meta = {}) {
   }
   if (typeof meta.mint === 'string') {
     mint = meta.mint;
+  }
+  if (typeof meta.network === 'string') {
+    network = meta.network;
   }
 }
 
@@ -45,4 +49,31 @@ export function isCashu() {
 /** @returns {string} The active mint URL (Cashu), or '' for a chain wallet. */
 export function activeMint() {
   return mint;
+}
+
+/**
+ * @returns {string} The active wallet's settlement network ('testnet'/'mainnet'),
+ * or '' if the wallet doesn't report one (chain / wallet-less).
+ */
+export function activeNetwork() {
+  return network;
+}
+
+/**
+ * Whether a wave on `waveNetwork` can transact with the active wallet — i.e. NOT
+ * a known cross-network mismatch. Permissive: an empty/unknown network on either
+ * side is allowed (mirrors the worker's `crossNetworkMints`), so only a known
+ * test-vs-main mismatch is excluded. Used to hide cross-network waves + block
+ * cross-network tips (which would be meaningless).
+ * @param {string} [waveNetwork] - The wave's settlement network.
+ * @returns {boolean} Whether the wave matches the active wallet's network.
+ */
+export function networkMatches(waveNetwork) {
+  if (!network || network === 'unknown') {
+    return true; // my own network unknown (custom mint / chain / none) → never filter
+  }
+  if (!waveNetwork || waveNetwork === 'unknown') {
+    return true; // the wave's network is unknown → permissive (matches crossNetworkMints)
+  }
+  return waveNetwork === network;
 }

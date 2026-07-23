@@ -168,6 +168,13 @@ function createEngine({
         // The active "account" for a mint-based wallet (Cashu) is its mint URL — surfaced so the
         // host's picker can show/persist it. Absent for chain wallets (no mintUrl getter).
         ...(pay.mintUrl ? { mint: pay.mintUrl } : {}),
+        // The wallet's selectable mints (Cashu: the curated list + app extras, `{url,label,network}`)
+        // — relayed so the host's picker renders the SAME list the wallet classifies against for the
+        // cross-network filter (one source of truth, no drift). Absent for chain wallets.
+        ...(pay.knownMints ? { mints: pay.knownMints } : {}),
+        // The wallet's own settlement network (Cashu: 'testnet'/'mainnet' of its active mint) — so a
+        // UI can filter to same-network waves and block cross-network tips. Updates on a mint switch.
+        ...(pay.network ? { network: pay.network } : {}),
         ...(await pay
           .balances()
           .catch(() => ({ address: pay.address, amount: 0, unit: pay.unit })))

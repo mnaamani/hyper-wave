@@ -81,12 +81,17 @@ async function confirmBurn(payments, waveId, hash) {
  * @returns {void}
  */
 function wireWallet(wave, payments) {
-  wave.setWallet(
-    payments.address,
-    (burnRef, expect) => payments.verifyBurnTx(burnRef, expect),
-    payments.type,
-    payments.fee // the fee I SET on the waves I initiate (rides their announces)
-  );
+  wave.setWallet({
+    address: payments.address,
+    verifier: (burnRef, expect) => payments.verifyBurnTx(burnRef, expect),
+    walletType: payments.type,
+    fee: payments.fee, // the fee I SET on the waves I initiate (rides their announces)
+    // Optional sync burnRef→network classifier (Cashu): tags each wave with its settlement network
+    // so the host shows only same-network waves. Absent on wallets that don't classify (chain).
+    classifyNetwork: payments.networkOf
+      ? (burnRef) => payments.networkOf(burnRef)
+      : undefined
+  });
 }
 
 module.exports = { burnMemo, payFee, confirmBurn, wireWallet };

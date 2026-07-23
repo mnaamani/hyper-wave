@@ -8,6 +8,7 @@
 module.exports = {
   ...require('./lib/cashu-wallet'), // CashuWallet, createCashuWallet, CASHU_WALLET_TYPE, CASHU_UNIT, DEFAULT_MINT
   ...require('./lib/cashu-burn'), // verifyBurnProofs, burnTags, p2pkLockPubkey, MEMO_TAG_KEY
+  ...require('./lib/mint-networks'), // KNOWN_MINTS, networkOfMint, crossNetworkMints
   ...require('./lib/nums'), // numsBurnPubkey, NUMS_DOMAIN
   ...require('./lib/proof-store'), // ProofStore, MAX_HISTORY
   ...require('./lib/bare-web-shims') // installBareWebShims
