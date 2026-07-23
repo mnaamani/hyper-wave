@@ -105,19 +105,26 @@ async function main() {
   const secretKey = b4a.from(record.secretKey, 'hex');
   const recordPublic = b4a.from(record.publicKey, 'hex');
 
-  // Integrity: the link, the record's public key, and the public half
-  // embedded in the ed25519 secret key must all agree.
-  if (!b4a.equals(recordPublic, publicKey)) {
-    fail("--in file's publicKey does not match --link.");
-  }
+  // Integrity: the keypair must be internally consistent — the public half
+  // embedded in the ed25519 secret key must equal the record's publicKey.
+  // NOTE: this SIGNER public key is NOT the link key. Modern Hypercores are
+  // manifest-based: the link key is the hash of a single-signer manifest over
+  // this signer key, so `recordPublic !== decode(link)` is expected. The
+  // signer<->link relationship is verified below, after registration, by
+  // asserting the derived core.key equals the link.
   if (
     secretKey.length !== 64 ||
-    !b4a.equals(secretKey.subarray(32), publicKey)
+    !b4a.equals(secretKey.subarray(32), recordPublic)
   ) {
-    fail('Secret key does not correspond to the link public key.');
+    fail(
+      "Secret key does not correspond to the record's publicKey " +
+        '(corrupt or mismatched --in file).'
+    );
   }
 
-  const keyPair = { publicKey, secretKey };
+  // Register with the SIGNER keypair (record.publicKey), not the link key.
+  // Corestore derives the manifest-hashed core key (= the link) from it.
+  const keyPair = { publicKey: recordPublic, secretKey };
 
   const store = new Corestore(args.store);
   try {
@@ -143,9 +150,20 @@ async function main() {
   const core = store.get({ keyPair, exclusive: true });
   await core.ready();
   const writable = core.writable;
+  const derivedKey = core.key;
   await core.close();
   await store.close();
 
+  // The signer keypair controls this link only if the single-signer manifest
+  // Corestore derived from it hashes to the link key. If it does not, this
+  // file is a write key for a DIFFERENT link.
+  if (!b4a.equals(derivedKey, publicKey)) {
+    fail(
+      'This keypair does not correspond to --link (derived core key ' +
+        `${b4a.toString(derivedKey, 'hex')} != link ` +
+        `${b4a.toString(publicKey, 'hex')}). Wrong --in file for this link.`
+    );
+  }
   if (!writable) {
     fail('Registration completed but the core is not writable.');
   }
