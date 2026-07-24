@@ -41,9 +41,9 @@ export function on(type, fn) {
   listenersByMessageType[type] = handlers;
 }
 
-// Send a command to the engine over the seam. Request/response commands (tip / send-trx /
-// fetch-transactions) resolve with their result; the rest are fire-and-forget. Results ALSO arrive
-// via onHwEvent, so callers keep consuming them through ipc.on(...).
+// Send a command to the engine over the seam. Request/response commands (tip / fetch-transactions)
+// resolve with their result; the rest are fire-and-forget. Results ALSO arrive via onHwEvent, so
+// callers keep consuming them through ipc.on(...).
 function send(type, extra = {}) {
   return bridge.hwCall(type, extra);
 }
@@ -70,18 +70,16 @@ export const note = (waveId, payload) =>
 // tip token to just the recipient instead of flooding it (privacy). `to` is the recipient's ring id.
 export const dm = (waveId, to, payload) =>
   send('dm', { waveId, to, note: payload });
-export const sendTrx = (to, amount) => send('send-trx', { to, amount });
 export const refreshWallet = () => send('refresh-wallet');
-// Multi-account wallet: list the derivable accounts (for the picker) + switch the active one
-// (live re-wire, same seed → a distinct BIP-44 address).
-export const listAccounts = (count = 5) => send('list-accounts', { count });
-export const setAccount = (index) => send('set-account', { index });
 export const fetchTransactions = () => send('fetch-transactions');
 // Cashu (ecash) wallet: switch the active mint (live re-wire), mint funds (top up),
-// and redeem a bearer token received in a tip note. No-ops on a chain wallet.
+// and redeem a bearer token received in a tip note.
 export const setMint = (mint) =>
   send('set-wallet-options', { walletOptions: { mint } });
 export const fundWallet = (amount) => send('fund-wallet', { amount });
+// Cash out: melt ecash to pay a bolt11 invoice from the user's external Lightning/BTC wallet,
+// redeeming the balance back to Lightning. Result arrives as `cash-out-result`.
+export const cashOut = (invoice) => send('cash-out', { invoice });
 export const redeem = (token) => send('redeem', { token });
 
 export const appVersion = () => bridge.pkg().version;

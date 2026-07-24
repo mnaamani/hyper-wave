@@ -95,9 +95,8 @@ const seam = serveEngine({
         // The renderer drives subscribe-wave / unsubscribe-wave from the wave directory UI.
         autoSubscribe: false
       },
-      // Inject Cashu as the payment factory (createEngine's default is the Tron wallet). The
-      // engine wires it through the same `Wallet` interface — burns, tips, and the paid gate are
-      // mechanism-agnostic.
+      // Inject Cashu as the payment factory (the engine ships no wallet). The engine wires it
+      // through the same `Wallet` interface — burns, tips, and the paid gate are mechanism-agnostic.
       deps: { createPayments: createCashuWallet },
       emit // host-wrapped seam.emit (taps `wallet` events for the network → topic switch)
     });

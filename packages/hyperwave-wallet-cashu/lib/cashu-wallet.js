@@ -40,6 +40,27 @@ const DEFAULT_MINT = 'https://testnut.cashu.space';
 // it's stable across restarts and distinct from the ring/swarm key.
 const IDENTITY_DOMAIN = 'hyperwave:cashu:identity:v1';
 
+// cashu-ts v4 returns amounts as `Amount` objects (a BigInt wrapper with a
+// `.toNumber()`), NOT plain numbers. Adding two of them with `+` concatenates
+// their toString()s ("100" + "0" -> "1000"), so any amount that feeds
+// arithmetic MUST be unwrapped to a plain sat number first. Passes plain
+// numbers/bigints through unchanged so this stays correct if the shape reverts.
+function satsOf(amount) {
+  if (amount === null || amount === undefined) {
+    return 0;
+  }
+  if (typeof amount === 'number') {
+    return amount;
+  }
+  if (typeof amount === 'bigint') {
+    return Number(amount);
+  }
+  if (typeof amount.toNumber === 'function') {
+    return amount.toNumber();
+  }
+  return Number(amount.value ?? amount);
+}
+
 /**
  * A self-custodial Cashu (ecash) wallet. Constructed by `createCashuWallet`
  * (which does the async cashu-ts import + identity derivation); do not `new` it.
@@ -311,6 +332,49 @@ class CashuWallet extends Wallet {
     return { moved, fee };
   }
 
+  // Cash out to Lightning: MELT home proofs to pay a user-supplied bolt11 invoice
+  // (from their external Lightning/BTC wallet), redeeming ecash back to sats on the
+  // network. The home mint pays the invoice over Lightning; any unused fee reserve
+  // comes back as change and is kept home. Requires a mint with REAL Lightning
+  // connectivity — a fake/auto-pay test mint (testnut) can't settle a real invoice,
+  // so this only makes sense on a mainnet mint. Returns { paid, fee } (sats): `paid`
+  // is the invoice amount, `fee` the Lightning routing + mint fee actually spent.
+  async payInvoice(invoice) {
+    const bolt11 = String(invoice || '').trim();
+    if (!bolt11) {
+      throw new Error('no invoice provided'); // cheap guard, before any network op
+    }
+    await this.#ensureLoaded();
+    const meltQuote = await this.#wallet.createMeltQuoteBolt11(bolt11);
+    const meltAmount = satsOf(meltQuote.amount);
+    const feeReserve = satsOf(meltQuote.fee_reserve);
+    const needed = meltAmount + feeReserve;
+    const homeProofs = this.#store.get(this.#mintUrl);
+    const available = Number(this.#cashu.sumProofs(homeProofs));
+    if (needed > available) {
+      throw new Error(
+        `insufficient balance: need ${needed} sat ` +
+          `(incl. ${feeReserve} fee reserve), have ${available}`
+      );
+    }
+    // Melt ALL home proofs against the quote — the mint spends what it needs and
+    // returns the rest as change, which becomes the new home balance.
+    const melt = await this.#wallet.meltProofsBolt11(meltQuote, homeProofs);
+    this.#store.set(this.#mintUrl, melt.change || []);
+    const changeAmount = Number(this.#cashu.sumProofs(melt.change || []));
+    const fee = available - changeAmount - meltAmount;
+    this.#store.addHistory({
+      kind: 'cashout',
+      amount: meltAmount,
+      to: 'lightning',
+      memo: '',
+      token: '',
+      timestamp: null // stamped by the host (Date.now unavailable in some hosts)
+    });
+    this.#log('cashed out', meltAmount, 'sat to Lightning (fee', fee, ')');
+    return { paid: meltAmount, fee };
+  }
+
   // Melt the proofs held at `sourceMint` and re-mint them at the home mint. The
   // home mint issues an invoice for the net amount; the source mint pays it.
   async #swapMintToHome(sourceMint) {
@@ -328,13 +392,15 @@ class CashuWallet extends Wallet {
     let mintAmount = available;
     let mintQuote = await this.#wallet.createMintQuoteBolt11(mintAmount);
     let meltQuote = await source.createMeltQuoteBolt11(mintQuote.request);
-    if (meltQuote.amount + meltQuote.fee_reserve > available) {
-      mintAmount = available - meltQuote.fee_reserve;
+    let feeReserve = satsOf(meltQuote.fee_reserve);
+    if (satsOf(meltQuote.amount) + feeReserve > available) {
+      mintAmount = available - feeReserve;
       if (mintAmount <= 0) {
         return { moved: 0, fee: 0 };
       }
       mintQuote = await this.#wallet.createMintQuoteBolt11(mintAmount);
       meltQuote = await source.createMeltQuoteBolt11(mintQuote.request);
+      feeReserve = satsOf(meltQuote.fee_reserve);
     }
     const melt = await source.meltProofsBolt11(meltQuote, sourceProofs);
     this.#store.set(sourceMint, melt.change || []);
@@ -353,7 +419,7 @@ class CashuWallet extends Wallet {
       timestamp: null
     });
     this.#log('consolidated', moved, 'sat', sourceMint, '->', this.#mintUrl);
-    return { moved, fee: meltQuote.fee_reserve };
+    return { moved, fee: feeReserve };
   }
 
   // Burn `amountSats`: swap home proofs into a token P2PK-locked to the NUMS burn
@@ -556,6 +622,7 @@ async function createCashuWallet(options = {}) {
 module.exports = {
   CashuWallet,
   createCashuWallet,
+  satsOf,
   CASHU_WALLET_TYPE,
   CASHU_UNIT,
   DEFAULT_MINT

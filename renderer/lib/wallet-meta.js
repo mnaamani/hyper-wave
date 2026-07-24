@@ -1,24 +1,19 @@
-// Shared, tiny source of truth for the active wallet's mechanism + unit, set
-// from each worker `wallet` message and read across the UI (toasts, the tip
-// button, the lobby fee) so amounts are labelled in the wallet's real unit
-// (sat for Cashu, TRX/USDT for Tron) instead of a hardcoded currency. The
-// desktop default is Cashu; a Tron build (or a live switch) updates these.
+// Shared, tiny source of truth for the active Cashu wallet's unit, mint, and
+// settlement network, set from each worker `wallet` message and read across the
+// UI (toasts, the tip button, the lobby fee, the same-network filter). The
+// desktop's only payment mechanism is Cashu (unit `sat`).
 let unit = 'sat';
-let walletType = 'cashu';
 let mint = '';
 let network = ''; // the active wallet's settlement network ('testnet'/'mainnet'), '' if unknown/none
 
 /**
  * Update the active wallet metadata from a worker `wallet` message.
- * @param {{unit?: string, walletType?: string, mint?: string, network?: string}} meta - The message.
+ * @param {{unit?: string, mint?: string, network?: string}} meta - The message.
  * @returns {void}
  */
 export function setWalletMeta(meta = {}) {
   if (meta.unit) {
     unit = meta.unit;
-  }
-  if (meta.walletType) {
-    walletType = meta.walletType;
   }
   if (typeof meta.mint === 'string') {
     mint = meta.mint;
@@ -30,9 +25,9 @@ export function setWalletMeta(meta = {}) {
 
 /**
  * The active currency unit label. Pass an `amount` to get the correctly
- * pluralized form — only 'sat' inflects (1 sat / 5 sats); TRX/USDT don't.
+ * pluralized form — 'sat' inflects (1 sat / 5 sats).
  * @param {number} [amount] - Amount, to choose singular vs plural.
- * @returns {string} The unit label (e.g. 'sat', 'sats', 'TRX').
+ * @returns {string} The unit label (e.g. 'sat', 'sats').
  */
 export function unitLabel(amount) {
   if (unit === 'sat' && amount !== undefined && amount !== 1) {
@@ -41,19 +36,14 @@ export function unitLabel(amount) {
   return unit;
 }
 
-/** @returns {boolean} Whether the active wallet is a Cashu (ecash) wallet. */
-export function isCashu() {
-  return walletType === 'cashu';
-}
-
-/** @returns {string} The active mint URL (Cashu), or '' for a chain wallet. */
+/** @returns {string} The active mint URL. */
 export function activeMint() {
   return mint;
 }
 
 /**
  * @returns {string} The active wallet's settlement network ('testnet'/'mainnet'),
- * or '' if the wallet doesn't report one (chain / wallet-less).
+ * or '' if it isn't known yet.
  */
 export function activeNetwork() {
   return network;

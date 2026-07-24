@@ -65,14 +65,14 @@ ipcMain.on('isPackaged', (evt) => {
   evt.returnValue = app.isPackaged;
 });
 
-// Copy text to the OS clipboard (e.g. the wallet address). The renderer is sandboxed, so it goes
+// Copy text to the OS clipboard (e.g. a Lightning invoice). The renderer is sandboxed, so it goes
 // through main rather than navigator.clipboard.
 ipcMain.handle('copy-text', (_evt, text) =>
   clipboard.writeText(String(text ?? ''))
 );
 
-// Open a URL in the user's default browser (e.g. the Nile faucet). Restricted to http(s) so a
-// compromised renderer can't ask main to open file:// or other schemes.
+// Open a URL in the user's default browser. Restricted to http(s) so a compromised renderer can't
+// ask main to open file:// or other schemes.
 ipcMain.handle('open-external', (_evt, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
     return shell.openExternal(url);
@@ -397,7 +397,7 @@ async function createWindow() {
     (_webContents, permission, callback) => callback(permission === 'media')
   );
 
-  // Right-click edit menu for text fields (e.g. paste a wallet address into Send). Electron
+  // Right-click edit menu for text fields (e.g. the moment caption input). Electron
   // ships no default context menu, so without this only the keyboard shortcuts work. Built from
   // roles (cut/copy/paste/select-all) with editing entries shown only when a field is editable.
   win.webContents.on('context-menu', (_evt, params) => {

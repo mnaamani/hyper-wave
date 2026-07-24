@@ -322,6 +322,36 @@ function createEngine({
     }
   }
 
+  // Cash out: pay a user-supplied invoice from the wallet, redeeming the balance out to the wallet's
+  // native settlement layer (Cashu: MELT ecash to pay a bolt11, i.e. back to Lightning). Mint-based
+  // wallets implement `payInvoice`; a wallet without it reports a clear `cash-out-result` error.
+  async function handleCashOut(command) {
+    if (!payments || typeof payments.payInvoice !== 'function') {
+      emit({
+        type: 'cash-out-result',
+        id: command.id,
+        error: 'cash-out not supported by this wallet'
+      });
+      return;
+    }
+    const invoice = command.invoice;
+    if (!invoice || typeof invoice !== 'string') {
+      emit({
+        type: 'cash-out-result',
+        id: command.id,
+        error: 'invalid invoice'
+      });
+      return;
+    }
+    try {
+      const result = await payments.payInvoice(invoice);
+      emit({ type: 'cash-out-result', id: command.id, ...result });
+      pushBalance?.();
+    } catch (err) {
+      emit({ type: 'cash-out-result', id: command.id, error: err.message });
+    }
+  }
+
   // Participation fee (wallet.js), burned to the black hole. The `burn-result` message carries a
   // `stage` so the UI never says "burned" prematurely:
   //   confirming — tx broadcast, awaiting on-chain confirmation (start only)
@@ -526,6 +556,7 @@ function createEngine({
     // received bearer token (a tip). Currency-agnostic — no-ops / errors on a chain wallet.
     'set-wallet-options': (command) => handleSetWalletOptions(command),
     'fund-wallet': (command) => handleFundWallet(command),
+    'cash-out': (command) => handleCashOut(command),
     redeem: (command) => handleRedeem(command),
     // Broadcast an opaque note on a wave (roster-member announcement; a tip notification is the
     // app's first use). The engine stays theme-agnostic — `note` is host-owned JSON.

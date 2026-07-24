@@ -9,6 +9,7 @@ const { Wallet } = require('hyperwave-wallet');
 const {
   CashuWallet,
   createCashuWallet,
+  satsOf,
   CASHU_WALLET_TYPE
 } = require('./cashu-wallet');
 
@@ -137,6 +138,42 @@ test('verifyBurnTx flags an uncompletable check as transient, not a rejection', 
     res.transient,
     true,
     'transient → engine retries instead of rejecting the wave'
+  );
+  wallet.dispose();
+});
+
+test('satsOf unwraps cashu-ts v4 Amount objects to plain numbers', (t) => {
+  // cashu-ts v4 returns amounts as Amount objects (a BigInt wrapper), and adding
+  // two of them with `+` CONCATENATES their toString()s ("100" + "0" -> "1000").
+  // This bit the melt-quote balance check (need == amount + fee_reserve): a
+  // 100-sat cash-out with a 0 fee reserve read as "need 1000". satsOf() unwraps
+  // to a number so the arithmetic is real. Simulate the Amount shape here (the
+  // real class also exposes .toNumber(), preferred when present).
+  const amount = { value: 100n, toNumber: () => 100 };
+  const feeReserve = { value: 0n, toNumber: () => 0 };
+  t.is(satsOf(amount) + satsOf(feeReserve), 100, 'unwrapped: real addition');
+  t.not(
+    satsOf(amount) + satsOf(feeReserve),
+    '1000',
+    'NOT string concatenation'
+  );
+  t.is(satsOf({ value: 42n }), 42, 'falls back to .value with no .toNumber');
+  t.is(satsOf(7), 7, 'plain number passes through');
+  t.is(satsOf(9n), 9, 'bigint coerces to number');
+  t.is(satsOf(null), 0, 'nullish → 0');
+});
+
+test('payInvoice rejects an empty invoice before any network op', async (t) => {
+  const dir = tempDir();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const wallet = await createCashuWallet({ storageDir: dir, seed: SEED });
+  // The invoice guard runs BEFORE loadMint, so a blank invoice fails offline (no
+  // mint contact) rather than hanging on a network call that can't succeed.
+  await t.exception(
+    () => wallet.payInvoice('  '),
+    /no invoice/,
+    'blank invoice → clear offline rejection'
   );
   wallet.dispose();
 });
