@@ -41,6 +41,7 @@ const txsEl = document.getElementById('wallet-txs');
 const mintSelect = document.getElementById('wallet-mint');
 const topupEl = document.getElementById('wallet-topup');
 const topupQrEl = document.getElementById('topup-qr');
+const topupTitleEl = document.getElementById('topup-title');
 const topupHintEl = document.getElementById('topup-hint');
 const topupCloseBtn = document.getElementById('topup-close');
 const cashoutToggleBtn = document.getElementById('wallet-cashout-toggle');
@@ -48,6 +49,7 @@ const cashoutEl = document.getElementById('wallet-cashout');
 const cashoutInput = document.getElementById('cashout-invoice');
 const cashoutBtn = document.getElementById('cashout-btn');
 const cashoutStatusEl = document.getElementById('cashout-status');
+const cashoutHintEl = document.getElementById('cashout-hint');
 
 // Icon + label + direction per Cashu ledger `kind` (the persisted proof-store
 // history — survives restarts, so it shows PAST sessions, not just this one).
@@ -61,6 +63,7 @@ const CASHU_META = {
 };
 
 let topupInvoice = ''; // the bolt11 currently shown as a QR (click the QR to re-copy it)
+let currentBalance = 0; // latest spendable balance (sat), for the cash-out affordability hint
 
 // Worker `wallet` message (balance + active mint): keep the modal live whether open or not.
 export function walletStatus({ address, amount, unit, mint, mints }) {
@@ -71,8 +74,10 @@ export function walletStatus({ address, amount, unit, mint, mints }) {
   if (Array.isArray(mints) && mints.length) {
     cashuMints = mints;
   }
+  currentBalance = Number(amount) || 0;
   balanceEl.innerText =
     `${amount} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
+  refreshCashoutHint(); // balance moved — re-evaluate the pasted invoice's affordability
   balChipEl.textContent = `${amount} ${unitLabel(amount)}`; // top-bar pill
   const currentMint = mint || activeMint();
   kindEl.textContent = mintHost(currentMint);
@@ -224,6 +229,7 @@ topupBtn.onclick = () => {
   if (!topupAutoPays()) {
     topupInvoice = '';
     topupQrEl.removeAttribute('src');
+    topupTitleEl.textContent = '⚡ Top-up invoice — scan or pay';
     topupHintEl.textContent = 'Requesting a Lightning invoice…';
     topupEl.classList.add('show', 'loading');
   }
@@ -258,8 +264,11 @@ export function fundResult({ minted, invoice, error, pending }) {
   topupBtn.disabled = false;
   topupBtn.textContent = '⬆ Top up';
   if (error) {
-    hideTopup();
+    // Surface it IN the panel (not just a hidden tooltip) — a mint outage (e.g. a
+    // 502 from the mint) otherwise just made the QR silently vanish, which reads
+    // like an app bug rather than the mint being down.
     balanceEl.title = `top-up failed: ${error}`;
+    showTopupError(`⚠ Top-up failed — ${error}`);
     return;
   }
   if (minted > 0) {
@@ -267,7 +276,8 @@ export function fundResult({ minted, invoice, error, pending }) {
     refreshWallet();
     return;
   }
-  hideTopup(); // poll gave up (unpaid within the window) — the invoice was copyable meanwhile
+  // Poll gave up (unpaid within the window) — the invoice was copyable meanwhile.
+  showTopupError('Top-up timed out — the invoice was not paid in time.');
 }
 
 // Render the invoice as a scannable QR in the modal. Fails soft — if the QR bundle isn't available
@@ -280,16 +290,34 @@ async function showTopupQr(invoice) {
   }
   topupInvoice = invoice;
   topupQrEl.src = dataUrl;
+  const amount = invoiceAmountSats(invoice);
+  topupTitleEl.textContent =
+    amount === null
+      ? '⚡ Top-up invoice — scan or pay'
+      : `⚡ Top-up invoice — ${amount} ${unitLabel(amount)}`;
   topupHintEl.textContent =
     'Scan with a Lightning wallet (also copied to your clipboard).';
   topupEl.classList.remove('loading'); // spinner → QR
   topupEl.classList.add('show');
 }
 
+// Turn the top-up panel into a terminal error state: drop the spinner + QR but
+// keep the panel open (with its Done button) so the failure is visible and
+// dismissable, instead of the panel silently disappearing.
+function showTopupError(message) {
+  topupEl.classList.remove('loading');
+  topupEl.classList.add('show');
+  topupQrEl.removeAttribute('src');
+  topupTitleEl.textContent = '⚡ Top up';
+  topupHintEl.textContent = message;
+  topupInvoice = '';
+}
+
 // Hide + reset the top-up panel (its QR, invoice, and loading state).
 function hideTopup() {
   topupEl.classList.remove('show', 'loading');
   topupQrEl.removeAttribute('src');
+  topupTitleEl.textContent = '⚡ Top-up invoice — scan or pay';
   topupInvoice = '';
 }
 
@@ -315,11 +343,61 @@ function setCashoutStatus(text, cls) {
   cashoutStatusEl.className = cls || '';
 }
 
+// Decode the sat amount a bolt11 invoice demands, WITHOUT a library. bolt11 puts
+// the amount in its human-readable part as <digits><multiplier> right after the
+// network prefix (bc/tb/bcrt); the multiplier m/u/n/p = 1e-3/1e-6/1e-9/1e-12 BTC
+// and 1 BTC = 1e8 sat. Returns the sat amount, or null for an amountless invoice
+// (no amount encoded) or a string we don't recognize as bolt11.
+const MULTIPLIER_SATS = { m: 1e5, u: 1e2, n: 1e-1, p: 1e-4 };
+function invoiceAmountSats(invoice) {
+  const match = /^ln(?:bcrt|bc|tbs|tb|sb)(\d+)([munp])?/i.exec(invoice);
+  if (!match || !match[1]) {
+    return null; // amountless, or not a bolt11 we can read
+  }
+  const value = Number(match[1]);
+  const multiplier = match[2] ? match[2].toLowerCase() : '';
+  const sats = multiplier ? value * MULTIPLIER_SATS[multiplier] : value * 1e8;
+  return Math.round(sats);
+}
+
+// Live affordability hint: show what the pasted invoice will cost vs. the balance
+// and disable "Pay invoice" when it can't be covered — catching the mismatch
+// before a round-trip to the mint. Re-run on paste/type and on any balance push.
+function refreshCashoutHint() {
+  const invoice = cashoutInput.value.trim();
+  if (!invoice) {
+    cashoutHintEl.textContent = '';
+    cashoutHintEl.className = '';
+    cashoutBtn.disabled = false;
+    return;
+  }
+  const needed = invoiceAmountSats(invoice);
+  if (needed === null) {
+    cashoutHintEl.textContent =
+      'Amountless invoice — paste one with an amount set.';
+    cashoutHintEl.className = 'err';
+    cashoutBtn.disabled = true;
+    return;
+  }
+  const short = needed > currentBalance;
+  cashoutHintEl.textContent =
+    `Invoice: ${needed} ${unitLabel(needed)} · ` +
+    `balance: ${currentBalance} ${unitLabel(currentBalance)}` +
+    (short ? ' — not enough (plus a fee reserve)' : '');
+  cashoutHintEl.className = short ? 'err' : '';
+  cashoutBtn.disabled = short;
+}
+
 cashoutToggleBtn.onclick = () => {
   const showing = cashoutEl.classList.toggle('show');
   if (showing) {
     cashoutInput.focus();
   }
+};
+
+cashoutInput.oninput = () => {
+  setCashoutStatus(''); // a new invoice invalidates the prior attempt's result
+  refreshCashoutHint();
 };
 
 function submitCashout() {
@@ -331,6 +409,15 @@ function submitCashout() {
   if (topupAutoPays()) {
     setCashoutStatus(
       'Cash out needs a real (mainnet) mint — a test mint has no Lightning.',
+      'err'
+    );
+    return;
+  }
+  const needed = invoiceAmountSats(invoice);
+  if (needed !== null && needed > currentBalance) {
+    setCashoutStatus(
+      `Invoice needs ${needed} ${unitLabel(needed)}, ` +
+        `balance is ${currentBalance} ${unitLabel(currentBalance)}.`,
       'err'
     );
     return;
@@ -356,6 +443,7 @@ export function cashOutResult({ paid, fee, error }) {
   const feeNote = fee > 0 ? ` (fee ${fee} ${unitLabel(fee)})` : '';
   setCashoutStatus(`✅ cashed out ${paid} ${unitLabel(paid)}${feeNote}`, 'ok');
   cashoutInput.value = '';
+  refreshCashoutHint(); // clear the affordability hint now the field is empty
   refreshWallet();
   fetchTransactions();
 }
