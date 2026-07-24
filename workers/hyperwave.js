@@ -12,10 +12,24 @@
 const FramedStream = require('framed-stream');
 const goodbye = require('graceful-goodbye');
 const env = require('bare-env');
-const { createEngine } = require('hyperwave-engine');
+const { createEngine, DEFAULT_TOPIC } = require('hyperwave-engine');
 const { serveEngine } = require('hyperwave-engine/lib/rpc');
 // The engine ships no wallet — the desktop host picks Cashu (a separate package).
 const { createCashuWallet } = require('hyperwave-wallet-cashu');
+
+// App policy: which DIRECTORY TOPIC this peer sits on, per its wallet's settlement network. The
+// engine is network-agnostic — it exposes a generic `set-topic` command and never decides this; the
+// mapping is the consumer's. We keep mainnet (real sats) and testnet (test ecash) peers in SEPARATE
+// directories — a first, coarse separation layer in front of the per-burn cross-network filter — so
+// they never even discover each other. Testnet / unknown / wallet-less stay on the base topic (the
+// current demo topic, unchanged); mainnet moves to a distinct `<base>:mainnet` topic.
+const BASE_TOPIC = env.HYPERWAVE_TOPIC || DEFAULT_TOPIC;
+function topicForNetwork(network) {
+  if (network === 'mainnet') {
+    return BASE_TOPIC + ':mainnet';
+  }
+  return BASE_TOPIC;
+}
 
 // Mints this APP adds beyond the package's built-in list — `{ url, label, network }`. This ONE list
 // feeds both (a) the cross-network paid-gate filter (via walletOptions.knownMints → the wallet
@@ -28,6 +42,26 @@ const APP_EXTRA_MINTS = [];
 const pipe = new FramedStream(Bare.IPC);
 
 let engine = null;
+// Wallet-network → directory-topic policy, host-side. We tap the engine's outbound `wallet` events
+// (which carry the wallet's settlement `network`) and, on a network change, issue a generic
+// `set-topic` so this peer moves to that network's directory (topicForNetwork above). Wrapping the
+// seam's emit keeps the engine network-agnostic — every message still flows to the seam untouched.
+let lastNetwork = null;
+function emit(msg) {
+  if (
+    msg &&
+    msg.type === 'wallet' &&
+    msg.network &&
+    msg.network !== lastNetwork
+  ) {
+    lastNetwork = msg.network;
+    engine?.exec({
+      type: 'set-topic',
+      topicId: topicForNetwork(msg.network)
+    });
+  }
+  seam.emit(msg); // engine -> host: raised over the seam's EVENT channel
+}
 const seam = serveEngine({
   stream: pipe,
   // Build the engine when main's `init` arrives with the storage dir + injected seeds. bootstrap /
@@ -41,7 +75,9 @@ const seam = serveEngine({
       storageDir: command.storageDir || Bare.argv[2],
       config: {
         bootstrap: env.HYPERWAVE_BOOTSTRAP,
-        topicId: env.HYPERWAVE_TOPIC || undefined,
+        // Start on the base topic; a mainnet wallet moves us to its topic on the first `wallet`
+        // event (the emit tap above → set-topic). The host owns the base, so pass it explicitly.
+        topicId: BASE_TOPIC,
         // Injected by main from the keychain-encrypted store; undefined → the engine persists its
         // own plaintext seed files (headless/dev fallback), same as before secure storage.
         seed: injected.seed,
@@ -63,7 +99,7 @@ const seam = serveEngine({
       // engine wires it through the same `Wallet` interface — burns, tips, and the paid gate are
       // mechanism-agnostic.
       deps: { createPayments: createCashuWallet },
-      emit: seam.emit // engine -> host: raised over the seam's EVENT channel
+      emit // host-wrapped seam.emit (taps `wallet` events for the network → topic switch)
     });
     seam.attach(engine);
   }

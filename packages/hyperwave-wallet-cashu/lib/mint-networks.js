@@ -49,11 +49,6 @@ const KNOWN_MINTS = [
     network: 'testnet'
   },
   {
-    url: 'https://nofee.testnut.cashu.space',
-    label: 'testnut · no fees',
-    network: 'testnet'
-  },
-  {
     url: 'https://mint.minibits.cash/Bitcoin',
     label: '⚠ Minibits — mainnet · REAL sats',
     network: 'mainnet'

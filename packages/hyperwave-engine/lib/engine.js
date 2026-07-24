@@ -247,6 +247,27 @@ function createEngine({
     );
   }
 
+  // Live-switch this peer's directory topic (a generic re-join — leave the old topic, drop
+  // connections, re-join the new one under the same identity). The engine has NO opinion on WHY a
+  // host switches: the reference desktop host uses it to keep mainnet and testnet peers in separate
+  // directories, but that network→topic mapping is the HOST's policy, computed host-side and passed
+  // here as an opaque topic string.
+  function handleSetTopic(command) {
+    const topicId = command.topicId;
+    if (typeof topicId !== 'string' || !topicId) {
+      emitBadCommand('set-topic needs a non-empty topicId string', command);
+      return;
+    }
+    wave.setTopicId(topicId).catch((err) =>
+      emit({
+        type: 'error',
+        scope: 'command',
+        error: err.message,
+        command: 'set-topic'
+      })
+    );
+  }
+
   // Fund the wallet (mint-based wallets only, e.g. Cashu): mint `amount` at the active mint and
   // return a `fund-result` — its `invoice` is a bolt11 the host surfaces (QR) when the mint isn't
   // an auto-paying test mint. A chain wallet has no `fund` (funded by a faucet) → clear error.
@@ -492,6 +513,9 @@ function createEngine({
     // with autoSubscribe:false drives these to bound its core budget.
     'subscribe-wave': (command) => wave.subscribe(command.waveId),
     'unsubscribe-wave': (command) => wave.unsubscribe(command.waveId),
+    // Live-switch the directory topic (generic; the host decides the topic — e.g. mainnet/testnet
+    // separation, which is host policy, not the engine's).
+    'set-topic': (command) => handleSetTopic(command),
     'set-tag': (command) => wave.setTag(command.tag),
     'stage-entry': (command) => wave.stageEntry(command.entry),
     // Multi-account wallet: list the derivable accounts (offline) for a picker, and switch the

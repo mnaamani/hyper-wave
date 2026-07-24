@@ -784,13 +784,18 @@
       #center > * {
         pointer-events: auto;
       }
-      /* primary CTA: a solid bitcoin-orange pill with a soft orange glow */
+      /* primary CTA: a solid bitcoin-orange circle showing just the ⚡ spark, soft orange glow */
       #start {
-        padding: 12px 26px;
-        font-size: 17px;
-        font-weight: 700;
+        width: 92px;
+        height: 92px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        font-size: 40px;
+        line-height: 1;
         border: none;
-        border-radius: 26px;
+        border-radius: 50%;
         background: linear-gradient(135deg, #f7931a, #ffb04d);
         color: #0a0a0a;
         cursor: pointer;
@@ -802,18 +807,26 @@
       #start:hover {
         background: linear-gradient(135deg, #ffa733, #ffc266);
         box-shadow: 0 6px 28px rgba(247, 147, 26, 0.55);
+        transform: scale(1.05);
       }
       #start:active {
-        transform: translateY(1px);
+        transform: scale(0.97);
       }
-      /* after a wave, dock the button below the ring so it doesn't cover the gallery */
+      /* after a wave, dock the (smaller) circle below the ring so it doesn't cover the gallery */
       #start.docked {
         position: absolute;
         bottom: 2px;
         left: 50%;
+        width: 52px;
+        height: 52px;
+        font-size: 24px;
         transform: translateX(-50%);
-        padding: 8px 18px;
-        font-size: 14px;
+      }
+      #start.docked:hover {
+        transform: translateX(-50%) scale(1.05);
+      }
+      #start.docked:active {
+        transform: translateX(-50%) scale(0.97);
       }
       /* gallery collection progress (moments arrive after the spark finishes) */
       /* stage status: a centred spinner + message shown in the ring centre while there's no
@@ -1166,7 +1179,9 @@
            bubble selects (subscribes to) that wave. -->
       <div id="wave-orbit"></div>
       <div id="center">
-        <button id="start">⚡ Start new wave</button>
+        <button id="start" title="Start new wave" aria-label="Start new wave">
+          ⚡
+        </button>
         <div id="lobby">
           <div id="lobby-count"></div>
           <div id="lobby-msg">a wave is forming</div>

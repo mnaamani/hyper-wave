@@ -13,7 +13,12 @@ import {
   setMint,
   fundWallet
 } from './ipc.js';
-import { isCashu, unitLabel, activeMint } from './wallet-meta.js';
+import {
+  isCashu,
+  unitLabel,
+  activeMint,
+  activeNetwork
+} from './wallet-meta.js';
 import { qrDataUrl } from './qr.js';
 import { openAddress, txLink } from './explorer.js';
 
@@ -436,18 +441,28 @@ refreshBtn.onclick = () => {
   refreshBtn.classList.add('spin');
 };
 
+// An auto-paying test mint (testnut, on testnet) settles its own Lightning quote — there's no
+// invoice for the user to pay. Only a real (mainnet) mint returns a payable invoice; an unknown /
+// custom mint might too, so we only skip the invoice UI for a KNOWN testnet mint.
+function topupAutoPays() {
+  return activeNetwork() === 'testnet';
+}
+
 // Cashu: "Top up" mints sats at the active mint (testnut auto-pays; a real mint returns an invoice,
 // surfaced by fundResult). Chain wallet: open the Nile faucet to receive test TRX.
 faucetBtn.onclick = () => {
   if (isCashu()) {
     faucetBtn.disabled = true;
     faucetBtn.textContent = '⏳ minting…';
-    // Show the panel with a spinner immediately — a real mint can take several seconds to return
-    // the invoice (the worker polls the quote), so give feedback rather than a frozen button.
-    topupInvoice = '';
-    topupQrEl.removeAttribute('src');
-    topupHintEl.textContent = 'Requesting a Lightning invoice…';
-    topupEl.classList.add('show', 'loading');
+    // A real mint can take several seconds to return the invoice (the worker polls the quote), so
+    // show the panel with a spinner immediately for feedback. A testnut auto-pays with no invoice
+    // to display, so skip the panel entirely — the balance just rises a moment later.
+    if (!topupAutoPays()) {
+      topupInvoice = '';
+      topupQrEl.removeAttribute('src');
+      topupHintEl.textContent = 'Requesting a Lightning invoice…';
+      topupEl.classList.add('show', 'loading');
+    }
     fundWallet(TOPUP_SATS);
     return;
   }
@@ -461,8 +476,14 @@ faucetBtn.onclick = () => {
 //      you to scan + pay.
 export function fundResult({ minted, invoice, amount, error, pending }) {
   if (pending) {
-    // The invoice exists — surface it immediately (copy + OS handler + QR). The background poll
-    // keeps running; the button is free again (the invoice is now displayed).
+    // A testnut auto-pays its own quote — there's no invoice for the user to act on, so ignore this
+    // phase entirely and keep the "⏳ minting…" state until the final (minted) phase raises the
+    // balance a moment later.
+    if (topupAutoPays()) {
+      return;
+    }
+    // A real mint's invoice exists — surface it immediately (copy + OS handler + QR). The background
+    // poll keeps running; the button is free again (the invoice is now displayed).
     faucetBtn.disabled = false;
     faucetBtn.textContent = '⬆ Top up';
     if (invoice) {
