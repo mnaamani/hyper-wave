@@ -536,6 +536,55 @@
       #wallet-refresh.spin {
         animation: hw-spin 0.6s linear;
       }
+      /* cash-out form (revealed by the "Cash out" pill) */
+      #wallet-cashout {
+        display: none;
+        margin-top: 12px;
+      }
+      #wallet-cashout.show {
+        display: block;
+      }
+      #cashout-invoice {
+        width: 100%;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 13px;
+        padding: 7px 10px;
+        border: 1px solid #3a3a3a;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.35);
+        color: #f5f5f5;
+        box-sizing: border-box;
+      }
+      .cashout-row {
+        display: flex;
+        align-items: center;
+        margin-top: 8px;
+      }
+      .cashout-go {
+        margin-left: auto;
+        background: #f7931a;
+        color: #0a0a0a;
+        border-color: #f7931a;
+        font-weight: 700;
+      }
+      .cashout-go:hover {
+        background: #ffb04d;
+      }
+      .cashout-go:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #cashout-status {
+        margin-top: 8px;
+        font-size: 12px;
+        min-height: 14px;
+      }
+      #cashout-status.err {
+        color: #ff7a68;
+      }
+      #cashout-status.ok {
+        color: #f7931a;
+      }
       #wallet-topup {
         display: none;
         margin-top: 12px;
@@ -982,6 +1031,28 @@
           >
             ⬆ Top up
           </button>
+          <button
+            id="wallet-cashout-toggle"
+            class="pill"
+            title="Cash out to a Lightning invoice from your own wallet"
+          >
+            ⚡ Cash out
+          </button>
+        </div>
+        <!-- cash-out form: paste a bolt11 invoice from an external LN wallet; the mint melts
+             ecash to pay it, redeeming the balance back to Lightning -->
+        <div id="wallet-cashout">
+          <input
+            id="cashout-invoice"
+            placeholder="Paste a Lightning invoice (lnbc…)"
+            spellcheck="false"
+          />
+          <div class="cashout-row">
+            <button id="cashout-btn" class="pill cashout-go">
+              Pay invoice
+            </button>
+          </div>
+          <div id="cashout-status"></div>
         </div>
         <!-- top-up QR: shown when a (real-mint) top-up returns a bolt11 invoice to pay -->
         <div id="wallet-topup">

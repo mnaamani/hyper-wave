@@ -367,6 +367,8 @@ ipc.on('wallet', (msg) => {
 });
 // Cashu top-up (fund-wallet) and tip redeem (receive) results — surfaced as toasts.
 ipc.on('fund-result', (msg) => wallet.fundResult(msg));
+// Cash out (melt ecash → Lightning) result — surfaced in the wallet modal's cash-out form.
+ipc.on('cash-out-result', (msg) => wallet.cashOutResult(msg));
 ipc.on('redeem-result', (msg) => {
   if (!msg.error && msg.amount > 0) {
     hud.waveStatus(`🎉 tip redeemed — +${msg.amount} ${unitLabel()}`);

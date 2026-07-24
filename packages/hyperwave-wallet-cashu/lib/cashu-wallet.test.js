@@ -140,3 +140,18 @@ test('verifyBurnTx flags an uncompletable check as transient, not a rejection', 
   );
   wallet.dispose();
 });
+
+test('payInvoice rejects an empty invoice before any network op', async (t) => {
+  const dir = tempDir();
+  t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const wallet = await createCashuWallet({ storageDir: dir, seed: SEED });
+  // The invoice guard runs BEFORE loadMint, so a blank invoice fails offline (no
+  // mint contact) rather than hanging on a network call that can't succeed.
+  await t.exception(
+    () => wallet.payInvoice('  '),
+    /no invoice/,
+    'blank invoice → clear offline rejection'
+  );
+  wallet.dispose();
+});

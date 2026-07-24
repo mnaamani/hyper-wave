@@ -6,7 +6,8 @@ import {
   refreshWallet,
   fetchTransactions,
   setMint,
-  fundWallet
+  fundWallet,
+  cashOut
 } from './ipc.js';
 import { unitLabel, activeMint, activeNetwork } from './wallet-meta.js';
 import { qrDataUrl } from './qr.js';
@@ -42,6 +43,11 @@ const topupEl = document.getElementById('wallet-topup');
 const topupQrEl = document.getElementById('topup-qr');
 const topupHintEl = document.getElementById('topup-hint');
 const topupCloseBtn = document.getElementById('topup-close');
+const cashoutToggleBtn = document.getElementById('wallet-cashout-toggle');
+const cashoutEl = document.getElementById('wallet-cashout');
+const cashoutInput = document.getElementById('cashout-invoice');
+const cashoutBtn = document.getElementById('cashout-btn');
+const cashoutStatusEl = document.getElementById('cashout-status');
 
 // Icon + label + direction per Cashu ledger `kind` (the persisted proof-store
 // history — survives restarts, so it shows PAST sessions, not just this one).
@@ -50,7 +56,8 @@ const CASHU_META = {
   receive: { icon: '📥', label: 'Received a tip', dir: 'in' },
   send: { icon: '⚡', label: 'Tipped a moment', dir: 'out' },
   burn: { icon: '🔥', label: 'Burned participation fee', dir: 'out' },
-  consolidate: { icon: '🔄', label: 'Consolidated', dir: 'neutral' }
+  consolidate: { icon: '🔄', label: 'Consolidated', dir: 'neutral' },
+  cashout: { icon: '🏧', label: 'Cashed out to Lightning', dir: 'out' }
 };
 
 let topupInvoice = ''; // the bolt11 currently shown as a QR (click the QR to re-copy it)
@@ -173,6 +180,7 @@ function open() {
 function close() {
   viewEl.classList.remove('show');
   hideTopup(); // don't leave a stale invoice QR / spinner on reopen
+  cashoutEl.classList.remove('show'); // collapse the cash-out form too
 }
 openBtn.onclick = open;
 closeBtn.onclick = close;
@@ -297,3 +305,57 @@ topupQrEl.onclick = () => {
 };
 
 topupCloseBtn.onclick = hideTopup;
+
+// --- cash out ---------------------------------------------------------------
+// Melt ecash to pay a bolt11 invoice from the user's OWN external Lightning/BTC wallet, redeeming
+// the balance back to Lightning. The mint pays the invoice; only a real (mainnet) mint has the
+// Lightning connectivity to settle one — a testnut auto-pay mint can't, so we refuse up front.
+function setCashoutStatus(text, cls) {
+  cashoutStatusEl.textContent = text || '';
+  cashoutStatusEl.className = cls || '';
+}
+
+cashoutToggleBtn.onclick = () => {
+  const showing = cashoutEl.classList.toggle('show');
+  if (showing) {
+    cashoutInput.focus();
+  }
+};
+
+function submitCashout() {
+  const invoice = cashoutInput.value.trim();
+  if (!/^ln[a-z0-9]+$/i.test(invoice)) {
+    setCashoutStatus('Enter a Lightning invoice (lnbc…)', 'err');
+    return;
+  }
+  if (topupAutoPays()) {
+    setCashoutStatus(
+      'Cash out needs a real (mainnet) mint — a test mint has no Lightning.',
+      'err'
+    );
+    return;
+  }
+  cashoutBtn.disabled = true;
+  setCashoutStatus('⚡ cashing out…', '');
+  cashOut(invoice);
+}
+cashoutBtn.onclick = submitCashout;
+cashoutInput.onkeydown = (evt) => {
+  if (evt.key === 'Enter') {
+    submitCashout();
+  }
+};
+
+// Worker reply to a cash-out: success → clear the form + refresh; error → surface it.
+export function cashOutResult({ paid, fee, error }) {
+  cashoutBtn.disabled = false;
+  if (error) {
+    setCashoutStatus(`⚠️ cash-out failed: ${error}`, 'err');
+    return;
+  }
+  const feeNote = fee > 0 ? ` (fee ${fee} ${unitLabel(fee)})` : '';
+  setCashoutStatus(`✅ cashed out ${paid} ${unitLabel(paid)}${feeNote}`, 'ok');
+  cashoutInput.value = '';
+  refreshWallet();
+  fetchTransactions();
+}

@@ -77,6 +77,9 @@ export const fetchTransactions = () => send('fetch-transactions');
 export const setMint = (mint) =>
   send('set-wallet-options', { walletOptions: { mint } });
 export const fundWallet = (amount) => send('fund-wallet', { amount });
+// Cash out: melt ecash to pay a bolt11 invoice from the user's external Lightning/BTC wallet,
+// redeeming the balance back to Lightning. Result arrives as `cash-out-result`.
+export const cashOut = (invoice) => send('cash-out', { invoice });
 export const redeem = (token) => send('redeem', { token });
 
 export const appVersion = () => bridge.pkg().version;

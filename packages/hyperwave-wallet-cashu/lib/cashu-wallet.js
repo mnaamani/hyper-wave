@@ -311,6 +311,53 @@ class CashuWallet extends Wallet {
     return { moved, fee };
   }
 
+  // Cash out to Lightning: MELT home proofs to pay a user-supplied bolt11 invoice
+  // (from their external Lightning/BTC wallet), redeeming ecash back to sats on the
+  // network. The home mint pays the invoice over Lightning; any unused fee reserve
+  // comes back as change and is kept home. Requires a mint with REAL Lightning
+  // connectivity — a fake/auto-pay test mint (testnut) can't settle a real invoice,
+  // so this only makes sense on a mainnet mint. Returns { paid, fee } (sats): `paid`
+  // is the invoice amount, `fee` the Lightning routing + mint fee actually spent.
+  async payInvoice(invoice) {
+    const bolt11 = String(invoice || '').trim();
+    if (!bolt11) {
+      throw new Error('no invoice provided'); // cheap guard, before any network op
+    }
+    await this.#ensureLoaded();
+    const meltQuote = await this.#wallet.createMeltQuoteBolt11(bolt11);
+    const needed = meltQuote.amount + meltQuote.fee_reserve;
+    const homeProofs = this.#store.get(this.#mintUrl);
+    const available = Number(this.#cashu.sumProofs(homeProofs));
+    if (needed > available) {
+      throw new Error(
+        `insufficient balance: need ${needed} sat ` +
+          `(incl. ${meltQuote.fee_reserve} fee reserve), have ${available}`
+      );
+    }
+    // Melt ALL home proofs against the quote — the mint spends what it needs and
+    // returns the rest as change, which becomes the new home balance.
+    const melt = await this.#wallet.meltProofsBolt11(meltQuote, homeProofs);
+    this.#store.set(this.#mintUrl, melt.change || []);
+    const changeAmount = Number(this.#cashu.sumProofs(melt.change || []));
+    const fee = available - changeAmount - meltQuote.amount;
+    this.#store.addHistory({
+      kind: 'cashout',
+      amount: meltQuote.amount,
+      to: 'lightning',
+      memo: '',
+      token: '',
+      timestamp: null // stamped by the host (Date.now unavailable in some hosts)
+    });
+    this.#log(
+      'cashed out',
+      meltQuote.amount,
+      'sat to Lightning (fee',
+      fee,
+      ')'
+    );
+    return { paid: meltQuote.amount, fee };
+  }
+
   // Melt the proofs held at `sourceMint` and re-mint them at the home mint. The
   // home mint issues an invoice for the net amount; the source mint pays it.
   async #swapMintToHome(sourceMint) {
