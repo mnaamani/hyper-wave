@@ -71,6 +71,11 @@ test('networkOfMint classifies known mints, testnut markers, and unknowns', (t) 
     'a second known real mint is mainnet'
   );
   t.is(
+    networkOfMint('https://21mint.me'),
+    'mainnet',
+    'a third known real mint is mainnet'
+  );
+  t.is(
     networkOfMint('https://some.custom.mint.example'),
     'unknown',
     'an unlisted mint is unknown'

@@ -35,11 +35,13 @@
 
 /**
  * The curated mints this package ships. The DEFAULT (first) is the free `testnut`
- * TEST mint (auto-pays quotes, no real Lightning — play money). The two ⚠ mints
- * are real, reputable, Lightning-connected MAINNET mints (verified via /v1/info:
- * bolt11 mint+melt, NUT-07/11/12); selecting one means REAL sats. They're the
- * only way to actually settle cross-mint tips (`consolidate`), which fake mints
- * can't do — clearly labelled, never the default.
+ * TEST mint (auto-pays quotes, no real Lightning — play money). The ⚠ mints are
+ * real, reputable, Lightning-connected MAINNET mints (verified via /v1/info:
+ * bolt11 mint+melt on `sat`, NUT-07/11/12, plus a live mint-quote round-trip and
+ * a cross-mint melt); selecting one means REAL sats. They're the only way to
+ * actually settle cross-mint tips (`consolidate`), which fake mints can't do —
+ * clearly labelled, never the default. Multiple mainnet mints are listed so a
+ * single mint outage doesn't strand cross-mint transfers.
  * @type {KnownMint[]}
  */
 const KNOWN_MINTS = [
@@ -51,6 +53,11 @@ const KNOWN_MINTS = [
   {
     url: 'https://mint.minibits.cash/Bitcoin',
     label: '⚠ Minibits — mainnet · REAL sats',
+    network: 'mainnet'
+  },
+  {
+    url: 'https://21mint.me',
+    label: '⚠ 21Mint — mainnet · REAL sats',
     network: 'mainnet'
   },
   {
