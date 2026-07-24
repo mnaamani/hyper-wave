@@ -15,7 +15,7 @@ let joined = false;
 let deadline = 0;
 let timer = null;
 let onCancelCb = null;
-let fee = null; // the initiator-set participation fee (TRX), null on an unpaid/wallet-less wave
+let fee = null; // the initiator-set participation fee (sats), null on an unpaid/wallet-less wave
 
 // Register what happens when a non-joiner dismisses the lobby (app.js un-dims + resumes browsing).
 export function onCancel(cb) {

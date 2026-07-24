@@ -7,9 +7,8 @@
 // so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js';
 import { tip, note, dm } from './ipc.js';
-import { unitLabel, isCashu } from './wallet-meta.js';
+import { unitLabel } from './wallet-meta.js';
 import { classify as classifyNsfw } from './nsfw.js';
-import { txLink } from './explorer.js';
 
 const stageEl = document.getElementById('stage-status');
 const stageTextEl = document.getElementById('stage-status-text');
@@ -17,9 +16,8 @@ const tipBtn = document.getElementById('tip');
 const toastEl = document.getElementById('tip-toast');
 const nsfwCover = document.getElementById('nsfw-cover');
 const nsfwRevealBtn = document.getElementById('nsfw-reveal');
-// The tip amount, in the active wallet's unit. Cashu is in sats — a few sats so the tip
-// survives the mint's ~1-sat swap fee; a chain wallet tips 1 whole unit (TRX).
-const tipAmount = () => (isCashu() ? 5 : 1);
+// The tip amount, in sats — a few sats so the tip survives the mint's ~1-sat swap fee.
+const tipAmount = () => 5;
 
 let items = [];
 let centerIdx = 0;
@@ -169,37 +167,20 @@ nsfwRevealBtn.onclick = () => {
   }
 };
 
-// Worker reply to a tip: show the clickable tx (success) or the error, then re-enable.
+// Worker reply to a tip: `hash` is the Cashu bearer token (no block explorer). On success,
+// deliver the token PRIVATELY (unicast to the recipient) so the token + the who-tipped-whom don't
+// hit the flood — Chaumian privacy at the network layer too — then flood a STRIPPED social-proof
+// note (no token, no recipient) for the gallery celebration.
 export function tipResult({ hash, error }) {
   if (hash) {
-    // Chain tip → a clickable explorer tx; Cashu tip → `hash` is a bearer token (no explorer).
-    if (isCashu()) {
-      toastEl.textContent = '✅ tipped';
-    } else {
-      toastEl.replaceChildren('✅ tipped — ', txLink(hash));
-    }
+    toastEl.textContent = '✅ tipped';
     if (lastTip) {
-      if (isCashu()) {
-        // Cashu: deliver the bearer token PRIVATELY (unicast to the recipient) so the token + the
-        // who-tipped-whom don't hit the flood — Chaumian privacy at the network layer too. Then a
-        // STRIPPED social-proof note (no token, no recipient) for the gallery celebration.
-        dm(lastTip.waveId, lastTip.peerId, {
-          kind: 'tip',
-          token: hash,
-          amount: lastTip.amount
-        });
-        note(lastTip.waveId, { kind: 'tip', amount: lastTip.amount });
-      } else {
-        // Chain (Tron): the tip is public on-chain anyway — flood the full note (to + tx hash) so
-        // the recipient celebrates and everyone sees the social proof. (Roster-gated in the engine.)
-        note(lastTip.waveId, {
-          kind: 'tip',
-          to: lastTip.address,
-          peerId: lastTip.peerId,
-          amount: lastTip.amount,
-          hash
-        });
-      }
+      dm(lastTip.waveId, lastTip.peerId, {
+        kind: 'tip',
+        token: hash,
+        amount: lastTip.amount
+      });
+      note(lastTip.waveId, { kind: 'tip', amount: lastTip.amount });
     }
   } else {
     toastEl.textContent = `⚠️ tip failed: ${error || 'unknown'}`;

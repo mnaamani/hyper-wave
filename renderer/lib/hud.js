@@ -35,10 +35,6 @@ export function networkStatus({ peers }) {
 export function waveStatus(text) {
   waveEl.innerText = text || '';
 }
-// Like waveStatus but for a mix of text + nodes (e.g. a clickable tx link from explorer.js).
-export function waveStatusNodes(...parts) {
-  waveEl.replaceChildren(...parts);
-}
 // OTA update notice (its own line), set by updater.js when the app is updating. Separate again so
 // it never collides with the network status line.
 export function updatingStatus(text) {

@@ -15,8 +15,8 @@ contextBridge.exposeInMainWorld('bridge', {
   isPackaged() {
     return ipcRenderer.sendSync('isPackaged');
   },
-  // Copy text to the clipboard (wallet address) and open external links (Nile faucet) via main —
-  // the sandboxed renderer can't do these itself.
+  // Copy text to the clipboard (a Lightning invoice) and open external links (a lightning: invoice)
+  // via main — the sandboxed renderer can't do these itself.
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   applyUpdate: () => ipcRenderer.invoke('pear:applyUpdate'),

@@ -470,17 +470,17 @@
       #wallet-kind:empty {
         display: none;
       }
-      /* account picker: label + dropdown of the seed's BIP-44 accounts */
-      #wallet-account-row {
+      /* mint picker: label + dropdown of the curated Cashu mints */
+      #wallet-mint-row {
         margin-top: 12px;
       }
-      #wallet-account-row .account-label {
+      #wallet-mint-row .mint-label {
         font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 0.6px;
         opacity: 0.55;
       }
-      #wallet-account {
+      #wallet-mint {
         flex: 1;
         font-family: ui-monospace, Menlo, monospace;
         font-size: 12px;
@@ -536,33 +536,6 @@
       #wallet-refresh.spin {
         animation: hw-spin 0.6s linear;
       }
-      /* the address is a link to the block explorer */
-      #wallet-address {
-        color: #f7931a;
-        text-decoration: underline;
-        text-underline-offset: 2px;
-        cursor: pointer;
-        word-break: break-all;
-      }
-      #wallet-address:hover {
-        color: #ffcc80;
-      }
-      /* Cashu: the address is an ecash identity, not a chain address — no block
-         explorer to open, so render it as plain (non-link) monospace text. */
-      #wallet-address.plain,
-      #wallet-address.plain:hover {
-        color: #cccccc;
-        text-decoration: none;
-        cursor: default;
-      }
-      /* send form (revealed by the "Send ▸" pill) */
-      #wallet-send {
-        display: none;
-        margin-top: 12px;
-      }
-      #wallet-send.show {
-        display: block;
-      }
       #wallet-topup {
         display: none;
         margin-top: 12px;
@@ -607,57 +580,6 @@
         color: #999999;
         margin: 8px 0;
       }
-      #wallet-send input {
-        font-family: ui-monospace, Menlo, monospace;
-        font-size: 13px;
-        padding: 7px 10px;
-        border: 1px solid #3a3a3a;
-        border-radius: 10px;
-        background: rgba(0, 0, 0, 0.35);
-        color: #f5f5f5;
-        box-sizing: border-box;
-      }
-      #send-to {
-        width: 100%;
-      }
-      .send-amt-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 8px;
-      }
-      #send-amount {
-        width: 120px;
-      }
-      .send-unit {
-        opacity: 0.6;
-        font-size: 12px;
-      }
-      .send-go {
-        margin-left: auto;
-        background: #f7931a;
-        color: #0a0a0a;
-        border-color: #f7931a;
-        font-weight: 700;
-      }
-      .send-go:hover {
-        background: #ffb04d;
-      }
-      .send-go:disabled {
-        opacity: 0.5;
-        cursor: default;
-      }
-      #send-status {
-        margin-top: 8px;
-        font-size: 12px;
-        min-height: 14px;
-      }
-      #send-status.err {
-        color: #ff7a68;
-      }
-      #send-status.ok {
-        color: #f7931a;
-      }
       .wallet-section {
         margin-top: 18px;
         font-size: 11px;
@@ -695,28 +617,6 @@
       }
       .tx-row .tx-amt.in {
         color: #f7931a; /* incoming */
-      }
-      #wallet-explorer {
-        display: inline-block;
-        margin-top: 14px;
-        color: #f7931a;
-        text-decoration: underline;
-        text-underline-offset: 2px;
-        cursor: pointer;
-        font-size: 12px;
-      }
-      #wallet-explorer:hover {
-        color: #ffcc80;
-      }
-      /* clickable tx hash inside a toast/status line — inherits the line's colour */
-      .tx-link {
-        color: inherit;
-        text-decoration: underline;
-        text-underline-offset: 2px;
-        cursor: pointer;
-      }
-      .tx-link:hover {
-        opacity: 0.75;
       }
       #tip {
         display: none;
@@ -1065,58 +965,23 @@
         </div>
         <div id="wallet-kind"></div>
         <div id="wallet-balance"></div>
-        <!-- account picker: all accounts share the seed; each is a distinct BIP-44 address -->
-        <div class="wallet-row" id="wallet-account-row">
-          <span class="account-label">Account</span>
+        <!-- mint picker: the curated Cashu mints relayed from the worker -->
+        <div class="wallet-row" id="wallet-mint-row">
+          <span class="mint-label">Mint</span>
           <select
-            id="wallet-account"
-            title="Choose the active account — all derived from the same seed (BIP-44)"
+            id="wallet-mint"
+            title="Choose the active Cashu mint"
           ></select>
         </div>
         <div class="wallet-row">
           <button id="wallet-refresh" title="Re-check your balance">🔄</button>
-          <a id="wallet-address" title="View this address on Tronscan"></a>
           <button
-            id="wallet-copy"
+            id="wallet-topup-btn"
             class="pill"
-            title="Copy your wallet address"
+            title="Mint sats at the selected mint"
           >
-            📋 Copy
+            ⬆ Top up
           </button>
-          <button
-            id="wallet-faucet"
-            class="pill"
-            title="Get free testnet TRX from the Nile faucet"
-          >
-            💧 Get test TRX
-          </button>
-          <button
-            id="wallet-send-toggle"
-            class="pill"
-            title="Send TRX to another address"
-          >
-            Send ▸
-          </button>
-        </div>
-        <!-- send form: revealed by the "Send ▸" pill; a plain TRX transfer to any address -->
-        <div id="wallet-send">
-          <input
-            id="send-to"
-            placeholder="Recipient address (T…)"
-            spellcheck="false"
-          />
-          <div class="send-amt-row">
-            <input
-              id="send-amount"
-              type="number"
-              min="0"
-              step="1"
-              placeholder="Amount"
-            />
-            <span class="send-unit">TRX</span>
-            <button id="send-btn" class="pill send-go">Send</button>
-          </div>
-          <div id="send-status"></div>
         </div>
         <!-- top-up QR: shown when a (real-mint) top-up returns a bolt11 invoice to pay -->
         <div id="wallet-topup">
@@ -1132,16 +997,8 @@
           </div>
           <button id="topup-close" class="pill">Done</button>
         </div>
-        <div class="wallet-section" id="wallet-txs-title">
-          Transactions (this session)
-        </div>
+        <div class="wallet-section">Recent transactions</div>
         <div id="wallet-txs"></div>
-        <a
-          id="wallet-explorer"
-          title="Open the full on-chain history on Tronscan"
-        >
-          View full history on Tronscan →
-        </a>
       </div>
     </div>
 
@@ -1217,7 +1074,7 @@
           <div id="stage-status-text"></div>
         </div>
         <!-- tip: a floating action on the featured moment (overlaps its lower edge) -->
-        <button id="tip" title="Send a tip to this moment">⚡ Tip 1 TRX</button>
+        <button id="tip" title="Send a tip to this moment">⚡ Tip</button>
       </div>
     </div>
 

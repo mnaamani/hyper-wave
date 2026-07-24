@@ -13,11 +13,9 @@ import { getActiveWave, setActiveWave } from './lib/active.js';
 import {
   setWalletMeta,
   unitLabel,
-  isCashu,
   activeNetwork,
   networkMatches
 } from './lib/wallet-meta.js';
-import { txLink } from './lib/explorer.js';
 
 // Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the spark
 // around the ring to browse the gallery once the completion replay has run).
@@ -29,8 +27,7 @@ scrubber.init();
 const state = {
   countrySent: false, // one-shot: pushed our saved country to the worker once it came up
   peers: 0, // number of live peers in the ring (drives the status line)
-  lobbyDeadline: 0, // ~when the lobby closes (wave start), for the capture countdown
-  myAddress: null // my wallet address — to recognise a tip note addressed to me
+  lobbyDeadline: 0 // ~when the lobby closes (wave start), for the capture countdown
 };
 const setState = (patch) => Object.assign(state, patch);
 
@@ -355,7 +352,6 @@ ipc.on('wallet', (msg) => {
   setWalletMeta(msg); // active mechanism + unit + mint + network, for labels + the same-network filter
   wallet.walletStatus(msg); // self-custodial wallet address + balance (wallet-view modal)
   gallery.setMyAddress(msg.address); // so we do not offer to tip our own moment
-  setState({ myAddress: msg.address }); // to recognise a tip note addressed to me
   // A live mint switch can change my network — re-render the directory so now-cross-network waves are
   // hidden, and DESELECT the active wave if it's become cross-network (its gallery + tip must go away,
   // a cross-network tip is meaningless). Only when the network actually changed.
@@ -376,34 +372,19 @@ ipc.on('redeem-result', (msg) => {
     hud.waveStatus(`🎉 tip redeemed — +${msg.amount} ${unitLabel()}`);
   }
 });
-// The seed's BIP-44 accounts (for the wallet-view picker); a distinct address per index.
-ipc.on('accounts', (msg) => wallet.setAccounts(msg));
-ipc.on('tip-result', (msg) => {
-  gallery.tipResult(msg);
-  if (msg.hash) {
-    wallet.record({ kind: 'tip', hash: msg.hash, amount: msg.amount });
-  }
-});
-ipc.on('send-result', (msg) => wallet.sendResult(msg));
+ipc.on('tip-result', (msg) => gallery.tipResult(msg));
 ipc.on('transactions', (msg) => wallet.setTransactions(msg.list));
 ipc.on('burn-result', (msg) => {
-  // participation fee (start or join), burned to the black hole (skin in the game). `stage`
-  // keeps us from claiming "burned" before the tx is actually confirmed on-chain.
+  // participation fee (start or join), burned to the NUMS black-hole pubkey (skin in the game).
+  // `stage` keeps us from claiming "burned" before the burn is confirmed. A Cashu burn is a bearer
+  // token that settles instantly — no block explorer, no on-chain wait.
   const what = msg.reason === 'join' ? 'join' : 'start';
-  // A chain burn links to its block explorer + confirms on-chain; a Cashu burn is a
-  // bearer token (no explorer) that settles instantly, so drop both for ecash.
-  const tx = msg.hash && !isCashu() ? [' (', txLink(msg.hash), ')'] : [];
-  const onChain = isCashu() ? '' : ' on-chain';
   if (msg.stage === 'confirming') {
-    hud.waveStatusNodes(`⏳ confirming ${what} burn${onChain}…`, ...tx);
+    hud.waveStatus(`⏳ confirming ${what} burn…`);
   } else if (msg.stage === 'failed') {
     hud.waveStatus(`⚠️ ${what} fee burn failed: ${msg.error}`);
   } else {
-    hud.waveStatusNodes(
-      `🔥 ${what} fee burned - ${msg.amount} ${unitLabel()}`,
-      ...tx
-    );
-    wallet.record({ kind: 'burn', hash: msg.hash, amount: msg.amount }); // 'burned' stage
+    hud.waveStatus(`🔥 ${what} fee burned - ${msg.amount} ${unitLabel()}`);
   }
 });
 
@@ -554,25 +535,15 @@ const EVENT_HANDLERS = {
     ipc.refreshWallet();
   },
 
-  // A roster member broadcast a note on the wave (flooded). For a CHAIN wallet (Tron) the tip is
-  // public anyway, so the note carries `to` + `hash`: if addressed to my wallet I got tipped
-  // (celebrate + refresh). For CASHU the note is a stripped social-proof announcement (no token, no
-  // recipient — the token comes via `dm`), so it falls through to the "a moment was tipped" line.
+  // A roster member broadcast a note on the wave (flooded). A Cashu tip note is a STRIPPED
+  // social-proof announcement (no token, no recipient — the actual bearer token arrives privately
+  // via `dm`), so this just celebrates that a moment was tipped.
   note: (evt) => {
     const payload = evt.note || {};
     if (payload.kind !== 'tip') {
       return;
     }
-    if (payload.to && payload.to === state.myAddress) {
-      hud.waveStatus(`🎉 you got tipped ${payload.amount} ${unitLabel()}!`);
-      ring.startFlourish();
-      if (payload.hash) {
-        ipc.redeem(payload.hash); // chain tip: redeem is a no-op; settled on-chain
-      }
-      ipc.refreshWallet();
-    } else {
-      hud.waveStatus(`💸 a moment was tipped ${payload.amount} ${unitLabel()}`);
-    }
+    hud.waveStatus(`💸 a moment was tipped ${payload.amount} ${unitLabel()}`);
   },
 
   // a completed wave always has ≥1 moment (the initiator's) — it may land a beat after this

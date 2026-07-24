@@ -1,35 +1,23 @@
-// Wallet view: the self-custodial wallet modal, opened from the top-right ₿. Shows the
-// balance + address (with refresh / copy / faucet / send) and a transaction history.
-// Chain wallet: merges the app's own events (burns / tips / sends — instant, optimistic)
-// with the on-chain history fetched from the worker (which also surfaces funds/tips
-// RECEIVED); each row links to Tronscan. Cashu: renders the persisted proof-store ledger
-// (survives restarts — shows PAST sessions too), no explorer. Extracted from hud.js.
+// Wallet view: the self-custodial Cashu (ecash) wallet modal, opened from the top-right ₿. Shows the
+// balance, a mint picker, a "Top up" (mint funds), and the persisted proof-store ledger (survives
+// restarts — shows PAST sessions too). Cashu is the desktop's only payment mechanism; there is no
+// chain address, block explorer, or on-chain send here. Extracted from hud.js.
 import {
   refreshWallet,
-  sendTrx,
   fetchTransactions,
-  listAccounts,
-  setAccount,
   setMint,
   fundWallet
 } from './ipc.js';
-import {
-  isCashu,
-  unitLabel,
-  activeMint,
-  activeNetwork
-} from './wallet-meta.js';
+import { unitLabel, activeMint, activeNetwork } from './wallet-meta.js';
 import { qrDataUrl } from './qr.js';
-import { openAddress, txLink } from './explorer.js';
 
-const NILE_FAUCET_URL = 'https://nileex.io/join/getJoinPage';
 // The curated Cashu mints for the picker are RELAYED from the worker on the `wallet` message
-// (`mints`, adopted in walletStatus below). That list is the SINGLE SOURCE OF TRUTH — the worker's wallet
-// reports the same `{url,label,network}` list it classifies against for the cross-network filter
-// (packages/hyperwave-wallet-cashu/lib/mint-networks.js) — so a mint's picker label and the filter's
-// testnet/mainnet classification can never drift, and an app-added mint appears in both with no
-// duplicated list here. Until the first `wallet` message arrives, this fallback (the default test
-// mint) keeps the picker non-empty.
+// (`mints`, adopted in walletStatus below). That list is the SINGLE SOURCE OF TRUTH — the worker's
+// wallet reports the same `{url,label,network}` list it classifies against for the cross-network
+// filter (packages/hyperwave-wallet-cashu/lib/mint-networks.js) — so a mint's picker label and the
+// filter's testnet/mainnet classification can never drift, and an app-added mint appears in both
+// with no duplicated list here. Until the first `wallet` message arrives, this fallback (the default
+// test mint) keeps the picker non-empty.
 let cashuMints = [
   {
     url: 'https://testnut.cashu.space',
@@ -43,38 +31,17 @@ const TOPUP_SATS = 100;
 const viewEl = document.getElementById('wallet-view');
 const openBtn = document.getElementById('wallet-btn');
 const closeBtn = document.getElementById('wallet-close');
-const titleEl = document.getElementById('wallet-title');
 const balanceEl = document.getElementById('wallet-balance');
 const balChipEl = document.getElementById('wallet-bal'); // top-bar balance pill
 const kindEl = document.getElementById('wallet-kind');
-const addressEl = document.getElementById('wallet-address');
 const refreshBtn = document.getElementById('wallet-refresh');
-const copyBtn = document.getElementById('wallet-copy');
-const faucetBtn = document.getElementById('wallet-faucet');
+const topupBtn = document.getElementById('wallet-topup-btn');
 const txsEl = document.getElementById('wallet-txs');
-const txsTitleEl = document.getElementById('wallet-txs-title');
-const explorerEl = document.getElementById('wallet-explorer');
-const sendToggleBtn = document.getElementById('wallet-send-toggle');
-const sendEl = document.getElementById('wallet-send');
-const sendToInput = document.getElementById('send-to');
-const sendAmountInput = document.getElementById('send-amount');
-const sendBtn = document.getElementById('send-btn');
-const sendStatusEl = document.getElementById('send-status');
-const accountSelect = document.getElementById('wallet-account');
-const accountLabel = document.querySelector(
-  '#wallet-account-row .account-label'
-);
+const mintSelect = document.getElementById('wallet-mint');
 const topupEl = document.getElementById('wallet-topup');
 const topupQrEl = document.getElementById('topup-qr');
 const topupHintEl = document.getElementById('topup-hint');
 const topupCloseBtn = document.getElementById('topup-close');
-
-// Icon + label per kind of outgoing tx the app itself makes (worker events).
-const SENT_META = {
-  burn: { icon: '🔥', label: 'Burned participation fee' },
-  tip: { icon: '⚡', label: 'Tipped a moment' },
-  send: { icon: '📤', label: 'Sent' }
-};
 
 // Icon + label + direction per Cashu ledger `kind` (the persisted proof-store
 // history — survives restarts, so it shows PAST sessions, not just this one).
@@ -86,60 +53,28 @@ const CASHU_META = {
   consolidate: { icon: '🔄', label: 'Consolidated', dir: 'neutral' }
 };
 
-let walletAddress = ''; // full address, for copy + faucet + explorer links
-let activeAccount = 0; // the active BIP-44 account index (multi-account wallet)
 let topupInvoice = ''; // the bolt11 currently shown as a QR (click the QR to re-copy it)
-const txById = new Map(); // hash -> { hash, dir, icon, label, amount, ts } — merged history
 
-// Worker `wallet` message (address + balance + which account): keep the modal live whether open or
-// not. A live account switch arrives here too (a new accountIndex + address) — clear the old
-// account's history and re-fetch for the new one.
-export function walletStatus({
-  address,
-  amount,
-  unit,
-  accountIndex,
-  mint,
-  mints
-}) {
+// Worker `wallet` message (balance + active mint): keep the modal live whether open or not.
+export function walletStatus({ address, amount, unit, mint, mints }) {
   if (!address) {
     return;
   }
-  // Adopt the worker-relayed mint list (Cashu) as the picker's source of truth.
+  // Adopt the worker-relayed mint list as the picker's source of truth.
   if (Array.isArray(mints) && mints.length) {
     cashuMints = mints;
   }
-  if (Number.isInteger(accountIndex) && accountIndex !== activeAccount) {
-    activeAccount = accountIndex;
-    txById.clear(); // the history belonged to the previous account's address
-    if (!isCashu()) {
-      fetchTransactions();
-    }
-    syncAccountSelect();
-  }
-  walletAddress = address;
-  // Cashu balances are whole sats; a chain balance shows 2 decimals.
-  const shown = isCashu() ? String(amount) : amount.toFixed(2);
   balanceEl.innerText =
-    `${shown} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
-  balChipEl.textContent = `${shown} ${unitLabel(amount)}`; // top-bar pill
-  addressEl.innerText = address.slice(0, 6) + '…' + address.slice(-4);
-  // A chain address deep-links to its block explorer; a Cashu identity pubkey has
-  // no explorer, so drop the link affordance + the misleading Tronscan tooltip.
-  addressEl.classList.toggle('plain', isCashu());
-  addressEl.title = isCashu()
-    ? 'Your ecash wallet identity (no block explorer — use Copy)'
-    : 'View this address on Tronscan';
-  renderWalletKind(mint || activeMint());
-  // Cashu reuses the account <select> as a MINT picker (no BIP-44 accounts), the faucet button as
-  // a "Top up" (mint-funded), and hides the chain-only Send form + explorer links.
-  if (isCashu()) {
-    applyCashuChrome(mint || activeMint());
-    // A balance push follows every money op — re-pull the persisted ledger so a
-    // just-made top-up/tip/burn shows without a manual refresh (local, no network).
-    if (viewEl.classList.contains('show')) {
-      fetchTransactions();
-    }
+    `${amount} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
+  balChipEl.textContent = `${amount} ${unitLabel(amount)}`; // top-bar pill
+  const currentMint = mint || activeMint();
+  kindEl.textContent = mintHost(currentMint);
+  topupBtn.title = `Mint ${TOPUP_SATS} sat at the selected mint`;
+  renderMintPicker(currentMint);
+  // A balance push follows every money op — re-pull the persisted ledger so a
+  // just-made top-up/tip/burn shows without a manual refresh (local, no network).
+  if (viewEl.classList.contains('show')) {
+    fetchTransactions();
   }
 }
 
@@ -155,38 +90,14 @@ function mintHost(mintUrl) {
   }
 }
 
-// Title the modal by wallet type ("Cashu wallet" / "Tron wallet") and show the
-// active mint (Cashu) or network (chain) as the subtitle beneath it.
-function renderWalletKind(mintUrl) {
-  if (isCashu()) {
-    titleEl.textContent = 'Cashu wallet';
-    kindEl.textContent = mintHost(mintUrl);
-    txsTitleEl.textContent = 'Recent transactions';
-    return;
-  }
-  titleEl.textContent = 'Tron wallet';
-  kindEl.textContent = 'Nile testnet';
-  txsTitleEl.textContent = 'Transactions (this session)';
-}
-
-// Repurpose the modal's chain-wallet chrome for Cashu: mint picker, top-up, no explorer/send.
-function applyCashuChrome(currentMint) {
-  faucetBtn.textContent = '⬆ Top up';
-  faucetBtn.title = `Mint ${TOPUP_SATS} sat at the selected mint`;
-  accountLabel.textContent = 'Mint'; // the picker chooses a mint, not a BIP-44 account
-  sendToggleBtn.style.display = 'none'; // the modal can't deliver a bearer token
-  explorerEl.style.display = 'none'; // ecash has no block explorer (no Tronscan link)
-  renderMintPicker(currentMint);
-}
-
-// Render the curated mints into the account <select>, marking the active one. Includes the active
-// mint even if it's a custom one not in the list, so the selection always reflects reality.
+// Render the curated mints into the picker, marking the active one. Includes the active mint even if
+// it's a custom one not in the list, so the selection always reflects reality.
 function renderMintPicker(currentMint) {
   const known = cashuMints.slice();
   if (currentMint && !known.some((mint) => mint.url === currentMint)) {
     known.unshift({ url: currentMint, label: currentMint });
   }
-  accountSelect.replaceChildren(
+  mintSelect.replaceChildren(
     ...known.map((mint) => {
       const option = document.createElement('option');
       option.value = mint.url;
@@ -197,114 +108,16 @@ function renderMintPicker(currentMint) {
   );
 }
 
-// Worker `accounts` message: render the picker (all derived from the same seed, distinct addresses).
-export function setAccounts({ list, active }) {
-  if (!list) {
-    return;
-  }
-  if (Number.isInteger(active)) {
-    activeAccount = active;
-  }
-  accountSelect.replaceChildren(
-    ...list.map((account) => {
-      const option = document.createElement('option');
-      option.value = String(account.index);
-      const short =
-        account.address.slice(0, 6) + '…' + account.address.slice(-4);
-      option.textContent = `Account ${account.index + 1} — ${short}`;
-      option.selected = account.index === activeAccount;
-      return option;
-    })
-  );
-}
-
-// Keep the dropdown's selection in sync with the active account (e.g. after a switch confirms).
-function syncAccountSelect() {
-  if (accountSelect.options.length) {
-    accountSelect.value = String(activeAccount);
-  }
-}
-
-// Switch the active account (live re-wire, same seed). The worker replies with a new `wallet`
-// message carrying the new accountIndex + address, which walletStatus applies above.
-accountSelect.onchange = () => {
-  // Cashu: the <select> holds mint URLs — switch the active mint (live re-wire). Chain wallet:
-  // it holds BIP-44 account indices.
-  if (isCashu()) {
-    if (accountSelect.value) {
-      setMint(accountSelect.value);
-    }
-    return;
-  }
-  const index = Number(accountSelect.value);
-  if (Number.isInteger(index) && index !== activeAccount) {
-    setAccount(index);
+// Switch the active mint (live re-wire). The worker replies with a fresh `wallet` message.
+mintSelect.onchange = () => {
+  if (mintSelect.value) {
+    setMint(mintSelect.value);
   }
 };
 
-// Record an outgoing tx the app just made (burn / tip / send), from a worker event — instant,
-// with a specific label. Wins over the generic on-chain view for the same hash.
-export function record({ kind, hash, amount }) {
-  // Cashu history comes from the persisted proof-store ledger (renderCashuHistory),
-  // which already logs every op — so the chain-style optimistic merge is unused here.
-  if (isCashu()) {
-    return;
-  }
-  if (!hash) {
-    return;
-  }
-  const meta = SENT_META[kind] || { icon: '•', label: kind };
-  txById.set(hash, {
-    hash,
-    dir: 'out',
-    amount,
-    ts: Date.now(),
-    fromEvent: true,
-    ...meta
-  });
-  renderHistory();
-}
-
-// Icon + label for an on-chain tx the app didn't log from its own events (those use SENT_META).
-function chainTxMeta(tx) {
-  if (tx.direction === 'in') {
-    return { icon: '📥', label: 'Received TRX' };
-  }
-  if (tx.memo?.startsWith('hyperwave:')) {
-    return { icon: '🔥', label: 'Burned participation fee' };
-  }
-  return { icon: '📤', label: 'Sent TRX' };
-}
-
-// Merge the wallet's on-chain history (both directions) fetched by the worker. A hash the app
-// already logged from its own event keeps that richer label; everything else — crucially funds
-// and tips RECEIVED — is added here.
+// Worker `transactions` message: the persisted proof-store ledger (all sessions), already
+// newest-first — render it directly (no hash to key/merge, no block explorer).
 export function setTransactions(list) {
-  // Cashu: the list is the persisted proof-store ledger (all sessions), already
-  // newest-first — render it directly (no hash to key/merge, no block explorer).
-  if (isCashu()) {
-    renderCashuHistory(list);
-    return;
-  }
-  for (const tx of list || []) {
-    if (txById.get(tx.hash)?.fromEvent) {
-      continue; // keep the app's own labelled entry
-    }
-    const meta = chainTxMeta(tx);
-    txById.set(tx.hash, {
-      hash: tx.hash,
-      dir: tx.direction,
-      amount: tx.amount,
-      ts: tx.timestamp || 0,
-      ...meta
-    });
-  }
-  renderHistory();
-}
-
-// Render the Cashu proof-store ledger (persisted across sessions). Entries keep
-// store order (newest first); timestamps are null in the store, so age is blank.
-function renderCashuHistory(list) {
   const rows = (list || []).slice(0, 10);
   txsEl.replaceChildren(
     ...rows.map((entry) => {
@@ -351,44 +164,10 @@ function ago(ts) {
   return `${Math.floor(seconds / 86400)}d`;
 }
 
-function renderHistory() {
-  const rows = [...txById.values()].sort((a, b) => b.ts - a.ts).slice(0, 10);
-  txsEl.replaceChildren(
-    ...rows.map((tx) => {
-      const row = document.createElement('div');
-      row.className = 'tx-row';
-      const label = document.createElement('span');
-      label.className = 'tx-label';
-      label.textContent = `${tx.icon} ${tx.label}`;
-      const time = document.createElement('span');
-      time.className = 'tx-time';
-      time.textContent = ago(tx.ts);
-      const amt = document.createElement('span');
-      amt.className = tx.dir === 'in' ? 'tx-amt in' : 'tx-amt';
-      if (typeof tx.amount === 'number') {
-        const sign = tx.dir === 'in' ? '+' : '−';
-        amt.textContent = `${sign}${tx.amount} ${unitLabel()}`;
-      }
-      // A Cashu `hash` is a bearer token (no block explorer) — omit the tx link.
-      row.append(label, time, amt);
-      if (!isCashu()) {
-        row.append(txLink(tx.hash));
-      }
-      return row;
-    })
-  );
-}
-
 // --- modal open/close -------------------------------------------------------
 function open() {
   refreshWallet(); // grab a fresh balance each time it's opened
-  // Pull the transaction history: chain = on-chain (incl. received); Cashu = the
-  // persisted proof-store ledger (past sessions too). The BIP-44 account picker is
-  // chain-only (Cashu's picker is a mint list, rendered from the wallet msg).
-  fetchTransactions();
-  if (!isCashu()) {
-    listAccounts();
-  }
+  fetchTransactions(); // the persisted proof-store ledger (past sessions too)
   viewEl.classList.add('show');
 }
 function close() {
@@ -409,33 +188,11 @@ document.addEventListener('keydown', (evt) => {
 });
 
 // --- wallet actions ---------------------------------------------------------
-// Both the short address and the "full history" link open the address's on-chain history.
-// Chain wallets open the address on a block explorer; a Cashu identity pubkey has no explorer.
-addressEl.onclick = () => {
-  if (!isCashu()) {
-    openAddress(walletAddress);
-  }
-};
-explorerEl.onclick = () => {
-  if (!isCashu()) {
-    openAddress(walletAddress);
-  }
-};
-
-copyBtn.onclick = async () => {
-  if (!walletAddress) {
-    return;
-  }
-  await window.bridge.copyText(walletAddress);
-  copyBtn.innerText = '✓ Copied';
-  setTimeout(() => (copyBtn.innerText = '📋 Copy'), 1500);
-};
-
 // Re-fetch the balance now (the auto-poll is every 15s) — handy right after funding. The chip
 // updates when the fresh `wallet` message lands; the spin is click feedback.
 refreshBtn.onclick = () => {
   refreshWallet();
-  fetchTransactions(); // re-pull history too (Cashu: local ledger; chain: on-chain)
+  fetchTransactions(); // re-pull the local ledger too
   refreshBtn.classList.remove('spin');
   void refreshBtn.offsetWidth; // restart the animation if clicked again mid-spin
   refreshBtn.classList.add('spin');
@@ -448,25 +205,21 @@ function topupAutoPays() {
   return activeNetwork() === 'testnet';
 }
 
-// Cashu: "Top up" mints sats at the active mint (testnut auto-pays; a real mint returns an invoice,
-// surfaced by fundResult). Chain wallet: open the Nile faucet to receive test TRX.
-faucetBtn.onclick = () => {
-  if (isCashu()) {
-    faucetBtn.disabled = true;
-    faucetBtn.textContent = '⏳ minting…';
-    // A real mint can take several seconds to return the invoice (the worker polls the quote), so
-    // show the panel with a spinner immediately for feedback. A testnut auto-pays with no invoice
-    // to display, so skip the panel entirely — the balance just rises a moment later.
-    if (!topupAutoPays()) {
-      topupInvoice = '';
-      topupQrEl.removeAttribute('src');
-      topupHintEl.textContent = 'Requesting a Lightning invoice…';
-      topupEl.classList.add('show', 'loading');
-    }
-    fundWallet(TOPUP_SATS);
-    return;
+// "Top up" mints sats at the active mint (testnut auto-pays; a real mint returns an invoice,
+// surfaced by fundResult).
+topupBtn.onclick = () => {
+  topupBtn.disabled = true;
+  topupBtn.textContent = '⏳ minting…';
+  // A real mint can take several seconds to return the invoice (the worker polls the quote), so
+  // show the panel with a spinner immediately for feedback. A testnut auto-pays with no invoice
+  // to display, so skip the panel entirely — the balance just rises a moment later.
+  if (!topupAutoPays()) {
+    topupInvoice = '';
+    topupQrEl.removeAttribute('src');
+    topupHintEl.textContent = 'Requesting a Lightning invoice…';
+    topupEl.classList.add('show', 'loading');
   }
-  window.bridge.openExternal(NILE_FAUCET_URL);
+  fundWallet(TOPUP_SATS);
 };
 
 // Worker replies to a top-up (fund-wallet), in two phases:
@@ -474,7 +227,7 @@ faucetBtn.onclick = () => {
 //   2. final: `minted > 0` once paid+minted (balance rises), or minted:0 if the poll gave up, or
 //      an `error`. testnut auto-pays so phase 2 lands ~1-2s after phase 1; a real mint waits for
 //      you to scan + pay.
-export function fundResult({ minted, invoice, amount, error, pending }) {
+export function fundResult({ minted, invoice, error, pending }) {
   if (pending) {
     // A testnut auto-pays its own quote — there's no invoice for the user to act on, so ignore this
     // phase entirely and keep the "⏳ minting…" state until the final (minted) phase raises the
@@ -484,8 +237,8 @@ export function fundResult({ minted, invoice, amount, error, pending }) {
     }
     // A real mint's invoice exists — surface it immediately (copy + OS handler + QR). The background
     // poll keeps running; the button is free again (the invoice is now displayed).
-    faucetBtn.disabled = false;
-    faucetBtn.textContent = '⬆ Top up';
+    topupBtn.disabled = false;
+    topupBtn.textContent = '⬆ Top up';
     if (invoice) {
       window.bridge.copyText(invoice);
       window.bridge.openExternal('lightning:' + invoice);
@@ -494,8 +247,8 @@ export function fundResult({ minted, invoice, amount, error, pending }) {
     return;
   }
   // Final result.
-  faucetBtn.disabled = false;
-  faucetBtn.textContent = '⬆ Top up';
+  topupBtn.disabled = false;
+  topupBtn.textContent = '⬆ Top up';
   if (error) {
     hideTopup();
     balanceEl.title = `top-up failed: ${error}`;
@@ -544,58 +297,3 @@ topupQrEl.onclick = () => {
 };
 
 topupCloseBtn.onclick = hideTopup;
-
-// --- send TRX ---------------------------------------------------------------
-// A plain transfer to any address — mainly to fund another peer's wallet (replacing the
-// wave.run.js CLI dance). The worker does the real send + a balance check; here we only do
-// cheap input validation and drive the button/status.
-function setSendStatus(text, cls) {
-  sendStatusEl.textContent = text || '';
-  sendStatusEl.className = cls || '';
-}
-
-sendToggleBtn.onclick = () => {
-  const showing = sendEl.classList.toggle('show');
-  sendToggleBtn.textContent = showing ? 'Send ▾' : 'Send ▸';
-  if (showing) {
-    sendToInput.focus();
-  }
-};
-
-function submitSend() {
-  const to = sendToInput.value.trim();
-  const amount = Number(sendAmountInput.value);
-  if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(to)) {
-    setSendStatus('Enter a valid Tron address (T…)', 'err');
-    return;
-  }
-  if (!(amount > 0)) {
-    setSendStatus('Enter an amount greater than 0', 'err');
-    return;
-  }
-  sendBtn.disabled = true;
-  setSendStatus(`Sending ${amount} TRX…`, '');
-  sendTrx(to, amount);
-}
-sendBtn.onclick = submitSend;
-sendAmountInput.onkeydown = (evt) => {
-  if (evt.key === 'Enter') {
-    submitSend();
-  }
-};
-
-// Worker reply to a send: success → record it + reset the form; error → surface it.
-export function sendResult({ hash, to, amount, error }) {
-  sendBtn.disabled = false;
-  if (error) {
-    setSendStatus(`⚠️ send failed: ${error}`, 'err');
-    return;
-  }
-  record({ kind: 'send', hash, amount });
-  setSendStatus(
-    `✅ sent ${amount} TRX to ${to.slice(0, 6)}…${to.slice(-4)}`,
-    'ok'
-  );
-  sendToInput.value = '';
-  sendAmountInput.value = '';
-}
