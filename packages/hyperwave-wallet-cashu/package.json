@@ -1,6 +1,6 @@
 {
   "name": "hyperwave-wallet-cashu",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "HyperWave Cashu wallet: a Chaumian-ecash (Cashu, on a Lightning mint) implementation of the hyperwave-engine Wallet interface, runs under Bare.",
   "license": "Apache-2.0",
   "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
@@ -34,6 +34,6 @@
   },
   "devDependencies": {
     "brittle": "^4.0.2",
-    "hyperwave-engine": "^0.3.0"
+    "hyperwave-engine": "^0.4.0"
   }
 }
