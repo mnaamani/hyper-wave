@@ -2135,7 +2135,7 @@ function createWave({
   // `discovered` count feeds host start-gating).
   swarm.on('update', pushRingState);
 
-  const topic = crypto.hash(b4a.from(topicId));
+  let topic = crypto.hash(b4a.from(topicId));
   const discovery = swarm.join(topic, { server: true, client: true });
   discovery.flushed().then(() => {
     log(
@@ -2171,12 +2171,77 @@ function createWave({
   }
   tRing = setTimeout(ringTick, RINGUPDATE_MS);
 
+  /**
+   * Move this peer's whole directory presence to a DIFFERENT topic — a generic live re-join (the
+   * engine has no opinion on WHY; a host uses it e.g. to separate mainnet from testnet peers, but
+   * that mapping is the host's policy, not the engine's). A clean-slate move: drop every held wave
+   * + its cores, leave the old directory topic, drop live connections so old-topic peers stop
+   * gossiping over an already-open stream (leaving a topic only halts rediscovery, not existing
+   * streams), then join the new topic under the SAME identity (id / ring angle / signing seed are
+   * the swarm keypair's — untouched, so the seat is stable). No-op when the topic is unchanged.
+   * @param {string} newTopicId The topic to move to.
+   * @returns {Promise<void>}
+   */
+  async function switchTopic(newTopicId) {
+    if (!newTopicId || newTopicId === topicId) {
+      return;
+    }
+    log('switching directory topic', topicId, '->', newTopicId);
+    // Free every wave we hold — unsubscribe frees its cores + leaves its sub-topic; then clear the
+    // timers and the WaveState/roster maps so the new directory starts empty.
+    for (const waveId of [...subscriptions]) {
+      unsubscribe(waveId);
+    }
+    for (const wave of waves.values()) {
+      teardownWave(wave);
+    }
+    waves.clear();
+    rosters.clear();
+    endedWaves.clear();
+    // Leave the old directory topic + release any directed-note dials.
+    await swarm.leave(topic).catch(() => {});
+    for (const to of [...dmDialed]) {
+      try {
+        swarm.leavePeer(b4a.from(to, 'hex'));
+      } catch {}
+    }
+    dmDialed.clear();
+    pendingDm.clear();
+    // Drop live connections (owned swarm only — a shared host swarm may carry the host's own
+    // topics/connections, not ours to sever). Each conn's 'close' handler clears its seat,
+    // neighbour-subs, and gossip channel, so the peer table empties itself.
+    if (ownsSwarm) {
+      for (const conn of [...swarm.connections]) {
+        try {
+          conn.destroy();
+        } catch {}
+      }
+    }
+    // Join the new directory topic (same swarm keypair → same id/angle/seat).
+    topicId = newTopicId;
+    topic = crypto.hash(b4a.from(topicId));
+    const discovery = swarm.join(topic, { server: true, client: true });
+    discovery.flushed().then(() => {
+      log(
+        'joined directory topic',
+        topicId,
+        'topic',
+        shortId(b4a.toString(topic, 'hex')),
+        'as',
+        shortId(me.id)
+      );
+      pushRingState();
+    });
+    pushRingState();
+  }
+
   return {
     me,
     startWave,
     subscribe,
     unsubscribe,
     join,
+    setTopicId: switchTopic, // live re-join onto a different directory topic (host policy)
     setTag,
     stageEntry,
     note: broadcastNote,
@@ -2245,4 +2310,9 @@ function createWave({
   };
 }
 
-module.exports = { createWave, parseBootstrap, loadOrCreateSwarmSeed };
+module.exports = {
+  createWave,
+  parseBootstrap,
+  loadOrCreateSwarmSeed,
+  DEFAULT_TOPIC
+};

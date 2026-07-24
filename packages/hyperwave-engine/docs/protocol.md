@@ -114,6 +114,18 @@ sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
 - **Topic:** `topic = BLAKE2b-256( utf8(topicId) )` (32 bytes). Join the Hyperswarm DHT
   with `join(topic, { server: true, client: true })`. Default `topicId` in the reference
   build is `"hyperwave:demo:v1"`.
+- **Live topic switch (`setTopicId` / `set-topic`).** The `topicId` is not fixed for the
+  life of a peer: the wave exposes `setTopicId(newTopicId)` (surfaced as the engine command
+  `set-topic { topicId }`) that moves the peer's whole directory presence to another topic —
+  it leaves the old topic, drops live connections (so old-topic peers stop gossiping over an
+  already-open stream), frees held waves, and re-joins the new topic under the **same swarm
+  identity** (the ring seat/angle is stable). The engine has **no opinion on WHY** a host
+  switches — the mapping from anything (e.g. a wallet's settlement network) to a topic is
+  **host policy**, computed host-side and passed here as an opaque string. The reference
+  desktop host uses it to keep **mainnet** and **testnet** peers in separate directories
+  (testnet/unknown/wallet-less on the base topic, mainnet on `<base>:mainnet`), so
+  real-money and test-money peers never even discover each other — a first, coarse
+  separation layer in front of the per-burn cross-network filter (§5 / mint classification).
 - **Per connection** (Noise-encrypted duplex stream from Hyperswarm):
   1. `Corestore.replicate(conn)` — replicates the per-participant feed cores (see §8).
   2. A **Protomux** channel with protocol id `"hyperwave/gossip"`, carrying a single
