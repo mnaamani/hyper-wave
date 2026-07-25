@@ -26,8 +26,12 @@ let cashuMints = [
     network: 'testnet'
   }
 ];
-// How many sats a "Top up" mints at once (testnut auto-pays; a real mint returns an invoice).
-const TOPUP_SATS = 100;
+// Default "Top up" amount (sat) pre-filled in the amount input; the user picks the actual amount
+// (testnut auto-pays it; a real mint returns an invoice for exactly that amount).
+const DEFAULT_TOPUP_SATS = 100;
+// Upper bound for a single top-up — a guard against a fat-fingered order of magnitude on a REAL
+// mint, not a protocol limit.
+const MAX_TOPUP_SATS = 1000000;
 
 const viewEl = document.getElementById('wallet-view');
 const openBtn = document.getElementById('wallet-btn');
@@ -37,6 +41,7 @@ const balChipEl = document.getElementById('wallet-bal'); // top-bar balance pill
 const kindEl = document.getElementById('wallet-kind');
 const refreshBtn = document.getElementById('wallet-refresh');
 const topupBtn = document.getElementById('wallet-topup-btn');
+const topupAmountInput = document.getElementById('topup-amount');
 const txsEl = document.getElementById('wallet-txs');
 const mintSelect = document.getElementById('wallet-mint');
 const topupEl = document.getElementById('wallet-topup');
@@ -81,7 +86,7 @@ export function walletStatus({ address, amount, unit, mint, mints }) {
   balChipEl.textContent = `${amount} ${unitLabel(amount)}`; // top-bar pill
   const currentMint = mint || activeMint();
   kindEl.textContent = mintHost(currentMint);
-  topupBtn.title = `Mint ${TOPUP_SATS} sat at the selected mint`;
+  refreshTopupAmount(); // the unit label in the button's title comes from the balance
   renderMintPicker(currentMint);
   // A balance push follows every money op — re-pull the persisted ledger so a
   // just-made top-up/tip/burn shows without a manual refresh (local, no network).
@@ -218,9 +223,44 @@ function topupAutoPays() {
   return activeNetwork() === 'testnet';
 }
 
-// "Top up" mints sats at the active mint (testnut auto-pays; a real mint returns an invoice,
-// surfaced by fundResult).
+// The amount the input currently asks for, or null if it isn't a whole, in-range sat amount (the
+// Top up button is disabled in that case, so an invalid amount never reaches the mint).
+function topupAmountSats() {
+  const amount = Number(topupAmountInput.value.trim());
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return null;
+  }
+  if (amount > MAX_TOPUP_SATS) {
+    return null;
+  }
+  return amount;
+}
+
+// Gate the Top up button on a valid amount + describe what it will mint. Also the "not minting"
+// button state — call it instead of clearing `disabled` by hand, or an invalid amount would
+// re-enable the button after a top-up settles.
+function refreshTopupAmount() {
+  const amount = topupAmountSats();
+  topupBtn.textContent = '⬆ Top up';
+  topupBtn.disabled = amount === null;
+  topupBtn.title =
+    amount === null
+      ? `Enter a whole amount between 1 and ${MAX_TOPUP_SATS} sat`
+      : `Mint ${amount} ${unitLabel(amount)} at the selected mint`;
+}
+
+topupAmountInput.value = String(DEFAULT_TOPUP_SATS);
+topupAmountInput.max = String(MAX_TOPUP_SATS);
+topupAmountInput.oninput = refreshTopupAmount;
+refreshTopupAmount();
+
+// "Top up" mints the entered amount at the active mint (testnut auto-pays; a real mint returns an
+// invoice, surfaced by fundResult).
 topupBtn.onclick = () => {
+  const amount = topupAmountSats();
+  if (amount === null) {
+    return;
+  }
   topupBtn.disabled = true;
   topupBtn.textContent = '⏳ minting…';
   // A real mint can take several seconds to return the invoice (the worker polls the quote), so
@@ -230,10 +270,10 @@ topupBtn.onclick = () => {
     topupInvoice = '';
     topupQrEl.removeAttribute('src');
     topupTitleEl.textContent = '⚡ Top-up invoice — scan or pay';
-    topupHintEl.textContent = 'Requesting a Lightning invoice…';
+    topupHintEl.textContent = `Requesting an invoice for ${amount} ${unitLabel(amount)}…`;
     topupEl.classList.add('show', 'loading');
   }
-  fundWallet(TOPUP_SATS);
+  fundWallet(amount);
 };
 
 // Worker replies to a top-up (fund-wallet), in two phases:
@@ -251,8 +291,7 @@ export function fundResult({ minted, invoice, error, pending }) {
     }
     // A real mint's invoice exists — surface it immediately (copy + OS handler + QR). The background
     // poll keeps running; the button is free again (the invoice is now displayed).
-    topupBtn.disabled = false;
-    topupBtn.textContent = '⬆ Top up';
+    refreshTopupAmount();
     if (invoice) {
       window.bridge.copyText(invoice);
       window.bridge.openExternal('lightning:' + invoice);
@@ -261,8 +300,7 @@ export function fundResult({ minted, invoice, error, pending }) {
     return;
   }
   // Final result.
-  topupBtn.disabled = false;
-  topupBtn.textContent = '⬆ Top up';
+  refreshTopupAmount();
   if (error) {
     // Surface it IN the panel (not just a hidden tooltip) — a mint outage (e.g. a
     // 502 from the mint) otherwise just made the QR silently vanish, which reads
