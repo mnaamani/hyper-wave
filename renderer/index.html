@@ -517,6 +517,10 @@
       .wallet-row .pill:hover {
         background: #33240e;
       }
+      .wallet-row .pill:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
       /* refresh is an icon-only button (no pill), so the spin reads cleanly */
       #wallet-refresh {
         border: none;
@@ -593,6 +597,21 @@
       }
       #cashout-status.ok {
         color: #f7931a;
+      }
+      /* top-up amount (sat) — sits left of the "Top up" pill in the wallet row */
+      #topup-amount {
+        width: 72px;
+        font-family: inherit;
+        font-size: 11px;
+        padding: 3px 8px;
+        border: 1px solid #3a3a3a;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.35);
+        color: #f5f5f5;
+        text-align: right;
+      }
+      #topup-amount:invalid {
+        border-color: #ff7a68;
       }
       #wallet-topup {
         display: none;
@@ -1033,6 +1052,14 @@
         </div>
         <div class="wallet-row">
           <button id="wallet-refresh" title="Re-check your balance">🔄</button>
+          <input
+            id="topup-amount"
+            type="number"
+            min="1"
+            step="1"
+            value="100"
+            title="How much to mint (sat)"
+          />
           <button
             id="wallet-topup-btn"
             class="pill"
