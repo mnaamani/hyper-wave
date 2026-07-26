@@ -1,6 +1,7 @@
 # Bringing the mobile app to parity with the desktop app
 
-**Status:** plan, not yet started. Written 2026-07-25.
+**Status:** Phases 0, 1 and 2 are DONE (2026-07-27) — see the per-phase notes below. Phases 3–6
+(ring/lobby UX, camera capture, wallet screen, platform hardening) remain. Written 2026-07-25.
 **Scope:** `mobile/` (Expo + `react-native-bare-kit`) and the shared worklet host
 (`packages/hyperwave-engine/worklet/app.js`). The engine's protocol, wave FSM, feed
 CRDT, and payment abstraction are **done and shared** — nothing in this plan requires a
@@ -197,7 +198,7 @@ before any mainnet mint is offered.
 Each phase ends in a demonstrable state. Sizes: **S** ≈ half a day, **M** ≈ 1–2 days,
 **L** ≈ 3–5 days (one person, familiar with the codebase).
 
-### Phase 0 — Unstick and re-baseline (S)
+### Phase 0 — Unstick and re-baseline (S) — ✅ DONE
 
 _Goal: the current scaffold builds and runs today, and its docs stop lying._
 
@@ -210,7 +211,7 @@ _Goal: the current scaffold builds and runs today, and its docs stop lying._
 
 **Done when:** a fresh clone reaches a running simulator app following only `mobile/README.md`.
 
-### Phase 1 — Host parity (M)
+### Phase 1 — Host parity (M) — ✅ DONE
 
 _Goal: the mobile peer is the same network + money participant as desktop, even with a rough UI._
 
@@ -235,7 +236,7 @@ _Goal: the mobile peer is the same network + money participant as desktop, even 
 **Done when:** a mobile peer with a funded Cashu wallet starts a paid wave that a desktop peer
 joins, and the mobile wallet balance survives an app restart.
 
-### Phase 2 — Extract `hyperwave-app-core`, then wire mobile to it (L)
+### Phase 2 — Extract `hyperwave-app-core`, then wire mobile to it (L) — ✅ DONE
 
 _Goal: one brain, two hosts. Every engine command and event reachable from RN, with correct
 per-wave state._

@@ -48,6 +48,17 @@ function send(type, extra = {}) {
   return bridge.hwCall(type, extra);
 }
 
+/**
+ * Generic command sender, for the shared app core (hyperwave-app-core), which speaks the engine's
+ * command vocabulary directly. The typed senders below stay the boundary for the view modules.
+ * @param {string} type - The engine command type.
+ * @param {Object} [args] - Command arguments.
+ * @returns {any} The transport's result (a promise for request/response commands).
+ */
+export function sendCommand(type, args = {}) {
+  return send(type, args);
+}
+
 export const startWave = () => send('start-wave');
 // Join a specific wave (from the directory), or the newest joinable lobby if omitted.
 export const joinWave = (waveId) => send('join-wave', { waveId });

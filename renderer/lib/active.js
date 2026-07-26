@@ -1,8 +1,11 @@
 // The wave currently shown + acted on in the main view (ring / gallery / lobby / capture).
 // In the concurrent-wave world a peer can be aware of many waves at once (the directory); the
-// "active" one is what the ring centre displays and what the action modules target. app.js sets
-// it when the user picks a wave in the directory (or on starting one); lobby/proof/gallery read
-// it so a join / staged moment / tip goes to the right wave. Null = no wave selected yet.
+// "active" one is what the ring centre displays and what the action modules target.
+//
+// The OWNER of this value is the shared app core (hyperwave-app-core); this module is the
+// renderer's ambient mirror of it — app.js writes it from every core snapshot so lobby/proof can
+// read it synchronously (a join / staged moment / tip goes to the right wave) without threading a
+// snapshot through them. Null = no wave selected yet.
 let activeWaveId = null;
 
 /** @returns {string|null} The active wave id, or null if none is selected. */

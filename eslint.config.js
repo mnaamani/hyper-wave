@@ -73,9 +73,15 @@ module.exports = [
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs' },
     rules: styleRules
   },
-  // ESM surfaces: the renderer, .mjs scripts, and the mobile app
+  // ESM surfaces: the renderer, .mjs scripts, the mobile app, and the shared app core (ESM so a
+  // file:// renderer and Metro can both import it with no bundler step)
   {
-    files: ['renderer/**/*.js', 'mobile/**/*.js', '**/*.mjs'],
+    files: [
+      'renderer/**/*.js',
+      'mobile/**/*.js',
+      'packages/hyperwave-app-core/**/*.js',
+      '**/*.mjs'
+    ],
     languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
     rules: { ...styleRules, ...namedExportsOnly }
   }

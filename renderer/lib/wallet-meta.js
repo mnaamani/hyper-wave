@@ -1,7 +1,16 @@
-// Shared, tiny source of truth for the active Cashu wallet's unit, mint, and
-// settlement network, set from each worker `wallet` message and read across the
-// UI (toasts, the tip button, the lobby fee, the same-network filter). The
-// desktop's only payment mechanism is Cashu (unit `sat`).
+// Module-global convenience for the renderer's views: the active Cashu wallet's unit, mint, and
+// settlement network, set from each worker `wallet` message and read across the UI (toasts, the tip
+// button, the lobby fee, the same-network filter). The desktop's only payment mechanism is Cashu
+// (unit `sat`).
+//
+// The RULES live in hyperwave-app-core (shared with the mobile host); this file is only the
+// renderer's ambient holder of the current values, so a view can read them without threading a
+// snapshot through every call.
+import {
+  unitLabelFor,
+  networksMatch
+} from '../../node_modules/hyperwave-app-core/lib/wallet-meta.js';
+
 let unit = 'sat';
 let mint = '';
 let network = ''; // the active wallet's settlement network ('testnet'/'mainnet'), '' if unknown/none
@@ -30,10 +39,7 @@ export function setWalletMeta(meta = {}) {
  * @returns {string} The unit label (e.g. 'sat', 'sats').
  */
 export function unitLabel(amount) {
-  if (unit === 'sat' && amount !== undefined && amount !== 1) {
-    return 'sats';
-  }
-  return unit;
+  return unitLabelFor(unit, amount);
 }
 
 /** @returns {string} The active mint URL. */
@@ -59,11 +65,5 @@ export function activeNetwork() {
  * @returns {boolean} Whether the wave matches the active wallet's network.
  */
 export function networkMatches(waveNetwork) {
-  if (!network || network === 'unknown') {
-    return true; // my own network unknown (custom mint / chain / none) → never filter
-  }
-  if (!waveNetwork || waveNetwork === 'unknown') {
-    return true; // the wave's network is unknown → permissive (matches crossNetworkMints)
-  }
-  return waveNetwork === network;
+  return networksMatch(network, waveNetwork);
 }

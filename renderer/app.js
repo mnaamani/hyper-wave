@@ -1,5 +1,11 @@
 // HyperWave renderer - orchestrator. Wires worker events (ipc) to the views:
 // ring (canvas), gallery (centre moment + progress), lobby, proof (webcam), hud.
+//
+// The STATE + RULES behind the views live in `hyperwave-app-core` (the wave directory, active-wave
+// selection, the ended-wave lifecycle, wallet metadata + the same-network filter, and the tip
+// choreography) — the same core the mobile host drives, so the two UIs can't drift on the rules.
+// This file is the desktop's presentation half: it feeds every engine message to the core FIRST,
+// then paints from the core's snapshots and its own per-event narration below.
 import * as ipc from './lib/ipc.js';
 import * as ring from './lib/ring.js';
 import * as gallery from './lib/gallery.js';
@@ -10,12 +16,10 @@ import * as hud from './lib/hud.js';
 import * as wallet from './lib/wallet.js';
 import * as directory from './lib/directory.js';
 import { getActiveWave, setActiveWave } from './lib/active.js';
-import {
-  setWalletMeta,
-  unitLabel,
-  activeNetwork,
-  networkMatches
-} from './lib/wallet-meta.js';
+import { setWalletMeta, unitLabel } from './lib/wallet-meta.js';
+// The shared app core. Imported by PATH (not by package name): a file:// renderer has no bare
+// specifier resolution, and the package is plain ESM precisely so no bundler step is needed.
+import { createAppCore } from '../node_modules/hyperwave-app-core/index.js';
 
 // Start frame animation loop for the ring (2d canvas) + the circular scrubber (drag the spark
 // around the ring to browse the gallery once the completion replay has run).
@@ -33,14 +37,24 @@ const setState = (patch) => Object.assign(state, patch);
 
 const fieldEl = document.querySelector('.field'); // the ring + gallery canvas area (dimmable)
 
+// The shared brain. `performance.now()` is the clock so the core's lobby deadlines and ended-wave
+// TTL share this renderer's time base; `onBeforeSwitchWave` is how the core enforces "stage the
+// pending capture BEFORE leaving a wave" (app-core invariant 3) without knowing about webcams.
+const core = createAppCore({
+  send: (type, args) => ipc.sendCommand(type, args),
+  now: () => performance.now(),
+  onBeforeSwitchWave: () => proof.captureAndStage()
+});
+
 // Dev-only console handle (`hw` = HyperWave): reach the orchestrator state + view modules from the
-// DevTools console, e.g. `hw.state`, `hw.gallery.count()`, `hw.hud.waveStatus('test')`. ES modules
+// DevTools console, e.g. `hw.state`, `hw.core.getSnapshot()`, `hw.gallery.count()`. ES modules
 // don't expose their bindings globally, so nothing is reachable unless we put it here — which is
 // exactly why we DON'T in a packaged build (keeps a shipped app's global scope clean). `npm start`
 // is unpackaged, so the handle is present in dev only.
 if (window.bridge?.isPackaged && !window.bridge.isPackaged()) {
   window.hw = {
     state,
+    core,
     ring,
     gallery,
     scrubber,
@@ -89,83 +103,32 @@ function updateHud() {
   hud.dockStart(gallery.count() > 0);
 }
 
-// The engine is theme-agnostic: a peer's cosmetic `tag` is this app's country code, and a
-// feed entry carries an opaque `payload` this app fills with a {image, caption} moment.
-// Map the engine's generic shape back to the app UI's shape right here at the inbound
-// boundary, so the rest of the UI keeps reading `.country` / `.image` / `.caption`.
-function withCountry(peer) {
-  return { ...peer, country: peer.tag };
-}
-function asMoment(item) {
-  return {
-    ...item,
-    image: item.payload?.image || '',
-    caption: item.payload?.caption || '',
-    country: item.tag
-  };
-}
-
-// --- concurrent waves: directory + active wave (scaling.md browse-then-pick) ----------------
+// --- concurrent waves: the core's directory + active wave (scaling.md browse-then-pick) --------
 // The engine is aware of many waves at once (autoSubscribe:false → no cores until we pick one).
-// We keep lightweight metadata for every announced wave (the directory) and a cached feed per
-// wave; only the ACTIVE wave drives the ring centre (gallery / lobby / capture). Selecting a
-// directory row subscribes to that wave (holds its cores) and makes it active.
-const waves = new Map(); // waveId -> { waveId, by, mine, joined, subscribed, phase, count, fee, walletType, paid, network, lobbyDeadline }
-const feedByWave = new Map(); // waveId -> raw feed items (rendered when its wave is active)
-let ringState = { me: null, peers: [] }; // the global heartbeat ring, for the directory's flags
+// The core keeps the metadata for every announced wave and a cached feed per wave; only the ACTIVE
+// wave drives the ring centre (gallery / lobby / capture). Clicking a bubble asks the core to
+// select it, which subscribes (holds its cores) and republishes.
 
 // The directory shows the initiator's country flag; derive it from the global ring by id.
 directory.setCountryLookup((id) => {
-  if (ringState.me && ringState.me.id === id) {
-    return ringState.me.country;
+  const { me, peers } = core.getSnapshot();
+  if (me && me.id === id) {
+    return me.country;
   }
-  const peer = ringState.peers.find((one) => one.id === id);
+  const peer = peers.find((one) => one.id === id);
   return peer ? peer.country : '';
 });
-directory.onSelect((waveId) => selectWave(waveId));
+directory.onSelect((waveId) => core.selectWave(waveId));
 
-// Merge a metadata patch into a wave and re-render the directory panel.
-function upsertWave(waveId, patch) {
-  const wave = waves.get(waveId) || {
-    waveId,
-    phase: 'lobby',
-    count: 1,
-    joined: false,
-    subscribed: false
-  };
-  Object.assign(wave, patch);
-  waves.set(waveId, wave);
-  directory.render(waves, getActiveWave());
-}
-
-// Make a wave active (engine already subscribed it, e.g. my own started wave). No view repaint —
-// the caller's event handler paints. Use selectWave() for a user-initiated directory pick.
-function activateWave(waveId) {
-  setActiveWave(waveId);
-  directory.render(waves, waveId);
-}
-
-// User picked a wave in the directory: subscribe (hold its cores) if not already, make it active,
-// and paint its current state (its gallery, or its lobby if it's still forming and I haven't joined).
-function selectWave(waveId) {
-  const wave = waves.get(waveId);
-  if (!wave || waveId === getActiveWave()) {
-    return;
-  }
-  // If I'm framing a moment for the wave I'm leaving, lock it in now (stage to the OLD active
-  // wave, before switching) — otherwise a wave that starts while I'm away would post nothing.
-  proof.captureAndStage();
-  setActiveWave(waveId);
-  if (!wave.subscribed) {
-    ipc.subscribeWave(waveId); // browse-then-pick: hold this wave's feed cores + control gossip
-    wave.subscribed = true; // optimistic; the 'subscribed' event confirms
-  }
-  directory.render(waves, waveId);
-  renderActiveWave();
+// Paint the wave orbit from the core's snapshot.
+function renderDirectory(snapshot) {
+  directory.render(snapshot.waves, snapshot.activeWaveId);
 }
 
 // Paint the ring centre for whatever the active wave is right now (used when switching waves).
 function renderActiveWave() {
+  const snapshot = core.getSnapshot();
+  const wave = snapshot.activeWave;
   ring.stopSweep();
   gallery.cancelReplay();
   gallery.close();
@@ -173,7 +136,6 @@ function renderActiveWave() {
   proof.close();
   setDim(false);
   hud.waveStatus('');
-  const wave = getActiveWave() ? waves.get(getActiveWave()) : null;
   if (!wave) {
     hud.showStart(true);
     gallery.setActive(false);
@@ -205,9 +167,8 @@ function renderActiveWave() {
     // racing / ended — show its (cached) gallery. setActive FIRST: the close() above left the
     // gallery closed, and handle() ignores feed repaints while closed (it would otherwise paint
     // nothing until the engine's next periodic re-emit).
-    const items = feedByWave.get(wave.waveId) || [];
     gallery.setActive(wave.phase === 'racing');
-    gallery.handle(items.map(asMoment));
+    gallery.handle(snapshot.feed);
     if (wave.phase !== 'racing') {
       gallery.restoreReplay(); // ended: bring the spark back, parked + draggable
     }
@@ -216,154 +177,65 @@ function renderActiveWave() {
   updateHud();
 }
 
-// An ended wave lingers in the orbit (its gallery still browsable) for a grace period, then
-// fades out and is dropped from the directory — and its cores are freed (O(subscribed)).
-const ENDED_TTL_MS = 180000; // ~3 minutes
-const FADE_MS = 600; // matches the bubble's CSS fade-out
-const expiryTimers = new Map(); // waveId -> one-shot timeout handle
-
-// Drop a wave from the UI now: free its cores, forget its metadata + cached feed, and if I was
-// viewing it, fall back to the empty ring. Used both by the grace-period fade and when my own
-// new wave supersedes a prior one.
-function removeWave(waveId) {
-  const wave = waves.get(waveId);
-  clearTimeout(expiryTimers.get(waveId));
-  expiryTimers.delete(waveId);
-  if (wave && wave.subscribed) {
-    ipc.unsubscribeWave(waveId); // free its feed cores now the wave is gone
-  }
-  waves.delete(waveId);
-  feedByWave.delete(waveId);
-  if (getActiveWave() === waveId) {
-    setActiveWave(null);
+// The core republishes on every change and says WHAT changed, so each kind repaints only what it
+// must. `select`/`deselect`/`network` are the transitions that re-own the ring centre;
+// `auto-select` (my own new wave) deliberately does NOT repaint here — its wave-announce handler
+// below drives that, including the capture flow.
+const SNAPSHOT_PAINTERS = {
+  ring: (snapshot) => {
+    ring.setState({ me: snapshot.me, peers: snapshot.peers });
+    setState({ peers: snapshot.peers.length });
+    updateHud();
+    renderDirectory(snapshot); // flags resolve as peers appear on the ring
+  },
+  waves: renderDirectory,
+  'auto-select': renderDirectory,
+  select: (snapshot) => {
+    renderDirectory(snapshot);
+    renderActiveWave();
+  },
+  deselect: (snapshot) => {
+    renderDirectory(snapshot);
     renderActiveWave(); // the wave I was viewing is gone → empty ring + Start
-  } else {
-    directory.render(waves, getActiveWave());
-  }
-}
-
-// Fade the bubble out (CSS), then remove the wave once the animation has run.
-function fadeOutWave(waveId) {
-  const wave = waves.get(waveId);
-  if (!wave) {
-    return;
-  }
-  wave.fading = true; // directory.render adds a .fading class → the CSS fade-out plays
-  directory.render(waves, getActiveWave());
-  setTimeout(() => removeWave(waveId), FADE_MS);
-}
-
-// Start the grace-period countdown for an ended wave (re-armed if wave-idle fires again).
-function scheduleWaveExpiry(waveId) {
-  clearTimeout(expiryTimers.get(waveId));
-  expiryTimers.set(
-    waveId,
-    setTimeout(() => fadeOutWave(waveId), ENDED_TTL_MS)
-  );
-}
-
-// Per-event metadata patch for the directory (missing kinds = no directory change).
-const DIRECTORY_PATCH = {
-  'wave-announce': (evt) => ({
-    by: evt.by,
-    mine: !!evt.mine,
-    joined: !!evt.joined,
-    subscribed: !!evt.subscribed,
-    count: evt.count,
-    fee: evt.fee,
-    walletType: evt.walletType,
-    paid: evt.paid,
-    network: evt.network, // settlement network (from the start burn) — for the same-network filter
-    phase: 'lobby',
-    lobbyDeadline: performance.now() + (evt.lobbyMs || 15000)
-  }),
-  subscribed: (evt) => ({ subscribed: true, joined: !!evt.joined }),
-  unsubscribed: () => ({ subscribed: false, joined: false }),
-  joined: (evt) => ({ joined: true, count: evt.count }),
-  roster: (evt) => ({ count: evt.count }),
-  'wave-active': (evt) => ({
-    phase: 'racing',
-    count: evt.count,
-    joined: !!evt.joined,
-    ...(evt.network ? { network: evt.network } : {})
-  }),
-  'wave-idle': () => ({ phase: 'ended' }),
-  'wave-verified': (evt) => ({
-    paid: 'verified',
-    ...(evt.network ? { network: evt.network } : {})
-  })
+  },
+  network: (snapshot) => {
+    // A live mint switch changed my network: re-render so now-cross-network waves are hidden, and
+    // repaint the centre (the core has already deselected a wave that became cross-network).
+    renderDirectory(snapshot);
+    renderActiveWave();
+  },
+  feed: (snapshot) => {
+    if (!snapshot.activeWaveId) {
+      return;
+    }
+    gallery.handle(snapshot.feed); // only the active wave paints the ring centre
+    updateHud();
+  },
+  wallet: () => {}
 };
 
-function updateDirectory(evt) {
-  const patch = DIRECTORY_PATCH[evt.event]?.(evt);
-  // Only wave-announce (the authoritative "aware" event — the only one carrying `by`) may CREATE
-  // a directory entry; every other event only UPDATES a wave we already know. Otherwise an echoed
-  // `unsubscribed` (after we removed a wave), a late `roster`, or a racing-sync `wave-active` —
-  // none of which carry `by` — would spawn a phantom by-less bubble at the top of the ring.
-  if (
-    evt.waveId &&
-    patch &&
-    (evt.event === 'wave-announce' || waves.has(evt.waveId))
-  ) {
-    upsertWave(evt.waveId, patch);
-  }
-  if (evt.event === 'wave-idle' && waves.has(evt.waveId)) {
-    scheduleWaveExpiry(evt.waveId); // ended → linger, then fade out after the grace period
-  }
+core.subscribe((snapshot, kind) => {
+  setActiveWave(snapshot.activeWaveId); // mirror for the view modules (lobby/proof read it)
+  SNAPSHOT_PAINTERS[kind]?.(snapshot);
+});
+
+// Every engine message reaches the core BEFORE this file's own handlers for it (ipc listeners run
+// in registration order), so the directory + active wave are current when the views paint.
+for (const type of ['state', 'event', 'feed', 'wallet', 'tip-result']) {
+  ipc.on(type, (msg) => core.handle(msg));
 }
 
-// Auto-engage a wave I just started (the engine already subscribed it as the initiator), and
-// supersede my PRIOR own wave immediately — kicking off a new one drops the last one from the UI.
-function maybeAutoSelect(evt) {
-  if (evt.event !== 'wave-announce' || !evt.mine || !evt.waveId) {
-    return;
-  }
-  const priorMine = [...waves.values()]
-    .filter((wave) => wave.mine && wave.waveId !== evt.waveId)
-    .map((wave) => wave.waveId);
-  for (const waveId of priorMine) {
-    removeWave(waveId);
-  }
-  activateWave(evt.waveId);
-}
-
-ipc.on('state', (msg) => {
+ipc.on('state', () => {
   if (!state.countrySent) {
     setState({ countrySent: true });
     hud.sendCountry(); // worker is up - tell it the nation we support
   }
-  ringState = { me: withCountry(msg.me), peers: msg.peers.map(withCountry) };
-  ring.setState(ringState);
-  setState({ peers: msg.peers.length });
-  updateHud();
-  directory.render(waves, getActiveWave()); // flags resolve as peers appear on the ring
-});
-
-ipc.on('feed', (msg) => {
-  feedByWave.set(msg.waveId, msg.items); // cache every subscribed wave's feed
-  if (msg.waveId === getActiveWave()) {
-    gallery.handle(msg.items.map(asMoment)); // only the active wave paints the ring centre
-    updateHud();
-  }
 });
 
 ipc.on('wallet', (msg) => {
-  const prevNetwork = activeNetwork();
-  setWalletMeta(msg); // active mechanism + unit + mint + network, for labels + the same-network filter
+  setWalletMeta(msg); // ambient unit + mint + network for the views' labels
   wallet.walletStatus(msg); // self-custodial wallet address + balance (wallet-view modal)
   gallery.setMyAddress(msg.address); // so we do not offer to tip our own moment
-  // A live mint switch can change my network — re-render the directory so now-cross-network waves are
-  // hidden, and DESELECT the active wave if it's become cross-network (its gallery + tip must go away,
-  // a cross-network tip is meaningless). Only when the network actually changed.
-  if (activeNetwork() !== prevNetwork) {
-    const activeId = getActiveWave();
-    const activeWave = activeId ? waves.get(activeId) : null;
-    if (activeWave && !activeWave.mine && !networkMatches(activeWave.network)) {
-      setActiveWave(null);
-    }
-    directory.render(waves, getActiveWave());
-    renderActiveWave();
-  }
 });
 // Cashu top-up (fund-wallet) and tip redeem (receive) results — surfaced as toasts.
 ipc.on('fund-result', (msg) => wallet.fundResult(msg));
@@ -389,6 +261,10 @@ ipc.on('burn-result', (msg) => {
     hud.waveStatus(`🔥 ${what} fee burned - ${msg.amount} ${unitLabel()}`);
   }
 });
+
+// The gallery's tip button goes through the core, which remembers the target and — once the tip
+// confirms — delivers the bearer token privately + floods the stripped announcement.
+gallery.onTip((target) => core.tip(target));
 
 // One handler per engine event — a lookup table instead of a switch (CLAUDE.md Code Style).
 const EVENT_HANDLERS = {
@@ -524,8 +400,9 @@ const EVENT_HANDLERS = {
   },
 
   // A DIRECTED (private) note addressed to me — the engine already checked it's for me. Used to
-  // deliver a Cashu tip: a bearer token (P2PK-locked to me) I redeem to credit the funds. This is
-  // the private counterpart of the flooded `note` — the token + who-tipped-whom never hit the flood.
+  // deliver a Cashu tip: a bearer token (P2PK-locked to me) the CORE redeems (wave-agnostically —
+  // app-core invariant 2) while this handler runs the celebration. This is the private counterpart
+  // of the flooded `note`: the token + who-tipped-whom never hit the flood.
   dm: (evt) => {
     const payload = evt.note || {};
     if (payload.kind !== 'tip' || !payload.token) {
@@ -533,8 +410,6 @@ const EVENT_HANDLERS = {
     }
     hud.waveStatus(`🎉 you got tipped ${payload.amount} ${unitLabel()}!`);
     ring.startFlourish(); // golden pulse + confetti — same celebration as a completed wave
-    ipc.redeem(payload.token); // Cashu bearer token, locked to me — swap it into my wallet
-    ipc.refreshWallet();
   },
 
   // A roster member broadcast a note on the wave (flooded). A Cashu tip note is a STRIPPED
@@ -559,15 +434,13 @@ const EVENT_HANDLERS = {
   }
 };
 
-// Wallet/celebration events touch MY wallet regardless of which wave I'm viewing (e.g. redeeming
-// a Cashu tip received on a wave I've since navigated away from), so they run unconditionally.
+// Wallet/celebration events touch MY wallet regardless of which wave I'm viewing (e.g. a Cashu tip
+// received on a wave I've since navigated away from), so they run unconditionally.
 const WAVE_AGNOSTIC_EVENTS = new Set(['dm', 'note']);
 
-// Route every engine event: keep the directory in sync for ALL waves, auto-engage my own new wave,
-// then drive the ring-centre view ONLY for the active wave (a background wave can't clobber it).
+// Narration for the wave the user is watching. The core has already applied this event to the
+// directory + active wave (its listener is registered first), so `getActiveWave()` is current.
 ipc.on('event', (evt) => {
-  updateDirectory(evt);
-  maybeAutoSelect(evt);
   const forActive = evt.waveId && evt.waveId === getActiveWave();
   if (WAVE_AGNOSTIC_EVENTS.has(evt.event) || forActive) {
     EVENT_HANDLERS[evt.event]?.(evt);

@@ -184,6 +184,9 @@ module.exports = {
       // install in the bundle resolves them from the monorepo (they aren't published).
       const workspaceLinks = {
         'hyperwave-engine': coreDir,
+        // The renderer imports the app core over file:// from node_modules (ESM, no bundler
+        // step), so it must land in the bundle's node_modules like any other workspace dep.
+        'hyperwave-app-core': path.join(packagesDir, 'hyperwave-app-core'),
         'hyperwave-wallet-cashu': path.join(
           packagesDir,
           'hyperwave-wallet-cashu'

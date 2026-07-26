@@ -116,8 +116,17 @@ export default function App() {
               {moment.country ? `${moment.country} ` : ''}
               {moment.caption || moment.peerId?.slice(0, 8) || 'moment'}
             </Text>
-            {moment.address ? (
-              <Pressable onPress={() => engine.tip(moment.address, TIP_SATS)}>
+            {moment.address && moment.address !== wallet?.address ? (
+              <Pressable
+                onPress={() =>
+                  engine.tip({
+                    waveId: moment.waveId,
+                    peerId: moment.peerId,
+                    address: moment.address,
+                    amount: TIP_SATS
+                  })
+                }
+              >
                 <Text style={styles.tip}>⚡ Tip {TIP_SATS} sat</Text>
               </Pressable>
             ) : null}
