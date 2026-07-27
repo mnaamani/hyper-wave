@@ -112,8 +112,9 @@ Tracked in detail in `../implement-mobile-app.md`:
   camera**: every frame there comes back empty, so the entry carries only a caption. Photographing
   a real moment (and with it the downscale ladder + EXIF strip) is unverified until it runs on a
   device.
-- **Wallet screen** — balance, mint picker, top up (invoice QR), cash out (scan a bolt11), the
-  ledger, tip redemption (Phase 5).
+- **Cash out against a real invoice** — the screen and the engine path are in place and the failure
+  path is verified (the mint rejects a bad invoice and the error surfaces), but a successful melt
+  needs a payable bolt11 from an external Lightning wallet.
 - **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake
   path — wire the equivalent addon step for `npm run android` (Phase 6).
 - **Discovery** — no local DHT on device; you're on the public DHT (~20–35s cold). Pin a

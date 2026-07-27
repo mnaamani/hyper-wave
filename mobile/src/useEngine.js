@@ -109,6 +109,11 @@ export function useEngine(config = {}) {
   // The last wave event for the ACTIVE wave, so the ring can trigger its sweep + flourish off the
   // protocol rather than guessing from phase transitions. {event, waveId, at}.
   const [lastEvent, setLastEvent] = useState(null);
+  // Wallet-screen results. Request/response replies (transactions) are ALSO surfaced through
+  // onEvent by the rpc client, so every one of these arrives on the same path.
+  const [fundResult, setFundResult] = useState(null);
+  const [cashOutResult, setCashOutResult] = useState(null);
+  const [transactions, setTransactions] = useState([]);
 
   useEffect(() => {
     const worklet = new Worklet();
@@ -128,6 +133,11 @@ export function useEngine(config = {}) {
         // The core FIRST (it owns the directory, active wave, redeem-on-dm and the tip
         // choreography), then this host's narration — the ordering rule the core documents.
         coreRef.current?.handle(msg);
+        // READY means "the engine has spoken", not "we sent init". A command issued between those
+        // two points is swallowed by the host's onBootstrap (which consumes anything arriving
+        // before the engine exists) — and a request/response command like fetch-transactions would
+        // then never get a reply, leaving the wallet's history silently empty.
+        setReady(true);
         const say = (text) => {
           if (text) {
             setToast({ text, at: Date.now() });
@@ -144,6 +154,25 @@ export function useEngine(config = {}) {
         if (msg.type === 'engine-error' || msg.type === 'error') {
           say(`⚠ ${msg.error}`);
           return;
+        }
+        if (msg.type === 'transactions') {
+          setTransactions(msg.list || []);
+          return;
+        }
+        if (msg.type === 'fund-result') {
+          setFundResult(msg);
+        } else if (msg.type === 'cash-out-result') {
+          setCashOutResult(msg);
+        }
+        // Money moved (and settled — a pending fund-result is just the invoice): pull the ledger
+        // again so the wallet's history is current without the user reopening the screen.
+        const settled =
+          !msg.pending &&
+          (msg.type === 'fund-result' ||
+            msg.type === 'cash-out-result' ||
+            msg.type === 'redeem-result');
+        if (settled) {
+          coreRef.current?.fetchTransactions();
         }
         const resultToast = RESULT_TOASTS[msg.type];
         if (resultToast) {
@@ -189,8 +218,8 @@ export function useEngine(config = {}) {
     setSnapshot(core.getSnapshot());
 
     // One-time init: a PERSISTENT storage dir + the keychain-held seeds + the peer's chosen mint.
-    // Async (keychain + fs are async on RN), so the engine is built a tick after mount — `ready`
-    // gates the UI.
+    // Async (keychain + fs are async on RN), so the engine is built a tick after mount. `ready`
+    // flips when the engine first speaks back (see onEvent), not here.
     (async () => {
       const storageDir = resolveStorageDir();
       const seeds = await resolveSeeds();
@@ -201,7 +230,6 @@ export function useEngine(config = {}) {
         storageDir,
         config: { ...config, ...seeds, walletOptions: { mint: readMint() } }
       });
-      setReady(true);
     })();
 
     // Cooperate with the OS lifecycle: react-native-bare-kit's Worklet.update() takes an RN
@@ -239,6 +267,9 @@ export function useEngine(config = {}) {
     ready,
     toast,
     lastEvent,
+    fundResult,
+    cashOutResult,
+    transactions,
     /**
      * Register what must happen before the active wave changes (staging a pending capture).
      * @param {(() => void)|null} fn - The hook, or null to clear it.

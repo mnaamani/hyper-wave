@@ -6,8 +6,8 @@
 // in its centre, the lobby (while the open wave is forming), and the moment list.
 //
 // Joining a wave opens the capture sheet for the lobby: frame a moment, which is staged and posts
-// when this peer's sweep slot fires. Still to come (implement-mobile-app.md): the wallet screen
-// (Phase 5) — the top-up button here is an interim stand-in for it.
+// when this peer's sweep slot fires. The Wallet button opens the self-custodial Cashu wallet (top
+// up, cash out, mint picker, history).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView,
@@ -28,6 +28,7 @@ import { Lobby } from './src/components/Lobby';
 import { StatusLine } from './src/components/StatusLine';
 import { CountryPicker } from './src/components/CountryPicker';
 import { Capture } from './src/components/Capture';
+import { Wallet } from './src/components/Wallet';
 import { PALETTE } from './src/theme';
 
 // Isolate this build's directory topic so test devices don't collide with the demo ring on the
@@ -35,8 +36,6 @@ import { PALETTE } from './src/theme';
 const TOPIC = 'hyperwave-mobile-demo';
 // A tip is a fixed 5 sats, as on desktop (enough to survive the mint's ~1-sat swap fee).
 const TIP_SATS = 5;
-// Interim fixed top-up amount until the wallet screen (Phase 5) takes a user-specified one.
-const TOPUP_SATS = 64;
 
 export default function App() {
   const engine = useEngine({ topicId: TOPIC });
@@ -55,6 +54,7 @@ export default function App() {
   // The wave whose capture the user dismissed ("Skip") — they still take part, just without a
   // moment, exactly like the desktop's skip button.
   const [skippedWaveId, setSkippedWaveId] = useState(null);
+  const [walletOpen, setWalletOpen] = useState(false);
   const captureRef = useRef(null);
 
   // The country is the engine's cosmetic peer `tag`; push it once the engine is up (and whenever
@@ -200,11 +200,18 @@ export default function App() {
 
       <View style={styles.actions}>
         <Button label='Start a wave' onPress={engine.startWave} />
-        <Button
-          label={`Top up ${TOPUP_SATS}`}
-          onPress={() => engine.fundWallet(TOPUP_SATS)}
-        />
+        <Button label='Wallet' onPress={() => setWalletOpen(true)} />
       </View>
+
+      <Wallet
+        visible={walletOpen}
+        onClose={() => setWalletOpen(false)}
+        wallet={wallet}
+        fundResult={engine.fundResult}
+        cashOutResult={engine.cashOutResult}
+        transactions={engine.transactions}
+        actions={engine}
+      />
 
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.section}>Moments ({gallery.length})</Text>

@@ -1,7 +1,7 @@
 # Bringing the mobile app to parity with the desktop app
 
-**Status:** Phases 0–4 are DONE (2026-07-27) — see the per-phase notes below. Phases 5–6
-(wallet screen, platform hardening) remain. Written 2026-07-25.
+**Status:** Phases 0–5 are DONE (2026-07-27) — see the per-phase notes below. Phase 6
+(platform hardening: Android, tests, bootstrap pin, NSFW decision, docs) remains. Written 2026-07-25.
 **Scope:** `mobile/` (Expo + `react-native-bare-kit`) and the shared worklet host
 (`packages/hyperwave-engine/worklet/app.js`). The engine's protocol, wave FSM, feed
 CRDT, and payment abstraction are **done and shared** — nothing in this plan requires a
@@ -310,7 +310,7 @@ beats as desktop.
 
 **Done when:** a moment captured on the phone appears in a desktop peer's gallery, and vice versa.
 
-### Phase 5 — Wallet screen (M)
+### Phase 5 — Wallet screen (M) — ✅ DONE (cash-out melt unverified, see below)
 
 **U9/U10**: balance, mint picker (`set-wallet-options`), **top up with a user-specified amount**
 (the input just added to desktop — `renderer/lib/wallet.js`; same 1..1,000,000 sat gate), invoice
@@ -319,6 +319,13 @@ should scan), the persisted ledger via `fetch-transactions`, and `redeem` for ti
 
 **Done when:** top up, tip, and cash out all work on device against a real mint, and the ledger
 shows past sessions after a restart.
+
+_Result:_ top up and the ledger are verified on the simulator against the live testnut mint (balance
+rises; History shows entries from earlier app runs). Cash out is verified only on its FAILURE path
+(the mint rejects a bogus invoice and the screen surfaces it) — a successful melt needs a real
+payable bolt11 from an external Lightning wallet, which the repo's e2e doesn't cover either. The
+mobile tip button calls the same `core.tip()` whose choreography was verified live on desktop, but
+has not been exercised from the phone.
 
 ### Phase 6 — Platform hardening + docs (M)
 
