@@ -1,7 +1,8 @@
 # HyperWave — task list
 
 Refinement backlog, roughly prioritized. Design context in `docs/idea.md`;
-engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`; demo script in `DEMO.md`.
+engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`; demo script in
+`README.md` §Demo, and the phone checklist in `mobile/README.md` §Manual device checklist.
 
 ## Done
 
@@ -210,6 +211,14 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
   Tether's QVAC but its "vision" is a multimodal **VLM** (GB RAM, seconds/image) — overkill for
   binary NSFW, especially P2P-every-peer + mobile; MobileNet is ~100–1000× cheaper. The
   **report/downvote** mechanism below still complements it for the tail (false negatives).
+  **Mobile is deliberately NOT filtered (decision D3, 2026-07-27)** — a known, documented
+  asymmetry, not an oversight. The desktop filter is an esbuild bundle of tfjs + nsfwjs + the
+  embedded model, which a React Native runtime can't consume: it would need `tfjs-react-native`,
+  a model asset, and its own native deps, on top of an already ~3 MB worklet bundle and a phone's
+  battery. Since the entry stays in the CRDT either way (each peer filters its OWN view), the
+  asymmetry is a per-peer viewing difference, not a protocol or safety divergence. Revisit if
+  mobile becomes the primary client, or when the report/downvote signal below lands — that one is
+  protocol-level and would serve both hosts at once.
 - [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) moments.** A `wave-entry` is
       an inline image any admitted participant can post, so a peer could post something NSFW or
       abusive. Add a **report/downvote** signal that propagates so each peer can **choose not to
@@ -261,6 +270,24 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 - [ ] "Past waves" browser (would need galleries to persist across runs — currently a wave
       initiator only retains its own wave's gallery in-run)
 - [ ] Tipping UX polish (a "you were tipped" toast for the recipient)
+
+### Mobile (`implement-mobile-app.md`)
+
+- [~] **Mobile parity with desktop — Phases 0–6 done (2026-07-27); the plan tracks the detail.**
+  The host now matches `workers/hyperwave.js` (Cashu, network→topic policy, browse-then-pick),
+  custody is RN-side (keychain seeds + a persistent storage dir, so bearer proofs survive), the
+  rules live in the shared `hyperwave-app-core` that BOTH hosts drive, and the UI has the ring,
+  wave directory, lobby, narration, country onboarding, lobby camera capture and the wallet
+  screen. Remaining, each with a stated reason:
+  - [ ] **Build + run on Android.** Addon linking is done and verified (88 `.so` across 4 ABIs);
+        the APK build needs a **JDK 17** and an **AVD**, neither present on the dev machine
+        (`mobile/README.md` has the exact diagnosis + commands).
+  - [ ] **Verify on real hardware**: a real camera frame (the simulator has none, so the
+        downscale ladder + EXIF strip are unexercised), a successful cash-out melt against a
+        payable bolt11, and a tip sent from the phone. `mobile/README.md` §Manual device
+        checklist is the script.
+  - [ ] **Automated UI tests for the RN app** — the shared rules are covered by
+        `hyperwave-app-core`'s suite, but nothing exercises the React layer.
 
 ### Housekeeping
 

@@ -85,8 +85,12 @@ function serveEngine({ stream, onBootstrap }) {
       // reject if there's none. The bootstrap command itself is consumed, not exec'd.
       if (onBootstrap) {
         onBootstrap(command);
-        return;
       }
+      // Either way, a REQUEST must be answered. A request/response command that raced the
+      // bootstrap (a UI that fired `fetch-transactions` between sending `init` and the engine
+      // actually starting) would otherwise be consumed here and never replied to, leaving the
+      // caller awaiting a promise that can never settle — which is how the mobile wallet's
+      // history silently stayed empty. Answer, so the caller can retry.
       if (wantsReply) {
         req.reply(JSON.stringify({ type: 'error', error: 'engine not ready' }));
       }

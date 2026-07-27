@@ -36,9 +36,17 @@ import { PALETTE } from './src/theme';
 const TOPIC = 'hyperwave-mobile-demo';
 // A tip is a fixed 5 sats, as on desktop (enough to survive the mint's ~1-sat swap fee).
 const TIP_SATS = 5;
+// Optional DHT bootstrap pin — 'host:port' (comma-separate several); createEngine parses it.
+// Cold discovery on the public DHT takes ~20-35s, which is a long silence in a demo; pointing at a
+// known node (e.g. a local @hyperswarm/testnet from the engine's `bare bin/dht-local.js`) makes it
+// near-instant. Empty = the public DHT, which is the right default for a real user.
+const BOOTSTRAP = '';
 
 export default function App() {
-  const engine = useEngine({ topicId: TOPIC });
+  const engine = useEngine({
+    topicId: TOPIC,
+    ...(BOOTSTRAP ? { bootstrap: BOOTSTRAP } : {})
+  });
   const {
     me,
     peers,

@@ -103,6 +103,39 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 `mobile/` (which reaches the addons via `hyperwave-engine`) and writes into the hoisted
 `react-native-bare-kit` — wired into `postinstall` (auto after every install) and `npm run ios`.
 
+## Manual device checklist
+
+Automated tests cover the shared rules (`hyperwave-app-core`) and the engine; everything below is
+what only a real run can tell you. Pair the phone with a desktop peer — the quickest partner is the
+engine's headless CLI, which needs no GUI and funds itself:
+
+```bash
+cd packages/hyperwave-engine
+HYPERWAVE_TOPIC=hyperwave-mobile-demo WALLET=1 WALLET_TYPE=cashu WALLET_FUND=200 \
+  AUTOJOIN=1 AUTOENTRY=1 bare bin/wave.run.js peer /tmp/hw-peer
+```
+
+1. **Boot** — identity + ring angle appear; the wallet chip shows a balance and `testnet`.
+2. **Restart** — same peer id and angle (keychain swarm seed), same balance (proofs on disk).
+3. **Discovery** — the headless peer appears on the ring within ~35s (public DHT).
+4. **Start a wave** — `🔥 paying the start fee…`, then the chip shows `lobby · 2 sat · pending`,
+   then `verified`.
+5. **Capture** — the sheet opens with a live preview, the countdown runs, and it auto-captures
+   before the lobby closes. Tap **Capture now** and **Skip** at least once each.
+6. **Sweep** — the spark laps the ring, `wave rolling — hop n`, then `✅ wave completed`, and the
+   ring pulses.
+7. **Gallery** — YOUR photo is in the moment list (this is the piece the simulator cannot test),
+   and it appears in the headless peer's feed (`FEED size=2` in its log).
+8. **Tip** — tap ⚡ Tip on the peer's moment: balance drops ~6 sat, and the peer logs a `dm`
+   carrying the token plus a stripped `note`.
+9. **Receive a tip** — from a desktop peer, tip the phone's moment: `🎉 you got tipped`, and the
+   balance rises after the automatic redeem.
+10. **Wallet** — top up a custom amount; on a real (non-test) mint the invoice renders as a QR;
+    scan a bolt11 with **Scan QR** and cash out; History lists the operations, and still does
+    after a restart.
+11. **Background** — background the app mid-lobby and return: sockets suspend, so expect to miss
+    a wave that starts meanwhile (a stated limitation).
+
 ## What's left (none of which touch the engine)
 
 Tracked in detail in `../implement-mobile-app.md`:
@@ -115,8 +148,14 @@ Tracked in detail in `../implement-mobile-app.md`:
 - **Cash out against a real invoice** — the screen and the engine path are in place and the failure
   path is verified (the mint rejects a bad invoice and the error surfaces), but a successful melt
   needs a payable bolt11 from an external Lightning wallet.
-- **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake
-  path — wire the equivalent addon step for `npm run android` (Phase 6).
+- **An Android BUILD** — the addon linking is done (`npm run link:android-addons`, wired into
+  `postinstall` and `npm run android`, and verified to vendor 88 `.so` files across 4 ABIs), but
+  the APK has never been built here. Two environment prerequisites, both absent on the dev machine:
+  a **JDK 17** (the RN gradle plugin requires that toolchain; with only JDK 21/26 present Gradle
+  tries to auto-provision it and the plugin's pinned `foojay-resolver 0.5.0` crashes under Gradle 9
+  with a misleading `JvmVendorSpec … IBM_SEMERU` error — the real message appears with
+  `-Porg.gradle.java.installations.auto-download=false`), and an **Android system image / AVD**.
+  With both installed: `JAVA_HOME=<jdk17> ANDROID_HOME=~/Library/Android/sdk npm run android`.
 - **Discovery** — no local DHT on device; you're on the public DHT (~20–35s cold). Pin a
   well-known bootstrap peer via `config.bootstrap` to speed a demo.
 - **Background lifecycle** — `useEngine` wires RN `AppState` → `Worklet.update(state)`, so the Bare

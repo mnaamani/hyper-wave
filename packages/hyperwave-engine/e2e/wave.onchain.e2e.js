@@ -8,7 +8,7 @@
 // Enable with:  E2E_ONCHAIN=1  and two funded BIP39 mnemonics:
 //   HYPERWAVE_E2E_SEED_1  — initiator P1 (kick-off burn; keep it well-funded)
 //   HYPERWAVE_E2E_SEED_2  — joiner P2 (join burn — its wave-join carries the burn attestation)
-// Fund via the Nile faucet (https://nileex.io/join/getJoinPage). See DEMO.md.
+// Fund via the Nile faucet (https://nileex.io/join/getJoinPage). See the repo README (§Demo).
 const test = require('brittle');
 const { Cluster, sleep } = require('./harness');
 

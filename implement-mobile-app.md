@@ -1,7 +1,8 @@
 # Bringing the mobile app to parity with the desktop app
 
-**Status:** Phases 0–5 are DONE (2026-07-27) — see the per-phase notes below. Phase 6
-(platform hardening: Android, tests, bootstrap pin, NSFW decision, docs) remains. Written 2026-07-25.
+**Status:** ALL PHASES (0–6) are DONE (2026-07-27) — see the per-phase notes below. What remains is
+verification that needs hardware or a toolchain this machine lacks — tracked in TODO.md under
+**Mobile** and in `mobile/README.md`. Written 2026-07-25.
 **Scope:** `mobile/` (Expo + `react-native-bare-kit`) and the shared worklet host
 (`packages/hyperwave-engine/worklet/app.js`). The engine's protocol, wave FSM, feed
 CRDT, and payment abstraction are **done and shared** — nothing in this plan requires a
@@ -327,12 +328,12 @@ payable bolt11 from an external Lightning wallet, which the repo's e2e doesn't c
 mobile tip button calls the same `core.tip()` whose choreography was verified live on desktop, but
 has not been exercised from the phone.
 
-### Phase 6 — Platform hardening + docs (M)
+### Phase 6 — Platform hardening + docs (M) — ✅ DONE (Android build blocked on toolchain)
 
 1. **P1** Android: the `bare-link` CMake path, `npm run android` verified on an emulator.
 2. **P3** tests: the `hyperwave-app-core` suite already landed in Phase 2c — extend it with the
    cases mobile turns up, wire it into the root `npm test`, and add a manual device checklist to
-   `DEMO.md`.
+   `mobile/README.md` (§Manual device checklist — there is no DEMO.md).
 3. **P5** pin a bootstrap peer via `config.bootstrap` for demos.
 4. **D3** NSFW decision executed (implement or document the asymmetry).
 5. **P4** docs: `mobile/README.md` rewritten, `CLAUDE.md` mobile paragraph updated, `TODO.md`
