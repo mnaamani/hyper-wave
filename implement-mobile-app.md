@@ -1,7 +1,7 @@
 # Bringing the mobile app to parity with the desktop app
 
-**Status:** Phases 0–3 are DONE (2026-07-27) — see the per-phase notes below. Phases 4–6
-(camera capture, wallet screen, platform hardening) remain. Written 2026-07-25.
+**Status:** Phases 0–4 are DONE (2026-07-27) — see the per-phase notes below. Phases 5–6
+(wallet screen, platform hardening) remain. Written 2026-07-25.
 **Scope:** `mobile/` (Expo + `react-native-bare-kit`) and the shared worklet host
 (`packages/hyperwave-engine/worklet/app.js`). The engine's protocol, wave FSM, feed
 CRDT, and payment abstraction are **done and shared** — nothing in this plan requires a
@@ -297,14 +297,15 @@ _Goal: it feels like HyperWave._
 **Done when:** a mobile peer can watch a wave sweep the ring end to end, with the same narration
 beats as desktop.
 
-### Phase 4 — Capture + gallery (M)
+### Phase 4 — Capture + gallery (M) — ✅ DONE (U8 scrubber dropped; see below)
 
 1. **U6** `expo-camera` preview during the lobby, capture → JPEG data URL (mind the entry byte
    caps in `protocol.md`) + caption → `stage-entry`; auto-capture at wave start, mirroring
    `proof.captureAndStage()`.
 2. **U7** gallery: hop-ordered items, featured moment in the ring centre, progress, tip button.
-3. **U8** scrubber gesture (drag the spark to browse) — optional polish, drop if it fights RN
-   gesture handling.
+3. **U8** scrubber gesture — DROPPED for now (the plan allows it): the ring is small on a phone
+   and the moment list below it already lets you browse every moment by tapping. Revisit only if
+   the gallery grows a full-screen mode.
 4. **P2** permission strings.
 
 **Done when:** a moment captured on the phone appears in a desktop peer's gallery, and vice versa.

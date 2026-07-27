@@ -99,6 +99,9 @@ const WAVE_AGNOSTIC_EVENTS = new Set(['dm', 'note']);
 export function useEngine(config = {}) {
   const coreRef = useRef(null);
   const clientRef = useRef(null);
+  // Set by the host (the capture sheet) — run before the active wave changes; see the core's
+  // onBeforeSwitchWave below.
+  const beforeSwitchRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
   // {text, at} rather than a bare string: the same beat firing twice must still re-show.
@@ -171,9 +174,11 @@ export function useEngine(config = {}) {
 
     const core = createAppCore({
       send: (type, args) => client.call(type, args),
-      // No webcam preview to lock in yet (capture is Phase 4) — when it lands, stage the pending
-      // frame here so a wave that starts while the user browses elsewhere still posts (invariant 3).
-      onBeforeSwitchWave: () => {}
+      // app-core invariant 3: if the user is framing a moment for the wave they're leaving, it
+      // must be staged to the OLD wave BEFORE the switch — otherwise a wave that starts while
+      // they browse elsewhere posts nothing. The capture sheet registers itself here (the ref is
+      // indirection because the sheet mounts long after the core is built).
+      onBeforeSwitchWave: () => beforeSwitchRef.current?.()
     });
     coreRef.current = core;
     core.subscribe((next) => {
@@ -234,6 +239,14 @@ export function useEngine(config = {}) {
     ready,
     toast,
     lastEvent,
+    /**
+     * Register what must happen before the active wave changes (staging a pending capture).
+     * @param {(() => void)|null} fn - The hook, or null to clear it.
+     * @returns {void}
+     */
+    setBeforeWaveSwitch: (fn) => {
+      beforeSwitchRef.current = fn;
+    },
     // the core's snapshot, flattened for the UI
     me: snapshot?.me || null,
     peers: snapshot?.peers || [],

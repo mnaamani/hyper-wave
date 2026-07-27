@@ -5,9 +5,10 @@
 // strip (tap a wave to subscribe + open it), the ring with the sweep spark and the featured moment
 // in its centre, the lobby (while the open wave is forming), and the moment list.
 //
-// Still to come (implement-mobile-app.md): camera capture (Phase 4) and the wallet screen
-// (Phase 5) — the top-up button here is an interim stand-in for the latter.
-import { useEffect, useState } from 'react';
+// Joining a wave opens the capture sheet for the lobby: frame a moment, which is staged and posts
+// when this peer's sweep slot fires. Still to come (implement-mobile-app.md): the wallet screen
+// (Phase 5) — the top-up button here is an interim stand-in for it.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -26,6 +27,7 @@ import { WaveList } from './src/components/WaveList';
 import { Lobby } from './src/components/Lobby';
 import { StatusLine } from './src/components/StatusLine';
 import { CountryPicker } from './src/components/CountryPicker';
+import { Capture } from './src/components/Capture';
 import { PALETTE } from './src/theme';
 
 // Isolate this build's directory topic so test devices don't collide with the demo ring on the
@@ -50,6 +52,10 @@ export default function App() {
     lastEvent
   } = engine;
   const [country, setCountry] = useState(() => readCountry());
+  // The wave whose capture the user dismissed ("Skip") — they still take part, just without a
+  // moment, exactly like the desktop's skip button.
+  const [skippedWaveId, setSkippedWaveId] = useState(null);
+  const captureRef = useRef(null);
 
   // The country is the engine's cosmetic peer `tag`; push it once the engine is up (and whenever
   // the user picks a new one), so this peer's seat and moments carry its flag.
@@ -89,6 +95,34 @@ export default function App() {
   const featured = gallery.length > 0 ? gallery[gallery.length - 1] : null;
   const unit = unitLabelFor(wallet?.unit || 'sat');
   const inLobby = activeWave && activeWave.phase === 'lobby';
+  // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one.
+  const capturing =
+    inLobby &&
+    (activeWave.joined || activeWave.mine) &&
+    skippedWaveId !== activeWaveId;
+
+  // Wave start: make sure the frame is taken (auto, if the user didn't press Capture), mirroring
+  // the desktop's proof.captureAndStage() on wave-active.
+  useEffect(() => {
+    if (
+      lastEvent?.event === 'wave-active' &&
+      lastEvent.waveId === activeWaveId
+    ) {
+      captureRef.current?.captureAndStage();
+    }
+  }, [lastEvent, activeWaveId]);
+
+  // app-core invariant 3: staging must happen BEFORE the core switches waves, so register the
+  // capture hook with the store rather than relying on call order here.
+  useEffect(() => {
+    engine.setBeforeWaveSwitch(() => captureRef.current?.captureAndStage());
+    return () => engine.setBeforeWaveSwitch(null);
+  }, [engine.setBeforeWaveSwitch]);
+
+  const stageMoment = useCallback(
+    (moment) => engine.stageMoment(moment, activeWaveId),
+    [engine.stageMoment, activeWaveId]
+  );
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -146,9 +180,23 @@ export default function App() {
         }
       />
 
+      {activeWave && !inLobby ? (
+        <Text style={styles.progress}>
+          {gallery.length}/{activeWave.count || 1} moments in
+        </Text>
+      ) : null}
+
       {inLobby ? (
         <Lobby wave={activeWave} unit={unit} onJoin={() => engine.joinWave()} />
       ) : null}
+
+      <Capture
+        visible={!!capturing}
+        deadline={activeWave?.lobbyDeadline || 0}
+        captureRef={captureRef}
+        onStage={stageMoment}
+        onSkip={() => setSkippedWaveId(activeWaveId)}
+      />
 
       <View style={styles.actions}>
         <Button label='Start a wave' onPress={engine.startWave} />
@@ -234,6 +282,12 @@ const styles = StyleSheet.create({
   btnDisabled: { backgroundColor: PALETTE.panel },
   btnText: { color: '#1a1204', fontWeight: '700' },
   btnTextDisabled: { color: PALETTE.muted },
+  progress: {
+    color: PALETTE.muted,
+    fontSize: 12,
+    textAlign: 'center',
+    paddingTop: 4
+  },
   body: { paddingBottom: 32 },
   section: {
     color: PALETTE.text,

@@ -50,7 +50,10 @@ pulses.
   outside the per-run `hyperwave/` Corestore the engine wipes on boot. (The old scaffold resolved
   storage under `os.tmpdir()`, which the OS may purge — a topped-up wallet could silently vanish.)
 - The chosen mint is persisted plain (`<storageDir>/cashu.mint`) so a live switch survives a
-  restart.
+  restart; so is the chosen country (`<storageDir>/country`).
+- **Uninstalling the app deletes its Cashu proofs** — they live in the app container, which iOS
+  removes with the app (the keychain seeds survive, but the bearer funds don't). Cash out before
+  uninstalling. Desktop has the same property for its storage dir.
 
 ## Status: runs on the iOS simulator — cross-peer with a desktop peer verified
 
@@ -77,7 +80,14 @@ npx expo install --fix     # align Expo package versions to the installed SDK (f
 npm run ios                # bundle + link iOS addons + build/install/launch a dev build
 ```
 
-`npm run ios` runs `npm run bundle` (bare-pack) and `npm run link:ios-addons` first. For a
+`npm run ios` runs `npm run bundle` (bare-pack) and `npm run link:ios-addons` first.
+
+`ios/` and `android/` are **generated and gitignored** — `app.json` is the source of truth for
+native config (bundle id, permission strings like `NSCameraUsageDescription`, plugins). An existing
+`ios/` is NOT re-synced from `app.json` on build, so after changing that config run
+`npx expo prebuild --clean` (or edit the generated plist to match locally). Note that the iOS
+Simulator caches a permission's purpose string per bundle id even across reinstalls, so a changed
+string may keep showing the old text there. For a
 standalone run with no Metro packager (the JS bundle is embedded), add `--configuration Release`:
 `npx expo run:ios --configuration Release`.
 
@@ -97,9 +107,11 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 
 Tracked in detail in `../implement-mobile-app.md`:
 
-- **Camera capture** — `expo-camera` in the lobby → downscaled JPEG data URL + caption →
-  `stage-entry` (Phase 4). Until it lands, a mobile peer watches and tips but posts no moment of
-  its own.
+- **Capture on real hardware** — the capture sheet, the auto-capture, the byte-cap ladder and the
+  staging path are implemented and the entry posts cross-peer, but the **iOS Simulator has no
+  camera**: every frame there comes back empty, so the entry carries only a caption. Photographing
+  a real moment (and with it the downscale ladder + EXIF strip) is unverified until it runs on a
+  device.
 - **Wallet screen** — balance, mint picker, top up (invoice QR), cash out (scan a bolt11), the
   ledger, tip redemption (Phase 5).
 - **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake

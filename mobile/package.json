@@ -16,8 +16,10 @@
   "dependencies": {
     "b4a": "^1.6.7",
     "expo": "~55.0.23",
+    "expo-camera": "~55.0.21",
     "expo-crypto": "~55.0.17",
     "expo-file-system": "~55.0.24",
+    "expo-image-manipulator": "~55.0.19",
     "expo-secure-store": "~55.0.16",
     "framed-stream": "^1.0.1",
     "hyperwave-app-core": "*",
