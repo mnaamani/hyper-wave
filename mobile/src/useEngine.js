@@ -48,23 +48,39 @@ const RESULT_TOASTS = {
       : `🎉 tip redeemed +${msg.amount}`
 };
 
-// Narration for the wave events the UI wants to say something about. Everything else is reflected
-// by the snapshot (phase, roster count, …) and needs no toast.
+// Narration for wave events — the same beats the desktop HUD shows (renderer/app.js's
+// EVENT_HANDLERS), minus the ones that are purely visual there. Anything already visible in the
+// snapshot (phase, roster count, fee) needs no beat.
 const EVENT_TOASTS = {
+  'wave-announce': (evt) =>
+    evt.mine && evt.paid !== 'verified'
+      ? '🔥 paying the start fee…'
+      : '🌊 a wave is forming',
+  paying: () => '🔥 paying the start fee…',
+  'wave-verified': (evt) =>
+    evt.mine ? '✅ your wave is live' : '✅ start fee verified — you can join',
+  'wave-unpaid': () => '⚠ ignored an unpaid wave',
   'join-blocked': (evt) => {
     const byReason = {
       'roster-full': '🚧 this wave is full — spectating',
-      'wallet-unsupported': '💸 this wave needs a different wallet',
+      'wallet-unsupported': evt.walletType
+        ? `💸 can’t join — this wave needs a ${evt.walletType} wallet`
+        : '💸 can’t join — no compatible wallet',
       pending: '⏳ verifying the wave’s start payment…',
       rejected: '⚠ the wave’s start payment was rejected'
     };
     return byReason[evt.reason] || '🚫 can’t join this wave';
   },
-  'wave-unpaid': () => '⚠ ignored an unpaid wave',
+  joined: () => '✋ you’re on the roster',
+  'wave-active': (evt) =>
+    evt.joined ? '📸 here comes the wave!' : '👀 spectating this wave',
+  busy: () => '⏳ a wave is already forming — wait for it to finish',
   started: () => '⚡ the wave is off!',
   holding: (evt) =>
     `📸 your moment joins the wave! — hop ${evt.hopCount ?? ''}`,
+  position: (evt) => `wave rolling — hop ${evt.hopCount ?? ''}`,
   completed: (evt) => `✅ wave completed — ${evt.hops} hops`,
+  'wave-idle': () => null, // the last beat (completed) deliberately stays on screen
   dm: (evt) =>
     evt.note?.kind === 'tip' && evt.note?.token
       ? `🎉 you got tipped ${evt.note.amount}!`
@@ -75,12 +91,21 @@ const EVENT_TOASTS = {
       : null
 };
 
+// `dm`/`note` touch MY wallet regardless of which wave I'm viewing (a tip can arrive for a wave
+// I've navigated away from), so they narrate unconditionally; every other beat is about the wave
+// on screen — same rule as the desktop renderer.
+const WAVE_AGNOSTIC_EVENTS = new Set(['dm', 'note']);
+
 export function useEngine(config = {}) {
   const coreRef = useRef(null);
   const clientRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
+  // {text, at} rather than a bare string: the same beat firing twice must still re-show.
   const [toast, setToast] = useState(null);
+  // The last wave event for the ACTIVE wave, so the ring can trigger its sweep + flourish off the
+  // protocol rather than guessing from phase transitions. {event, waveId, at}.
+  const [lastEvent, setLastEvent] = useState(null);
 
   useEffect(() => {
     const worklet = new Worklet();
@@ -100,29 +125,46 @@ export function useEngine(config = {}) {
         // The core FIRST (it owns the directory, active wave, redeem-on-dm and the tip
         // choreography), then this host's narration — the ordering rule the core documents.
         coreRef.current?.handle(msg);
+        const say = (text) => {
+          if (text) {
+            setToast({ text, at: Date.now() });
+          }
+        };
         if (msg.type === 'wallet') {
           if (msg.error) {
-            setToast(`⚠ wallet: ${msg.error}`);
+            say(`⚠ wallet: ${msg.error}`);
           } else if (typeof msg.mint === 'string') {
             writeMint(msg.mint); // survive a restart, like desktop's cashu.mint file
           }
           return;
         }
         if (msg.type === 'engine-error' || msg.type === 'error') {
-          setToast(`⚠ ${msg.error}`);
+          say(`⚠ ${msg.error}`);
           return;
         }
         const resultToast = RESULT_TOASTS[msg.type];
         if (resultToast) {
-          setToast(resultToast(msg));
+          say(resultToast(msg));
           return;
         }
-        if (msg.type === 'event') {
-          const text = EVENT_TOASTS[msg.event]?.(msg);
-          if (text) {
-            setToast(text);
-          }
+        if (msg.type !== 'event') {
+          return;
         }
+        // Narrate (and drive the ring) only for the wave on screen — a background wave must not
+        // clobber the view — except the wave-agnostic money events.
+        const activeWaveId = coreRef.current?.getSnapshot().activeWaveId;
+        const forActive = msg.waveId && msg.waveId === activeWaveId;
+        if (!WAVE_AGNOSTIC_EVENTS.has(msg.event) && !forActive) {
+          return;
+        }
+        if (forActive) {
+          setLastEvent({
+            event: msg.event,
+            waveId: msg.waveId,
+            at: Date.now()
+          });
+        }
+        say(EVENT_TOASTS[msg.event]?.(msg));
       }
     });
     clientRef.current = client;
@@ -191,6 +233,7 @@ export function useEngine(config = {}) {
   return {
     ready,
     toast,
+    lastEvent,
     // the core's snapshot, flattened for the UI
     me: snapshot?.me || null,
     peers: snapshot?.peers || [],

@@ -1,7 +1,7 @@
 # Bringing the mobile app to parity with the desktop app
 
-**Status:** Phases 0, 1 and 2 are DONE (2026-07-27) — see the per-phase notes below. Phases 3–6
-(ring/lobby UX, camera capture, wallet screen, platform hardening) remain. Written 2026-07-25.
+**Status:** Phases 0–3 are DONE (2026-07-27) — see the per-phase notes below. Phases 4–6
+(camera capture, wallet screen, platform hardening) remain. Written 2026-07-25.
 **Scope:** `mobile/` (Expo + `react-native-bare-kit`) and the shared worklet host
 (`packages/hyperwave-engine/worklet/app.js`). The engine's protocol, wave FSM, feed
 CRDT, and payment abstraction are **done and shared** — nothing in this plan requires a
@@ -283,7 +283,7 @@ package's invariant tests pass, and — with a deliberately plain UI — a mobil
 several concurrent waves, join one, be blocked with the right reason on another, tip a moment,
 and receive + redeem a tip.
 
-### Phase 3 — Core wave UX (L)
+### Phase 3 — Core wave UX (L) — ✅ DONE
 
 _Goal: it feels like HyperWave._
 

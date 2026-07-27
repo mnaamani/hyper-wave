@@ -22,6 +22,8 @@ const STORAGE_SUBDIR = 'hyperwave';
 // The chosen Cashu mint — NOT a secret, so it sits as a plain file next to the store (mirroring
 // desktop's <dir>/cashu.mint) rather than in the keychain.
 const MINT_FILE = 'cashu.mint';
+// The chosen country (the engine's cosmetic peer `tag`) — a preference, not a secret.
+const COUNTRY_FILE = 'country';
 
 const HEX_SEED_BYTES = 32;
 
@@ -95,13 +97,11 @@ export async function resolveSeeds() {
   }
 }
 
-/**
- * The peer's chosen Cashu mint, so a live `set-wallet-options` switch survives a restart.
- * @returns {string|undefined} The mint URL, or undefined for the wallet's default.
- */
-export function readMint() {
+// Plain (non-secret) preferences kept as small files next to the store, mirroring desktop's
+// <dir>/cashu.mint. The keychain is for secrets only.
+function readPref(name) {
   try {
-    const file = new File(storageDirectory(), MINT_FILE);
+    const file = new File(storageDirectory(), name);
     if (!file.exists) {
       return undefined;
     }
@@ -112,19 +112,48 @@ export function readMint() {
   }
 }
 
+function writePref(name, value) {
+  try {
+    const file = new File(storageDirectory(), name);
+    if (!file.exists) {
+      file.create();
+    }
+    file.write(String(value));
+  } catch (err) {
+    console.warn(`[custody] could not persist ${name}:`, err.message);
+  }
+}
+
+/**
+ * The peer's chosen Cashu mint, so a live `set-wallet-options` switch survives a restart.
+ * @returns {string|undefined} The mint URL, or undefined for the wallet's default.
+ */
+export function readMint() {
+  return readPref(MINT_FILE);
+}
+
 /**
  * Persist the active Cashu mint (called when the engine reports one on a `wallet` message).
  * @param {string} mint - The mint URL.
  * @returns {void}
  */
 export function writeMint(mint) {
-  try {
-    const file = new File(storageDirectory(), MINT_FILE);
-    if (!file.exists) {
-      file.create();
-    }
-    file.write(String(mint));
-  } catch (err) {
-    console.warn('[custody] could not persist the Cashu mint:', err.message);
-  }
+  writePref(MINT_FILE, mint);
+}
+
+/**
+ * The peer's chosen country — the engine's cosmetic peer `tag`, asked once at onboarding.
+ * @returns {string|undefined} The ISO 3166-1 alpha-2 code, or undefined if never chosen.
+ */
+export function readCountry() {
+  return readPref(COUNTRY_FILE);
+}
+
+/**
+ * Persist the chosen country so onboarding is asked once.
+ * @param {string} code - The ISO code.
+ * @returns {void}
+ */
+export function writeCountry(code) {
+  writePref(COUNTRY_FILE, code);
 }

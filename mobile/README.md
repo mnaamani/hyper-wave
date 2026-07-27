@@ -12,10 +12,19 @@ The UI is still a scaffold; the roadmap to desktop parity is `../implement-mobil
 ```
 Expo RN app (this package)                 Bare worklet (hyperwave-engine)
   App.js ── useEngine() ──► FramedStream ⇄ IPC ⇄ FramedStream ──► worklet/app.js ──► createEngine
-  (React UI)                (bare-rpc, JSON)                       (wave + gallery + Cashu wallet)
+  (React UI)   │            (bare-rpc, JSON)                      (wave + gallery + Cashu wallet)
+  src/components/ (Ring, WaveList, Lobby, StatusLine, CountryPicker)
+               └── hyperwave-app-core  (the view-model the desktop renderer drives too)
   src/custody.js
   (keychain seeds + persistent storage dir, injected in `init`)
 ```
+
+The **rules** (wave directory, active wave, ended-wave lifecycle, wallet meta, tip choreography)
+live in `hyperwave-app-core`, shared with the desktop renderer — `src/useEngine.js` is only
+transport + React glue, and `src/components/` is only presentation. The ring is `react-native-svg`:
+peers sit at their true seat angles, the sweep spark rolls a fixed-duration lap while a wave races
+(a local replay, like desktop — the protocol itself races at network speed), and a completed wave
+pulses.
 
 - `bare-pack` bundles `../packages/hyperwave-engine/worklet/app.js` (+ its whole
   Hyperswarm/Corestore-Hypercore/cashu-ts require graph) into `bundles/app.bundle.mjs` (~3 MB).
@@ -88,12 +97,9 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 
 Tracked in detail in `../implement-mobile-app.md`:
 
-- **Shared view-model** — the per-wave directory/active-wave/tip logic currently duplicated in
-  `src/useEngine.js` moves into a `hyperwave-app-core` package both hosts import (Phase 2).
-- **Rich UI** — the ring at true peer angles, the sweep spark, the centre-moment player, the wave
-  directory, the lobby countdown (`react-native-svg` or Skia) (Phase 3).
 - **Camera capture** — `expo-camera` in the lobby → downscaled JPEG data URL + caption →
-  `stage-entry` (Phase 4).
+  `stage-entry` (Phase 4). Until it lands, a mobile peer watches and tips but posts no moment of
+  its own.
 - **Wallet screen** — balance, mint picker, top up (invoice QR), cash out (scan a bolt11), the
   ledger, tip redemption (Phase 5).
 - **Android addons** — `link:ios-addons` covers iOS; Android uses `react-native-bare-kit`'s CMake

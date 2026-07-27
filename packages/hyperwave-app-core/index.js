@@ -9,3 +9,4 @@ export {
   mergeWalletMeta
 } from './lib/wallet-meta.js';
 export { topicForNetwork } from './lib/topic.js';
+export { flagOf, countryName, COUNTRIES } from './lib/countries.js';
