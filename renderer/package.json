@@ -1,0 +1,6 @@
+{
+  "name": "hyperwave-renderer",
+  "private": true,
+  "type": "module",
+  "//": "Not a workspace and not published — this file exists so NODE agrees with what the browser and eslint already believe: everything under renderer/ is ESM. Without it, node resolves these .js files against the CJS root package.json and refuses to import them, which is what kept renderer code untestable outside Electron. Chromium loads these files via <script type=\"module\"> and ignores this file entirely, so it changes nothing at runtime."
+}

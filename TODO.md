@@ -295,7 +295,9 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
     filling in sweep order, the feed auto-advancing as moments land, and the drag-takes-control
     rule holding for the rest of that wave.
   - [ ] **Automated UI tests for the RN app** — the shared rules are covered by
-        `hyperwave-app-core`'s suite, but nothing exercises the React layer.
+        `hyperwave-app-core`'s suite, but nothing exercises the React layer. The desktop now has
+        a pattern to copy: `renderer/lib/ring.test.js` drives the real module over a DOM stub
+        under `node --test`.
 
 ### Desktop field (concentric wave rings)
 
@@ -318,7 +320,9 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
     badges first). Covered headlessly too — a scratch harness stubs the canvas and runs real
     frames, checking the layout, DPR, the birth-and-drift easing, the fading fall, hit-testing,
     the ✕ hover/click (walking the pointer in, which is what caught the gap) and the scrubber
-    handoff. Still unverified because they need a live wave with peers: the sweep spark riding
+    handoff — and that suite is now COMMITTED (`renderer/lib/ring.test.js`, wired into
+    `npm test`) rather than a scratch file. Still unverified because they need a live wave
+    with peers: the sweep spark riding
     the ACTIVE wave's radius as it laps, clicking a ghost ring to subscribe, and the scrubber
     standing down on presses that land on another ring.
 

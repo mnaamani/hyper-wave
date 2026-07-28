@@ -46,6 +46,9 @@ const BUNDLE_KEEP_DIRS = new Set([
   'flatpak'
 ]);
 const BUNDLE_KEEP_FILES = new Set(['package.json', 'pear.json']);
+// Test-only files that live INSIDE an allowlisted dir (the renderer suite + its DOM stub) — kept
+// in the repo, kept out of the distributable.
+const BUNDLE_EXCLUDE_FILES = /(\.test\.js|\/canvas-stub\.js)$/;
 
 // electron-packager ignore predicate: return true to EXCLUDE. Paths are repo-root-relative with a
 // leading slash ('' is the root itself). Keep the root, the allowlisted top-level dirs and their
@@ -53,6 +56,9 @@ const BUNDLE_KEEP_FILES = new Set(['package.json', 'pear.json']);
 function ignoreNonAppFiles(relPath) {
   if (relPath === '') {
     return false;
+  }
+  if (BUNDLE_EXCLUDE_FILES.test(relPath)) {
+    return true;
   }
   const segments = relPath.split('/'); // ['', 'electron', 'main.js']
   const top = segments[1];
