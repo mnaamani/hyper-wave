@@ -368,9 +368,10 @@ So mobile's presentation now diverges deliberately:
 Everything else is untouched: no engine change, no app-core change, no new dependency — the rules
 still come from `hyperwave-app-core`, which is what let the presentation be rethought this cheaply.
 
-**Done when:** a wave watched on a phone reads like a feed you'd scroll anyway. _Verification
-owed:_ only reviewed as code — the layout, the auto-advance, and the drag-takes-control rule have
-not been run on the simulator or a device (see `mobile/README.md` §Manual device checklist step 6).
+**Done when:** a wave watched on a phone reads like a feed you'd scroll anyway. _Result:_ the
+layout is confirmed on screen (2026-07-28). Still owed, because it takes a live wave with peers:
+the segment bar filling in sweep order, the feed auto-advancing as moments land, and the
+drag-takes-control rule (see `mobile/README.md` §Manual device checklist step 6).
 
 ---
 

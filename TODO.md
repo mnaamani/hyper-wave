@@ -289,9 +289,10 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         downscale ladder + EXIF strip are unexercised), a successful cash-out melt against a
         payable bolt11, and a tip sent from the phone. `mobile/README.md` §Manual device
         checklist is the script.
-  - [ ] **Run the Phase 7 feed UI** — the redesign (`MomentFeed`, `SweepBar`, the sweep-driven
-        auto-advance and the drag-takes-control rule) has only been reviewed as code, never run
-        on the simulator or a device.
+  - [~] **Run the Phase 7 feed UI.** The LAYOUT is confirmed on screen (2026-07-28) — the
+    full-screen feed and its overlays render as intended. Still unverified because they need
+    a live wave with peers: the segment bar filling in sweep order, the feed auto-advancing
+    as moments land, and the drag-takes-control rule holding for the rest of that wave.
   - [ ] **Automated UI tests for the RN app** — the shared rules are covered by
         `hyperwave-app-core`'s suite, but nothing exercises the React layer.
 
@@ -306,10 +307,11 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         when its phase changes; step 2 tweens the radius so waves visibly drift inward, and adds
         an explicit dismiss (pull it to the inner floor early → `unsubscribe`) alongside the
         existing linger → fade → drop that app-core already drives.
-  - [ ] **Verify on screen.** Step 1 is covered by a headless geometry harness (layout, DPR,
-        hit-testing, the cross-network filter) and the app boots, but nobody has WATCHED a wave
-        sweep a ring in the new field — the sweep spark now rides the active wave's radius, and
-        the scrubber stands down on presses that land on another ring.
+  - [~] **Verify on screen.** The FIELD is confirmed on screen (2026-07-28): the concentric rings
+    render as intended at the responsive size. Covered headlessly too (layout, DPR,
+    hit-testing, the cross-network filter). Still unverified because they need a live wave
+    with peers: the sweep spark riding the ACTIVE wave's radius as it laps, clicking a ghost
+    ring to subscribe, and the scrubber standing down on presses that land on another ring.
 
 ### Housekeeping
 
