@@ -6,6 +6,7 @@
 // joining (and paying a fee of your own) would be throwing sats at an unproven wave.
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { unitLabelFor } from 'hyperwave-app-core';
 import { PALETTE } from '../theme';
 
 const TICK_MS = 250;
@@ -31,7 +32,7 @@ function useCountdown(deadline) {
 /**
  * @param {Object} props - Props.
  * @param {Object} props.wave - The active wave's directory entry.
- * @param {string} props.unit - The wallet's unit label (e.g. 'sat').
+ * @param {string} props.unit - The wallet's RAW unit code (e.g. 'sat'); inflected for the fee.
  * @param {() => void} props.onJoin - Join handler.
  * @returns {JSX.Element} The lobby panel.
  */
@@ -40,7 +41,9 @@ export function Lobby({ wave, unit, onJoin }) {
   const joinable = wave.paid === 'verified';
   const joined = !!wave.joined || !!wave.mine;
   const feeSuffix =
-    typeof wave.fee === 'number' ? ` (${wave.fee} ${unit})` : '';
+    typeof wave.fee === 'number'
+      ? ` (${wave.fee} ${unitLabelFor(unit, wave.fee)})`
+      : '';
 
   return (
     <View style={styles.panel}>

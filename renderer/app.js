@@ -249,7 +249,7 @@ ipc.on('fund-result', (msg) => wallet.fundResult(msg));
 ipc.on('cash-out-result', (msg) => wallet.cashOutResult(msg));
 ipc.on('redeem-result', (msg) => {
   if (!msg.error && msg.amount > 0) {
-    hud.waveStatus(`🎉 tip redeemed — +${msg.amount} ${unitLabel()}`);
+    hud.waveStatus(`🎉 tip redeemed — +${msg.amount} ${unitLabel(msg.amount)}`);
   }
 });
 ipc.on('tip-result', (msg) => gallery.tipResult(msg));
@@ -264,7 +264,9 @@ ipc.on('burn-result', (msg) => {
   } else if (msg.stage === 'failed') {
     hud.waveStatus(`⚠️ ${what} fee burn failed: ${msg.error}`);
   } else {
-    hud.waveStatus(`🔥 ${what} fee burned - ${msg.amount} ${unitLabel()}`);
+    hud.waveStatus(
+      `🔥 ${what} fee burned - ${msg.amount} ${unitLabel(msg.amount)}`
+    );
   }
 });
 
@@ -414,7 +416,9 @@ const EVENT_HANDLERS = {
     if (payload.kind !== 'tip' || !payload.token) {
       return;
     }
-    hud.waveStatus(`🎉 you got tipped ${payload.amount} ${unitLabel()}!`);
+    hud.waveStatus(
+      `🎉 you got tipped ${payload.amount} ${unitLabel(payload.amount)}!`
+    );
     ring.startFlourish(); // golden pulse + confetti — same celebration as a completed wave
   },
 
@@ -426,7 +430,9 @@ const EVENT_HANDLERS = {
     if (payload.kind !== 'tip') {
       return;
     }
-    hud.waveStatus(`💸 a moment was tipped ${payload.amount} ${unitLabel()}`);
+    hud.waveStatus(
+      `💸 a moment was tipped ${payload.amount} ${unitLabel(payload.amount)}`
+    );
   },
 
   // a completed wave always has ≥1 moment (the initiator's) — it may land a beat after this

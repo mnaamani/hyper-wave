@@ -4,17 +4,22 @@
 // wallet-meta.js) wraps these.
 
 /**
- * The active currency unit label. Pass an `amount` for the correctly pluralized form — 'sat'
- * inflects (1 sat / 5 sats).
+ * The active currency unit label. 'sat' inflects: pass the `amount` beside which it will be shown
+ * and you get 1 sat / 5 sats. With NO amount you get the generic plural, 'sats' — that is the form
+ * people write when naming the unit rather than counting it ("amount in sats"), and it is what a
+ * standing label like a balance chip's suffix or an input's unit should read.
+ *
+ * So: pass the amount whenever one is on screen next to the label, or a balance of exactly 1 will
+ * read "1 sats".
  * @param {string} unit - The wallet's unit (e.g. 'sat').
  * @param {number} [amount] - Amount, to choose singular vs plural.
  * @returns {string} The unit label.
  */
 export function unitLabelFor(unit, amount) {
-  if (unit === 'sat' && amount !== undefined && amount !== 1) {
-    return 'sats';
+  if (unit !== 'sat') {
+    return unit; // other units (TRX, …) don't inflect
   }
-  return unit;
+  return amount === 1 ? 'sat' : 'sats';
 }
 
 /**

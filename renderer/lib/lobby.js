@@ -50,7 +50,7 @@ export function setJoinable(ok) {
   }
   joinBtn.disabled = !ok;
   // Show the fee on the button so a joiner sees the cost before opting in (the initiator sets it).
-  const feeSuffix = fee !== null ? ` (${fee} ${unitLabel()})` : '';
+  const feeSuffix = fee !== null ? ` (${fee} ${unitLabel(fee)})` : '';
   joinBtn.innerText = ok
     ? `✋ Count me in${feeSuffix}`
     : '⏳ verifying payment…';
@@ -67,7 +67,7 @@ function paint() {
   }
   const secs = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
   countEl.innerText = secs;
-  const feeNote = fee !== null ? ` · fee ${fee} ${unitLabel()}` : '';
+  const feeNote = fee !== null ? ` · fee ${fee} ${unitLabel(fee)}` : '';
   msgEl.innerText = `wave forming · ${joined ? 'you are in' : 'join in?'} · ${count} in${feeNote}`;
 }
 

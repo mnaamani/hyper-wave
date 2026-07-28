@@ -16,7 +16,7 @@ import {
   Alert,
   StyleSheet
 } from 'react-native';
-import { flagOf } from 'hyperwave-app-core';
+import { flagOf, unitLabelFor } from 'hyperwave-app-core';
 import { PALETTE, PHASE_COLOR } from '../theme';
 
 // Dismissing is destructive-ish (the wave leaves your list and its cores are freed), and a chip is
@@ -98,7 +98,9 @@ export function WaveList({
               </Text>
               <Text style={[styles.chipPhase, { color }]}>
                 {wave.phase} · {wave.count || 1}👥
-                {typeof wave.fee === 'number' ? ` · ${wave.fee} sat` : ''}
+                {typeof wave.fee === 'number'
+                  ? ` · ${wave.fee} ${unitLabelFor('sat', wave.fee)}`
+                  : ''}
               </Text>
               {wave.paid && wave.paid !== 'verified' ? (
                 <View style={styles.pending}>

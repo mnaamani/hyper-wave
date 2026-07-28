@@ -5,10 +5,15 @@ import test from 'brittle';
 import { unitLabelFor, networksMatch, mergeWalletMeta } from './wallet-meta.js';
 
 test('unitLabelFor pluralizes sats but leaves other units alone', (t) => {
-  t.is(unitLabelFor('sat'), 'sat', 'no amount → the bare unit');
+  t.is(
+    unitLabelFor('sat'),
+    'sats',
+    'no amount → the generic plural, as a label'
+  );
   t.is(unitLabelFor('sat', 1), 'sat', 'one sat');
   t.is(unitLabelFor('sat', 5), 'sats', 'many sats');
   t.is(unitLabelFor('sat', 0), 'sats', 'zero sats');
+  t.is(unitLabelFor('TRX'), 'TRX', 'a non-sat unit is never inflected');
   t.is(unitLabelFor('TRX', 5), 'TRX', 'a non-sat unit does not inflect');
 });
 

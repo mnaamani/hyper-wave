@@ -110,7 +110,10 @@ export function Wallet({
   const [invoiceHidden, setInvoiceHidden] = useState(false);
   const lastMintRef = useRef(wallet?.mint);
 
-  const unit = unitLabelFor(wallet?.unit || 'sat');
+  const rawUnit = wallet?.unit || 'sat';
+  // The generic label ('sats') for standing UI — the amount input's suffix. Every place that
+  // prints an actual number inflects against THAT number instead, so 1 never reads "1 sats".
+  const unit = unitLabelFor(rawUnit);
   const amount = useMemo(() => parseAmount(amountText), [amountText]);
   // A test mint auto-pays its own quote, so there is no invoice for the user to act on — the
   // balance simply rises. Same rule as the desktop's topupAutoPays().
@@ -124,14 +127,14 @@ export function Wallet({
   // own quote, and a real mint hands back an invoice to settle.
   const topupHint = useMemo(() => {
     if (amount === null) {
-      return `Enter a whole amount between 1 and ${MAX_TOPUP_SATS} sat`;
+      return `Enter a whole amount between 1 and ${MAX_TOPUP_SATS} ${unit}`;
     }
-    const amountLabel = `${amount} ${unitLabelFor(wallet?.unit || 'sat', amount)}`;
+    const amountLabel = `${amount} ${unitLabelFor(rawUnit, amount)}`;
     if (autoPays) {
       return `Mints ${amountLabel} at the test mint`;
     }
     return `Creates a Lightning invoice for ${amountLabel}`;
-  }, [amount, autoPays, wallet?.unit]);
+  }, [amount, autoPays, rawUnit]);
 
   // Switching mints closes the top-up QR. An invoice belongs to the mint that issued it: paying it
   // after a switch would credit the mint you just left, and the balance on screen is the new one's.
@@ -169,7 +172,7 @@ export function Wallet({
 
         <ScrollView contentContainerStyle={styles.body}>
           <Text style={styles.balance}>
-            {wallet?.amount ?? 0} {unit}
+            {wallet?.amount ?? 0} {unitLabelFor(rawUnit, wallet?.amount ?? 0)}
           </Text>
           <Text style={styles.sub}>
             {mintHost(wallet?.mint) || 'no mint'} · {wallet?.network || '…'}
@@ -294,7 +297,8 @@ export function Wallet({
           ) : null}
           {cashOutResult && !cashOutResult.error && cashOutResult.paid ? (
             <Text style={styles.ok}>
-              ✅ cashed out {cashOutResult.paid} {unit}
+              ✅ cashed out {cashOutResult.paid}{' '}
+              {unitLabelFor(rawUnit, cashOutResult.paid)}
               {cashOutResult.fee > 0 ? ` (fee ${cashOutResult.fee})` : ''}
             </Text>
           ) : null}
@@ -324,7 +328,7 @@ export function Wallet({
                 <Text style={styles.rowMeta}>
                   {ago(entry.timestamp)}
                   {typeof entry.amount === 'number'
-                    ? `  ${sign}${entry.amount} ${unit}`
+                    ? `  ${sign}${entry.amount} ${unitLabelFor(rawUnit, entry.amount)}`
                     : ''}
                 </Text>
               </View>

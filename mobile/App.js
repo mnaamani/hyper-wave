@@ -147,7 +147,9 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [sweepId]);
 
-  const unit = unitLabelFor(wallet?.unit || 'sat');
+  // The raw unit code ('sat'); each display site inflects it for the amount beside it, so a
+  // balance of exactly 1 reads "1 sat" while a standing label reads "sats".
+  const rawUnit = wallet?.unit || 'sat';
   const inLobby = activeWave && activeWave.phase === 'lobby';
   // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one.
   const capturing =
@@ -219,7 +221,7 @@ export default function App() {
         onManualScroll={() => setFollowing(false)}
         onTip={tipMoment}
         canTip={canTip}
-        tipLabel={`${TIP_SATS} ${unitLabelFor(wallet?.unit || 'sat', TIP_SATS)}`}
+        tipLabel={`${TIP_SATS} ${unitLabelFor(rawUnit, TIP_SATS)}`}
         emptyText={
           activeWave
             ? 'Moments appear here as the wave sweeps the ring.'
@@ -252,7 +254,7 @@ export default function App() {
             <Pressable onPress={() => setWalletOpen(true)}>
               <Text style={styles.chip}>
                 {wallet
-                  ? `${wallet.amount ?? 0} ${unit} · ${wallet.network || '…'}`
+                  ? `${wallet.amount ?? 0} ${unitLabelFor(rawUnit, wallet.amount ?? 0)} · ${wallet.network || '…'}`
                   : '…'}
               </Text>
             </Pressable>
@@ -296,7 +298,7 @@ export default function App() {
         {inLobby ? (
           <Lobby
             wave={activeWave}
-            unit={unit}
+            unit={rawUnit}
             onJoin={() => engine.joinWave()}
           />
         ) : null}
