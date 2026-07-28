@@ -1,17 +1,61 @@
-// The field: all <canvas> rendering — the ring, peer dots + flags, the travelling
-// spark, and the centre moment. Owns a rAF loop and reads state pushed via the
+// The field: all <canvas> rendering — CONCENTRIC RINGS (one per wave), peer dots + flags, the
+// travelling spark, and the centre moment. Owns a rAF loop and reads state pushed via the
 // setters. No worker/DOM-UI concerns here.
+//
+// --- why concentric rings ---------------------------------------------------
+// The engine has been multi-wave since the scaling work (a multiplexed `Map<waveId, WaveState>`;
+// scaling.md), but the UI used to hide that: ONE wave got to be the ring and every other wave was
+// a 46px HTML bubble orbiting outside it (the old directory.js, now gone). Here every wave gets
+// its own ring instead:
+//
+//   - The OUTERMOST ring is the topic itself — every peer present, at its seat. Waves are born on
+//     it and sit progressively further in, so a wave visibly condenses out of the crowd.
+//   - Radius encodes LIFECYCLE, not wall-clock age (a wave's whole life is ~30s, so a clock would
+//     dump everything in the centre in under a minute): lobby sits outermost, racing next, ended
+//     innermost, where it lingers and fades. Step 2 animates the drift between those bands; today
+//     each ring is placed at its band and moves when its phase changes.
+//   - The inner floor is the STAGE: the centre moment is never encroached on.
+//   - Radius is time; BRIGHTNESS is attention. The active wave is drawn full-strength with its
+//     participants' seats and the sweep spark; a wave you have not opened is a thin ghost ring.
+//     That keeps browse-then-pick (`autoSubscribe: false`) honest — a ghost ring is visibly
+//     something you don't hold cores for.
+//
+// Because every seat angle is derived locally from the peer id (`angleOfId`, never trusted from
+// gossip), the SAME peer sits at the same angle on every ring — so a radial line through the
+// rings is one person's participation across waves.
+//
+// What a ring can show depends on what this peer holds: for a wave we haven't subscribed to we
+// know only the initiator and the roster COUNT (that's the whole point of the core budget), so a
+// ghost ring draws the initiator's seat and a count. Subscribing fills it in.
 import { flagOf } from './countries.js';
+import { networkMatches } from './wallet-meta.js';
 
 const canvas = document.getElementById('ring');
 const ctx = canvas.getContext('2d');
-const RING_RADIUS = 170;
-const SWEEP_MS = 8000; // replay sweep duration — the spark's lap around the ring
+const SWEEP_MS = 8000; // replay sweep duration — the spark's lap around the active wave's ring
 const FLOURISH_MS = 1500; // completion flourish duration (ring pulses + confetti)
+// Geometry budget, all in CSS px and all derived from the canvas's live size (the field is
+// responsive, so the ring grows with the window instead of sitting in a fixed 440px box).
+const OUTER_MARGIN = 36; // room outside the topic ring for its flags
+const STAGE_RADIUS = 148; // inner floor: the centre moment (r=108) plus breathing room
+const TOPIC_GAP = 28; // clearance between the topic ring and the outermost wave ring
+const MIN_RING_GAP = 30; // any closer and two rings read as one
+const MAX_RING_GAP = 58;
+const HIT_TOLERANCE = 16; // how near a ring a click counts as hitting it
+// Lifecycle → band order (0 = outermost). A fading wave sinks below an ended one so the last
+// thing it does is fall inward.
+const PHASE_RANK = { lobby: 0, racing: 1, ended: 2 };
+const PHASE_COLOR = { lobby: '#f7931a', racing: '#f7931a', ended: '#7a6a55' };
 
 // Module state — all declared up front (CLAUDE.md Code Style); each group's behaviour is
 // documented at the section that drives it below.
-let state = { me: null, peers: [] };
+let state = { me: null, peers: [] }; // the topic ring: everyone present
+let waves = new Map(); // waveId -> directory meta (from the app core's snapshot)
+let activeWaveId = null;
+let activeSeats = []; // [{id, country}] participants of the active wave that have posted
+let layout = []; // [{waveId, radius, wave}] — recomputed each frame, read by hit-testing
+let cssWidth = 440; // canvas size in CSS px (backing store is this × devicePixelRatio)
+let cssHeight = 440;
 let center = null; // gallery item shown in the centre (or null)
 const imgCache = new Map(); // dataURL -> HTMLImageElement
 // replay sweep (see "the sweep" section)
@@ -23,6 +67,8 @@ const frameListeners = []; // fn(frac, origin) called each render frame while a 
 // completion flourish (see "completion flourish" section)
 let flourish = null; // { startedAt } | null
 let confetti = []; // particles for the current flourish (browser rAF, so Math.random is fine here)
+// wave selection (see "selection" section)
+let onWaveSelectCb = () => {};
 
 // Captions come from other peers' gallery entries — treat them as untrusted. We render on
 // <canvas> (fillText), so HTML/JS injection is already impossible; this strips control &
@@ -52,14 +98,48 @@ export function setCenter(item) {
   center = item;
 }
 
+/**
+ * Push the wave directory — one ring per wave. Cross-network waves are HIDDEN here exactly as the
+ * old bubble directory hid them: a wave whose settlement network (from its start burn) is a known
+ * mismatch with the active wallet's is dropped, so a testnet peer never sees (or can tip into) a
+ * mainnet wave. My own waves + unpaid/unknown-network waves always pass (`networkMatches` is
+ * permissive).
+ * @param {Map<string, Object>} nextWaves The waveId -> metadata map from the app core.
+ * @param {string|null} nextActive The active waveId.
+ * @returns {void}
+ */
+export function setWaves(nextWaves, nextActive) {
+  waves = nextWaves || new Map();
+  activeWaveId = nextActive || null;
+}
+
+/**
+ * The participants to draw on the ACTIVE wave's ring — those whose moment has landed (we only
+ * hold a feed for the wave we're subscribed to, so this is what "who is in this wave" can honestly
+ * mean here). The ring fills in as the wave syncs.
+ * @param {Array<{id: string, country: string}>} seats The seats to draw.
+ * @returns {void}
+ */
+export function setActiveSeats(seats) {
+  activeSeats = seats || [];
+}
+
 // --- geometry ---------------------------------------------------------------
 // [x, y] of the point at `angleDeg` on the circle of `orbitRadius` around the canvas centre.
 function pointOn(angleDeg, orbitRadius) {
   const radians = ((angleDeg - 90) * Math.PI) / 180; // 0° at top, clockwise
   return [
-    canvas.width / 2 + orbitRadius * Math.cos(radians),
-    canvas.height / 2 + orbitRadius * Math.sin(radians)
+    cssWidth / 2 + orbitRadius * Math.cos(radians),
+    cssHeight / 2 + orbitRadius * Math.sin(radians)
   ];
+}
+
+// The topic ring's radius — the outermost circle, sized to whatever the field currently is.
+function topicRadius() {
+  return Math.max(
+    STAGE_RADIUS + TOPIC_GAP,
+    Math.min(cssWidth, cssHeight) / 2 - OUTER_MARGIN
+  );
 }
 
 function dot(angleDeg, orbitRadius, color, dotRadius, label) {
@@ -88,6 +168,19 @@ function drawFlagAt(angleDeg, orbitRadius, size, flag) {
   ctx.textBaseline = 'alphabetic';
 }
 
+// A peer id -> its country, resolved from the topic ring we already hold (this is what the old
+// directory.js needed a callback from app.js for; here the ring owns both, so it just looks up).
+function countryOfPeer(peerId) {
+  if (!peerId) {
+    return '';
+  }
+  if (state.me && state.me.id === peerId) {
+    return state.me.country;
+  }
+  const peer = state.peers.find((one) => one.id === peerId);
+  return peer ? peer.country : '';
+}
+
 // Ring angle (seat) derived from a hex peer id — mirrors ring.js `angleOf` in the engine
 // (top 6 bytes, big-endian, mapped onto [0, 360)). Used to place a gallery entry on the ring.
 export function angleOfId(hex) {
@@ -98,13 +191,116 @@ export function angleOfId(hex) {
   return (topBytes / 2 ** 48) * 360;
 }
 
+// --- ring layout ------------------------------------------------------------
+// Order the visible waves by lifecycle (lobby outermost → fading innermost), then hand each a
+// radius stepping inward from just inside the topic ring. Ties break on waveId so the order is
+// stable frame to frame (and so two peers watching the same waves see the same picture).
+
+function rankOf(wave) {
+  const base = PHASE_RANK[wave.phase] ?? 1;
+  return wave.fading ? base + 1 : base;
+}
+
+function visibleWaves() {
+  const list = [...waves.values()].filter(
+    (wave) => wave.mine || networkMatches(wave.network)
+  );
+  list.sort((left, right) => {
+    const byRank = rankOf(left) - rankOf(right);
+    if (byRank !== 0) {
+      return byRank;
+    }
+    return String(left.waveId).localeCompare(String(right.waveId));
+  });
+  return list;
+}
+
+// How many rings actually fit between the outermost wave band and the stage floor. Anything past
+// this is NOT drawn — and the caller says so on screen rather than silently dropping it.
+function ringCapacity(outermost) {
+  const span = outermost - STAGE_RADIUS;
+  return Math.max(1, Math.floor(span / MIN_RING_GAP) + 1);
+}
+
+function computeLayout() {
+  const outermost = topicRadius() - TOPIC_GAP;
+  const list = visibleWaves();
+  const capacity = ringCapacity(outermost);
+  const shown = list.slice(0, capacity);
+  const span = outermost - STAGE_RADIUS;
+  const gap = Math.max(
+    MIN_RING_GAP,
+    Math.min(MAX_RING_GAP, shown.length > 1 ? span / (shown.length - 1) : span)
+  );
+  return {
+    rings: shown.map((wave, index) => ({
+      waveId: wave.waveId,
+      wave,
+      radius: Math.max(STAGE_RADIUS, outermost - index * gap)
+    })),
+    hidden: list.length - shown.length
+  };
+}
+
+// The radius the active wave's ring sits at — where the spark rides and the flourish pulses from.
+// Falls back to the topic ring when no wave is active (e.g. a replay left over from a dropped one).
+function activeRadius() {
+  const found = layout.find((entry) => entry.waveId === activeWaveId);
+  return found ? found.radius : topicRadius();
+}
+
+// --- selection: a ring is the click target the old orbit bubble used to be ---
+/**
+ * Register the click handler — app.js's core.selectWave(waveId) subscribes + activates.
+ * @param {(waveId: string) => void} cb The selection callback.
+ * @returns {void}
+ */
+export function onWaveSelect(cb) {
+  onWaveSelectCb = cb;
+}
+
+/**
+ * Which OTHER wave's ring (if any) a viewport point lands on — "other" because a press on the
+ * active ring is a scrub, not a selection. Exported so the scrubber can stand down for presses
+ * that are really selections.
+ * @param {number} clientX Viewport x.
+ * @param {number} clientY Viewport y.
+ * @returns {string|null} The waveId to select, or null.
+ */
+export function selectableWaveAt(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const dx = clientX - (rect.left + rect.width / 2);
+  const dy = clientY - (rect.top + rect.height / 2);
+  const distance = Math.hypot(dx, dy);
+  let best = null;
+  let bestDelta = HIT_TOLERANCE;
+  for (const entry of layout) {
+    if (entry.waveId === activeWaveId) {
+      continue; // the active ring belongs to the scrubber
+    }
+    const delta = Math.abs(distance - entry.radius);
+    if (delta <= bestDelta) {
+      best = entry.waveId;
+      bestDelta = delta;
+    }
+  }
+  return best;
+}
+
+function onCanvasClick(ev) {
+  const waveId = selectableWaveAt(ev.clientX, ev.clientY);
+  if (waveId) {
+    onWaveSelectCb(waveId);
+  }
+}
+
 // --- the sweep: a local REPLAY sweep, decoupled from the (near-instant) race ---
 // The protocol races at network speed; visual pacing lives here. On
 // completion the host starts a fixed-duration sweep: the spark rolls clockwise once around the
-// ring over SWEEP_MS regardless of N, and each frame we report progress so the gallery can
-// feature the moment the spark is passing. When the sweep reaches the end it FREEZES (the spark
-// parks and stays); the user can then drag it (see scrubber.js → scrubTo) to browse. `origin`
-// is the originator's seat angle (hop 0) — frac 0 sits there, frac 1 completes the lap.
+// ACTIVE WAVE'S ring over SWEEP_MS regardless of N, and each frame we report progress so the
+// gallery can feature the moment the spark is passing. When the sweep reaches the end it FREEZES
+// (the spark parks and stays); the user can then drag it (see scrubber.js → scrubTo) to browse.
+// `origin` is the originator's seat angle (hop 0) — frac 0 sits there, frac 1 completes the lap.
 // (State: origin/sweepMs/playStart/frac/frameListeners, declared at the top of the module.)
 
 // Register a per-frame progress listener (gallery featuring, scrubber handle).
@@ -172,11 +368,11 @@ function drawSpark(x, y) {
   ctx.restore();
 }
 
-function drawBall(angle, asHandle) {
+function drawBall(angle, orbitRadius, asHandle) {
   if (angle === null) {
     return;
   }
-  const [ballX, ballY] = pointOn(angle, RING_RADIUS);
+  const [ballX, ballY] = pointOn(angle, orbitRadius);
   // when the replay has frozen, the spark is the scrubber handle — draw a grab halo so it reads
   // as draggable (paired with the cursor:grab from scrubber.js and the dashed track below)
   if (asHandle) {
@@ -193,14 +389,15 @@ function drawBall(angle, asHandle) {
 // (State: flourish/confetti, declared at the top of the module.)
 export function startFlourish() {
   const PARTICLES = 26;
-  const centerX = canvas.width / 2;
-  const centerY = canvas.height / 2;
+  const centerX = cssWidth / 2;
+  const centerY = cssHeight / 2;
+  const radius = activeRadius();
   confetti = [];
   for (let i = 0; i < PARTICLES; i++) {
-    // start on the ring edge
+    // start on the active wave's ring edge
     const [startX, startY] = pointOn(
       (i / PARTICLES) * 360 + Math.random() * 8,
-      RING_RADIUS
+      radius
     );
     const offsetX = startX - centerX;
     const offsetY = startY - centerY;
@@ -230,14 +427,15 @@ function drawFlourish(centerX, centerY) {
     confetti = [];
     return;
   }
-  // two staggered orange ring pulses expanding outward from the ring
+  const radius = activeRadius();
+  // two staggered orange ring pulses expanding outward from the active wave's ring
   for (let pulse = 0; pulse < 2; pulse++) {
     const pulseProgress = progress - pulse * 0.18;
     if (pulseProgress < 0 || pulseProgress > 1) {
       continue;
     }
     ctx.beginPath();
-    ctx.arc(centerX, centerY, RING_RADIUS + pulseProgress * 70, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, radius + pulseProgress * 70, 0, Math.PI * 2);
     ctx.strokeStyle = `rgba(247,147,26,${(1 - pulseProgress) * 0.55})`;
     ctx.lineWidth = 3;
     ctx.stroke();
@@ -267,16 +465,118 @@ function drawFlourish(centerX, centerY) {
   ctx.globalAlpha = 1;
 }
 
-// A dashed track around the ring while the replay is frozen — signals the ring is now an
+// A dashed track around the active ring while the replay is frozen — signals it is now an
 // interactive circular scrubber (drag the spark around it to browse the moments).
-function drawScrubTrack(centerX, centerY) {
+function drawScrubTrack(centerX, centerY, orbitRadius) {
   ctx.save();
   ctx.setLineDash([4, 7]);
   ctx.beginPath();
-  ctx.arc(centerX, centerY, RING_RADIUS, 0, Math.PI * 2);
+  ctx.arc(centerX, centerY, orbitRadius, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(247,147,26,0.4)';
   ctx.lineWidth = 2;
   ctx.stroke();
+  ctx.restore();
+}
+
+// --- the rings --------------------------------------------------------------
+// The topic ring: everyone present on the shared topic, at their true seats. Waves are born here.
+function drawTopicRing() {
+  const radius = topicRadius();
+  ctx.beginPath();
+  ctx.arc(cssWidth / 2, cssHeight / 2, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  for (const peer of state.peers) {
+    dot(peer.angle, radius, '#f5f5f5', 6, peer.id.slice(0, 6));
+    drawFlagAt(peer.angle, radius + 20, 22, flagOf(peer.country));
+  }
+  if (state.me) {
+    dot(state.me.angle, radius, '#f7931a', 9, 'you');
+    drawFlagAt(state.me.angle, radius + 22, 26, flagOf(state.me.country));
+  }
+}
+
+// The label that replaced the orbit bubble: the initiator's flag, roster count and phase, sat on
+// the ring at the initiator's own seat angle.
+function drawWaveLabel(entry, isActive) {
+  const { wave, radius } = entry;
+  const angle = wave.by ? angleOfId(wave.by) : 0;
+  const [x, y] = pointOn(angle, radius);
+  const flag = flagOf(countryOfPeer(wave.by)) || '🌐';
+  const count = wave.count || 1;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, isActive ? 15 : 12, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(20,12,4,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = PHASE_COLOR[wave.phase] || '#666';
+  ctx.lineWidth = isActive ? 2.5 : 1.5;
+  ctx.stroke();
+  ctx.font = `${isActive ? 17 : 14}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(flag, x, y);
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.fillStyle = isActive ? '#ffb04d' : 'rgba(245,245,245,0.6)';
+  ctx.font = '10px ui-monospace, Menlo, monospace';
+  const label = `${wave.mine ? 'you' : 'wave'} · ${count}`;
+  ctx.fillText(label, x, y + (isActive ? 30 : 26));
+  ctx.restore();
+}
+
+// One wave = one ring. The active one is drawn full-strength with its participants' seats; the
+// rest are thin dashed ghosts (we hold no cores for them — see the module header).
+function drawWaveRing(entry) {
+  const { wave, radius } = entry;
+  const isActive = wave.waveId === activeWaveId;
+  const color = PHASE_COLOR[wave.phase] || '#666';
+  let alpha = isActive ? 1 : 0.4;
+  if (wave.fading) {
+    alpha *= 0.4;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.arc(cssWidth / 2, cssHeight / 2, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = isActive ? 2.5 : 1;
+  if (!isActive) {
+    ctx.setLineDash([3, 7]);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (isActive) {
+    // the seats of everyone whose moment has landed — the ring fills in as the wave syncs
+    for (const seat of activeSeats) {
+      const angle = angleOfId(seat.id);
+      dot(angle, radius, '#f5f5f5', 5, null);
+      drawFlagAt(angle, radius - 18, 16, flagOf(seat.country));
+    }
+  }
+  drawWaveLabel(entry, isActive);
+  ctx.restore();
+}
+
+// Anything past the radial budget isn't drawn — say so rather than silently dropping waves.
+function drawHiddenCount(hidden) {
+  if (hidden <= 0) {
+    return;
+  }
+  ctx.save();
+  ctx.fillStyle = 'rgba(245,245,245,0.55)';
+  ctx.font = '11px ui-monospace, Menlo, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    `+${hidden} more wave${hidden === 1 ? '' : 's'} (no room to draw)`,
+    cssWidth / 2,
+    cssHeight - 8
+  );
   ctx.restore();
 }
 
@@ -316,7 +616,7 @@ function drawCenterMoment(centerX, centerY) {
   if (!center) {
     return;
   }
-  const momentRadius = 108; // bigger centre moment (RING_RADIUS=170, so still clears the seats)
+  const momentRadius = 108; // the stage — STAGE_RADIUS keeps every ring clear of it
 
   ctx.save();
   ctx.beginPath();
@@ -377,35 +677,45 @@ function drawCenterMoment(centerX, centerY) {
 }
 
 // --- frame ------------------------------------------------------------------
+// The field is responsive, so the backing store is resized to its CSS box (× devicePixelRatio)
+// and every coordinate below is CSS px — one transform, set once per resize.
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  if (!rect.width || !rect.height) {
+    return;
+  }
+  cssWidth = rect.width;
+  cssHeight = rect.height;
+  canvas.width = Math.round(rect.width * ratio);
+  canvas.height = Math.round(rect.height * ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+
 function render() {
-  const centerX = canvas.width / 2;
-  const centerY = canvas.height / 2;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const centerX = cssWidth / 2;
+  const centerY = cssHeight / 2;
+  const computed = computeLayout();
+  layout = computed.rings; // cached for hit-testing between frames
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, RING_RADIUS, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  for (const peer of state.peers) {
-    dot(peer.angle, RING_RADIUS, '#f5f5f5', 6, peer.id.slice(0, 6));
-    drawFlagAt(peer.angle, RING_RADIUS + 20, 22, flagOf(peer.country));
+  drawTopicRing();
+  for (const entry of layout) {
+    drawWaveRing(entry);
   }
-  if (state.me) {
-    dot(state.me.angle, RING_RADIUS, '#f7931a', 9, 'you');
-    drawFlagAt(state.me.angle, RING_RADIUS + 22, 26, flagOf(state.me.country));
-  }
+  drawHiddenCount(computed.hidden);
 
-  // replay sweep: drive the ball + notify listeners (gallery featuring, scrubber handle)
+  // replay sweep on the ACTIVE wave's ring: drive the ball + notify listeners (gallery featuring,
+  // scrubber handle)
   if (origin !== null) {
     const progress = currentFrac();
     const frozen = playStart === 0; // sweep finished (or user is scrubbing) → interactive
     const ballAngle = (origin + progress * 360) % 360;
+    const radius = activeRadius();
     if (frozen) {
-      drawScrubTrack(centerX, centerY);
+      drawScrubTrack(centerX, centerY, radius);
     }
-    drawBall(ballAngle, frozen);
+    drawBall(ballAngle, radius, frozen);
     for (const listener of frameListeners) {
       listener(progress, origin);
     }
@@ -415,6 +725,9 @@ function render() {
 }
 
 export function start() {
+  resize();
+  new window.ResizeObserver(resize).observe(canvas);
+  canvas.addEventListener('click', onCanvasClick);
   const loop = () => {
     render();
     requestAnimationFrame(loop);

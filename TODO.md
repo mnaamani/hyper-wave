@@ -273,12 +273,15 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 
 ### Mobile (`implement-mobile-app.md`)
 
-- [~] **Mobile parity with desktop — Phases 0–6 done (2026-07-27); the plan tracks the detail.**
-  The host now matches `workers/hyperwave.js` (Cashu, network→topic policy, browse-then-pick),
-  custody is RN-side (keychain seeds + a persistent storage dir, so bearer proofs survive), the
-  rules live in the shared `hyperwave-app-core` that BOTH hosts drive, and the UI has the ring,
-  wave directory, lobby, narration, country onboarding, lobby camera capture and the wallet
-  screen. Remaining, each with a stated reason:
+- [~] **Mobile parity with desktop — Phases 0–7 done (Phase 7: 2026-07-28); the plan tracks the
+  detail.** The host now matches `workers/hyperwave.js` (Cashu, network→topic policy,
+  browse-then-pick), custody is RN-side (keychain seeds + a persistent storage dir, so bearer
+  proofs survive), the rules live in the shared `hyperwave-app-core` that BOTH hosts drive, and
+  the UI has the wave directory, lobby, narration, country onboarding, lobby camera capture and
+  the wallet screen. **The ring is gone on mobile** (Phase 7): the screen is a full-bleed vertical
+  moment feed and the sweep is a story-style segmented bar — presentation native to the device,
+  while parity stays where it matters (the wire and the money). Remaining, each with a stated
+  reason:
   - [ ] **Build + run on Android.** Addon linking is done and verified (88 `.so` across 4 ABIs);
         the APK build needs a **JDK 17** and an **AVD**, neither present on the dev machine
         (`mobile/README.md` has the exact diagnosis + commands).
@@ -286,8 +289,27 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         downscale ladder + EXIF strip are unexercised), a successful cash-out melt against a
         payable bolt11, and a tip sent from the phone. `mobile/README.md` §Manual device
         checklist is the script.
+  - [ ] **Run the Phase 7 feed UI** — the redesign (`MomentFeed`, `SweepBar`, the sweep-driven
+        auto-advance and the drag-takes-control rule) has only been reviewed as code, never run
+        on the simulator or a device.
   - [ ] **Automated UI tests for the RN app** — the shared rules are covered by
         `hyperwave-app-core`'s suite, but nothing exercises the React layer.
+
+### Desktop field (concentric wave rings)
+
+- [~] **Concentric rings — step 1 done (2026-07-28).** The desktop field is now one ring per wave
+  instead of one ring plus orbiting bubbles: outermost = the topic (everyone at their seat),
+  each wave stepping inward by lifecycle, active ring full-strength + clickable-to-subscribe,
+  ghost rings for waves we hold no cores for. `renderer/lib/directory.js` is gone (absorbed
+  into `ring.js`), and the field is responsive (DPR-aware backing store).
+  - [ ] **Step 2: animate the inward drift + a dismiss gesture.** Today a ring JUMPS to its band
+        when its phase changes; step 2 tweens the radius so waves visibly drift inward, and adds
+        an explicit dismiss (pull it to the inner floor early → `unsubscribe`) alongside the
+        existing linger → fade → drop that app-core already drives.
+  - [ ] **Verify on screen.** Step 1 is covered by a headless geometry harness (layout, DPR,
+        hit-testing, the cross-network filter) and the app boots, but nobody has WATCHED a wave
+        sweep a ring in the new field — the sweep spark now rides the active wave's radius, and
+        the scrubber stands down on presses that land on another ring.
 
 ### Housekeeping
 

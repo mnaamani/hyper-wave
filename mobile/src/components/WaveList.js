@@ -1,8 +1,9 @@
-// The wave directory — the mobile counterpart of the desktop's orbiting bubbles
-// (renderer/lib/directory.js). A phone has no room to orbit the ring, so the same information
-// becomes a horizontal strip of chips: one per wave this peer is AWARE of, phase-coloured, with
-// the initiator's flag and roster count. Merely being aware holds no cores — tapping a chip is
-// what subscribes (browse-then-pick) and makes the wave active.
+// The wave directory — the mobile counterpart of the desktop's concentric wave rings
+// (renderer/lib/ring.js: one ring per wave, drifting inward through its lifecycle). A phone has
+// neither the radial room for that nor a ring at all, so the same information becomes a horizontal
+// strip of chips: one per wave this peer is AWARE of, phase-coloured, with the initiator's flag and
+// roster count. Merely being aware holds no cores — tapping a chip is what subscribes
+// (browse-then-pick) and makes the wave active.
 //
 // Cross-network waves are hidden (a wave whose settlement network is a known mismatch with my
 // wallet's), exactly as on desktop: a cross-network tip would be meaningless. My own waves always

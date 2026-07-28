@@ -14,7 +14,6 @@ import * as lobby from './lib/lobby.js';
 import * as proof from './lib/proof.js';
 import * as hud from './lib/hud.js';
 import * as wallet from './lib/wallet.js';
-import * as directory from './lib/directory.js';
 import { getActiveWave, setActiveWave } from './lib/active.js';
 import { setWalletMeta, unitLabel } from './lib/wallet-meta.js';
 // The shared app core. Imported by PATH (not by package name): a file:// renderer has no bare
@@ -62,7 +61,6 @@ if (window.bridge?.isPackaged && !window.bridge.isPackaged()) {
     proof,
     hud,
     ipc,
-    directory,
     getActiveWave
   };
 }
@@ -106,23 +104,26 @@ function updateHud() {
 // --- concurrent waves: the core's directory + active wave (scaling.md browse-then-pick) --------
 // The engine is aware of many waves at once (autoSubscribe:false → no cores until we pick one).
 // The core keeps the metadata for every announced wave and a cached feed per wave; only the ACTIVE
-// wave drives the ring centre (gallery / lobby / capture). Clicking a bubble asks the core to
-// select it, which subscribes (holds its cores) and republishes.
+// wave drives the ring centre (gallery / lobby / capture). Each wave is a CONCENTRIC RING on the
+// canvas (ring.js — this replaced the orbiting bubbles); clicking one asks the core to select it,
+// which subscribes (holds its cores) and republishes.
+ring.onWaveSelect((waveId) => core.selectWave(waveId));
 
-// The directory shows the initiator's country flag; derive it from the global ring by id.
-directory.setCountryLookup((id) => {
-  const { me, peers } = core.getSnapshot();
-  if (me && me.id === id) {
-    return me.country;
-  }
-  const peer = peers.find((one) => one.id === id);
-  return peer ? peer.country : '';
-});
-directory.onSelect((waveId) => core.selectWave(waveId));
-
-// Paint the wave orbit from the core's snapshot.
+// Paint the wave rings from the core's snapshot. The ring module owns the cross-network filter and
+// the initiator-flag lookup itself (it already holds the topic ring), so this is just a handoff.
+// The active wave's ring also draws the seats of everyone whose moment has landed, so it fills in
+// as the wave syncs — `snapshot.feed` is always the ACTIVE wave's feed (browse-then-pick holds no
+// cores for the others, so there is nothing to draw for them).
 function renderDirectory(snapshot) {
-  directory.render(snapshot.waves, snapshot.activeWaveId);
+  ring.setWaves(snapshot.waves, snapshot.activeWaveId);
+  ring.setActiveSeats(
+    snapshot.activeWaveId
+      ? snapshot.feed.map((moment) => ({
+          id: moment.peerId,
+          country: moment.country
+        }))
+      : []
+  );
 }
 
 // Paint the ring centre for whatever the active wave is right now (used when switching waves).
@@ -209,6 +210,7 @@ const SNAPSHOT_PAINTERS = {
       return;
     }
     gallery.handle(snapshot.feed); // only the active wave paints the ring centre
+    renderDirectory(snapshot); // its ring gains a seat as each moment lands
     updateHud();
   },
   wallet: () => {}
