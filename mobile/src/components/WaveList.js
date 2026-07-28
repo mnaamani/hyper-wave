@@ -102,6 +102,11 @@ export function WaveList({
                   ? ` · ${wave.fee} ${unitLabelFor('sat', wave.fee)}`
                   : ''}
               </Text>
+              {wave.message ? (
+                <Text style={styles.chipMsg} numberOfLines={1}>
+                  {wave.message}
+                </Text>
+              ) : null}
               {wave.paid && wave.paid !== 'verified' ? (
                 <View style={styles.pending}>
                   <Text style={styles.pendingText}>{wave.paid}</Text>
@@ -143,6 +148,14 @@ const styles = StyleSheet.create({
   fading: { opacity: 0.45 },
   chipTop: { color: PALETTE.text, fontWeight: '600', fontSize: 13 },
   chipPhase: { fontSize: 11, marginTop: 2 },
+  // the initiator's own words — one line on the chip, in full in the lobby
+  chipMsg: {
+    color: PALETTE.orangeSoft,
+    fontSize: 11,
+    fontStyle: 'italic',
+    marginTop: 3,
+    maxWidth: 150
+  },
   pending: { marginTop: 4 },
   pendingText: { color: PALETTE.warn, fontSize: 10 }
 });

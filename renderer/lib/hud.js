@@ -2,13 +2,14 @@
 // and the Start button (which docks below the ring once there is a gallery). The wallet
 // view lives in its own module (wallet.js).
 import { COUNTRIES, flagOf } from './countries.js';
-import { startWave, setCountry, appVersion } from './ipc.js';
+import { setCountry, appVersion } from './ipc.js';
 
 const statusEl = document.getElementById('status');
 const statusPillEl = document.getElementById('status-pill');
 const waveEl = document.getElementById('wave-status');
 const updaterEl = document.getElementById('updater');
 const startBtn = document.getElementById('start');
+const startMsgEl = document.getElementById('start-msg');
 const introEl = document.getElementById('intro');
 const introCountryEl = document.getElementById('intro-country');
 const enterBtn = document.getElementById('enter');
@@ -42,11 +43,48 @@ export function updatingStatus(text) {
 }
 export function showStart(show) {
   startBtn.style.display = show ? '' : 'none';
+  // The message input follows the button — but never into the docked corner (below), where it
+  // would sit over the gallery.
+  startMsgEl.classList.toggle(
+    'show',
+    show && !startBtn.classList.contains('docked')
+  );
 }
 export function dockStart(docked) {
   startBtn.classList.toggle('docked', docked);
+  startMsgEl.classList.toggle(
+    'show',
+    !docked && startBtn.style.display !== 'none'
+  );
 }
-startBtn.onclick = () => startWave();
+
+// Starting a wave goes through the HOST (app.js → core.startWave), not straight to the engine,
+// because the message the initiator typed is app vocabulary — app-core maps it to the engine's
+// opaque announce `meta`.
+let onStartCb = () => {};
+
+/**
+ * Register the start handler. Called with the initiator's message ('' if they said nothing).
+ * @param {(message: string) => void} cb - The handler.
+ * @returns {void}
+ */
+export function onStart(cb) {
+  onStartCb = cb;
+}
+
+function fireStart() {
+  const message = startMsgEl.value.trim();
+  startMsgEl.value = ''; // a message belongs to the wave it started, not to the next one
+  onStartCb(message);
+}
+
+startBtn.onclick = fireStart;
+// Enter in the message field starts the wave too — it reads as "send".
+startMsgEl.onkeydown = (ev) => {
+  if (ev.key === 'Enter') {
+    fireStart();
+  }
+};
 
 // --- country picker + intro screen ------------------------------------------
 // The intro overlay (pick your country) shows only on first launch — if a country is

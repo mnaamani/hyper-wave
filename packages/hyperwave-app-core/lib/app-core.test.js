@@ -423,3 +423,60 @@ test('dismissing one wave leaves the others alone', (t) => {
   t.is(snapshot.waves.size, 1, 'only the dismissed one went');
   t.is(snapshot.waves.get('w2').count, 4, 'the survivor still updates');
 });
+
+// --- the initiator's message (engine `meta` ↔ app `message`) -----------------------------------
+
+test('a wave carries what its initiator said about it', (t) => {
+  const { core, sent } = makeCore();
+
+  core.startWave('sunset over Nairobi');
+  t.alike(
+    sent.at(-1),
+    { type: 'start-wave', meta: { message: 'sunset over Nairobi' } },
+    'the message rides start-wave as opaque engine meta'
+  );
+
+  core.handle(announce('w1', { meta: { message: 'sunset over Nairobi' } }));
+  t.is(
+    core.getSnapshot().waves.get('w1').message,
+    'sunset over Nairobi',
+    'and a receiving peer reads it off the announce'
+  );
+});
+
+test('a wave with nothing to say carries no meta at all', (t) => {
+  const { core, sent } = makeCore();
+
+  core.startWave();
+  t.is(sent.at(-1).meta, undefined, 'no meta for an omitted message');
+  core.startWave('   ');
+  t.is(sent.at(-1).meta, undefined, 'nor for whitespace');
+
+  core.handle(announce('w1'));
+  t.is(core.getSnapshot().waves.get('w1').message, '', 'and it reads as empty');
+});
+
+test('a malformed meta from another peer degrades to no message', (t) => {
+  const { core } = makeCore();
+
+  core.handle(announce('w1', { meta: { message: 42 } }));
+  core.handle(announce('w2', { meta: 'not an object' }));
+  t.is(core.getSnapshot().waves.get('w1').message, '', 'a non-string message');
+  t.is(core.getSnapshot().waves.get('w2').message, '', 'a non-object meta');
+});
+
+test('a wave message from another peer is sanitized before a host ever sees it', (t) => {
+  const { core } = makeCore();
+
+  // U+202E (right-to-left override) can visually reverse the text after it; a newline would break
+  // the single line this is drawn on. Neither should reach a renderer.
+  core.handle(announce('w1', { meta: { message: 'join‮me\nnow' } }));
+  t.is(core.getSnapshot().waves.get('w1').message, 'joinmenow', 'stripped');
+
+  core.handle(announce('w2', { meta: { message: 'x'.repeat(500) } }));
+  t.is(
+    core.getSnapshot().waves.get('w2').message.length,
+    80,
+    'and clamped, so one wave cannot own the screen'
+  );
+});

@@ -16,8 +16,8 @@ function fakeWave() {
     opts: null,
     feeValue: null, // the wave's announced (initiator-set) fee; null → payFee falls back to wallet
     feeFor: () => wave.feeValue,
-    startWave: () => {
-      calls.push('startWave');
+    startWave: (options) => {
+      calls.push(['startWave', options]);
       return 'wave-1';
     },
     join: () => {
@@ -98,7 +98,7 @@ test('the engine routes commands to the wave protocol and forwards its events to
     [
       ['setTag', 'JP'],
       ['stageEntry', 'data:image/jpeg;base64,xxx'],
-      'startWave',
+      ['startWave', { meta: undefined }],
       ['note', { waveId: 'w1', note: { kind: 'tip', amount: 1 } }],
       [
         'dm',
@@ -656,4 +656,23 @@ test('createEngine threads a host-supplied Hyperswarm to the wave protocol', asy
     hostSwarm,
     'the host-owned swarm is passed straight through to createWave'
   );
+});
+
+test("start-wave carries the host's opaque meta to the wave protocol", (t) => {
+  const wave = fakeWave();
+  const engine = createEngine({
+    storageDir: '/tmp/e-meta',
+    config: { topicId: 'm', bootstrap: '' },
+    emit: () => {},
+    log: () => {},
+    deps: { createWave: () => wave }
+  });
+
+  engine.exec({ type: 'start-wave', meta: { message: 'sunset over Nairobi' } });
+  t.alike(
+    wave.calls.at(-1),
+    ['startWave', { meta: { message: 'sunset over Nairobi' } }],
+    'the engine passes meta through without interpreting it'
+  );
+  engine.close();
 });

@@ -137,27 +137,30 @@ build, pass the same string to the desktop side as `HYPERWAVE_TOPIC`.
    (its cores are freed) and does NOT come back when the engine gossips about it again. "Keep"
    must leave it exactly as it was.
 5. **Discovery** — the peer count rises within ~35s (public DHT).
-6. **Start a wave** — `🔥 paying the start fee…`, then the chip shows `lobby · 2 sat · pending`,
+6. **Wave message** — type something in "Say what your wave is about" before starting; the
+   desktop peer's log shows it (`wave message: {...}`), and a wave started elsewhere WITH a
+   message shows it on the chip and in the lobby.
+7. **Start a wave** — `🔥 paying the start fee…`, then the chip shows `lobby · 2 sat · pending`,
    then `verified`.
-7. **Capture** — the sheet opens with a live preview, the countdown runs, and it auto-captures
+8. **Capture** — the sheet opens with a live preview, the countdown runs, and it auto-captures
    before the lobby closes. Tap **Capture now** and **Skip** at least once each.
-8. **Sweep** — the segment bar fills left to right, the feed auto-advances to each moment as it
+9. **Sweep** — the segment bar fills left to right, the feed auto-advances to each moment as it
    lands, `wave rolling — hop n`, then `✅ wave completed` and the bar glows. Swipe mid-wave: the
    auto-advance must stop and stay stopped for the rest of that wave.
-9. **Gallery** — YOUR photo is a page in the feed (this is the piece the simulator cannot test),
-   and it appears in the headless peer's feed (`FEED size=2` in its log). Once the lap has ended,
-   the feed is YOURS: scroll up and down through every moment freely, and a moment landing late
-   (cores still syncing) must not yank the page you're on.
-10. **Tip** — tap ⚡ Tip on the peer's moment: balance drops ~6 sat, and the peer logs a `dm`
+10. **Gallery** — YOUR photo is a page in the feed (this is the piece the simulator cannot test),
+    and it appears in the headless peer's feed (`FEED size=2` in its log). Once the lap has ended,
+    the feed is YOURS: scroll up and down through every moment freely, and a moment landing late
+    (cores still syncing) must not yank the page you're on.
+11. **Tip** — tap ⚡ Tip on the peer's moment: balance drops ~6 sat, and the peer logs a `dm`
     carrying the token plus a stripped `note`.
-11. **Receive a tip** — from a desktop peer, tip the phone's moment: `🎉 you got tipped`, and the
+12. **Receive a tip** — from a desktop peer, tip the phone's moment: `🎉 you got tipped`, and the
     balance rises after the automatic redeem.
-12. **Wallet** — top up a custom amount; on a real (non-test) mint the invoice renders as a QR.
+13. **Wallet** — top up a custom amount; on a real (non-test) mint the invoice renders as a QR.
     **Hide this invoice** puts it away, and switching mints closes it too — an invoice belongs to
     the mint that issued it, so paying it after a switch would credit the mint you just left.
     Asking for a new top-up brings the QR back. Then scan a bolt11 with **Scan QR** and cash out;
     History lists the operations, and still does after a restart.
-13. **Background** — background the app mid-lobby and return: sockets suspend, so expect to miss
+14. **Background** — background the app mid-lobby and return: sockets suspend, so expect to miss
     a wave that starts meanwhile (a stated limitation).
 
 ## What's left (none of which touch the engine)

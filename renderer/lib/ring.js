@@ -671,6 +671,16 @@ function drawWaveLabel(entry, isActive) {
   ctx.font = '10px ui-monospace, Menlo, monospace';
   const label = `${wave.mine ? 'you' : 'wave'} · ${count}`;
   ctx.fillText(label, x, y + (isActive ? 30 : 26));
+
+  // What the initiator said this wave is about — drawn only for the ACTIVE ring and the one under
+  // the pointer, so browsing reveals it without every ring shouting at once. Untrusted text: it
+  // goes through the same sanitizer a caption does (canvas fillText, so no injection either way).
+  const message = safeCaption(wave.message);
+  if (message && (isActive || wave.waveId === hoverWaveId)) {
+    ctx.fillStyle = '#ffb04d';
+    ctx.font = 'italic 12px -apple-system, sans-serif';
+    ctx.fillText(message, x, y + (isActive ? 46 : 42));
+  }
   ctx.restore();
 }
 

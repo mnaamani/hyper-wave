@@ -19,6 +19,7 @@ import {
   SafeAreaView,
   View,
   Text,
+  TextInput,
   Pressable,
   StatusBar,
   Platform,
@@ -80,6 +81,9 @@ export default function App() {
   // moment, exactly like the desktop's skip button.
   const [skippedWaveId, setSkippedWaveId] = useState(null);
   const [walletOpen, setWalletOpen] = useState(false);
+  // What this peer will say about the wave it starts. It rides the wave's announce, so every peer
+  // browsing the directory reads it while deciding whether to join.
+  const [waveMessage, setWaveMessage] = useState('');
   // Reopening the country picker after onboarding (the header flag is its button).
   const [pickerOpen, setPickerOpen] = useState(false);
   // Which page of the feed is on screen, and whether the sweep is still driving it. `following`
@@ -303,8 +307,28 @@ export default function App() {
           />
         ) : null}
 
+        {/* Only offer the message field when starting is what the buttons below actually do —
+            i.e. when there's no wave of mine already forming or rolling. */}
+        {!activeWave ? (
+          <TextInput
+            value={waveMessage}
+            onChangeText={setWaveMessage}
+            placeholder='Say what your wave is about (optional)'
+            placeholderTextColor={PALETTE.dim}
+            maxLength={80}
+            returnKeyType='done'
+            style={styles.waveMsgInput}
+          />
+        ) : null}
+
         <View style={styles.actions}>
-          <Button label='Start a wave' onPress={engine.startWave} />
+          <Button
+            label='Start a wave'
+            onPress={() => {
+              engine.startWave(waveMessage);
+              setWaveMessage(''); // a message belongs to the wave it started
+            }}
+          />
           <Button label='Wallet' onPress={() => setWalletOpen(true)} />
         </View>
       </SafeAreaView>
@@ -378,6 +402,18 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     paddingHorizontal: 10,
     overflow: 'hidden'
+  },
+  waveMsgInput: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    color: PALETTE.text,
+    fontSize: 13
   },
   progress: {
     color: PALETTE.muted,

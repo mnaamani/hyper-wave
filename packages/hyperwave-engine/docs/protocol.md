@@ -334,6 +334,24 @@ field drops the message; unknown extra fields are tolerated (forward compatibili
 shape only — the `sig` verification, age check, paid gate, and hostile-value clamps are in the
 handlers (wave.js) / attest.js.
 
+**Adding a field is backwards compatible — by construction.** Three properties combine, and all
+three are exercised by tests (`messages.test.js`, `attest.test.js`):
+
+1. **The signature covers what is PRESENT, not a fixed schema.** `attest.messageHash` canonicalizes
+   the received object's own keys, so a peer running older code hashes the frame it actually got —
+   including a field it has never heard of — and the signature verifies. The field is authenticated
+   for old and new peers alike: a relay can neither add, edit, nor strip one without invalidating
+   the frame.
+2. **Validators tolerate unknown fields.** Each checks the fields its kind requires; extras pass.
+   An old peer therefore ACCEPTS and PROCESSES a message from a newer one.
+3. **Relays forward the whole object.** `relayDir` re-serializes the parsed message, and the
+   connect-time directory catch-up forwards the initiator's stored frame verbatim — so a new
+   field survives a hop through an old peer and still reaches new peers behind it.
+
+The practical rule: a new field must be **optional** (absent is valid — that is what every peer
+that hasn't upgraded will send) and **size-capped** if it rides a flooded kind. Removing or
+retyping an existing field is NOT compatible; only addition is.
+
 > Each schema below shows the **kind + payload**. Every message ALSO carries the §5.0 envelope
 > (`origin`, `ts`, `sig`, + `mid` on flooded kinds); it is omitted from the blocks for brevity.
 > The author is always `origin` — there is no per-kind `id`/`by`/`peerId` (except `wave-sync`'s
@@ -386,7 +404,8 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
     /* start attestation, §9.0 — present when the paid-wave gate is enforced */
   },
   "walletType": "tron-nile", // the payment-mechanism id (paid waves) — see below
-  "fee": 1 // the initiator-set participation fee every joiner burns (paid waves) — see below
+  "fee": 1, // the initiator-set participation fee every joiner burns (paid waves) — see below
+  "meta": {/* OPTIONAL opaque initiator metadata — see below */}
 }
 ```
 
@@ -397,6 +416,24 @@ stored, signed announce VERBATIM** (same frame, same `mid`, same `origin`/`sig`)
 knows, so a peer that joined the swarm after the original flood can still discover the wave — the
 receiver re-verifies the initiator's envelope sig, and if it relays the frame on, the original
 `mid` dedups it within one hop (no amplification, no separate catch-up message kind).
+
+**`meta` — the initiator's opaque metadata (optional).** An arbitrary JSON object the initiator
+attaches to its wave; the engine **never interprets it** and only bounds its size. It exists so a
+consumer can carry its own concept on a wave without a protocol change of its own — the app built
+on this engine puts `{ "message": "…" }` there, what the initiator says the wave is about, so a
+peer reads it while deciding whether to join.
+
+It is capped at **`MAX_META_BYTES` (256) of JSON**, far tighter than a `wave-note`'s 2 KB, for one
+reason: the announce is the **only** message that floods the entire directory, so every peer on the
+topic buffers, parses and re-broadcasts it whether or not it cares about the wave. A note is scoped
+to a wave's subscribers; this is not. The cap is enforced at the receive edge (an oversized `meta`
+makes the whole message invalid) **and** at origination (an oversized `meta` is dropped rather than
+sent, so a wave is never made invisible by a field the initiator can't see).
+
+`meta` is inside the envelope, so it is signed like every other field (§5.0): a relay can neither
+inject one nor edit the initiator's words in flight, and stripping it invalidates the frame. Treat
+it as **untrusted text** at the point of display — the app strips control/bidi characters and
+clamps the length before rendering (`hyperwave-app-core`'s theme boundary).
 
 **No shared feed key.** There is no shared per-wave feed core and no feed key to
 carry or sign — each participant owns its own feed core (§8). The originator is a participant too: right

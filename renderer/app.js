@@ -164,6 +164,7 @@ function renderActiveWave() {
         mine: wave.mine,
         joined: wave.joined,
         fee: wave.fee,
+        message: wave.message, // what the initiator said this wave is about
         lobbyMs: Math.max(0, (wave.lobbyDeadline || 0) - performance.now())
       });
       lobby.setJoinable(wave.paid === 'verified');
@@ -270,6 +271,10 @@ ipc.on('burn-result', (msg) => {
   }
 });
 
+// Starting a wave carries the initiator's own words: app-core maps the message to the engine's
+// opaque announce `meta`, so every peer browsing the directory sees why to join.
+hud.onStart((message) => core.startWave(message));
+
 // The gallery's tip button goes through the core, which remembers the target and — once the tip
 // confirms — delivers the bearer token privately + floods the stripped announcement.
 gallery.onTip((target) => core.tip(target));
@@ -299,7 +304,12 @@ const EVENT_HANDLERS = {
       // it browsable underneath. Join → capture (clears it); "Not now" → un-dim + keep browsing.
       // The join button stays disabled until the start payment verifies (anti-spam).
       setDim(true);
-      lobby.open(evt);
+      // the raw event carries the engine's opaque `meta`; the core's snapshot has it mapped to
+      // `message`, so read it from there rather than re-deriving the theme mapping here
+      lobby.open({
+        ...evt,
+        message: core.getSnapshot().waves.get(evt.waveId)?.message || ''
+      });
       lobby.setJoinable(evt.paid === 'verified');
     }
   },

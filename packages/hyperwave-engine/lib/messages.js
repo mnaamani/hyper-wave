@@ -48,6 +48,13 @@ const FLOODED_KINDS = new Set([
 // data channel. Belt-and-suspenders alongside the frame cap + per-author flood cap (protocol.md §11).
 const MAX_NOTE_BYTES = 2048;
 
+// Max bytes for a wave-announce's opaque `meta` (JSON) — the initiator's own words about the wave
+// (the app maps it to a message). MUCH tighter than a note's cap for one reason: the announce is
+// the ONLY message that floods the entire directory, so every peer on the topic buffers, parses
+// and re-broadcasts it whether or not they care about the wave. A note is scoped to a wave's
+// subscribers; this is not, so it stays a sentence, not a payload.
+const MAX_META_BYTES = 256;
+
 const HEX_RE = /^[0-9a-f]+$/;
 
 /**
@@ -174,6 +181,22 @@ function isWaveIdList(value) {
 // checked once by validGossip, so these only cover the kind's own fields). The author is the
 // envelope's `origin`, so no kind carries a separate id/by/peerId — EXCEPT `wave-sync`, whose
 // `by` is the wave INITIATOR (payload; distinct from `origin`, the peer that sent the sync).
+/**
+ * An optional opaque `meta` object, within the directory-flood byte cap. Absent is fine (every
+ * wave before this field existed, and any wave whose initiator said nothing).
+ * @param {*} value - The candidate meta.
+ * @returns {boolean} True if absent, or an object within MAX_META_BYTES of JSON.
+ */
+function isOptionalMeta(value) {
+  if (value === undefined) {
+    return true;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  return JSON.stringify(value).length <= MAX_META_BYTES;
+}
+
 const VALIDATORS = {
   heartbeat: (msg) => isTag(msg.tag),
 
@@ -186,7 +209,8 @@ const VALIDATORS = {
     isMillis(msg.lobbyMs) &&
     isOptionalObject(msg.paid) &&
     isOptionalWalletType(msg.walletType) &&
-    isOptionalFee(msg.fee),
+    isOptionalFee(msg.fee) &&
+    isOptionalMeta(msg.meta),
 
   // origin (the joiner) + writerKey + joinSig are the feed-core credential; origin is the peerId.
   'wave-join': (msg) =>
@@ -299,16 +323,18 @@ function makeSubs({ subs }) {
  * @param {Object|null} [fields.paid] - The signed start burn proof (paid path).
  * @param {string|null} [fields.walletType] - The payment-mechanism id (paid path), so a joiner can decide whether it supports this wave's payments.
  * @param {number} [fields.fee] - The initiator-set participation fee (paid path); every joiner burns this exact amount, and a peer refuses a wave whose fee is below its local floor.
+ * @param {Object} [fields.meta] - Opaque initiator-supplied metadata (the app's own concept — e.g. a message about the wave), capped at MAX_META_BYTES of JSON because this floods the whole directory.
  * @returns {GossipMessage} The wave-announce message (pre-envelope).
  */
-function makeWaveAnnounce({ waveId, lobbyMs, paid, walletType, fee }) {
+function makeWaveAnnounce({ waveId, lobbyMs, paid, walletType, fee, meta }) {
   return {
     kind: 'wave-announce',
     waveId,
     lobbyMs,
     ...(paid ? { paid } : {}),
     ...(walletType ? { walletType } : {}),
-    ...(fee ? { fee } : {})
+    ...(fee ? { fee } : {}),
+    ...(meta ? { meta } : {})
   };
 }
 
@@ -435,6 +461,7 @@ module.exports = {
   FLOODED_KINDS,
   MAX_WRITERS,
   MAX_NOTE_BYTES,
+  MAX_META_BYTES,
   validGossip,
   makeHeartbeat,
   makeSubs,

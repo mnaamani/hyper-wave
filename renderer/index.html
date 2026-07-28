@@ -643,6 +643,18 @@
         min-height: 14px;
         margin-top: 4px;
       }
+      /* the initiator's own words about the wave, above the countdown line in the lobby */
+      #lobby-wave-msg {
+        font-size: 15px;
+        font-style: italic;
+        color: #ffb04d;
+        max-width: 260px;
+        margin: 0 auto 6px;
+        overflow-wrap: anywhere;
+      }
+      #lobby-wave-msg:empty {
+        display: none;
+      }
       /* the field: the concentric wave rings with a centred overlay (start / countdown).
          RESPONSIVE — it grows with the window instead of sitting in a fixed 440px box, because
          the rings need radial room: every wave is a ring, so the radius budget is what decides
@@ -702,6 +714,30 @@
         background: linear-gradient(135deg, #ffa733, #ffc266);
         box-shadow: 0 6px 28px rgba(247, 147, 26, 0.55);
         transform: scale(1.05);
+      }
+      /* the wave message input — sits under the ⚡, shown only when the start button is */
+      #start-msg {
+        display: none;
+        margin-top: 14px;
+        width: min(320px, 70vw);
+        box-sizing: border-box;
+        padding: 9px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(0, 0, 0, 0.42);
+        color: #f5f5f5;
+        font-size: 13px;
+        text-align: center;
+      }
+      #start-msg::placeholder {
+        color: #7c7268;
+      }
+      #start-msg:focus {
+        outline: none;
+        border-color: #f7931a;
+      }
+      #start-msg.show {
+        display: block;
       }
       #start:active {
         transform: scale(0.97);
@@ -1082,8 +1118,20 @@
         <button id="start" title="Start new wave" aria-label="Start new wave">
           ⚡
         </button>
+        <!-- Optional: what this wave is about. It rides the wave's ANNOUNCE, which floods the
+             whole directory, so every peer sees it while deciding whether to join — hence the
+             tight maxlength (the wire caps the field too). -->
+        <input
+          id="start-msg"
+          placeholder="Say what this wave is about (optional)"
+          maxlength="80"
+          title="Rides the wave's announce so browsing peers see why to join"
+        />
         <div id="lobby">
           <div id="lobby-count"></div>
+          <!-- what the initiator said this wave is about (untrusted text — set via textContent,
+               sanitized in lobby.js); hidden when they said nothing -->
+          <div id="lobby-wave-msg"></div>
           <div id="lobby-msg">a wave is forming</div>
           <div id="lobby-btns">
             <button id="join">✋ Count me in</button>

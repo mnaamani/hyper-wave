@@ -6,6 +6,7 @@
 //   env HYPERWAVE_TOPIC=<id>           -> isolated topic
 //   env START=<n>                      -> announce a wave once >= n peers are present
 //   env AUTOJOIN=1                     -> auto opt-in when a wave is announced
+//   env WAVE_MESSAGE='…'               -> what this wave is about (rides the announce as `meta`)
 //   env AUTOENTRY=1                   -> stage a fake entry in the lobby (posted at my sweep slot, if joined)
 //   env SPECTATE=1                    -> subscribe to an announced wave WITHOUT joining (non-member)
 //   env NOTE=1                        -> broadcast a wave-note on `completed` (roster-gated); logs NOTE-SENT ok=<bool>
@@ -105,6 +106,9 @@ const wave = createWave({
       // SPECTATE: subscribe (hold the feed + watch the sweep) WITHOUT joining/posting — the
       // browse-then-pick path (Phase 2). Meaningful with HYPERWAVE_AUTO_SUBSCRIBE=0, where
       // awareness alone holds no cores; subscribe() engages the feed on demand.
+      if (msg.event === 'wave-announce' && msg.meta) {
+        console.log(`[${name}] wave message: ${JSON.stringify(msg.meta)}`);
+      }
       if (env.SPECTATE && !msg.mine && msg.event === 'wave-announce') {
         wave.subscribe(msg.waveId);
       }
@@ -153,7 +157,11 @@ async function burnFee(waveId, reason) {
 // Initiator: start (deferred announce when enforcing), pay, wait for the burn to confirm
 // on-chain, then announce. Without a wallet, startWave announces immediately (unpaid path).
 async function startWaveFlow() {
-  const waveId = wave.startWave();
+  // WAVE_MESSAGE rides the announce as the engine's opaque `meta` — the same field the app uses
+  // to say what a wave is about. Here it makes the field exercisable headlessly, end to end.
+  const waveId = wave.startWave({
+    meta: env.WAVE_MESSAGE ? { message: env.WAVE_MESSAGE } : null
+  });
   if (!waveId || !payments) {
     return;
   }

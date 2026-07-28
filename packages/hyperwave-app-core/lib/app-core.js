@@ -29,7 +29,13 @@
 //   6. A DISMISSED wave stays dismissed. The engine keeps gossiping about a live wave, so without
 //      remembering the dismissal it would reappear seconds after the user pushed it away — but
 //      invariant 2 still wins over this one: a tip `dm` for a dismissed wave is still redeemed.
-import { withCountry, asMoment, asEntry } from './theme.js';
+import {
+  withCountry,
+  asMoment,
+  asEntry,
+  waveMessageOf,
+  asWaveMeta
+} from './theme.js';
 import { networksMatch, mergeWalletMeta } from './wallet-meta.js';
 
 const DEFAULT_ENDED_TTL_MS = 180000; // ~3 minutes an ended wave lingers, still browsable
@@ -48,6 +54,7 @@ const DIRECTORY_PATCH = {
     walletType: evt.walletType,
     paid: evt.paid,
     network: evt.network, // settlement network (from the start burn) — same-network filter
+    message: waveMessageOf(evt.meta), // what the initiator said this wave is about ('' if nothing)
     phase: 'lobby',
     lobbyDeadline: now() + (evt.lobbyMs || defaultLobbyMs)
   }),
@@ -432,7 +439,13 @@ export function createAppCore({
     handle,
     // wave lifecycle
     selectWave,
-    startWave: () => send('start-wave'),
+    /**
+     * Start a wave, optionally saying what it's about. The message rides the wave's announce as
+     * opaque engine `meta`, so every peer browsing the directory sees it before deciding to join.
+     * @param {string} [message] - The initiator's own words; omitted when empty.
+     * @returns {void}
+     */
+    startWave: (message) => send('start-wave', { meta: asWaveMeta(message) }),
     joinWave: (waveId) => send('join-wave', { waveId: waveId || activeWaveId }),
     removeWave,
     dismissWave,

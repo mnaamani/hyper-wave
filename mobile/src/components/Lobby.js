@@ -50,6 +50,9 @@ export function Lobby({ wave, unit, onJoin }) {
       <Text style={styles.title}>
         {joined ? 'You’re in this wave' : 'A wave is forming'}
       </Text>
+      {wave.message ? (
+        <Text style={styles.waveMsg}>“{wave.message}”</Text>
+      ) : null}
       <Text style={styles.meta}>
         {Math.ceil(msLeft / 1000)}s · {wave.count || 1} peer
         {(wave.count || 1) === 1 ? '' : 's'} on the roster
@@ -85,6 +88,13 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   title: { color: PALETTE.text, fontWeight: '700', fontSize: 15 },
+  waveMsg: {
+    color: PALETTE.orangeSoft,
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 4
+  },
   meta: { color: PALETTE.muted, fontSize: 12, marginTop: 4 },
   hint: { color: PALETTE.orangeSoft, fontSize: 12, marginTop: 8 },
   join: {
