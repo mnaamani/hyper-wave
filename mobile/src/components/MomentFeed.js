@@ -64,8 +64,13 @@ export function MomentFeed({
 
   // Follow the page the parent asks for. While a wave rolls, App.js walks this forward with the
   // sweep — the wave IS the scroll — so a moment takes the screen as its seat's slot fires. The
-  // parent stops moving it the instant the user drags (onManualScroll), so this never fights a
-  // thumb.
+  // parent stops moving it once the lap finishes or the user drags, after which the feed is
+  // theirs to browse freely.
+  //
+  // `moments.length` is deliberately NOT a dependency: a moment landing must never re-issue a
+  // scroll, or an arrival mid-browse would yank the list back under the user's thumb. Only a
+  // genuine change of the requested page moves the feed. (The length is still READ here, to clamp
+  // — reading it without depending on it is the point.)
   useEffect(() => {
     if (!listRef.current || !pageHeight || moments.length === 0) {
       return;
@@ -74,17 +79,21 @@ export function MomentFeed({
       index: Math.max(0, Math.min(index, moments.length - 1)),
       animated: true
     });
-  }, [index, pageHeight, moments.length]);
+  }, [index, pageHeight]);
 
-  const onMomentumScrollEnd = useCallback(
+  // Which page are we on now? Tracked from BOTH scroll-end events: a fling ends in
+  // `onMomentumScrollEnd`, but a slow drag released without momentum only ever fires
+  // `onScrollEndDrag` — and if we missed that, the parent's idea of the current page would go
+  // stale and the next programmatic scroll would jump somewhere the user didn't ask for.
+  const trackIndex = useCallback(
     (event) => {
       if (!pageHeight) {
         return;
       }
       const next = Math.round(event.nativeEvent.contentOffset.y / pageHeight);
-      onIndexChange(next);
+      onIndexChange(Math.max(0, Math.min(next, moments.length - 1)));
     },
-    [pageHeight, onIndexChange]
+    [pageHeight, onIndexChange, moments.length]
   );
 
   const renderItem = useCallback(
@@ -138,8 +147,17 @@ export function MomentFeed({
           getItemLayout={getItemLayout}
           pagingEnabled
           showsVerticalScrollIndicator={false}
-          onMomentumScrollEnd={onMomentumScrollEnd}
+          onMomentumScrollEnd={trackIndex}
+          onScrollEndDrag={trackIndex}
           onScrollBeginDrag={onManualScroll}
+          // A page can be asked for before the row is realised (a long gallery scrolled far);
+          // recover by measuring, then retrying, rather than throwing.
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({
+              offset: info.averageItemLength * info.index,
+              animated: true
+            });
+          }}
           // The sweep drives this while it's rolling; a drag hands control back to the user
           // (App.js stops following once onManualScroll fires).
           initialScrollIndex={Math.min(index, moments.length - 1)}

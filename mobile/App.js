@@ -35,7 +35,7 @@ import { StatusLine } from './src/components/StatusLine';
 import { CountryPicker } from './src/components/CountryPicker';
 import { Capture } from './src/components/Capture';
 import { Wallet } from './src/components/Wallet';
-import { PALETTE } from './src/theme';
+import { PALETTE, SWEEP_MS } from './src/theme';
 
 // Directory topic override. Empty = the engine's DEFAULT_TOPIC ('hyperwave:demo:v1'), the same
 // base the desktop host uses — a phone and a laptop only discover each other when these match, so
@@ -80,6 +80,8 @@ export default function App() {
   // moment, exactly like the desktop's skip button.
   const [skippedWaveId, setSkippedWaveId] = useState(null);
   const [walletOpen, setWalletOpen] = useState(false);
+  // Reopening the country picker after onboarding (the header flag is its button).
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Which page of the feed is on screen, and whether the sweep is still driving it. `following`
   // is the auto-advance: while a wave rolls, each moment takes the screen as it lands, so the
   // wave is something you watch roll past rather than a progress read-out. The first manual drag
@@ -132,6 +134,19 @@ export default function App() {
     }
   }, [following, gallery.length]);
 
+  // ...and the sweep hands the feed BACK when its lap ends. This is the desktop's rule too: the
+  // spark freezes at the end of its lap and the ring becomes the user's scrubber. Without it the
+  // wave would keep owning the scroll after there was anything left to show, so a moment landing
+  // late (cores still syncing) would yank a browsing user back to the end. The bar's lap is
+  // SWEEP_MS, so that is when the feed becomes theirs to scroll freely.
+  useEffect(() => {
+    if (!sweepId) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setFollowing(false), SWEEP_MS);
+    return () => clearTimeout(timer);
+  }, [sweepId]);
+
   const unit = unitLabelFor(wallet?.unit || 'sat');
   const inLobby = activeWave && activeWave.phase === 'lobby';
   // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one.
@@ -182,12 +197,18 @@ export default function App() {
   return (
     <View style={styles.screen}>
       <StatusBar barStyle='light-content' translucent />
+      {/* Onboarding while there's no country, and the switcher afterwards (tap the header flag).
+          `onClose` is passed ONLY once a country exists — during onboarding the picker must have
+          no way out but choosing, and afterwards a mistaken tap must be cancellable, leaving the
+          current country untouched. */}
       <CountryPicker
-        visible={!country}
+        visible={!country || pickerOpen}
         onPick={(code) => {
           writeCountry(code);
           setCountry(code);
+          setPickerOpen(false);
         }}
+        onClose={country ? () => setPickerOpen(false) : null}
       />
 
       <MomentFeed
@@ -208,6 +229,9 @@ export default function App() {
 
       {/* everything below floats OVER the feed — box-none so only the controls take touches */}
       <SafeAreaView style={styles.topOverlay} pointerEvents='box-none'>
+        {/* box-none, not auto: the scrim is a backdrop, so a swipe that starts on the title or
+            the status line falls through to the feed instead of being swallowed. Its interactive
+            children (the wallet chip, the wave strip) still take their own touches. */}
         <View style={styles.topScrim} pointerEvents='box-none'>
           <SweepBar
             seats={activeWave?.count || 0}
@@ -216,9 +240,15 @@ export default function App() {
             flourishId={flourishId}
           />
           <View style={styles.header}>
-            <Text style={styles.title}>
-              ⚡ HyperWave {country ? flagOf(country) : ''}
-            </Text>
+            {/* the flag is the country switcher, as `#myflag` is on desktop */}
+            <Pressable
+              onPress={() => setPickerOpen(true)}
+              accessibilityLabel='Change your country'
+            >
+              <Text style={styles.title}>
+                ⚡ HyperWave {country ? flagOf(country) : '🌐'}
+              </Text>
+            </Pressable>
             <Pressable onPress={() => setWalletOpen(true)}>
               <Text style={styles.chip}>
                 {wallet
