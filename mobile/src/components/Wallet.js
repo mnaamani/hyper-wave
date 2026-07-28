@@ -164,13 +164,20 @@ export function Wallet({
     <Modal visible animationType='slide'>
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Text style={styles.title}>Wallet</Text>
+          <Text style={styles.title}>Cashu wallet</Text>
           <Pressable onPress={onClose} hitSlop={12}>
             <Text style={styles.close}>Done</Text>
           </Pressable>
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
+          {/* Name what this money actually IS. "Wallet" alone said nothing: the balance is
+              bitcoin, held as Chaumian ecash issued by a Lightning mint, and it is BEARER —
+              the tokens are on this device, so losing the app loses them. */}
+          <Text style={styles.what}>
+            ⚡ Bitcoin ecash on a Lightning mint. Self-custodial — the tokens
+            live on this device.
+          </Text>
           <Text style={styles.balance}>
             {wallet?.amount ?? 0} {unitLabelFor(rawUnit, wallet?.amount ?? 0)}
           </Text>
@@ -380,6 +387,13 @@ const styles = StyleSheet.create({
   body: { padding: 16, paddingBottom: 48 },
   balance: { color: PALETTE.text, fontSize: 34, fontWeight: '700' },
   sub: { color: PALETTE.muted, fontSize: 13, marginTop: 2 },
+  // what the money is — sits above the balance, so it's read before the number
+  what: {
+    color: PALETTE.orangeSoft,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 12
+  },
   section: {
     color: PALETTE.text,
     fontSize: 15,

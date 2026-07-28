@@ -365,6 +365,13 @@
       }
       /* wallet subtitle: the active mint (Cashu) so it's clear where the ecash
          lives; a chain wallet shows its network here instead. */
+      /* what the money is — read before the balance, so the ⚡ orange ties it to the wave motif */
+      #wallet-what {
+        margin: 4px 0 8px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #ffb04d;
+      }
       #wallet-kind {
         margin: 2px 0 10px;
         font-size: 11px;
@@ -949,6 +956,12 @@
         <div class="wallet-card-head">
           <h2 id="wallet-title">Cashu wallet</h2>
           <button id="wallet-close" title="Close">✕</button>
+        </div>
+        <!-- Name what this money IS: the balance is bitcoin, held as Chaumian ecash issued by a
+             Lightning mint, and it is BEARER — the tokens live in this app's storage. -->
+        <div id="wallet-what">
+          ⚡ Bitcoin ecash on a Lightning mint. Self-custodial — the tokens live
+          on this device.
         </div>
         <div id="wallet-kind"></div>
         <div id="wallet-balance"></div>
