@@ -290,6 +290,9 @@ export function useEngine(config = {}) {
     startWave: () => action('startWave'),
     joinWave: (waveId) => action('joinWave', waveId),
     selectWave: (waveId) => action('selectWave', waveId),
+    // Push a wave away for good (app-core invariant 6 — it stays gone despite the engine's
+    // continuing gossip about it). Frees its cores, like the desktop ring's ✕.
+    dismissWave: (waveId) => action('dismissWave', waveId),
     setCountry: (country) => action('setCountry', country),
     stageMoment: (moment, waveId) => action('stageMoment', moment, waveId),
     // money

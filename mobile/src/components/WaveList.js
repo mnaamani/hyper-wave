@@ -8,9 +8,37 @@
 // Cross-network waves are hidden (a wave whose settlement network is a known mismatch with my
 // wallet's), exactly as on desktop: a cross-network tip would be meaningless. My own waves always
 // pass.
-import { ScrollView, Pressable, Text, View, StyleSheet } from 'react-native';
+import {
+  ScrollView,
+  Pressable,
+  Text,
+  View,
+  Alert,
+  StyleSheet
+} from 'react-native';
 import { flagOf } from 'hyperwave-app-core';
 import { PALETTE, PHASE_COLOR } from '../theme';
+
+// Dismissing is destructive-ish (the wave leaves your list and its cores are freed), and a chip is
+// small enough to catch a stray thumb, so confirm first. The desktop reveals its ✕ on hover; a
+// phone has no hover, so the equivalent "show me you meant it" is a long press.
+function confirmDismiss(wave, onDismiss) {
+  const who = wave.mine
+    ? 'your wave'
+    : `${(wave.by || 'peer').slice(0, 6)}'s wave`;
+  Alert.alert(
+    'Dismiss this wave?',
+    `${who} disappears from your list and stops using your connection. It won't come back.`,
+    [
+      { text: 'Keep', style: 'cancel' },
+      {
+        text: 'Dismiss',
+        style: 'destructive',
+        onPress: () => onDismiss(wave.waveId)
+      }
+    ]
+  );
+}
 
 /**
  * @param {Object} props - Props.
@@ -19,6 +47,7 @@ import { PALETTE, PHASE_COLOR } from '../theme';
  * @param {(id: string) => string} props.countryOf - Ring id -> country code.
  * @param {(wave: Object) => boolean} props.matchesNetwork - The same-network filter.
  * @param {(waveId: string) => void} props.onSelect - Tap handler.
+ * @param {(waveId: string) => void} props.onDismiss - Long-press handler (after confirmation).
  * @returns {JSX.Element} The directory strip.
  */
 export function WaveList({
@@ -26,7 +55,8 @@ export function WaveList({
   activeWaveId,
   countryOf,
   matchesNetwork,
-  onSelect
+  onSelect,
+  onDismiss
 }) {
   const visible = waves.filter(
     (wave) => wave.mine || matchesNetwork(wave) !== false
@@ -41,41 +71,48 @@ export function WaveList({
   }
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.strip}
-    >
-      {visible.map((wave) => {
-        const active = wave.waveId === activeWaveId;
-        const color = PHASE_COLOR[wave.phase] || PALETTE.orangeSoft;
-        return (
-          <Pressable
-            key={wave.waveId}
-            onPress={() => onSelect(wave.waveId)}
-            style={[
-              styles.chip,
-              { borderColor: active ? color : 'transparent' },
-              wave.fading && styles.fading
-            ]}
-          >
-            <Text style={styles.chipTop}>
-              {flagOf(countryOf(wave.by)) || '🌐'}{' '}
-              {wave.mine ? 'You' : (wave.by || 'peer').slice(0, 6)}
-            </Text>
-            <Text style={[styles.chipPhase, { color }]}>
-              {wave.phase} · {wave.count || 1}👥
-              {typeof wave.fee === 'number' ? ` · ${wave.fee} sat` : ''}
-            </Text>
-            {wave.paid && wave.paid !== 'verified' ? (
-              <View style={styles.pending}>
-                <Text style={styles.pendingText}>{wave.paid}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+    <>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.strip}
+      >
+        {visible.map((wave) => {
+          const active = wave.waveId === activeWaveId;
+          const color = PHASE_COLOR[wave.phase] || PALETTE.orangeSoft;
+          return (
+            <Pressable
+              key={wave.waveId}
+              onPress={() => onSelect(wave.waveId)}
+              onLongPress={() => confirmDismiss(wave, onDismiss)}
+              delayLongPress={400}
+              style={[
+                styles.chip,
+                { borderColor: active ? color : 'transparent' },
+                wave.fading && styles.fading
+              ]}
+            >
+              <Text style={styles.chipTop}>
+                {flagOf(countryOf(wave.by)) || '🌐'}{' '}
+                {wave.mine ? 'You' : (wave.by || 'peer').slice(0, 6)}
+              </Text>
+              <Text style={[styles.chipPhase, { color }]}>
+                {wave.phase} · {wave.count || 1}👥
+                {typeof wave.fee === 'number' ? ` · ${wave.fee} sat` : ''}
+              </Text>
+              {wave.paid && wave.paid !== 'verified' ? (
+                <View style={styles.pending}>
+                  <Text style={styles.pendingText}>{wave.paid}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      {/* A long press is invisible, and the desktop's ✕ is revealed by a hover a phone can't do —
+          so say it once, quietly, under the strip. */}
+      <Text style={styles.hint}>Hold a wave to dismiss it</Text>
+    </>
   );
 }
 
@@ -94,6 +131,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     minWidth: 118
+  },
+  hint: {
+    color: PALETTE.dim,
+    fontSize: 10,
+    paddingHorizontal: 16,
+    paddingTop: 2
   },
   fading: { opacity: 0.45 },
   chipTop: { color: PALETTE.text, fontWeight: '600', fontSize: 13 },

@@ -275,6 +275,9 @@ export default function App() {
             }
             matchesNetwork={engine.waveMatchesNetwork}
             onSelect={engine.selectWave}
+            // long-press a chip → confirm → push that wave away for good (app-core invariant 6),
+            // the phone's answer to the ✕ the desktop reveals on hover
+            onDismiss={engine.dismissWave}
           />
         </View>
       </SafeAreaView>
