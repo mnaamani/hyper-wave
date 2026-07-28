@@ -50,6 +50,7 @@ const DRIFT_SNAP_PX = 0.4; // close enough — stop animating and sit still
 const BIRTH_MARGIN = 6; // a new ring is born just inside the topic ring, then drifts in
 const DISMISS_RADIUS = 11; // the ✕ badge's hit circle
 const DISMISS_INSET = 26; // how far inside its ring the badge sits
+const BADGE_PAD = 5; // slack around the badge, so the pointer doesn't fall off its own target
 // Lifecycle → band order (0 = outermost). A fading wave sinks below an ended one so the last
 // thing it does is fall inward.
 const PHASE_RANK = { lobby: 0, racing: 1, ended: 2 };
@@ -327,21 +328,35 @@ function dismissPointOf(entry) {
   return pointOn(angle, Math.max(0, entry.radius - DISMISS_INSET));
 }
 
+// Whose ✕ badge covers this viewport point — checked against EVERY drawn ring, not just the
+// hovered one, because this is also what KEEPS a ring hovered while the pointer is on its badge.
+// The badge sits inside the ring, outside its hit band: without this the badge would vanish the
+// moment you moved off the ring line toward it, and could never be clicked.
+function badgeWaveAt(clientX, clientY) {
+  const [x, y] = localPoint(clientX, clientY);
+  for (const entry of layout) {
+    const [badgeX, badgeY] = dismissPointOf(entry);
+    if (Math.hypot(x - badgeX, y - badgeY) <= DISMISS_RADIUS + BADGE_PAD) {
+      return entry.waveId;
+    }
+  }
+  return null;
+}
+
 // The ✕ under a viewport point, if any. Only the HOVERED ring shows one, so only it can be hit —
 // a badge you can't see must not be clickable.
 function dismissAt(clientX, clientY) {
-  const entry = layout.find((one) => one.waveId === hoverWaveId);
-  if (!entry) {
-    return null;
-  }
-  const [x, y] = localPoint(clientX, clientY);
-  const [badgeX, badgeY] = dismissPointOf(entry);
-  const within = Math.hypot(x - badgeX, y - badgeY) <= DISMISS_RADIUS;
-  return within ? entry.waveId : null;
+  const waveId = badgeWaveAt(clientX, clientY);
+  return waveId && waveId === hoverWaveId ? waveId : null;
 }
 
-// The ring nearest a viewport point (ANY ring, including the active one) — drives the hover state.
+// What the pointer is over: a ring's badge, else the ring nearest it (ANY ring, the active one
+// included). Badges win, so travelling from a ring to its own ✕ never breaks the hover.
 function ringAt(clientX, clientY) {
+  const onBadge = badgeWaveAt(clientX, clientY);
+  if (onBadge) {
+    return onBadge;
+  }
   const [x, y] = localPoint(clientX, clientY);
   const distance = Math.hypot(x - cssWidth / 2, y - cssHeight / 2);
   let best = null;
@@ -412,6 +427,12 @@ function onCanvasClick(ev) {
 }
 
 function onCanvasPointerMove(ev) {
+  hoverWaveId = ringAt(ev.clientX, ev.clientY);
+}
+
+// A touch/pen tap produces no hover pass at all, so resolve it at press time too — otherwise the ✕
+// would be unreachable on a touchscreen.
+function onCanvasPointerDown(ev) {
   hoverWaveId = ringAt(ev.clientX, ev.clientY);
 }
 
@@ -886,6 +907,7 @@ export function start() {
   new window.ResizeObserver(resize).observe(canvas);
   canvas.addEventListener('click', onCanvasClick);
   canvas.addEventListener('pointermove', onCanvasPointerMove);
+  canvas.addEventListener('pointerdown', onCanvasPointerDown);
   canvas.addEventListener('pointerleave', onCanvasPointerLeave);
   const loop = () => {
     render();
