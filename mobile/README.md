@@ -152,9 +152,11 @@ build, pass the same string to the desktop side as `HYPERWAVE_TOPIC`.
     carrying the token plus a stripped `note`.
 11. **Receive a tip** — from a desktop peer, tip the phone's moment: `🎉 you got tipped`, and the
     balance rises after the automatic redeem.
-12. **Wallet** — top up a custom amount; on a real (non-test) mint the invoice renders as a QR;
-    scan a bolt11 with **Scan QR** and cash out; History lists the operations, and still does
-    after a restart.
+12. **Wallet** — top up a custom amount; on a real (non-test) mint the invoice renders as a QR.
+    **Hide this invoice** puts it away, and switching mints closes it too — an invoice belongs to
+    the mint that issued it, so paying it after a switch would credit the mint you just left.
+    Asking for a new top-up brings the QR back. Then scan a bolt11 with **Scan QR** and cash out;
+    History lists the operations, and still does after a restart.
 13. **Background** — background the app mid-lobby and return: sockets suspend, so expect to miss
     a wave that starts meanwhile (a stated limitation).
 

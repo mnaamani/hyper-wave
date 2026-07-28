@@ -8,7 +8,7 @@
 //
 // The ledger comes from the wallet's own persisted proof store, so it shows PAST sessions, not
 // just this run.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -103,6 +103,12 @@ export function Wallet({
   const [invoiceText, setInvoiceText] = useState('');
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  // The top-up QR is engine state (`fundResult`), which stays pending until the quote is paid or
+  // the poll times out — so the user needs a way to put it away when they change their mind.
+  // Suppression is sticky until they ask for a NEW top-up, which also covers a stale invoice
+  // arriving from an in-flight quote after they've switched mints.
+  const [invoiceHidden, setInvoiceHidden] = useState(false);
+  const lastMintRef = useRef(wallet?.mint);
 
   const unit = unitLabelFor(wallet?.unit || 'sat');
   const amount = useMemo(() => parseAmount(amountText), [amountText]);
@@ -110,7 +116,7 @@ export function Wallet({
   // balance simply rises. Same rule as the desktop's topupAutoPays().
   const autoPays = wallet?.network === 'testnet';
   const pendingInvoice =
-    !autoPays && fundResult?.pending && fundResult.invoice
+    !autoPays && !invoiceHidden && fundResult?.pending && fundResult.invoice
       ? fundResult.invoice
       : '';
 
@@ -126,6 +132,18 @@ export function Wallet({
     }
     return `Creates a Lightning invoice for ${amountLabel}`;
   }, [amount, autoPays, wallet?.unit]);
+
+  // Switching mints closes the top-up QR. An invoice belongs to the mint that issued it: paying it
+  // after a switch would credit the mint you just left, and the balance on screen is the new one's.
+  // Guarded on a PREVIOUS mint existing, so first learning the wallet's mint doesn't count as a
+  // switch (that would hide an invoice still pending from before the screen was reopened).
+  useEffect(() => {
+    const mint = wallet?.mint;
+    if (lastMintRef.current && mint && mint !== lastMintRef.current) {
+      setInvoiceHidden(true);
+    }
+    lastMintRef.current = mint;
+  }, [wallet?.mint]);
 
   // Refresh the balance + ledger whenever the screen opens, so it never shows a stale session.
   useEffect(() => {
@@ -191,7 +209,10 @@ export function Wallet({
             <Text style={styles.unit}>{unit}</Text>
             <Pressable
               disabled={amount === null}
-              onPress={() => actions.fundWallet(amount)}
+              onPress={() => {
+                setInvoiceHidden(false); // asking for a new one un-hides the QR
+                actions.fundWallet(amount);
+              }}
               style={[styles.btn, amount === null && styles.btnDisabled]}
             >
               <Text
@@ -215,6 +236,15 @@ export function Wallet({
                 Scan with a Lightning wallet to pay. The balance rises once it
                 settles.
               </Text>
+              {/* Changed your mind? Put it away. This only hides it — the engine is still
+                  watching the quote, so paying it later still credits you, until it expires. */}
+              <Pressable
+                onPress={() => setInvoiceHidden(true)}
+                style={styles.qrDismiss}
+                hitSlop={10}
+              >
+                <Text style={styles.qrDismissText}>✕ Hide this invoice</Text>
+              </Pressable>
             </View>
           ) : null}
 
@@ -409,6 +439,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginTop: 12
   },
+  // on the white QR card, so it needs its own dark-on-light treatment
+  qrDismiss: { marginTop: 10, paddingVertical: 4 },
+  qrDismissText: { color: '#6b625a', fontSize: 13, fontWeight: '600' },
   qrHint: {
     color: '#333',
     fontSize: 12,

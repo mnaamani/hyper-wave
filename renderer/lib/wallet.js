@@ -126,8 +126,12 @@ function renderMintPicker(currentMint) {
 }
 
 // Switch the active mint (live re-wire). The worker replies with a fresh `wallet` message.
+// Any top-up invoice on screen belongs to the mint that ISSUED it, so it goes with the switch:
+// paying it afterwards would credit the mint you just left, while the balance shown is the new
+// one's. (The engine keeps watching that quote regardless — hiding it cancels nothing.)
 mintSelect.onchange = () => {
   if (mintSelect.value) {
+    hideTopup();
     setMint(mintSelect.value);
   }
 };
