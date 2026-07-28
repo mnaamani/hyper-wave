@@ -31,9 +31,11 @@ import { Capture } from './src/components/Capture';
 import { Wallet } from './src/components/Wallet';
 import { PALETTE } from './src/theme';
 
-// Isolate this build's directory topic so test devices don't collide with the demo ring on the
-// public DHT. The host derives the mainnet directory from it (`<base>:mainnet`).
-const TOPIC = 'hyperwave-mobile-demo';
+// Directory topic override. Empty = the engine's DEFAULT_TOPIC ('hyperwave:demo:v1'), the same
+// base the desktop host uses — a phone and a laptop only discover each other when these match, so
+// the shared default is what a demo wants. Set a string here to isolate a build's ring from the
+// demo one on the public DHT. The host derives the mainnet directory from it (`<base>:mainnet`).
+const TOPIC = '';
 // A tip is a fixed 5 sats, as on desktop (enough to survive the mint's ~1-sat swap fee).
 const TIP_SATS = 5;
 // Optional DHT bootstrap pin — 'host:port' (comma-separate several); createEngine parses it.
@@ -44,7 +46,7 @@ const BOOTSTRAP = '';
 
 export default function App() {
   const engine = useEngine({
-    topicId: TOPIC,
+    ...(TOPIC ? { topicId: TOPIC } : {}),
     ...(BOOTSTRAP ? { bootstrap: BOOTSTRAP } : {})
   });
   const {

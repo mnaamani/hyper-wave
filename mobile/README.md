@@ -111,9 +111,14 @@ engine's headless CLI, which needs no GUI and funds itself:
 
 ```bash
 cd packages/hyperwave-engine
-HYPERWAVE_TOPIC=hyperwave-mobile-demo WALLET=1 WALLET_TYPE=cashu WALLET_FUND=200 \
+WALLET=1 WALLET_TYPE=cashu WALLET_FUND=200 \
   AUTOJOIN=1 AUTOENTRY=1 bare bin/wave.run.js peer /tmp/hw-peer
 ```
+
+The phone and the desktop must sit on the SAME base topic or they never discover each other.
+`mobile/App.js`'s `TOPIC` is empty by default, so both sides use the engine's `DEFAULT_TOPIC`
+(`hyperwave:demo:v1`) — matching the desktop host's own default. If you set `TOPIC` to isolate a
+build, pass the same string to the desktop side as `HYPERWAVE_TOPIC`.
 
 1. **Boot** — identity + ring angle appear; the wallet chip shows a balance and `testnet`.
 2. **Restart** — same peer id and angle (keychain swarm seed), same balance (proofs on disk).
