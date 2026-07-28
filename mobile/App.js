@@ -1,9 +1,15 @@
 // HyperWave mobile — the wave screen. Composition only: every rule behind it lives in the shared
 // app core (hyperwave-app-core), which src/useEngine.js drives over the worklet.
 //
-// Layout, top to bottom: the wallet/brand header, the status + narration line, the wave directory
-// strip (tap a wave to subscribe + open it), the ring with the sweep spark and the featured moment
-// in its centre, the lobby (while the open wave is forming), and the moment list.
+// The screen is a full-bleed vertical feed of moments (MomentFeed) with everything else floating
+// over it, the shape a phone user already knows. The desktop's ring has NO counterpart here — a
+// 320pt circle on a 6" screen crowded out the moments it was framing — so the sweep it drew is a
+// story-style segmented bar at the top instead (SweepBar): one segment per roster seat, in sweep
+// order, filling as the wave rolls. Same information, a fraction of the height. The ring remains
+// the desktop's map of the world (renderer/lib/ring.js); only the mobile presentation differs.
+//
+// Overlays, top to bottom: the sweep bar, the wallet/brand header + narration, the wave directory
+// strip (tap a wave to subscribe + open it), then at the foot the lobby and the action buttons.
 //
 // Joining a wave opens the capture sheet for the lobby: frame a moment, which is staged and posts
 // when this peer's sweep slot fires. The Wallet button opens the self-custodial Cashu wallet (top
@@ -11,18 +17,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView,
-  ScrollView,
   View,
   Text,
   Pressable,
-  Image,
   StatusBar,
+  Platform,
   StyleSheet
 } from 'react-native';
 import { flagOf, unitLabelFor } from 'hyperwave-app-core';
 import { useEngine } from './src/useEngine';
 import { readCountry, writeCountry } from './src/custody';
-import { Ring } from './src/components/Ring';
+import { MomentFeed } from './src/components/MomentFeed';
+import { SweepBar } from './src/components/SweepBar';
 import { WaveList } from './src/components/WaveList';
 import { Lobby } from './src/components/Lobby';
 import { StatusLine } from './src/components/StatusLine';
@@ -43,6 +49,15 @@ const TIP_SATS = 5;
 // known node (e.g. a local @hyperswarm/testnet from the engine's `bare bin/dht-local.js`) makes it
 // near-instant. Empty = the public DHT, which is the right default for a real user.
 const BOOTSTRAP = '';
+// Android draws under the status bar (iOS's SafeAreaView handles itself), so the top overlay pays
+// for it explicitly.
+const TOP_INSET = Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 0;
+
+// A moment's stable identity: one entry per peer per wave (the CRDT posts block 0 only), so the
+// peer id names it; `hopCount` is the fallback for an entry that arrived without one.
+function momentKey(moment) {
+  return moment.peerId || String(moment.hopCount);
+}
 
 export default function App() {
   const engine = useEngine({
@@ -65,6 +80,12 @@ export default function App() {
   // moment, exactly like the desktop's skip button.
   const [skippedWaveId, setSkippedWaveId] = useState(null);
   const [walletOpen, setWalletOpen] = useState(false);
+  // Which page of the feed is on screen, and whether the sweep is still driving it. `following`
+  // is the auto-advance: while a wave rolls, each moment takes the screen as it lands, so the
+  // wave is something you watch roll past rather than a progress read-out. The first manual drag
+  // hands control back to the user for the rest of that wave.
+  const [feedIndex, setFeedIndex] = useState(0);
+  const [following, setFollowing] = useState(true);
   const captureRef = useRef(null);
 
   // The country is the engine's cosmetic peer `tag`; push it once the engine is up (and whenever
@@ -75,15 +96,17 @@ export default function App() {
     }
   }, [country, engine.ready]);
 
-  // Ring triggers, straight off the protocol: the spark sweeps while the open wave races, and the
-  // ring pulses when it completes. Both are STICKY ids (they must survive the events that follow,
-  // e.g. `position`), reset when the open wave changes or a new wave forms.
+  // Sweep triggers, straight off the protocol: the bar fills while the open wave races, and glows
+  // when it completes. Both are STICKY ids (they must survive the events that follow, e.g.
+  // `position`), reset when the open wave changes or a new wave forms.
   const [sweepId, setSweepId] = useState(null);
   const [flourishId, setFlourishId] = useState(null);
 
   useEffect(() => {
     setSweepId(null);
     setFlourishId(null);
+    setFeedIndex(0);
+    setFollowing(true); // a new wave gets the feed back
   }, [activeWaveId]);
 
   useEffect(() => {
@@ -92,6 +115,7 @@ export default function App() {
     }
     if (lastEvent.event === 'wave-active') {
       setSweepId(String(lastEvent.at));
+      setFollowing(true);
     } else if (lastEvent.event === 'completed') {
       setFlourishId(String(lastEvent.at));
     } else if (lastEvent.event === 'wave-announce') {
@@ -100,9 +124,14 @@ export default function App() {
     }
   }, [lastEvent, activeWaveId]);
 
-  // The moment the ring features: the newest one that has arrived (hop-ordered feed), so the
-  // centre fills as the wave syncs in.
-  const featured = gallery.length > 0 ? gallery[gallery.length - 1] : null;
+  // Auto-advance: the gallery is hop-ordered, so the newest arrival IS the seat the sweep just
+  // passed — following it is the wave rolling through the feed.
+  useEffect(() => {
+    if (following && gallery.length > 0) {
+      setFeedIndex(gallery.length - 1);
+    }
+  }, [following, gallery.length]);
+
   const unit = unitLabelFor(wallet?.unit || 'sat');
   const inLobby = activeWave && activeWave.phase === 'lobby';
   // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one.
@@ -134,9 +163,25 @@ export default function App() {
     [engine.stageMoment, activeWaveId]
   );
 
+  const canTip = useCallback(
+    (moment) => !!moment.address && moment.address !== wallet?.address,
+    [wallet?.address]
+  );
+
+  const tipMoment = useCallback(
+    (moment) =>
+      engine.tip({
+        waveId: moment.waveId,
+        peerId: moment.peerId,
+        address: moment.address,
+        amount: TIP_SATS
+      }),
+    [engine.tip]
+  );
+
   return (
-    <SafeAreaView style={styles.screen}>
-      <StatusBar barStyle='light-content' />
+    <View style={styles.screen}>
+      <StatusBar barStyle='light-content' translucent />
       <CountryPicker
         visible={!country}
         onPick={(code) => {
@@ -145,60 +190,89 @@ export default function App() {
         }}
       />
 
-      <View style={styles.header}>
-        <Text style={styles.title}>
-          ⚡ HyperWave {country ? flagOf(country) : ''}
-        </Text>
-        <Text style={styles.chip}>
-          {wallet
-            ? `${wallet.amount ?? 0} ${unit} · ${wallet.network || '…'}`
-            : '…'}
-        </Text>
-      </View>
-
-      <StatusLine
-        peers={peers.length}
-        waves={waves.length}
-        me={me}
-        toast={toast}
-      />
-
-      <WaveList
-        waves={waves}
-        activeWaveId={activeWaveId}
-        countryOf={(id) =>
-          (me && me.id === id
-            ? me.country
-            : peers.find((peer) => peer.id === id)?.country) || ''
-        }
-        matchesNetwork={engine.waveMatchesNetwork}
-        onSelect={engine.selectWave}
-      />
-
-      <Ring
-        me={me}
-        peers={peers}
-        sweepId={sweepId}
-        flourishId={flourishId}
-        featured={featured}
-        centerText={
+      <MomentFeed
+        moments={gallery}
+        keyOf={momentKey}
+        index={feedIndex}
+        onIndexChange={setFeedIndex}
+        onManualScroll={() => setFollowing(false)}
+        onTip={tipMoment}
+        canTip={canTip}
+        tipLabel={`${TIP_SATS} ${unitLabelFor(wallet?.unit || 'sat', TIP_SATS)}`}
+        emptyText={
           activeWave
-            ? `${activeWave.phase} · ${activeWave.count || 1} peer${
-                (activeWave.count || 1) === 1 ? '' : 's'
-              }`
-            : 'Start a wave, or tap one above'
+            ? 'Moments appear here as the wave sweeps the ring.'
+            : 'Start a wave, or tap one above to watch it.'
         }
       />
 
-      {activeWave && !inLobby ? (
-        <Text style={styles.progress}>
-          {gallery.length}/{activeWave.count || 1} moments in
-        </Text>
-      ) : null}
+      {/* everything below floats OVER the feed — box-none so only the controls take touches */}
+      <SafeAreaView style={styles.topOverlay} pointerEvents='box-none'>
+        <View style={styles.topScrim} pointerEvents='box-none'>
+          <SweepBar
+            seats={activeWave?.count || 0}
+            arrived={gallery.length}
+            sweepId={sweepId}
+            flourishId={flourishId}
+          />
+          <View style={styles.header}>
+            <Text style={styles.title}>
+              ⚡ HyperWave {country ? flagOf(country) : ''}
+            </Text>
+            <Pressable onPress={() => setWalletOpen(true)}>
+              <Text style={styles.chip}>
+                {wallet
+                  ? `${wallet.amount ?? 0} ${unit} · ${wallet.network || '…'}`
+                  : '…'}
+              </Text>
+            </Pressable>
+          </View>
 
-      {inLobby ? (
-        <Lobby wave={activeWave} unit={unit} onJoin={() => engine.joinWave()} />
-      ) : null}
+          <StatusLine
+            peers={peers.length}
+            waves={waves.length}
+            me={me}
+            toast={toast}
+          />
+
+          <WaveList
+            waves={waves}
+            activeWaveId={activeWaveId}
+            countryOf={(id) =>
+              (me && me.id === id
+                ? me.country
+                : peers.find((peer) => peer.id === id)?.country) || ''
+            }
+            matchesNetwork={engine.waveMatchesNetwork}
+            onSelect={engine.selectWave}
+          />
+        </View>
+      </SafeAreaView>
+
+      <SafeAreaView style={styles.bottomOverlay} pointerEvents='box-none'>
+        {activeWave && !inLobby ? (
+          <Text style={styles.progress}>
+            {gallery.length > 0
+              ? `${Math.min(feedIndex + 1, gallery.length)} of ${
+                  gallery.length
+                } · ${activeWave.count || 1} on the roster`
+              : `${activeWave.count || 1} on the roster`}
+          </Text>
+        ) : null}
+
+        {inLobby ? (
+          <Lobby
+            wave={activeWave}
+            unit={unit}
+            onJoin={() => engine.joinWave()}
+          />
+        ) : null}
+
+        <View style={styles.actions}>
+          <Button label='Start a wave' onPress={engine.startWave} />
+          <Button label='Wallet' onPress={() => setWalletOpen(true)} />
+        </View>
+      </SafeAreaView>
 
       <Capture
         visible={!!capturing}
@@ -207,11 +281,6 @@ export default function App() {
         onStage={stageMoment}
         onSkip={() => setSkippedWaveId(activeWaveId)}
       />
-
-      <View style={styles.actions}>
-        <Button label='Start a wave' onPress={engine.startWave} />
-        <Button label='Wallet' onPress={() => setWalletOpen(true)} />
-      </View>
 
       <Wallet
         visible={walletOpen}
@@ -222,39 +291,7 @@ export default function App() {
         transactions={engine.transactions}
         actions={engine}
       />
-
-      <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.section}>Moments ({gallery.length})</Text>
-        {gallery.map((moment) => (
-          <View key={moment.peerId || moment.hopCount} style={styles.card}>
-            {moment.image ? (
-              <Image source={{ uri: moment.image }} style={styles.thumb} />
-            ) : null}
-            <Text style={styles.caption}>
-              {flagOf(moment.country)}{' '}
-              {moment.caption || moment.peerId?.slice(0, 8) || 'moment'}
-            </Text>
-            {moment.address && moment.address !== wallet?.address ? (
-              <Pressable
-                onPress={() =>
-                  engine.tip({
-                    waveId: moment.waveId,
-                    peerId: moment.peerId,
-                    address: moment.address,
-                    amount: TIP_SATS
-                  })
-                }
-              >
-                <Text style={styles.tip}>
-                  ⚡ Tip {TIP_SATS}{' '}
-                  {unitLabelFor(wallet?.unit || 'sat', TIP_SATS)}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ))}
-      </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -274,55 +311,59 @@ function Button({ label, onPress, disabled }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: PALETTE.bg },
+  topOverlay: { position: 'absolute', top: 0, left: 0, right: 0 },
+  // a scrim so white captions in a moment can't swallow the header text
+  topScrim: {
+    paddingTop: TOP_INSET + 6,
+    paddingBottom: 10,
+    backgroundColor: 'rgba(10,10,10,0.72)'
+  },
+  bottomOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingBottom: 8,
+    backgroundColor: 'rgba(10,10,10,0.72)'
+  },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: PALETTE.bgGlow
+    paddingTop: 8
   },
-  title: { color: PALETTE.text, fontSize: 20, fontWeight: '700' },
-  chip: { color: PALETTE.orange, fontSize: 13 },
-  actions: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingTop: 10
+  title: { color: PALETTE.text, fontSize: 17, fontWeight: '700' },
+  chip: {
+    color: PALETTE.orange,
+    fontSize: 12,
+    fontWeight: '600',
+    backgroundColor: PALETTE.panel,
+    borderRadius: 999,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    overflow: 'hidden'
   },
-  btn: {
-    backgroundColor: PALETTE.orange,
-    paddingVertical: 11,
-    paddingHorizontal: 16,
-    borderRadius: 10
-  },
-  btnDisabled: { backgroundColor: PALETTE.panel },
-  btnText: { color: '#1a1204', fontWeight: '700' },
-  btnTextDisabled: { color: PALETTE.muted },
   progress: {
     color: PALETTE.muted,
     fontSize: 12,
     textAlign: 'center',
-    paddingTop: 4
-  },
-  body: { paddingBottom: 32 },
-  section: {
-    color: PALETTE.text,
-    fontSize: 16,
-    fontWeight: '600',
-    paddingHorizontal: 16,
-    paddingTop: 14,
     paddingBottom: 6
   },
-  card: {
-    marginHorizontal: 16,
-    marginVertical: 6,
-    backgroundColor: PALETTE.panel,
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 6
+  },
+  btn: {
+    flex: 1,
+    backgroundColor: PALETTE.orange,
     borderRadius: 12,
-    padding: 12,
+    paddingVertical: 13,
     alignItems: 'center'
   },
-  thumb: { width: 160, height: 160, borderRadius: 8, marginBottom: 8 },
-  caption: { color: PALETTE.text },
-  tip: { color: PALETTE.orange, marginTop: 6, fontWeight: '600' }
+  btnDisabled: { backgroundColor: PALETTE.panel },
+  btnText: { color: '#1a1005', fontWeight: '700', fontSize: 15 },
+  btnTextDisabled: { color: PALETTE.dim }
 });

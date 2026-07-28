@@ -1,6 +1,7 @@
 # Bringing the mobile app to parity with the desktop app
 
-**Status:** ALL PHASES (0–6) are DONE (2026-07-27) — see the per-phase notes below. What remains is
+**Status:** ALL PHASES (0–7) are DONE (Phase 7 added 2026-07-28) — see the per-phase notes below.
+What remains is
 verification that needs hardware or a toolchain this machine lacks — tracked in TODO.md under
 **Mobile** and in `mobile/README.md`. Written 2026-07-25.
 **Scope:** `mobile/` (Expo + `react-native-bare-kit`) and the shared worklet host
@@ -288,8 +289,10 @@ and receive + redeem a tip.
 
 _Goal: it feels like HyperWave._
 
-1. **U3** ring with peers at their true angles (angle derived locally from peer id — never trusted
-   from gossip), the sweep spark, and the completion flourish.
+1. **U3** the sweep — originally a `react-native-svg` ring mirroring desktop, since REPLACED (see
+   Phase 7): the ring lost its screen-space argument on a phone, so the sweep is a segmented
+   story bar. The rule it encodes is unchanged — seats in angle order, angle derived locally from
+   the peer id, never trusted from gossip.
 2. **U4** wave directory; selecting a wave subscribes + activates it.
 3. **U5** lobby: countdown, roster count, fee, join button gated on `paid === 'verified'`.
 4. **U12** status line + toasts for the ~15 narration events desktop shows.
@@ -303,10 +306,10 @@ beats as desktop.
 1. **U6** `expo-camera` preview during the lobby, capture → JPEG data URL (mind the entry byte
    caps in `protocol.md`) + caption → `stage-entry`; auto-capture at wave start, mirroring
    `proof.captureAndStage()`.
-2. **U7** gallery: hop-ordered items, featured moment in the ring centre, progress, tip button.
-3. **U8** scrubber gesture — DROPPED for now (the plan allows it): the ring is small on a phone
-   and the moment list below it already lets you browse every moment by tapping. Revisit only if
-   the gallery grows a full-screen mode.
+2. **U7** gallery: hop-ordered items, progress, tip button (the featured-moment presentation was
+   superseded by Phase 7's feed).
+3. **U8** scrubber gesture — DROPPED, and now moot: Phase 7 made the gallery the full screen, so
+   browsing is the feed's own vertical swipe. Nothing to drag around.
 4. **P2** permission strings.
 
 **Done when:** a moment captured on the phone appears in a desktop peer's gallery, and vice versa.
@@ -338,6 +341,36 @@ has not been exercised from the phone.
 4. **D3** NSFW decision executed (implement or document the asymmetry).
 5. **P4** docs: `mobile/README.md` rewritten, `CLAUDE.md` mobile paragraph updated, `TODO.md`
    mobile items reconciled.
+
+### Phase 7 — Mobile-native presentation: drop the ring (M) — ✅ DONE (unverified on device)
+
+_Added 2026-07-28, after using Phase 3's UI on the simulator._
+
+Phases 3–4 pursued "comparable UI" (§2.5) by porting the desktop's presentation. On a phone that
+was the wrong target: the ring is a 320pt circle competing with the moments it frames, so the
+gallery — the actual content — got whatever height was left, and the screen read as cramped.
+
+Parity is about the wire and the money (§2.1–2.4); presentation should be native to the device.
+So mobile's presentation now diverges deliberately:
+
+1. **The ring is deleted** (`src/components/Ring.js` gone). It remains the DESKTOP's map of the
+   world; a phone has no room for a map.
+2. **`MomentFeed`** — full-bleed vertical pager, one moment per page, caption/byline/tip as an
+   overlay. The gallery is the screen.
+3. **`SweepBar`** — the ring's spark as a story-style segmented bar: one segment per roster seat
+   in sweep order, filling as the wave rolls, glowing on completion. Same information (who's in,
+   how far it's travelled), ~3pt tall instead of 320. Still a local fixed-duration replay.
+4. **The sweep drives the feed** — while a wave rolls, the feed auto-advances to each moment as
+   it lands, so the wave is something you watch roll past. The first manual drag hands control
+   back to the user for that wave.
+5. Header, status line, wave strip, lobby and buttons float over the feed as scrimmed overlays.
+
+Everything else is untouched: no engine change, no app-core change, no new dependency — the rules
+still come from `hyperwave-app-core`, which is what let the presentation be rethought this cheaply.
+
+**Done when:** a wave watched on a phone reads like a feed you'd scroll anyway. _Verification
+owed:_ only reviewed as code — the layout, the auto-advance, and the drag-takes-control rule have
+not been run on the simulator or a device (see `mobile/README.md` §Manual device checklist step 6).
 
 ---
 

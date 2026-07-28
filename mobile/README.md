@@ -13,7 +13,7 @@ The UI is still a scaffold; the roadmap to desktop parity is `../implement-mobil
 Expo RN app (this package)                 Bare worklet (hyperwave-engine)
   App.js ── useEngine() ──► FramedStream ⇄ IPC ⇄ FramedStream ──► worklet/app.js ──► createEngine
   (React UI)   │            (bare-rpc, JSON)                      (wave + gallery + Cashu wallet)
-  src/components/ (Ring, WaveList, Lobby, StatusLine, CountryPicker)
+  src/components/ (MomentFeed, SweepBar, WaveList, Lobby, StatusLine, CountryPicker)
                └── hyperwave-app-core  (the view-model the desktop renderer drives too)
   src/custody.js
   (keychain seeds + persistent storage dir, injected in `init`)
@@ -21,10 +21,17 @@ Expo RN app (this package)                 Bare worklet (hyperwave-engine)
 
 The **rules** (wave directory, active wave, ended-wave lifecycle, wallet meta, tip choreography)
 live in `hyperwave-app-core`, shared with the desktop renderer — `src/useEngine.js` is only
-transport + React glue, and `src/components/` is only presentation. The ring is `react-native-svg`:
-peers sit at their true seat angles, the sweep spark rolls a fixed-duration lap while a wave races
-(a local replay, like desktop — the protocol itself races at network speed), and a completed wave
-pulses.
+transport + React glue, and `src/components/` is only presentation.
+
+**The phone does NOT draw the desktop's ring.** A 320pt circle on a 6" screen crowded out the
+moments it was framing, so the mobile presentation is a full-bleed vertical feed (`MomentFeed`) —
+one moment per page, swipe up for the next — with the header, wave strip, lobby and buttons
+floating over it. The sweep the ring drew becomes a story-style segmented bar (`SweepBar`): one
+segment per roster seat, in the same angle order the sweep fires in, filling left to right as the
+wave rolls, glowing on completion. Like the desktop ring's spark, that fill is a local
+fixed-duration REPLAY (`SWEEP_MS`) — the protocol itself races at network speed, so visual pacing
+is a renderer concern. While a wave rolls, the feed AUTO-ADVANCES to each moment as it lands (the
+wave is the scroll); the first manual drag hands control back to the user for that wave.
 
 - `bare-pack` bundles `../packages/hyperwave-engine/worklet/app.js` (+ its whole
   Hyperswarm/Corestore-Hypercore/cashu-ts require graph) into `bundles/app.bundle.mjs` (~3 MB).
@@ -120,16 +127,18 @@ The phone and the desktop must sit on the SAME base topic or they never discover
 (`hyperwave:demo:v1`) — matching the desktop host's own default. If you set `TOPIC` to isolate a
 build, pass the same string to the desktop side as `HYPERWAVE_TOPIC`.
 
-1. **Boot** — identity + ring angle appear; the wallet chip shows a balance and `testnet`.
+1. **Boot** — identity + ring angle appear in the status line; the wallet chip shows a balance and
+   `testnet`.
 2. **Restart** — same peer id and angle (keychain swarm seed), same balance (proofs on disk).
-3. **Discovery** — the headless peer appears on the ring within ~35s (public DHT).
+3. **Discovery** — the peer count rises within ~35s (public DHT).
 4. **Start a wave** — `🔥 paying the start fee…`, then the chip shows `lobby · 2 sat · pending`,
    then `verified`.
 5. **Capture** — the sheet opens with a live preview, the countdown runs, and it auto-captures
    before the lobby closes. Tap **Capture now** and **Skip** at least once each.
-6. **Sweep** — the spark laps the ring, `wave rolling — hop n`, then `✅ wave completed`, and the
-   ring pulses.
-7. **Gallery** — YOUR photo is in the moment list (this is the piece the simulator cannot test),
+6. **Sweep** — the segment bar fills left to right, the feed auto-advances to each moment as it
+   lands, `wave rolling — hop n`, then `✅ wave completed` and the bar glows. Swipe mid-wave: the
+   auto-advance must stop and stay stopped for the rest of that wave.
+7. **Gallery** — YOUR photo is a page in the feed (this is the piece the simulator cannot test),
    and it appears in the headless peer's feed (`FEED size=2` in its log).
 8. **Tip** — tap ⚡ Tip on the peer's moment: balance drops ~6 sat, and the peer logs a `dm`
    carrying the token plus a stripped `note`.
