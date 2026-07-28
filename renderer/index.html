@@ -1015,7 +1015,16 @@
           <div id="topup-hint">
             Scan with a Lightning wallet (also copied to your clipboard).
           </div>
-          <button id="topup-close" class="pill">Done</button>
+          <!-- "Hide", not "Done": on a payment panel "Done" reads as "I've paid". Hiding cancels
+               nothing — the worker keeps polling the quote, so a later payment still credits you
+               (until it expires), which the title spells out. -->
+          <button
+            id="topup-close"
+            class="pill"
+            title="Hide this invoice. It stays payable — paying it later still tops you up."
+          >
+            ✕ Hide invoice
+          </button>
         </div>
         <div class="wallet-section">Recent transactions</div>
         <div id="wallet-txs"></div>
