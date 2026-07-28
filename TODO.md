@@ -290,9 +290,10 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         payable bolt11, and a tip sent from the phone. `mobile/README.md` §Manual device
         checklist is the script.
   - [~] **Run the Phase 7 feed UI.** The LAYOUT is confirmed on screen (2026-07-28) — the
-    full-screen feed and its overlays render as intended. Still unverified because they need
-    a live wave with peers: the segment bar filling in sweep order, the feed auto-advancing
-    as moments land, and the drag-takes-control rule holding for the rest of that wave.
+    full-screen feed and its overlays render as intended — and so is the long-press wave
+    dismissal. Still unverified because they need a live wave with peers: the segment bar
+    filling in sweep order, the feed auto-advancing as moments land, and the drag-takes-control
+    rule holding for the rest of that wave.
   - [ ] **Automated UI tests for the RN app** — the shared rules are covered by
         `hyperwave-app-core`'s suite, but nothing exercises the React layer.
 
@@ -312,11 +313,13 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         core remembers the dismissal, since the engine keeps gossiping about a live wave; a tip
         `dm` for a dismissed wave is still redeemed).
   - [~] **Verify on screen.** The FIELD is confirmed on screen (2026-07-28): the concentric rings
-    render as intended at the responsive size. Covered headlessly too — a scratch harness stubs
-    the canvas and runs real frames, checking the layout, DPR, the birth-and-drift easing, the
-    fading fall, hit-testing, the ✕ hover/click and the scrubber handoff. Still unverified
-    because they need a live wave with peers: the sweep spark riding the ACTIVE wave's radius as
-    it laps, clicking a ghost ring to subscribe, the ✕ actually freeing cores, and the scrubber
+    render as intended at the responsive size, and the ✕ dismisses a wave (confirmed after the
+    hover-gap fix — the badge sits inside the ring's hit band, so hover now resolves against the
+    badges first). Covered headlessly too — a scratch harness stubs the canvas and runs real
+    frames, checking the layout, DPR, the birth-and-drift easing, the fading fall, hit-testing,
+    the ✕ hover/click (walking the pointer in, which is what caught the gap) and the scrubber
+    handoff. Still unverified because they need a live wave with peers: the sweep spark riding
+    the ACTIVE wave's radius as it laps, clicking a ghost ring to subscribe, and the scrubber
     standing down on presses that land on another ring.
 
 ### Housekeeping
