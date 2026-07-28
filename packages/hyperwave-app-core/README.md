@@ -25,7 +25,8 @@ core.tip({ waveId, peerId, address, amount });
 
 - the **wave directory** (every announced wave) + a per-wave **feed cache**
 - **active-wave selection**, and superseding my own prior wave
-- the **ended-wave lifecycle**: linger → fade → drop → `unsubscribe`
+- the **ended-wave lifecycle**: linger → fade → drop → `unsubscribe`, plus `dismissWave(id)` —
+  the explicit "push this one away" a host offers the user, at any phase
 - **wallet metadata** + the same-network filter
 - the **tip choreography**: `tip` → `dm` the bearer token + `note` the announcement; `redeem` an
   inbound `dm`
@@ -63,10 +64,11 @@ The core can't enforce these for the host:
 3. **Stage a pending capture in `onBeforeSwitchWave`** — the core calls it synchronously before the
    active wave changes (invariant 3 below).
 
-## The five invariants
+## The six invariants
 
-Each is a bug that was fixed once in the desktop renderer, and each has a test here
-(`lib/app-core.test.js`). A re-implementation re-breaks all five, which is why this package exists:
+Each is a bug that was fixed once in the desktop renderer (or a trap that would become one), and
+each has a test here (`lib/app-core.test.js`). A re-implementation re-breaks all six, which is why
+this package exists:
 
 1. **Only `wave-announce` may CREATE a directory entry.** Every other event updates a wave already
    known, or a late `roster` / echoed `unsubscribed` spawns a phantom by-less wave.
@@ -78,6 +80,10 @@ Each is a bug that was fixed once in the desktop renderer, and each has a test h
 4. **A network change deselects a now-cross-network active wave** (its gallery + tip must go away).
 5. **Ended waves are unsubscribed when dropped** — this is what keeps the core budget
    O(subscribed).
+6. **A dismissed wave stays dismissed.** The engine keeps gossiping about a live wave
+   (re-announces, roster updates), so without remembering the dismissal the wave the user just
+   pushed away reappears seconds later. Invariant 2 still outranks this one: a tip `dm` for a
+   dismissed wave is **still redeemed** — dismissing is a viewing choice, and the token is money.
 
 ## Known duplication
 

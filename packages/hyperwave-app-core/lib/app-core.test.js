@@ -1,4 +1,4 @@
-// The app core's invariants (app-core.js, numbered 1–5 in its header). Each is a bug that was
+// The app core's invariants (app-core.js, numbered 1–6 in its header). Each is a bug that was
 // fixed once in the desktop renderer and would be re-broken by any re-implementation — this suite
 // is the regression net for the renderer port AND for the mobile host.
 //   bare lib/app-core.test.js   (or `npm test`)
@@ -343,4 +343,83 @@ test('a balance-only wallet refresh keeps the mint and network', (t) => {
     { mint: 'https://mint', network: 'testnet', amount: 25 },
     'the refresh merged instead of blanking'
   );
+});
+
+// --- INVARIANT 6: a dismissed wave stays dismissed -------------------------------------------
+
+test('dismissing a wave frees its cores and drops it from the directory', (t) => {
+  const { core, sentOf } = makeCore();
+
+  core.handle(announce('w1'));
+  core.selectWave('w1'); // subscribes, so the dismissal must unsubscribe
+  core.dismissWave('w1');
+
+  const snapshot = core.getSnapshot();
+  t.is(snapshot.waves.size, 0, 'gone from the directory');
+  t.is(snapshot.activeWaveId, null, 'and deselected, since it was active');
+  t.is(sentOf('unsubscribe-wave').length, 1, 'its cores were freed');
+});
+
+test('a dismissed wave is not resurrected by continuing gossip', (t) => {
+  const { core } = makeCore();
+
+  core.handle(announce('w1'));
+  core.dismissWave('w1');
+  // the engine keeps talking about a live wave: a re-announce, a roster update, a start
+  core.handle(announce('w1'));
+  core.handle({ type: 'event', event: 'roster', waveId: 'w1', count: 9 });
+  core.handle({ type: 'event', event: 'wave-active', waveId: 'w1', count: 9 });
+  core.handle({
+    type: 'feed',
+    waveId: 'w1',
+    items: [{ peerId: 'p1', payload: { caption: 'nope' } }]
+  });
+
+  t.is(core.getSnapshot().waves.size, 0, 'it stayed gone');
+});
+
+test('dismissing MY OWN wave stops it auto-selecting itself again', (t) => {
+  const { core } = makeCore();
+
+  core.handle(announce('w1', { mine: true }));
+  t.is(core.getSnapshot().activeWaveId, 'w1', 'my wave auto-engaged');
+
+  core.dismissWave('w1');
+  core.handle(announce('w1', { mine: true })); // a re-announce of the same wave
+
+  const snapshot = core.getSnapshot();
+  t.is(snapshot.activeWaveId, null, 'it did not re-engage');
+  t.is(snapshot.waves.size, 0, 'nor reappear in the directory');
+});
+
+// Invariant 6 must never override invariant 2: dismissing a wave is a VIEWING choice, and a tip
+// token addressed to me is money. Routing the dm "only for waves I still watch" would destroy it.
+test('a tip dm for a dismissed wave is still redeemed', (t) => {
+  const { core, sentOf } = makeCore();
+
+  core.handle(announce('w1'));
+  core.dismissWave('w1');
+  core.handle({
+    type: 'event',
+    event: 'dm',
+    waveId: 'w1',
+    note: { kind: 'tip', token: 'cashuAbc', amount: 5 }
+  });
+
+  const redeems = sentOf('redeem');
+  t.is(redeems.length, 1, 'the token was redeemed');
+  t.is(redeems[0].token, 'cashuAbc', 'the right token');
+});
+
+test('dismissing one wave leaves the others alone', (t) => {
+  const { core } = makeCore();
+
+  core.handle(announce('w1'));
+  core.handle(announce('w2'));
+  core.dismissWave('w1');
+  core.handle({ type: 'event', event: 'roster', waveId: 'w2', count: 4 });
+
+  const snapshot = core.getSnapshot();
+  t.is(snapshot.waves.size, 1, 'only the dismissed one went');
+  t.is(snapshot.waves.get('w2').count, 4, 'the survivor still updates');
 });

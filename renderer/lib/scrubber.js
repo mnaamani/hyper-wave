@@ -33,8 +33,8 @@ function onDown(ev) {
   if (frac === null) {
     return; // no replay active — leave the ring as a plain display
   }
-  if (ring.selectableWaveAt(ev.clientX, ev.clientY)) {
-    return; // this press is another wave's ring — a selection, which ring.js handles
+  if (ring.claimsPointer(ev.clientX, ev.clientY)) {
+    return; // the rings own this press (another wave's ring, or a ✕) — ring.js handles it
   }
   dragging = true;
   canvas.style.cursor = 'grabbing';

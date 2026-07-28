@@ -6,13 +6,15 @@
 // What it owns (extracted from the desktop renderer, which had no test coverage):
 //   - the wave directory (every announced wave) + a per-wave feed cache
 //   - active-wave selection, and superseding my own prior wave
-//   - the ended-wave lifecycle: linger → fade → drop → unsubscribe
+//   - the ended-wave lifecycle: linger → fade → drop → unsubscribe, and the explicit
+//     `dismissWave` a host offers the user
 //   - wallet metadata + the same-network filter
 //   - the tip choreography: tip → dm the bearer token + note the announcement; redeem on an
 //     inbound dm
 //
-// The five invariants below are each a fixed bug, and each has a test in this package. If you
-// change this file, read them first — a re-implementation re-breaks all five:
+// The six invariants below are each a fixed bug (or a trap that would become one), and each has a
+// test in this package. If you change this file, read them first — a re-implementation re-breaks
+// all six:
 //
 //   1. Only `wave-announce` may CREATE a directory entry. Every other event updates a wave we
 //      already know, or a late `roster` / echoed `unsubscribed` spawns a phantom by-less wave.
@@ -24,6 +26,9 @@
 //   4. A network change deselects a now-cross-network active wave.
 //   5. Ended waves are UNSUBSCRIBED when dropped — this is what keeps the core budget
 //      O(subscribed).
+//   6. A DISMISSED wave stays dismissed. The engine keeps gossiping about a live wave, so without
+//      remembering the dismissal it would reappear seconds after the user pushed it away — but
+//      invariant 2 still wins over this one: a tip `dm` for a dismissed wave is still redeemed.
 import { withCountry, asMoment, asEntry } from './theme.js';
 import { networksMatch, mergeWalletMeta } from './wallet-meta.js';
 
@@ -99,6 +104,7 @@ export function createAppCore({
   const waves = new Map(); // waveId -> directory metadata
   const feeds = new Map(); // waveId -> raw engine feed items
   const expiryTimers = new Map(); // waveId -> one-shot handle (linger, then fade)
+  const dismissed = new Set(); // waveIds the user pushed away — never re-admitted (invariant 6)
   const subscribers = new Set();
   const patchContext = { now, defaultLobbyMs };
 
@@ -189,7 +195,27 @@ export function createAppCore({
     notify(activeChanged ? 'deselect' : 'waves');
   }
 
-  // Mark the bubble fading (the host plays its animation), then drop it once the fade has run.
+  /**
+   * Push a wave away for good: the user is done with it. Frees its cores (via removeWave →
+   * `unsubscribe-wave`), drops its metadata + cached feed, deselects it if it was active, and
+   * REMEMBERS the dismissal so the engine's continuing gossip about it can't resurrect it
+   * (invariant 6). Distinct from the automatic ended-wave lifecycle, which drops a wave only after
+   * it has ended and lingered — a dismissal applies at any phase, including a live one.
+   *
+   * The `dismissed` set only ever grows, but it grows one waveId per EXPLICIT user action, so it
+   * is bounded by how many waves a person pushes away in a session.
+   * @param {string} waveId - The wave to dismiss.
+   * @returns {void}
+   */
+  function dismissWave(waveId) {
+    if (!waveId) {
+      return;
+    }
+    dismissed.add(waveId);
+    removeWave(waveId);
+  }
+
+  // Mark the wave fading (the host plays its animation), then drop it once the fade has run.
   function fadeOutWave(waveId) {
     if (!waves.has(waveId)) {
       return;
@@ -260,8 +286,15 @@ export function createAppCore({
   }
 
   function handleEvent(evt) {
-    updateDirectory(evt);
-    maybeAutoSelect(evt);
+    // INVARIANT 6: a DISMISSED wave stays dismissed. The engine keeps gossiping about a live wave
+    // (re-announces, roster updates), so without this the wave the user just pushed away would
+    // reappear seconds later. Note what is NOT skipped: `dm` still runs, because invariant 2 is
+    // the stronger rule — a P2PK-locked tip token must be redeemed even for a wave the user has
+    // walked away from, and "walked away" includes dismissing it.
+    if (!evt.waveId || !dismissed.has(evt.waveId)) {
+      updateDirectory(evt);
+      maybeAutoSelect(evt);
+    }
     if (evt.event === 'dm') {
       handleDirectedNote(evt);
     }
@@ -321,6 +354,9 @@ export function createAppCore({
       notify('ring');
     },
     feed: (message) => {
+      if (dismissed.has(message.waveId)) {
+        return; // a feed still in flight when the user dismissed it (invariant 6)
+      }
       feeds.set(message.waveId, message.items || []); // cache EVERY subscribed wave's feed
       notify('feed');
     },
@@ -399,6 +435,7 @@ export function createAppCore({
     startWave: () => send('start-wave'),
     joinWave: (waveId) => send('join-wave', { waveId: waveId || activeWaveId }),
     removeWave,
+    dismissWave,
     stageMoment: (moment, waveId) =>
       send('stage-entry', {
         waveId: waveId || activeWaveId,

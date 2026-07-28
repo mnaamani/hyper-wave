@@ -42,6 +42,14 @@ const TOPIC_GAP = 28; // clearance between the topic ring and the outermost wave
 const MIN_RING_GAP = 30; // any closer and two rings read as one
 const MAX_RING_GAP = 58;
 const HIT_TOLERANCE = 16; // how near a ring a click counts as hitting it
+// Inward drift: a ring EASES to the radius its lifecycle asks for instead of jumping there, so a
+// wave is seen to travel inward as it forms → races → ends. Exponential smoothing on real elapsed
+// time (not per-frame steps), so the motion is identical on a 60Hz and a 120Hz display.
+const DRIFT_TAU_MS = 550; // time constant: ~63% of the remaining distance per tau
+const DRIFT_SNAP_PX = 0.4; // close enough — stop animating and sit still
+const BIRTH_MARGIN = 6; // a new ring is born just inside the topic ring, then drifts in
+const DISMISS_RADIUS = 11; // the ✕ badge's hit circle
+const DISMISS_INSET = 26; // how far inside its ring the badge sits
 // Lifecycle → band order (0 = outermost). A fading wave sinks below an ended one so the last
 // thing it does is fall inward.
 const PHASE_RANK = { lobby: 0, racing: 1, ended: 2 };
@@ -54,6 +62,9 @@ let waves = new Map(); // waveId -> directory meta (from the app core's snapshot
 let activeWaveId = null;
 let activeSeats = []; // [{id, country}] participants of the active wave that have posted
 let layout = []; // [{waveId, radius, wave}] — recomputed each frame, read by hit-testing
+const driftRadii = new Map(); // waveId -> the radius actually on screen, easing toward its target
+let lastFrameAt = 0; // performance.now() of the previous frame, for time-based easing
+let hoverWaveId = null; // the ring under the pointer — only it shows its ✕ (no permanent clutter)
 let cssWidth = 440; // canvas size in CSS px (backing store is this × devicePixelRatio)
 let cssHeight = 440;
 let center = null; // gallery item shown in the centre (or null)
@@ -69,6 +80,7 @@ let flourish = null; // { startedAt } | null
 let confetti = []; // particles for the current flourish (browser rAF, so Math.random is fine here)
 // wave selection (see "selection" section)
 let onWaveSelectCb = () => {};
+let onWaveDismissCb = () => {};
 
 // Captions come from other peers' gallery entries — treat them as untrusted. We render on
 // <canvas> (fillText), so HTML/JS injection is already impossible; this strips control &
@@ -222,7 +234,26 @@ function ringCapacity(outermost) {
   return Math.max(1, Math.floor(span / MIN_RING_GAP) + 1);
 }
 
-function computeLayout() {
+// Where a wave's ring WANTS to be. A fading wave always targets the floor: the last thing it does
+// is fall inward and wink out, rather than sliding sideways into some middle band.
+function targetRadiusOf({ wave, index, outermost, gap }) {
+  if (wave.fading) {
+    return STAGE_RADIUS;
+  }
+  return Math.max(STAGE_RADIUS, outermost - index * gap);
+}
+
+// Ease `current` toward `target` over `elapsedMs`. Frame-rate independent: the fraction covered
+// depends on elapsed TIME, so a 120Hz display doesn't drift twice as fast as a 60Hz one.
+function easeToward({ current, target, elapsedMs }) {
+  const distance = target - current;
+  if (Math.abs(distance) < DRIFT_SNAP_PX) {
+    return target;
+  }
+  return current + distance * (1 - Math.exp(-elapsedMs / DRIFT_TAU_MS));
+}
+
+function computeLayout(elapsedMs) {
   const outermost = topicRadius() - TOPIC_GAP;
   const list = visibleWaves();
   const capacity = ringCapacity(outermost);
@@ -232,14 +263,28 @@ function computeLayout() {
     MIN_RING_GAP,
     Math.min(MAX_RING_GAP, shown.length > 1 ? span / (shown.length - 1) : span)
   );
-  return {
-    rings: shown.map((wave, index) => ({
-      waveId: wave.waveId,
-      wave,
-      radius: Math.max(STAGE_RADIUS, outermost - index * gap)
-    })),
-    hidden: list.length - shown.length
-  };
+  const live = new Set();
+  const rings = shown.map((wave, index) => {
+    const target = targetRadiusOf({ wave, index, outermost, gap });
+    // A ring the user has never seen is BORN on the topic ring — the crowd it condensed out of —
+    // and drifts to its band from there, so arrival reads as "a wave formed out there".
+    const current = driftRadii.has(wave.waveId)
+      ? driftRadii.get(wave.waveId)
+      : topicRadius() - BIRTH_MARGIN;
+    const radius = easeToward({ current, target, elapsedMs });
+    driftRadii.set(wave.waveId, radius);
+    live.add(wave.waveId);
+    return { waveId: wave.waveId, wave, radius, target };
+  });
+  // Forget rings that are no longer drawn (dropped, dismissed, or pushed out of the radial
+  // budget), so a wave that ever comes back is born again rather than teleporting from a stale
+  // position — and so the map can't grow without bound over a long session.
+  for (const waveId of [...driftRadii.keys()]) {
+    if (!live.has(waveId)) {
+      driftRadii.delete(waveId);
+    }
+  }
+  return { rings, hidden: list.length - shown.length };
 }
 
 // The radius the active wave's ring sits at — where the spark rides and the flourish pulses from.
@@ -260,6 +305,73 @@ export function onWaveSelect(cb) {
 }
 
 /**
+ * Register the dismiss handler — app.js's core.dismissWave(waveId) frees the wave's cores and
+ * drops it for good.
+ * @param {(waveId: string) => void} cb The dismiss callback.
+ * @returns {void}
+ */
+export function onWaveDismiss(cb) {
+  onWaveDismissCb = cb;
+}
+
+// Canvas-local [x, y] of a viewport point.
+function localPoint(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return [clientX - rect.left, clientY - rect.top];
+}
+
+// Where a ring's ✕ badge sits: just INSIDE the ring at the initiator's seat angle, i.e. in the
+// band between it and the next ring in, where nothing else is drawn.
+function dismissPointOf(entry) {
+  const angle = entry.wave.by ? angleOfId(entry.wave.by) : 0;
+  return pointOn(angle, Math.max(0, entry.radius - DISMISS_INSET));
+}
+
+// The ✕ under a viewport point, if any. Only the HOVERED ring shows one, so only it can be hit —
+// a badge you can't see must not be clickable.
+function dismissAt(clientX, clientY) {
+  const entry = layout.find((one) => one.waveId === hoverWaveId);
+  if (!entry) {
+    return null;
+  }
+  const [x, y] = localPoint(clientX, clientY);
+  const [badgeX, badgeY] = dismissPointOf(entry);
+  const within = Math.hypot(x - badgeX, y - badgeY) <= DISMISS_RADIUS;
+  return within ? entry.waveId : null;
+}
+
+// The ring nearest a viewport point (ANY ring, including the active one) — drives the hover state.
+function ringAt(clientX, clientY) {
+  const [x, y] = localPoint(clientX, clientY);
+  const distance = Math.hypot(x - cssWidth / 2, y - cssHeight / 2);
+  let best = null;
+  let bestDelta = HIT_TOLERANCE;
+  for (const entry of layout) {
+    const delta = Math.abs(distance - entry.radius);
+    if (delta <= bestDelta) {
+      best = entry.waveId;
+      bestDelta = delta;
+    }
+  }
+  return best;
+}
+
+/**
+ * Whether a press at this point belongs to the rings (a selection or a dismiss) rather than to the
+ * scrubber. The scrubber asks before starting a drag, so a click on another wave's ring — or on a
+ * ✕ — never doubles as a scrub of the active one.
+ * @param {number} clientX Viewport x.
+ * @param {number} clientY Viewport y.
+ * @returns {boolean} True if the rings claim this press.
+ */
+export function claimsPointer(clientX, clientY) {
+  if (dismissAt(clientX, clientY)) {
+    return true;
+  }
+  return selectableWaveAt(clientX, clientY) !== null;
+}
+
+/**
  * Which OTHER wave's ring (if any) a viewport point lands on — "other" because a press on the
  * active ring is a scrub, not a selection. Exported so the scrubber can stand down for presses
  * that are really selections.
@@ -268,10 +380,8 @@ export function onWaveSelect(cb) {
  * @returns {string|null} The waveId to select, or null.
  */
 export function selectableWaveAt(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  const dx = clientX - (rect.left + rect.width / 2);
-  const dy = clientY - (rect.top + rect.height / 2);
-  const distance = Math.hypot(dx, dy);
+  const [x, y] = localPoint(clientX, clientY);
+  const distance = Math.hypot(x - cssWidth / 2, y - cssHeight / 2);
   let best = null;
   let bestDelta = HIT_TOLERANCE;
   for (const entry of layout) {
@@ -288,10 +398,25 @@ export function selectableWaveAt(clientX, clientY) {
 }
 
 function onCanvasClick(ev) {
+  // the ✕ wins over selection: it sits inside the ring's own hit band
+  const dismissId = dismissAt(ev.clientX, ev.clientY);
+  if (dismissId) {
+    onWaveDismissCb(dismissId);
+    hoverWaveId = null;
+    return;
+  }
   const waveId = selectableWaveAt(ev.clientX, ev.clientY);
   if (waveId) {
     onWaveSelectCb(waveId);
   }
+}
+
+function onCanvasPointerMove(ev) {
+  hoverWaveId = ringAt(ev.clientX, ev.clientY);
+}
+
+function onCanvasPointerLeave() {
+  hoverWaveId = null;
 }
 
 // --- the sweep: a local REPLAY sweep, decoupled from the (near-instant) race ---
@@ -560,6 +685,32 @@ function drawWaveRing(entry) {
     }
   }
   drawWaveLabel(entry, isActive);
+  if (entry.waveId === hoverWaveId) {
+    drawDismissBadge(entry);
+  }
+  ctx.restore();
+}
+
+// The dismiss affordance: a ✕ shown only on the ring under the pointer, so the field stays clean
+// until you reach for one. Clicking it frees that wave's cores and drops it for good — the manual
+// counterpart of the automatic linger → fade → drop, available at any phase.
+function drawDismissBadge(entry) {
+  const [x, y] = dismissPointOf(entry);
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.arc(x, y, DISMISS_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(20,12,4,0.95)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(245,245,245,0.5)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(245,245,245,0.9)';
+  ctx.font = '13px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('✕', x, y);
+  ctx.textBaseline = 'alphabetic';
   ctx.restore();
 }
 
@@ -695,7 +846,13 @@ function resize() {
 function render() {
   const centerX = cssWidth / 2;
   const centerY = cssHeight / 2;
-  const computed = computeLayout();
+  const frameAt = performance.now();
+  // Real elapsed time drives the drift. Clamped: a backgrounded window can hand us a gap of many
+  // seconds, and without the clamp every ring would teleport to its target on the first frame back
+  // (the animation would be skipped exactly when the user returns to look at it).
+  const elapsedMs = Math.min(100, lastFrameAt ? frameAt - lastFrameAt : 16);
+  const computed = computeLayout(elapsedMs);
+  lastFrameAt = frameAt;
   layout = computed.rings; // cached for hit-testing between frames
   ctx.clearRect(0, 0, cssWidth, cssHeight);
 
@@ -728,6 +885,8 @@ export function start() {
   resize();
   new window.ResizeObserver(resize).observe(canvas);
   canvas.addEventListener('click', onCanvasClick);
+  canvas.addEventListener('pointermove', onCanvasPointerMove);
+  canvas.addEventListener('pointerleave', onCanvasPointerLeave);
   const loop = () => {
     render();
     requestAnimationFrame(loop);

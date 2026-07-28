@@ -108,6 +108,10 @@ function updateHud() {
 // canvas (ring.js — this replaced the orbiting bubbles); clicking one asks the core to select it,
 // which subscribes (holds its cores) and republishes.
 ring.onWaveSelect((waveId) => core.selectWave(waveId));
+// The ✕ on a ring: push that wave away for good (app-core invariant 6 — the engine keeps
+// gossiping about a live wave, so the core remembers the dismissal and never re-admits it). This
+// is the manual counterpart of the automatic linger → fade → drop, and it frees the wave's cores.
+ring.onWaveDismiss((waveId) => core.dismissWave(waveId));
 
 // Paint the wave rings from the core's snapshot. The ring module owns the cross-network filter and
 // the initiator-flag lookup itself (it already holds the topic ring), so this is just a handoff.

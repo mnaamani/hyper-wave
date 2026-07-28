@@ -303,15 +303,21 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
   each wave stepping inward by lifecycle, active ring full-strength + clickable-to-subscribe,
   ghost rings for waves we hold no cores for. `renderer/lib/directory.js` is gone (absorbed
   into `ring.js`), and the field is responsive (DPR-aware backing store).
-  - [ ] **Step 2: animate the inward drift + a dismiss gesture.** Today a ring JUMPS to its band
-        when its phase changes; step 2 tweens the radius so waves visibly drift inward, and adds
-        an explicit dismiss (pull it to the inner floor early → `unsubscribe`) alongside the
-        existing linger → fade → drop that app-core already drives.
+  - [x] **Step 2 — inward drift + dismiss: DONE (2026-07-28).** A ring now EASES to the radius its
+        lifecycle asks for instead of jumping: born on the topic ring (the crowd it condensed out
+        of), drifting in as it forms → races → ends, and falling to the stage floor as it fades.
+        The easing is time-based, so the motion is identical at 60Hz and 120Hz, and clamped so a
+        backgrounded window doesn't teleport every ring on the first frame back. Dismiss is a ✕
+        revealed on the ring under the pointer → `core.dismissWave` (app-core invariant 6: the
+        core remembers the dismissal, since the engine keeps gossiping about a live wave; a tip
+        `dm` for a dismissed wave is still redeemed).
   - [~] **Verify on screen.** The FIELD is confirmed on screen (2026-07-28): the concentric rings
-    render as intended at the responsive size. Covered headlessly too (layout, DPR,
-    hit-testing, the cross-network filter). Still unverified because they need a live wave
-    with peers: the sweep spark riding the ACTIVE wave's radius as it laps, clicking a ghost
-    ring to subscribe, and the scrubber standing down on presses that land on another ring.
+    render as intended at the responsive size. Covered headlessly too — a scratch harness stubs
+    the canvas and runs real frames, checking the layout, DPR, the birth-and-drift easing, the
+    fading fall, hit-testing, the ✕ hover/click and the scrubber handoff. Still unverified
+    because they need a live wave with peers: the sweep spark riding the ACTIVE wave's radius as
+    it laps, clicking a ghost ring to subscribe, the ✕ actually freeing cores, and the scrubber
+    standing down on presses that land on another ring.
 
 ### Housekeeping
 
