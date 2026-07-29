@@ -16,6 +16,16 @@
       "package": "io.hyperwave.mobile",
       "permissions": ["CAMERA"]
     },
-    "plugins": ["expo-secure-store"]
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 29
+          }
+        }
+      ]
+    ]
   }
 }

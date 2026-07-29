@@ -110,6 +110,39 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 `mobile/` (which reaches the addons via `hyperwave-engine`) and writes into the hoisted
 `react-native-bare-kit` — wired into `postinstall` (auto after every install) and `npm run ios`.
 
+## Android
+
+The app builds and runs on an Android emulator. Four prerequisites, each of which failed in a way
+worth writing down:
+
+1. **A JDK 17.** RN's gradle plugin declares `jvmToolchain(17)` in four modules. With only JDK
+   21/26 present, Gradle tries to auto-provision one through the `foojay-resolver 0.5.0` pinned in
+   `@react-native/gradle-plugin/settings.gradle.kts` — which predates Gradle 9 and dies with the
+   misleading `Class org.gradle.jvm.toolchain.JvmVendorSpec does not have member field … IBM_SEMERU`.
+   Install a real 17 (e.g. Temurin to `~/.jdks`) and the auto-download path never runs.
+2. **Two NDKs.** RN pins `27.1.12297006`; a module that pins none inherits AGP's default
+   `27.0.12077973`. Gradle installs them itself — but if the download dies (flaky link) it leaves an
+   EMPTY `ndk/<version>/` stub and the next build sits on it at 0% CPU forever. Check
+   `ndk/<version>/source.properties` exists; if not, `rm -rf` the dir and
+   `sdkmanager "ndk;<version>"`.
+3. **`minSdkVersion` 29**, set via the `expo-build-properties` plugin in `app.json`.
+   `react-native-b4a` requires 28 and `react-native-bare-kit` requires 29, against Expo's default of 24. This is a real constraint of the Bare stack, not a local workaround — hence in `app.json`
+   (which survives `prebuild`) rather than the generated `android/`.
+4. **A system image + AVD.** `sdkmanager "system-images;android-36;google_apis;arm64-v8a"` then
+   `avdmanager create avd -n hyperwave -k <that> -d pixel_7`.
+
+```bash
+export JAVA_HOME=~/.jdks/jdk-17.0.19+10/Contents/Home
+export ANDROID_HOME=~/Library/Android/sdk
+$ANDROID_HOME/emulator/emulator -avd hyperwave &     # boots in ~40s
+cd mobile && npm run android
+```
+
+Note `sdkmanager` DELETES its whole `.temp` tree when killed, so a partial download does not
+survive an interrupt — on a flaky link, fetch the zip yourself (`curl -C -`) and drop it into
+`.temp/PackageOperation01/` before running `sdkmanager`, which then verifies and installs it
+without re-downloading.
+
 ## Manual device checklist
 
 Automated tests cover the shared rules (`hyperwave-app-core`) and the engine; everything below is
@@ -175,14 +208,10 @@ Tracked in detail in `../implement-mobile-app.md`:
 - **Cash out against a real invoice** — the screen and the engine path are in place and the failure
   path is verified (the mint rejects a bad invoice and the error surfaces), but a successful melt
   needs a payable bolt11 from an external Lightning wallet.
-- **An Android BUILD** — the addon linking is done (`npm run link:android-addons`, wired into
-  `postinstall` and `npm run android`, and verified to vendor 88 `.so` files across 4 ABIs), but
-  the APK has never been built here. Two environment prerequisites, both absent on the dev machine:
-  a **JDK 17** (the RN gradle plugin requires that toolchain; with only JDK 21/26 present Gradle
-  tries to auto-provision it and the plugin's pinned `foojay-resolver 0.5.0` crashes under Gradle 9
-  with a misleading `JvmVendorSpec … IBM_SEMERU` error — the real message appears with
-  `-Porg.gradle.java.installations.auto-download=false`), and an **Android system image / AVD**.
-  With both installed: `JAVA_HOME=<jdk17> ANDROID_HOME=~/Library/Android/sdk npm run android`.
+- ~~An Android BUILD~~ — **DONE (2026-07-29): the APK builds, installs and runs on an emulator**,
+  with the worklet booting the full stack (`engine up` → `cashu wallet ready` → `joined directory
+topic`). Bare's addons `dlopen` on Android, which is what `link-android-addons.mjs` exists for.
+  See §Android below for the four things that had to be true first.
 - **Discovery** — no local DHT on device; you're on the public DHT (~20–35s cold). Pin a
   well-known bootstrap peer via `config.bootstrap` to speed a demo.
 - **Background lifecycle** — `useEngine` wires RN `AppState` → `Worklet.update(state)`, so the Bare

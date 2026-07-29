@@ -282,9 +282,15 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
   moment feed and the sweep is a story-style segmented bar — presentation native to the device,
   while parity stays where it matters (the wire and the money). Remaining, each with a stated
   reason:
-  - [ ] **Build + run on Android.** Addon linking is done and verified (88 `.so` across 4 ABIs);
-        the APK build needs a **JDK 17** and an **AVD**, neither present on the dev machine
-        (`mobile/README.md` has the exact diagnosis + commands).
+  - [x] **Build + run on Android — DONE (2026-07-29).** The APK builds, installs and runs on an
+        emulator: the worklet boots, Bare's addons `dlopen`, the Cashu wallet comes up and the peer
+        joins the directory topic. Needed a JDK 17 (the RN plugin's toolchain — without it Gradle's
+        foojay fallback crashes on Gradle 9), both NDKs RN and AGP ask for, `minSdkVersion` 29 (now
+        in `app.json` via `expo-build-properties`, since `react-native-bare-kit` requires it), and a
+        system image + AVD. Full diagnosis in `mobile/README.md` §Android.
+  - [ ] **Exercise the FEATURES on Android**, now that it runs — the emulator can do what the iOS
+        Simulator can't: point the AVD's camera at the host webcam and finally exercise the capture
+        path (EXIF strip, downscale ladder, the 256 KB entry cap).
   - [ ] **Verify on real hardware**: a real camera frame (the simulator has none, so the
         downscale ladder + EXIF strip are unexercised), a successful cash-out melt against a
         payable bolt11, and a tip sent from the phone. `mobile/README.md` §Manual device
