@@ -295,15 +295,14 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
     preview, the sweep bar filling, the feed with caption/byline/`Tip 5 sats`, cross-peer
     replication (`FEED size=3`), the ended-wave drop at its TTL, and the whole wallet screen
     (mint picker with ⚠ REAL-sats warnings, top up, cash out + Scan QR, persisted history).
-  - [ ] **BUG: the moment feed will not page backwards.** Reproducible on Android: with a 3-entry
-        feed showing `3 of 3`, no swipe moves it to an earlier moment — the auto-advance can only
-        ever go forward, so a user can never see their own moment. Ruled out so far: page height is
-        measured correctly (`onLayout h=914`, which IS the screen in dp); touch reaches the app
-        (the header flag opens the picker); and adding `flex: 1` to the FlatList — the usual RN
-        "ScrollView sizes to content and can't scroll" trap — changed NOTHING, so that is NOT the
-        cause. Next: log inside `onScrollBeginDrag`/`onScroll` to see whether the gesture reaches
-        the list at all, which separates "touch never arrives" (overlay/responder problem) from
-        "list scrolls then snaps back" (state problem).
+  - [x] **~~BUG: the feed will not page backwards~~ — NOT A BUG (2026-07-30). The feed scrolls
+        correctly; the test was wrong.** Instrumenting the FlatList settled it:
+        `content=2742 layout=914` (3 pages of 914dp) and the list tracked the finger
+        1828 → 1771 → … → 1371 before `pagingEnabled` snapped it back. The cause of the false
+        report: **`adb input swipe` works in PIXELS (screen 1080×2400) while RN pages in DP
+        (411×914, density 2.625)** — so a 900px drag is only ~343dp, about 37% of a page, and
+        paging correctly returns to where it started. Drive UI tests in dp × density, or the
+        gesture silently under-shoots and looks like a dead control.
   - [ ] **AVD camera setup** — map the host webcam to the FRONT camera only
         (`hw.camera.front = webcam0`, `hw.camera.back = emulated`). Pointing the same webcam at
         both makes the emulator expose only a back camera, and `Capture.js` asks for
