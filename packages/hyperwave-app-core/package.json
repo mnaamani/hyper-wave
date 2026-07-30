@@ -1,6 +1,6 @@
 {
   "name": "hyperwave-app-core",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "HyperWave app core: the framework-agnostic view-model both hosts (the Electron renderer and the React Native app) drive — the wave directory, the active wave, the ended-wave lifecycle, wallet meta, and the tip choreography. No DOM, no React, no engine import.",
   "license": "Apache-2.0",
   "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
