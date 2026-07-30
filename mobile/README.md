@@ -112,7 +112,7 @@ npm-workspaces monorepo has no addon deps. So `scripts/link-ios-addons.mjs` runs
 
 ## Android
 
-The app builds and runs on an Android emulator. Four prerequisites, each of which failed in a way
+The app builds and runs on an Android emulator. Six prerequisites, each of which failed in a way
 worth writing down:
 
 1. **A JDK 17.** RN's gradle plugin declares `jvmToolchain(17)` in four modules. With only JDK
@@ -130,7 +130,10 @@ worth writing down:
    (which survives `prebuild`) rather than the generated `android/`.
 4. **A system image + AVD.** `sdkmanager "system-images;android-36;google_apis;arm64-v8a"` then
    `avdmanager create avd -n hyperwave -k <that> -d pixel_7`.
-5. **The AVD's camera, if you want the capture path.** In `~/.android/avd/<name>.avd/config.ini`
+5. **Give the AVD a GPU** if you plan to drive the UI: `hw.gpu.enabled = yes`,
+   `hw.gpu.mode = host`. With software rendering the app ANRs under scripted input, which reads as
+   frozen controls rather than a slow emulator.
+6. **The AVD's camera, if you want the capture path.** In `~/.android/avd/<name>.avd/config.ini`
    set `hw.camera.front = webcam0` and `hw.camera.back = emulated`, then cold-boot
    (`-no-snapshot-load`). Pointing the SAME webcam at both cameras makes the emulator expose only
    a back camera — and `Capture.js` requests `facing='front'`, so the preview is silently black.
