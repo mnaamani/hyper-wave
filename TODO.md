@@ -303,6 +303,14 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         (411×914, density 2.625)** — so a 900px drag is only ~343dp, about 37% of a page, and
         paging correctly returns to where it started. Drive UI tests in dp × density, or the
         gesture silently under-shoots and looks like a dead control.
+  - [ ] **Confirm the wave-message fix on device, and test TIPPING from the phone.** The message
+        path had a real bug — `useEngine.startWave` dropped its argument, so the field cleared, the
+        wave started, and every peer saw `meta: null` (found by watching the wire, fixed by
+        forwarding the argument). The fix is a one-line pass-through and the rest of the chain is
+        unit-tested, but it has NOT been confirmed end-to-end on the device, and tipping from the
+        phone is still untested. Give the AVD a GPU first (`hw.gpu.enabled = yes`,
+        `hw.gpu.mode = host`): with software rendering the app ANRs under scripted input, which is
+        what blocked both tests.
   - [ ] **AVD camera setup** — map the host webcam to the FRONT camera only
         (`hw.camera.front = webcam0`, `hw.camera.back = emulated`). Pointing the same webcam at
         both makes the emulator expose only a back camera, and `Capture.js` asks for

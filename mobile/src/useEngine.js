@@ -287,7 +287,10 @@ export function useEngine(config = {}) {
     gallery: snapshot?.feed || [],
     wallet: snapshot?.wallet || null,
     // wave lifecycle
-    startWave: () => action('startWave'),
+    // The message must be FORWARDED: app-core maps it to the engine's opaque announce `meta`.
+    // Dropping the argument here (which this did) silently sends a wave with nothing to say —
+    // the UI looks right, the field clears, and every peer sees `meta: null`.
+    startWave: (message) => action('startWave', message),
     joinWave: (waveId) => action('joinWave', waveId),
     selectWave: (waveId) => action('selectWave', waveId),
     // Push a wave away for good (app-core invariant 6 — it stays gone despite the engine's
