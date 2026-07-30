@@ -317,10 +317,21 @@ emulator"}` — and renders on the phone's own chip. A tip moved the balance 67 
         (`hw.camera.front = webcam0`, `hw.camera.back = emulated`). Pointing the same webcam at
         both makes the emulator expose only a back camera, and `Capture.js` asks for
         `facing='front'`, so the preview is black. Belongs in `mobile/README.md` §Android.
-  - [ ] **Verify on real hardware**: a real camera frame (the simulator has none, so the
-        downscale ladder + EXIF strip are unexercised), a successful cash-out melt against a
-        payable bolt11, and a tip sent from the phone. `mobile/README.md` §Manual device
-        checklist is the script.
+  - [ ] **Verify on real hardware**: a real camera frame (the iOS simulator has none — the
+        Android emulator's webcam covers this now, see above) and a successful cash-out melt
+        against a payable bolt11. `mobile/README.md` §Manual device checklist is the script.
+  - [~] **iOS re-run after the feed-scroll fix — PARTLY DONE (2026-07-30).** The app boots on the
+    iPhone 16e sim with the current JS and worklet bundle, and OBSERVABLE changes check out:
+    the `sats` plural in the balance chip, the wave-message input, and a remote wave's message
+    rendering on its chip (a CLI peer started one carrying "hello from the CLI peer" and it
+    appeared, italic, under the roster line). Everything needing a TAP is still unverified on
+    iOS — the country switcher, the wallet screen (caption, invoice hide, mint switch), tipping
+    and the feed scroll. **There is no scripted-tap path on this machine**: `simctl` has no tap
+    command, `idb`/`cliclick` aren't installed, and AppleScript/System Events is refused by the
+    Accessibility TCC gate (`-1712`). All of those paths are shared JS already verified on the
+    Android emulator, so this is about platform rendering, not logic. To close it, either
+    install `idb` (needs `idb-companion` + `fb-idb`) or grant Accessibility and drive
+    System Events.
   - [~] **Run the Phase 7 feed UI.** The LAYOUT is confirmed on screen (2026-07-28) — the
     full-screen feed and its overlays render as intended — and so is the long-press wave
     dismissal. Still unverified because they need a live wave with peers: the segment bar
