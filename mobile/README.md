@@ -130,9 +130,16 @@ worth writing down:
    (which survives `prebuild`) rather than the generated `android/`.
 4. **A system image + AVD.** `sdkmanager "system-images;android-36;google_apis;arm64-v8a"` then
    `avdmanager create avd -n hyperwave -k <that> -d pixel_7`.
-5. **Give the AVD a GPU** if you plan to drive the UI: `hw.gpu.enabled = yes`,
-   `hw.gpu.mode = host`. With software rendering the app ANRs under scripted input, which reads as
-   frozen controls rather than a slow emulator.
+5. **Give the AVD a GPU _and_ enough RAM/cores** if you plan to drive the UI:
+   `hw.gpu.enabled = yes`, `hw.gpu.mode = host`, and — because `avdmanager`'s defaults are
+   `hw.ramSize = 1536` with `hw.cpu.ncore = 4` — raise them to `hw.ramSize = 4096`,
+   `vm.heapSize = 512`, `hw.cpu.ncore = 6`, then cold-boot
+   (`emulator -avd <name> -gpu host -memory 4096 -cores 6 -no-snapshot-load`). Under software
+   rendering or 1.5 GB the app ANRs ("HyperWave isn't responding"), which reads as frozen
+   controls rather than a starved emulator — the ANR trace gives it away: the main thread is
+   parked in `BinderProxy.transact` waiting on `system_server`, not in our JS. After the bump a
+   tap round-trips in ~5s with no ANRs. Also kill any headless peers you spawned on the same
+   host — they compete for the same cores.
 6. **The AVD's camera, if you want the capture path.** In `~/.android/avd/<name>.avd/config.ini`
    set `hw.camera.front = webcam0` and `hw.camera.back = emulated`, then cold-boot
    (`-no-snapshot-load`). Pointing the SAME webcam at both cameras makes the emulator expose only

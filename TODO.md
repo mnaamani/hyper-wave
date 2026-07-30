@@ -310,9 +310,13 @@ emulator"}` — and renders on the phone's own chip. A tip moved the balance 67 
         (5 + a 1-sat swap fee) and produced the full choreography at the far end: a private `dm`
         carrying the P2PK token to the recipient, plus the stripped `note` ({kind:tip, amount:5},
         no token, no recipient) on the flood.
-  - [ ] **Give any test AVD a GPU** — `hw.gpu.enabled = yes` / `hw.gpu.mode = host`, then cold-boot
-        (`-no-snapshot-load`). With software rendering the app ANRs under scripted input ("HyperWave
-        isn't responding"), which silently blocks UI testing and looks like frozen controls.
+  - [x] **AVD resourcing — DOCUMENTED (2026-07-31), `mobile/README.md` §Android step 5.** A test
+        AVD needs a GPU (`hw.gpu.enabled = yes` / `hw.gpu.mode = host`) AND more than
+        `avdmanager`'s defaults (1536 MB / 4 cores → 4096 MB, `vm.heapSize = 512`, 6 cores), then
+        a cold boot. Under either shortfall the app ANRs ("HyperWave isn't responding"), which
+        silently blocks UI testing and looks like frozen controls. The ANR trace proves it is
+        environmental — the main thread sits in `BinderProxy.transact` waiting on `system_server`,
+        not in our JS. After the bump: ~5s tap round-trip, no ANRs.
   - [ ] **AVD camera setup** — map the host webcam to the FRONT camera only
         (`hw.camera.front = webcam0`, `hw.camera.back = emulated`). Pointing the same webcam at
         both makes the emulator expose only a back camera, and `Capture.js` asks for
