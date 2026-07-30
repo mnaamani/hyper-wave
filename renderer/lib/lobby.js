@@ -6,6 +6,7 @@ import { getActiveWave } from './active.js';
 
 const lobbyEl = document.getElementById('lobby');
 const msgEl = document.getElementById('lobby-msg');
+const waveMsgEl = document.getElementById('lobby-wave-msg');
 const countEl = document.getElementById('lobby-count');
 const joinBtn = document.getElementById('join');
 const cancelBtn = document.getElementById('cancel');
@@ -17,6 +18,18 @@ let timer = null;
 let onCancelCb = null;
 let fee = null; // the initiator-set participation fee (sats), null on an unpaid/wallet-less wave
 
+// The initiator's message is UNTRUSTED text from another peer. This panel is HTML (unlike the
+// canvas ring), so it goes in via textContent — never innerHTML — and control/bidi characters
+// are stripped so it can't scramble the line around it. Same treatment a caption gets.
+function safeMessage(text) {
+  return String(text || '')
+    .replace(
+      /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
+      ''
+    )
+    .slice(0, 80);
+}
+
 // Register what happens when a non-joiner dismisses the lobby (app.js un-dims + resumes browsing).
 export function onCancel(cb) {
   onCancelCb = cb;
@@ -27,6 +40,8 @@ export function open(evt) {
   joined = !!evt.mine || !!evt.joined;
   fee = typeof evt.fee === 'number' ? evt.fee : null;
   deadline = performance.now() + (evt.lobbyMs || 15000);
+  // what the initiator said this wave is about (blank when they said nothing)
+  waveMsgEl.textContent = safeMessage(evt.message);
   // a non-joiner gets Join + "Not now" (dismiss to keep browsing the previous gallery)
   joinBtn.style.display = joined ? 'none' : 'inline-block';
   cancelBtn.style.display = joined ? 'none' : 'inline-block';
@@ -50,7 +65,7 @@ export function setJoinable(ok) {
   }
   joinBtn.disabled = !ok;
   // Show the fee on the button so a joiner sees the cost before opting in (the initiator sets it).
-  const feeSuffix = fee !== null ? ` (${fee} ${unitLabel()})` : '';
+  const feeSuffix = fee !== null ? ` (${fee} ${unitLabel(fee)})` : '';
   joinBtn.innerText = ok
     ? `✋ Count me in${feeSuffix}`
     : '⏳ verifying payment…';
@@ -67,7 +82,7 @@ function paint() {
   }
   const secs = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
   countEl.innerText = secs;
-  const feeNote = fee !== null ? ` · fee ${fee} ${unitLabel()}` : '';
+  const feeNote = fee !== null ? ` · fee ${fee} ${unitLabel(fee)}` : '';
   msgEl.innerText = `wave forming · ${joined ? 'you are in' : 'join in?'} · ${count} in${feeNote}`;
 }
 

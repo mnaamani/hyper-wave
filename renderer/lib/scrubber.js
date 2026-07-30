@@ -3,6 +3,11 @@
 // the pointer angle to a progress fraction and parks the spark there (ring.scrubTo), so the
 // gallery features the moment at that point in the ring order. Only active while a replay
 // exists (ring.sweepOrigin() !== null); otherwise the ring is just a display.
+//
+// The canvas now carries a ring per wave, and a press on ANOTHER wave's ring is a selection, not a
+// scrub (ring.js turns it into core.selectWave). So we stand down whenever the pointer lands on a
+// non-active ring. Note the drag itself is angle-only — it doesn't care what radius the active
+// ring sits at — so nothing else here changes as waves drift inward.
 import * as ring from './ring.js';
 
 const canvas = document.getElementById('ring');
@@ -27,6 +32,9 @@ function onDown(ev) {
   const frac = fracFromEvent(ev);
   if (frac === null) {
     return; // no replay active — leave the ring as a plain display
+  }
+  if (ring.claimsPointer(ev.clientX, ev.clientY)) {
+    return; // the rings own this press (another wave's ring, or a ✕) — ring.js handles it
   }
   dragging = true;
   canvas.style.cursor = 'grabbing';

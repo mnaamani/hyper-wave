@@ -71,7 +71,7 @@ let topupInvoice = ''; // the bolt11 currently shown as a QR (click the QR to re
 let currentBalance = 0; // latest spendable balance (sat), for the cash-out affordability hint
 
 // Worker `wallet` message (balance + active mint): keep the modal live whether open or not.
-export function walletStatus({ address, amount, unit, mint, mints }) {
+export function walletStatus({ address, amount, mint, mints }) {
   if (!address) {
     return;
   }
@@ -80,8 +80,10 @@ export function walletStatus({ address, amount, unit, mint, mints }) {
     cashuMints = mints;
   }
   currentBalance = Number(amount) || 0;
+  // unitLabel inflects the ambient unit for display, so the modal balance reads "5 sats" / "1 sat"
+  // like every other amount here — it used to print the worker's raw unit code instead
   balanceEl.innerText =
-    `${amount} ${unit}` + (amount === 0 ? '  ⚠ unfunded' : '');
+    `${amount} ${unitLabel(amount)}` + (amount === 0 ? '  ⚠ unfunded' : '');
   refreshCashoutHint(); // balance moved — re-evaluate the pasted invoice's affordability
   balChipEl.textContent = `${amount} ${unitLabel(amount)}`; // top-bar pill
   const currentMint = mint || activeMint();
@@ -126,8 +128,12 @@ function renderMintPicker(currentMint) {
 }
 
 // Switch the active mint (live re-wire). The worker replies with a fresh `wallet` message.
+// Any top-up invoice on screen belongs to the mint that ISSUED it, so it goes with the switch:
+// paying it afterwards would credit the mint you just left, while the balance shown is the new
+// one's. (The engine keeps watching that quote regardless — hiding it cancels nothing.)
 mintSelect.onchange = () => {
   if (mintSelect.value) {
+    hideTopup();
     setMint(mintSelect.value);
   }
 };
@@ -155,7 +161,7 @@ export function setTransactions(list) {
       amt.className = meta.dir === 'in' ? 'tx-amt in' : 'tx-amt';
       if (typeof entry.amount === 'number') {
         const sign = { in: '+', out: '−' }[meta.dir] || ''; // neutral → no sign
-        amt.textContent = `${sign}${entry.amount} ${unitLabel()}`;
+        amt.textContent = `${sign}${entry.amount} ${unitLabel(entry.amount)}`;
       }
       row.append(label, time, amt);
       return row;

@@ -1,7 +1,8 @@
 # HyperWave — task list
 
 Refinement backlog, roughly prioritized. Design context in `docs/idea.md`;
-engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`; demo script in `DEMO.md`.
+engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`; demo script in
+`README.md` §Demo, and the phone checklist in `mobile/README.md` §Manual device checklist.
 
 ## Done
 
@@ -210,6 +211,14 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
   Tether's QVAC but its "vision" is a multimodal **VLM** (GB RAM, seconds/image) — overkill for
   binary NSFW, especially P2P-every-peer + mobile; MobileNet is ~100–1000× cheaper. The
   **report/downvote** mechanism below still complements it for the tail (false negatives).
+  **Mobile is deliberately NOT filtered (decision D3, 2026-07-27)** — a known, documented
+  asymmetry, not an oversight. The desktop filter is an esbuild bundle of tfjs + nsfwjs + the
+  embedded model, which a React Native runtime can't consume: it would need `tfjs-react-native`,
+  a model asset, and its own native deps, on top of an already ~3 MB worklet bundle and a phone's
+  battery. Since the entry stays in the CRDT either way (each peer filters its OWN view), the
+  asymmetry is a per-peer viewing difference, not a protocol or safety divergence. Revisit if
+  mobile becomes the primary client, or when the report/downvote signal below lands — that one is
+  protocol-level and would serve both hosts at once.
 - [ ] **Downvote / report mechanism for objectionable (e.g. NSFW) moments.** A `wave-entry` is
       an inline image any admitted participant can post, so a peer could post something NSFW or
       abusive. Add a **report/downvote** signal that propagates so each peer can **choose not to
@@ -261,6 +270,108 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
 - [ ] "Past waves" browser (would need galleries to persist across runs — currently a wave
       initiator only retains its own wave's gallery in-run)
 - [ ] Tipping UX polish (a "you were tipped" toast for the recipient)
+
+### Mobile (`implement-mobile-app.md`)
+
+- [~] **Mobile parity with desktop — Phases 0–7 done (Phase 7: 2026-07-28); the plan tracks the
+  detail.** The host now matches `workers/hyperwave.js` (Cashu, network→topic policy,
+  browse-then-pick), custody is RN-side (keychain seeds + a persistent storage dir, so bearer
+  proofs survive), the rules live in the shared `hyperwave-app-core` that BOTH hosts drive, and
+  the UI has the wave directory, lobby, narration, country onboarding, lobby camera capture and
+  the wallet screen. **The ring is gone on mobile** (Phase 7): the screen is a full-bleed vertical
+  moment feed and the sweep is a story-style segmented bar — presentation native to the device,
+  while parity stays where it matters (the wire and the money). Remaining, each with a stated
+  reason:
+  - [x] **Build + run on Android — DONE (2026-07-29).** The APK builds, installs and runs on an
+        emulator: the worklet boots, Bare's addons `dlopen`, the Cashu wallet comes up and the peer
+        joins the directory topic. Needed a JDK 17 (the RN plugin's toolchain — without it Gradle's
+        foojay fallback crashes on Gradle 9), both NDKs RN and AGP ask for, `minSdkVersion` 29 (now
+        in `app.json` via `expo-build-properties`, since `react-native-bare-kit` requires it), and a
+        system image + AVD. Full diagnosis in `mobile/README.md` §Android.
+  - [~] **Exercise the FEATURES on Android — mostly DONE (2026-07-30).** Verified on the emulator
+    against a headless peer: onboarding + the country switcher (Cancel is non-destructive),
+    wave start with the paid gate (`burned 2 sat`, balance steps down), the wave chip strip
+    (including a STRANGER's wave off the public DHT), lobby, the capture sheet, a LIVE webcam
+    preview, the sweep bar filling, the feed with caption/byline/`Tip 5 sats`, cross-peer
+    replication (`FEED size=3`), the ended-wave drop at its TTL, and the whole wallet screen
+    (mint picker with ⚠ REAL-sats warnings, top up, cash out + Scan QR, persisted history).
+  - [x] **~~BUG: the feed will not page backwards~~ — NOT A BUG (2026-07-30). The feed scrolls
+        correctly; the test was wrong.** Instrumenting the FlatList settled it:
+        `content=2742 layout=914` (3 pages of 914dp) and the list tracked the finger
+        1828 → 1771 → … → 1371 before `pagingEnabled` snapped it back. The cause of the false
+        report: **`adb input swipe` works in PIXELS (screen 1080×2400) while RN pages in DP
+        (411×914, density 2.625)** — so a 900px drag is only ~343dp, about 37% of a page, and
+        paging correctly returns to where it started. Drive UI tests in dp × density, or the
+        gesture silently under-shoots and looks like a dead control.
+  - [x] **Wave message + tipping from the phone — VERIFIED on device (2026-07-30).** After giving
+        the AVD a GPU (see below), both passed end to end. The message typed on the phone reached a
+        separate process off the announce — `[peer] wave message: {"message":"sunset from the
+emulator"}` — and renders on the phone's own chip. A tip moved the balance 67 → 61 sats
+        (5 + a 1-sat swap fee) and produced the full choreography at the far end: a private `dm`
+        carrying the P2PK token to the recipient, plus the stripped `note` ({kind:tip, amount:5},
+        no token, no recipient) on the flood.
+  - [x] **AVD resourcing — DOCUMENTED (2026-07-31), `mobile/README.md` §Android step 5.** A test
+        AVD needs a GPU (`hw.gpu.enabled = yes` / `hw.gpu.mode = host`) AND more than
+        `avdmanager`'s defaults (1536 MB / 4 cores → 4096 MB, `vm.heapSize = 512`, 6 cores), then
+        a cold boot. Under either shortfall the app ANRs ("HyperWave isn't responding"), which
+        silently blocks UI testing and looks like frozen controls. The ANR trace proves it is
+        environmental — the main thread sits in `BinderProxy.transact` waiting on `system_server`,
+        not in our JS. After the bump: ~5s tap round-trip, no ANRs.
+  - [ ] **AVD camera setup** — map the host webcam to the FRONT camera only
+        (`hw.camera.front = webcam0`, `hw.camera.back = emulated`). Pointing the same webcam at
+        both makes the emulator expose only a back camera, and `Capture.js` asks for
+        `facing='front'`, so the preview is black. Belongs in `mobile/README.md` §Android.
+  - [ ] **Verify on real hardware**: a real camera frame (the iOS simulator has none — the
+        Android emulator's webcam covers this now, see above) and a successful cash-out melt
+        against a payable bolt11. `mobile/README.md` §Manual device checklist is the script.
+  - [~] **iOS re-run after the feed-scroll fix — PARTLY DONE (2026-07-30).** The app boots on the
+    iPhone 16e sim with the current JS and worklet bundle, and OBSERVABLE changes check out:
+    the `sats` plural in the balance chip, the wave-message input, and a remote wave's message
+    rendering on its chip (a CLI peer started one carrying "hello from the CLI peer" and it
+    appeared, italic, under the roster line). Everything needing a TAP is still unverified on
+    iOS — the country switcher, the wallet screen (caption, invoice hide, mint switch), tipping
+    and the feed scroll. **There is no scripted-tap path on this machine**: `simctl` has no tap
+    command, `idb`/`cliclick` aren't installed, and AppleScript/System Events is refused by the
+    Accessibility TCC gate (`-1712`). All of those paths are shared JS already verified on the
+    Android emulator, so this is about platform rendering, not logic. To close it, either
+    install `idb` (needs `idb-companion` + `fb-idb`) or grant Accessibility and drive
+    System Events.
+  - [~] **Run the Phase 7 feed UI.** The LAYOUT is confirmed on screen (2026-07-28) — the
+    full-screen feed and its overlays render as intended — and so is the long-press wave
+    dismissal. Still unverified because they need a live wave with peers: the segment bar
+    filling in sweep order, the feed auto-advancing as moments land, and the drag-takes-control
+    rule holding for the rest of that wave.
+  - [ ] **Automated UI tests for the RN app** — the shared rules are covered by
+        `hyperwave-app-core`'s suite, but nothing exercises the React layer. The desktop now has
+        a pattern to copy: `renderer/lib/ring.test.js` drives the real module over a DOM stub
+        under `node --test`.
+
+### Desktop field (concentric wave rings)
+
+- [~] **Concentric rings — step 1 done (2026-07-28).** The desktop field is now one ring per wave
+  instead of one ring plus orbiting bubbles: outermost = the topic (everyone at their seat),
+  each wave stepping inward by lifecycle, active ring full-strength + clickable-to-subscribe,
+  ghost rings for waves we hold no cores for. `renderer/lib/directory.js` is gone (absorbed
+  into `ring.js`), and the field is responsive (DPR-aware backing store).
+  - [x] **Step 2 — inward drift + dismiss: DONE (2026-07-28).** A ring now EASES to the radius its
+        lifecycle asks for instead of jumping: born on the topic ring (the crowd it condensed out
+        of), drifting in as it forms → races → ends, and falling to the stage floor as it fades.
+        The easing is time-based, so the motion is identical at 60Hz and 120Hz, and clamped so a
+        backgrounded window doesn't teleport every ring on the first frame back. Dismiss is a ✕
+        revealed on the ring under the pointer → `core.dismissWave` (app-core invariant 6: the
+        core remembers the dismissal, since the engine keeps gossiping about a live wave; a tip
+        `dm` for a dismissed wave is still redeemed).
+  - [~] **Verify on screen.** The FIELD is confirmed on screen (2026-07-28): the concentric rings
+    render as intended at the responsive size, and the ✕ dismisses a wave (confirmed after the
+    hover-gap fix — the badge sits inside the ring's hit band, so hover now resolves against the
+    badges first). Covered headlessly too — a scratch harness stubs the canvas and runs real
+    frames, checking the layout, DPR, the birth-and-drift easing, the fading fall, hit-testing,
+    the ✕ hover/click (walking the pointer in, which is what caught the gap) and the scrubber
+    handoff — and that suite is now COMMITTED (`renderer/lib/ring.test.js`, wired into
+    `npm test`) rather than a scratch file. Still unverified because they need a live wave
+    with peers: the sweep spark riding
+    the ACTIVE wave's radius as it laps, clicking a ghost ring to subscribe, and the scrubber
+    standing down on presses that land on another ring.
 
 ### Housekeeping
 

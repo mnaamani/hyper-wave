@@ -224,6 +224,33 @@ test('onBootstrap builds the engine lazily from a first command (the mobile init
   );
 });
 
+test('a request/response command that RACES the bootstrap is answered, not swallowed', async (t) => {
+  // A UI fires `init` (fire-and-forget) and then a request/response command a beat later, before
+  // the host has finished building the engine. onBootstrap consumes whatever arrives first, so
+  // such a request used to be dropped with no reply — the caller awaited a promise that could
+  // never settle. That is exactly how the mobile wallet's history silently stayed empty.
+  const [hostStream, uiStream] = duplexPair();
+  const seen = [];
+  serveEngine({
+    stream: hostStream,
+    onBootstrap: (command) => {
+      seen.push(command.type); // deliberately never attaches an engine (the slow-boot case)
+    }
+  });
+  const client = createRpcClient({ stream: uiStream });
+
+  client.call('init', { storageDir: 'x', config: {} });
+  const result = await Promise.race([
+    client.call('fetch-transactions'),
+    delay(200).then(() => 'HUNG')
+  ]);
+
+  t.alike(seen, ['init', 'fetch-transactions'], 'both reached the bootstrap');
+  t.not(result, 'HUNG', 'the caller was unblocked instead of hanging forever');
+  t.is(result?.type, 'error', 'and told why');
+  t.is(result?.error, 'engine not ready', 'so a UI can retry once it is');
+});
+
 test('the seam rides FramedStream — the transport both real hosts actually use', async (t) => {
   // The desktop worker and the mobile worklet both wrap their IPC pipe in FramedStream before
   // handing it to the seam. bare-rpc does its own length-prefix framing on top, so this proves

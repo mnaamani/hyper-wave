@@ -207,7 +207,11 @@ packages/hyperwave-engine/   the reusable Bare engine (npm workspace)
     lib/
       ipc.js         worker channel: route state/event/feed/wallet/tip/burn/send/
                      transactions + command senders
-      ring.js        all <canvas> drawing (ring, dots, flags, orange spark, centre moment)
+      ring.js        all <canvas> drawing: CONCENTRIC RINGS (the outermost is the topic — every
+                     peer at its seat — then one ring per wave, stepping inward as it moves
+                     through its lifecycle), dots, flags, orange spark, centre moment. Clicking
+                     a ring selects (subscribes to) that wave — this absorbed the old
+                     directory.js, which drew waves as HTML bubbles orbiting a single ring.
       gallery.js     centre-moment slideshow + collection progress + 💵 tip button
       lobby.js       lobby panel (countdown + join, gated on payment verification)
       proof.js       lobby webcam capture (staged moment)

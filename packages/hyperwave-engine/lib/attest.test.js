@@ -241,3 +241,47 @@ test('signMessage/verifyMessage authenticate the whole message by origin', (t) =
     'survives a JSON round-trip (canonical hash is key-order independent)'
   );
 });
+
+// The envelope is what makes ADDING a wire field safe, and it does so in both directions. The
+// canonical hash covers whatever fields are PRESENT (it enumerates the object's own keys), so:
+//   - a peer running older code verifies a message carrying a field it has never heard of, and
+//   - that field is signed like any other, so a relay can't inject or edit one in flight.
+// Both halves matter for wave-announce `meta`: it is the initiator's own words, flooded across
+// the whole directory and relayed by every peer on the way.
+test('a newly-added field is covered by the envelope, and old code still verifies', (t) => {
+  const author = keyPairs[0];
+  const base = {
+    kind: 'wave-announce',
+    mid: 'cd'.repeat(8),
+    origin: ids[0],
+    ts: 1719705612080,
+    waveId,
+    lobbyMs: 15000
+  };
+  const fromANewerPeer = { ...base, meta: { message: 'sunset over Nairobi' } };
+  const sig = signMessage(author, fromANewerPeer);
+
+  t.ok(
+    verifyMessage({ ...fromANewerPeer, sig }),
+    'the message verifies with the new field present'
+  );
+  // An older peer parses the frame into an object that still HAS the field (it just ignores it),
+  // hashes what it received, and verifies — no field allowlist anywhere in the path.
+  t.ok(
+    verifyMessage(JSON.parse(JSON.stringify({ ...fromANewerPeer, sig }))),
+    'and after a JSON round-trip through a relay'
+  );
+
+  t.absent(
+    verifyMessage({ ...base, sig }),
+    'stripping the field breaks the signature — a relay cannot remove it'
+  );
+  t.absent(
+    verifyMessage({
+      ...fromANewerPeer,
+      meta: { message: 'join my scam' },
+      sig
+    }),
+    'nor rewrite it'
+  );
+});

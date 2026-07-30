@@ -9,12 +9,23 @@
     "ios": {
       "bundleIdentifier": "io.hyperwave.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "HyperWave uses the camera to take your wave selfie."
+        "NSCameraUsageDescription": "HyperWave uses the camera to capture your moment for the wave."
       }
     },
     "android": {
       "package": "io.hyperwave.mobile",
       "permissions": ["CAMERA"]
-    }
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 29
+          }
+        }
+      ]
+    ]
   }
 }

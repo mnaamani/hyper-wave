@@ -16,7 +16,8 @@ const {
   makeWaveStart,
   makeWaveSync,
   makeWaveNote,
-  makeDirectedNote
+  makeDirectedNote,
+  MAX_META_BYTES
 } = require('./messages');
 
 const PEER = 'ab'.repeat(32); // origin (author) — a 32-byte ring id in hex
@@ -464,4 +465,66 @@ test('the flooded/direct classification matches the kinds', (t) => {
   t.absent(FLOODED_KINDS.has('subs'), 'subs is one-hop');
   t.absent(FLOODED_KINDS.has('wave-sync'), 'wave-sync is unicast');
   t.absent(FLOODED_KINDS.has('wave-dm'), 'wave-dm is unicast');
+});
+
+// --- wave-announce `meta`: the initiator's opaque metadata ------------------------------------
+
+test('meta is optional on a wave-announce and rides when present', (t) => {
+  const bare = makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 });
+  t.absent('meta' in bare, 'no meta key when the initiator said nothing');
+  t.ok(validGossip(flooded(bare)), 'and the announce is still valid');
+
+  const withMeta = makeWaveAnnounce({
+    waveId: WAVE,
+    lobbyMs: 1,
+    meta: { message: 'sunset over Nairobi' }
+  });
+  t.is(withMeta.meta.message, 'sunset over Nairobi', 'the meta rides');
+  t.ok(validGossip(flooded(withMeta)), 'and validates');
+});
+
+test('meta is capped, because an announce floods the WHOLE directory', (t) => {
+  const justFits = { message: 'x'.repeat(MAX_META_BYTES - 20) };
+  t.ok(
+    validGossip(
+      flooded(makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1, meta: justFits }))
+    ),
+    'a sentence fits'
+  );
+  const tooBig = { message: 'x'.repeat(MAX_META_BYTES) };
+  t.absent(
+    validGossip(
+      flooded(makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1, meta: tooBig }))
+    ),
+    'a payload does not'
+  );
+  t.absent(
+    validGossip(
+      flooded({
+        ...makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }),
+        meta: 'a string'
+      })
+    ),
+    'meta must be an object, not a bare string'
+  );
+  t.absent(
+    validGossip(
+      flooded({
+        ...makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }),
+        meta: [1, 2]
+      })
+    ),
+    'nor an array'
+  );
+});
+
+// FORWARD COMPATIBILITY — the property that makes `meta` (and any future field) safe to add:
+// a validator checks the fields it KNOWS and tolerates the rest, so a peer running older code
+// still accepts, processes and relays a message carrying a field it has never heard of.
+test('an unknown extra field does not invalidate a message', (t) => {
+  const fromTheFuture = flooded({
+    ...makeWaveAnnounce({ waveId: WAVE, lobbyMs: 1 }),
+    somethingNewerPeersSend: { anything: true }
+  });
+  t.ok(validGossip(fromTheFuture), 'older validators tolerate unknown fields');
 });

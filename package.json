@@ -19,12 +19,13 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "ota:deploy": "node scripts/ota-deploy.mjs",
-    "test": "npm test -w hyperwave-wallet && npm test -w hyperwave-engine && npm test -w hyperwave-wallet-tron && npm test -w hyperwave-wallet-cashu",
+    "test": "npm test -w hyperwave-wallet && npm test -w hyperwave-engine && npm test -w hyperwave-wallet-tron && npm test -w hyperwave-wallet-cashu && npm test -w hyperwave-app-core && npm run test:renderer",
+    "test:renderer": "node --test \"renderer/lib/*.test.js\"",
     "test:e2e:local": "npm run test:e2e:local -w hyperwave-engine",
     "test:e2e:onchain": "npm run test:e2e:onchain -w hyperwave-engine",
     "test:e2e:onchain:usdt": "npm run test:e2e:onchain:usdt -w hyperwave-engine",
     "test:e2e:cashu": "npm run test:e2e:cashu -w hyperwave-engine",
-    "lint": "prettier --check . && lunte packages electron renderer workers scripts && eslint . && npm run lint:jsdoc -w hyperwave-wallet && npm run lint:jsdoc -w hyperwave-engine && npm run lint:jsdoc -w hyperwave-wallet-tron && npm run lint:jsdoc -w hyperwave-wallet-cashu",
+    "lint": "prettier --check . && lunte packages electron renderer workers scripts && eslint . && npm run lint:jsdoc -w hyperwave-wallet && npm run lint:jsdoc -w hyperwave-engine && npm run lint:jsdoc -w hyperwave-wallet-tron && npm run lint:jsdoc -w hyperwave-wallet-cashu && npm run lint:jsdoc -w hyperwave-app-core",
     "format": "prettier --write . && lunte --fix packages electron renderer workers scripts"
   },
   "overrides": {
@@ -47,6 +48,7 @@
     "framed-stream": "^1.0.1",
     "graceful-goodbye": "^1.3.3",
     "hyperswarm": "^4.17.0",
+    "hyperwave-app-core": "^0.4.0",
     "hyperwave-engine": "^0.4.0",
     "hyperwave-wallet-cashu": "^0.4.0",
     "paparam": "^1.10.0",

@@ -34,5 +34,5 @@ const vendoredCount = fs.existsSync(out)
   ? fs.readdirSync(out).filter((name) => name.endsWith('.xcframework')).length
   : 0;
 console.log(
-  `[link-ios-addons] vendored  addon xcframeworks -> ${path.relative(appDir, out)}`
+  `[link-ios-addons] vendored ${vendoredCount} addon xcframeworks -> ${path.relative(appDir, out)}`
 );

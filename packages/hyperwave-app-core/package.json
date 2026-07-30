@@ -1,0 +1,26 @@
+{
+  "name": "hyperwave-app-core",
+  "version": "0.4.0",
+  "description": "HyperWave app core: the framework-agnostic view-model both hosts (the Electron renderer and the React Native app) drive — the wave directory, the active wave, the ended-wave lifecycle, wallet meta, and the tip choreography. No DOM, no React, no engine import.",
+  "license": "Apache-2.0",
+  "author": "Mokhtar Naamani <mokhtar.naamani@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mnaamani/hyper-wave.git"
+  },
+  "homepage": "https://github.com/mnaamani/hyper-wave#readme",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lib",
+    "!**/*.test.js"
+  ],
+  "scripts": {
+    "test": "bare test.js",
+    "lint:jsdoc": "tsc --noEmit --allowJs --checkJs --strict --skipLibCheck --maxNodeModuleJsDepth 0 --target es2022 --module esnext --moduleResolution bundler lib/app-core.js lib/theme.js lib/wallet-meta.js lib/topic.js 2>&1 | grep -E 'error TS80' ; test $? -eq 1"
+  },
+  "devDependencies": {
+    "brittle": "^4.0.2"
+  }
+}

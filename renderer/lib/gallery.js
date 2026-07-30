@@ -6,7 +6,6 @@
 // → featureByFrac) to browse — no auto-cycle. Moments are always hopCount-ordered (buildGallery),
 // so the sweep reproduces ring order regardless of arrival timing.
 import * as ring from './ring.js';
-import { tip, note, dm } from './ipc.js';
 import { unitLabel } from './wallet-meta.js';
 import { classify as classifyNsfw } from './nsfw.js';
 
@@ -25,7 +24,9 @@ let expected = 0;
 let active = false;
 let closed = false; // gallery view closed (a new wave's lobby/capture owns the ring centre)
 let myAddress = null; // my own wallet — never tip myself
-let lastTip = null; // the entry we just tipped (captured at click; announced on success)
+// The app's tip sender (app.js wires it to the app core, which owns the tip choreography: remember
+// the target, then dm the bearer token + note the announcement once it confirms).
+let tipSender = () => {};
 let pendingReplay = false; // replay requested but waiting for the first moment (see startReplay)
 let waitingText = ''; // app-set centre message before racing (e.g. post-capture wait)
 const shownKeys = new Set(); // waveId|peerId already featured
@@ -56,6 +57,15 @@ function refreshTip() {
   tipBtn.innerText = `⚡ Tip ${tipAmount()} ${unitLabel(tipAmount())}`;
 }
 
+/**
+ * Wire the tip button to the app's tip sender (the app core). Called once at startup.
+ * @param {(target: Object) => void} fn - Receives {waveId, peerId, address, amount}.
+ * @returns {void}
+ */
+export function onTip(fn) {
+  tipSender = fn;
+}
+
 tipBtn.onclick = () => {
   const featured = items[centerIdx];
   if (!featured || !featured.address || featured.address === myAddress) {
@@ -63,16 +73,14 @@ tipBtn.onclick = () => {
   }
   tipBtn.disabled = true;
   tipBtn.innerText = '💸 sending…';
-  // Remember the target now — by the time the result comes back the user may have scrubbed to
-  // another moment. Used to announce the tip on the wave once it confirms (tipResult).
-  const amount = tipAmount();
-  lastTip = {
+  // The core remembers this target — by the time the result comes back the user may have scrubbed
+  // to another moment, and the token still has to reach THIS recipient.
+  tipSender({
     waveId: featured.waveId,
     peerId: featured.peerId,
     address: featured.address,
-    amount
-  };
-  tip(featured.address, amount, featured.peerId);
+    amount: tipAmount()
+  });
 };
 
 export function count() {
@@ -167,25 +175,13 @@ nsfwRevealBtn.onclick = () => {
   }
 };
 
-// Worker reply to a tip: `hash` is the Cashu bearer token (no block explorer). On success,
-// deliver the token PRIVATELY (unicast to the recipient) so the token + the who-tipped-whom don't
-// hit the flood — Chaumian privacy at the network layer too — then flood a STRIPPED social-proof
-// note (no token, no recipient) for the gallery celebration.
+// Worker reply to a tip: `hash` is the Cashu bearer token (no block explorer). This is the VIEW
+// half only — the delivery choreography (dm the token privately to the recipient, then flood a
+// stripped social-proof note) lives in the app core, which sees this same message.
 export function tipResult({ hash, error }) {
-  if (hash) {
-    toastEl.textContent = '✅ tipped';
-    if (lastTip) {
-      dm(lastTip.waveId, lastTip.peerId, {
-        kind: 'tip',
-        token: hash,
-        amount: lastTip.amount
-      });
-      note(lastTip.waveId, { kind: 'tip', amount: lastTip.amount });
-    }
-  } else {
-    toastEl.textContent = `⚠️ tip failed: ${error || 'unknown'}`;
-  }
-  lastTip = null;
+  toastEl.textContent = hash
+    ? '✅ tipped'
+    : `⚠️ tip failed: ${error || 'unknown'}`;
   setTimeout(() => toastEl.replaceChildren(), 6000);
   refreshTip();
 }

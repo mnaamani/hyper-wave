@@ -379,11 +379,11 @@ function createEngine({
 
   // Start: the wave is NOT announced until the initiator's burn is CONFIRMED on-chain, so
   // peers can verify it and won't join an unpaid (spam) wave.
-  async function handleStartWave() {
+  async function handleStartWave(command = {}) {
     if (payments && !(await fundedForFee('start', 'start a wave'))) {
       return;
     }
-    const waveId = wave.startWave();
+    const waveId = wave.startWave({ meta: command.meta });
     if (!waveId || !payments) {
       return; // busy / no wallet (unpaid path already announced)
     }
@@ -536,7 +536,9 @@ function createEngine({
   // Code Style). Same message shapes the desktop renderer + the RN UI both speak. The reciprocal
   // engine -> host channel is `emit` (kernel raising events).
   const commandHandlers = {
-    'start-wave': () => handleStartWave(),
+    // `meta` is opaque host metadata carried on the wave's announce (e.g. the app's message about
+    // the wave) — the engine bounds its size and never interprets it.
+    'start-wave': (command) => handleStartWave(command),
     'join-wave': (command) => handleJoin(command),
     // Subscription layer (scaling.md Phase 2): browse-then-pick. subscribe holds a wave's feed
     // cores (+ receives its control gossip); unsubscribe frees them but stays aware. A host running

@@ -50,6 +50,7 @@ const { sweepSchedule, mySlot } = require('./sweep');
 const {
   FLOODED_KINDS,
   MAX_WRITERS,
+  MAX_META_BYTES,
   validGossip,
   makeHeartbeat,
   makeSubs,
@@ -731,7 +732,8 @@ function createWave({
       by: msg.origin,
       dur: msg.lobbyMs,
       walletType: msg.walletType,
-      fee: msg.fee
+      fee: msg.fee,
+      meta: msg.meta // opaque; the receive edge already bounded its size (validGossip)
     });
     const wave = waves.get(msg.waveId);
     if (!wave) {
@@ -1326,7 +1328,8 @@ function createWave({
     dur = lobbyMs,
     silent = false,
     walletType = null,
-    fee = null
+    fee = null,
+    meta = null
   }) {
     if (waves.has(waveId)) {
       return;
@@ -1337,6 +1340,9 @@ function createWave({
       id: waveId,
       phase: 'lobby',
       by,
+      // Opaque, initiator-supplied metadata carried on the announce (the app's own concept — a
+      // message about the wave). The engine never interprets it; it only bounds its size.
+      meta: meta || null,
       joined: !!mine,
       // subscribed = I hold this wave's feed cores (open my own + the roster's, replicate,
       // render its gallery). Awareness alone (from a wave-announce) does NOT open cores.
@@ -1411,7 +1417,8 @@ function createWave({
       paid: wave.paid, // 'verified' (enforcement off / already paid) | 'pending' (verifying)
       walletType: wave.walletType, // the payment mechanism (null on an unpaid/wallet-less wave)
       fee: wave.fee, // the initiator-set participation fee (null on an unpaid/wallet-less wave)
-      network: waveNetwork(wave) // settlement network (from the start burn) so the host filters same-network
+      network: waveNetwork(wave), // settlement network (from the start burn) so the host filters same-network
+      meta: wave.meta // opaque initiator metadata (null if they said nothing); the app gives it meaning
     });
   }
 
@@ -1771,16 +1778,37 @@ function createWave({
    * the sweep.
    * @returns {string} The new waveId.
    */
-  function startWave() {
+  /**
+   * A host-supplied `meta` for an announce, or null. Enforced HERE as well as at every receive
+   * edge: an oversized meta is DROPPED (the wave still starts) rather than sent, because the
+   * alternative is originating a message every peer's validator rejects — the wave would be
+   * invisible, and the initiator would have no idea why.
+   * @param {*} meta - The host's candidate metadata.
+   * @returns {Object|null} The meta to carry, or null.
+   */
+  function validMeta(meta) {
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+      return null;
+    }
+    if (JSON.stringify(meta).length > MAX_META_BYTES) {
+      log('wave meta too large — dropping it from the announce');
+      return null;
+    }
+    return meta;
+  }
+
+  function startWave({ meta = null } = {}) {
     const waveId = b4a.toString(crypto.randomBytes(16), 'hex');
     // initiator auto-joins (marks its own lobby); my wallet type + fee (if any) ride the wave — as
     // the initiator I SET the participation fee every joiner burns (myFee = my wallet's fee).
+    // `meta` is opaque to the engine (the host's own concept) and rides the announce.
     enterLobby({
       waveId,
       by: me.id,
       mine: true,
       walletType: myWalletType,
-      fee: myFee
+      fee: myFee,
+      meta: validMeta(meta)
     });
     if (enforcePaid) {
       // Anti-spam: don't announce yet. Wait for the worker to burn the start fee and prove it
@@ -1823,7 +1851,8 @@ function createWave({
         lobbyMs,
         paid: paidProof,
         walletType: wave.walletType,
-        fee: wave.fee
+        fee: wave.fee,
+        meta: wave.meta
       })
     );
     floodMyFeedCore(waveId); // the initiator is a participant too — share its core

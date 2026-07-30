@@ -301,102 +301,6 @@
       #updater:empty {
         display: none;
       }
-      /* wave directory as orbiting bubbles — one small circle per live wave, positioned
-         (from JS) at the initiator's ring angle, just outside the ring. */
-      #wave-orbit {
-        position: absolute;
-        inset: 0;
-        pointer-events: none; /* let ring/gallery clicks through; bubbles re-enable */
-      }
-      .wave-bubble {
-        position: absolute;
-        width: 46px;
-        height: 46px;
-        margin: -23px 0 0 -23px; /* centre the bubble on its (left,top) point */
-        border-radius: 50%;
-        border: 2px solid #666;
-        background: rgba(20, 12, 4, 0.92);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        pointer-events: auto;
-        transition:
-          transform 0.15s ease,
-          box-shadow 0.15s ease,
-          border-color 0.15s ease;
-      }
-      .wave-bubble:hover {
-        transform: scale(1.1);
-      }
-      /* phase colour: a forming lobby pulses (a joinable opportunity), racing is solid
-         orange, an ended wave is dim grey. */
-      .wave-bubble.lobby {
-        border-color: #f7931a;
-        animation: bub-pulse 1.6s ease-out infinite;
-      }
-      .wave-bubble.racing {
-        border-color: #f7931a;
-      }
-      .wave-bubble.ended {
-        border-color: #555;
-        opacity: 0.5;
-      }
-      .wave-bubble.active {
-        transform: scale(1.18);
-        border-color: #ffb04d;
-        box-shadow: 0 0 18px rgba(247, 147, 26, 0.6);
-        animation: none;
-      }
-      .wave-bubble.active:hover {
-        transform: scale(1.18);
-      }
-      /* grace period elapsed: fade + shrink away (the bubble is rebuilt with this class, so a
-         one-shot animation plays on mount; app.js drops the wave when it finishes). */
-      .wave-bubble.fading {
-        pointer-events: none;
-        animation: bub-fade 0.6s ease forwards;
-      }
-      @keyframes bub-fade {
-        from {
-          opacity: 0.5;
-          transform: scale(1);
-        }
-        to {
-          opacity: 0;
-          transform: scale(0.6);
-        }
-      }
-      .bub-flag {
-        font-size: 22px;
-        line-height: 1;
-      }
-      .bub-count {
-        position: absolute;
-        bottom: -4px;
-        right: -4px;
-        min-width: 16px;
-        height: 16px;
-        padding: 0 3px;
-        box-sizing: border-box;
-        border-radius: 8px;
-        background: #f7931a;
-        color: #0a0a0a;
-        font-size: 10px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      @keyframes bub-pulse {
-        0% {
-          box-shadow: 0 0 0 0 rgba(247, 147, 26, 0.45);
-        }
-        70%,
-        100% {
-          box-shadow: 0 0 0 6px rgba(247, 147, 26, 0);
-        }
-      }
       /* status area, docked at the bottom of the page (margin-top:auto pushes it down) */
       #hud {
         margin-top: auto;
@@ -461,6 +365,13 @@
       }
       /* wallet subtitle: the active mint (Cashu) so it's clear where the ecash
          lives; a chain wallet shows its network here instead. */
+      /* what the money is — read before the balance, so the ⚡ orange ties it to the wave motif */
+      #wallet-what {
+        margin: 4px 0 8px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #ffb04d;
+      }
       #wallet-kind {
         margin: 2px 0 10px;
         font-size: 11px;
@@ -732,15 +643,33 @@
         min-height: 14px;
         margin-top: 4px;
       }
-      /* the field: canvas ring with a centred overlay (start / countdown) */
+      /* the initiator's own words about the wave, above the countdown line in the lobby */
+      #lobby-wave-msg {
+        font-size: 15px;
+        font-style: italic;
+        color: #ffb04d;
+        max-width: 260px;
+        margin: 0 auto 6px;
+        overflow-wrap: anywhere;
+      }
+      #lobby-wave-msg:empty {
+        display: none;
+      }
+      /* the field: the concentric wave rings with a centred overlay (start / countdown).
+         RESPONSIVE — it grows with the window instead of sitting in a fixed 440px box, because
+         the rings need radial room: every wave is a ring, so the radius budget is what decides
+         how many can be drawn at once (ring.js caps at what fits and says how many it dropped).
+         ring.js resizes its backing store to this box (× devicePixelRatio) via a ResizeObserver. */
       .field {
         position: relative;
-        width: 440px;
-        height: 440px;
+        width: min(880px, 94vw, 74vh);
+        aspect-ratio: 1 / 1;
         margin-top: 8px;
       }
       #ring {
         display: block;
+        width: 100%;
+        height: 100%;
         transition: opacity 0.4s ease;
       }
       /* while a new wave's lobby is up, fade the ring + gallery so the countdown reads clearly
@@ -785,6 +714,30 @@
         background: linear-gradient(135deg, #ffa733, #ffc266);
         box-shadow: 0 6px 28px rgba(247, 147, 26, 0.55);
         transform: scale(1.05);
+      }
+      /* the wave message input — sits under the ⚡, shown only when the start button is */
+      #start-msg {
+        display: none;
+        margin-top: 14px;
+        width: min(320px, 70vw);
+        box-sizing: border-box;
+        padding: 9px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(0, 0, 0, 0.42);
+        color: #f5f5f5;
+        font-size: 13px;
+        text-align: center;
+      }
+      #start-msg::placeholder {
+        color: #7c7268;
+      }
+      #start-msg:focus {
+        outline: none;
+        border-color: #f7931a;
+      }
+      #start-msg.show {
+        display: block;
       }
       #start:active {
         transform: scale(0.97);
@@ -1040,6 +993,12 @@
           <h2 id="wallet-title">Cashu wallet</h2>
           <button id="wallet-close" title="Close">✕</button>
         </div>
+        <!-- Name what this money IS: the balance is bitcoin, held as Chaumian ecash issued by a
+             Lightning mint, and it is BEARER — the tokens live in this app's storage. -->
+        <div id="wallet-what">
+          ⚡ Bitcoin ecash on a Lightning mint. Self-custodial — the tokens live
+          on this device.
+        </div>
         <div id="wallet-kind"></div>
         <div id="wallet-balance"></div>
         <!-- mint picker: the curated Cashu mints relayed from the worker -->
@@ -1058,7 +1017,7 @@
             min="1"
             step="1"
             value="100"
-            title="How much to mint (sat)"
+            title="How much to mint (sats)"
           />
           <button
             id="wallet-topup-btn"
@@ -1105,7 +1064,16 @@
           <div id="topup-hint">
             Scan with a Lightning wallet (also copied to your clipboard).
           </div>
-          <button id="topup-close" class="pill">Done</button>
+          <!-- "Hide", not "Done": on a payment panel "Done" reads as "I've paid". Hiding cancels
+               nothing — the worker keeps polling the quote, so a later payment still credits you
+               (until it expires), which the title spells out. -->
+          <button
+            id="topup-close"
+            class="pill"
+            title="Hide this invoice. It stays payable — paying it later still tops you up."
+          >
+            ✕ Hide invoice
+          </button>
         </div>
         <div class="wallet-section">Recent transactions</div>
         <div id="wallet-txs"></div>
@@ -1140,17 +1108,30 @@
     </div>
 
     <div class="field">
+      <!-- one concentric ring per wave (ring.js): the outermost is the topic itself — everyone
+           present at their seat — and each wave sits further in as it moves through its
+           lifecycle. Clicking a ring subscribes to that wave (scaling.md browse-then-pick).
+           The width/height here are only a first-paint fallback; ring.js sizes the backing
+           store to the field's CSS box × devicePixelRatio. -->
       <canvas id="ring" width="440" height="440"></canvas>
-      <!-- wave directory as orbiting bubbles: one small circle per live wave (scaling.md
-           browse-then-pick), sat at its initiator's seat angle just outside the ring. A
-           bubble selects (subscribes to) that wave. -->
-      <div id="wave-orbit"></div>
       <div id="center">
         <button id="start" title="Start new wave" aria-label="Start new wave">
           ⚡
         </button>
+        <!-- Optional: what this wave is about. It rides the wave's ANNOUNCE, which floods the
+             whole directory, so every peer sees it while deciding whether to join — hence the
+             tight maxlength (the wire caps the field too). -->
+        <input
+          id="start-msg"
+          placeholder="Say what this wave is about (optional)"
+          maxlength="80"
+          title="Rides the wave's announce so browsing peers see why to join"
+        />
         <div id="lobby">
           <div id="lobby-count"></div>
+          <!-- what the initiator said this wave is about (untrusted text — set via textContent,
+               sanitized in lobby.js); hidden when they said nothing -->
+          <div id="lobby-wave-msg"></div>
           <div id="lobby-msg">a wave is forming</div>
           <div id="lobby-btns">
             <button id="join">✋ Count me in</button>

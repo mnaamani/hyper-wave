@@ -5,26 +5,36 @@
   "description": "HyperWave mobile (Expo + react-native-bare-kit) — hosts the shared engine (hyperwave) in a Bare worklet.",
   "main": "index.js",
   "scripts": {
-    "postinstall": "node scripts/link-ios-addons.mjs || true",
+    "postinstall": "node scripts/link-ios-addons.mjs || true && node scripts/link-android-addons.mjs || true",
     "bundle": "bare-pack --target ios --target android --linked --defer bufferutil --defer utf-8-validate --out bundles/app.bundle.mjs ../packages/hyperwave-engine/worklet/app.js",
     "link:ios-addons": "node scripts/link-ios-addons.mjs",
+    "link:android-addons": "node scripts/link-android-addons.mjs",
     "prestart": "npm run bundle",
     "start": "expo start --dev-client",
     "ios": "npm run bundle && npm run link:ios-addons && expo run:ios",
-    "android": "npm run bundle && expo run:android"
+    "android": "npm run bundle && npm run link:android-addons && expo run:android"
   },
   "dependencies": {
     "b4a": "^1.6.7",
     "expo": "~55.0.23",
+    "expo-build-properties": "~55.0.16",
+    "expo-camera": "~55.0.21",
+    "expo-crypto": "~55.0.17",
+    "expo-file-system": "~55.0.24",
+    "expo-image-manipulator": "~55.0.19",
+    "expo-secure-store": "~55.0.16",
     "framed-stream": "^1.0.1",
+    "hyperwave-app-core": "*",
     "hyperwave-engine": "*",
+    "hyperwave-wallet-cashu": "*",
     "react": "19.2.0",
     "react-native": "0.83.6",
     "react-native-b4a": "^0.0.4",
     "react-native-bare-kit": "^0.13.3",
+    "react-native-qrcode-svg": "^6.3.21",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.23.0",
-    "hyperwave-wallet-tron": "*"
+    "react-native-svg": "15.15.3"
   },
   "devDependencies": {
     "bare-pack": "^1.4.1"
