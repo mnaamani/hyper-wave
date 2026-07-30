@@ -130,6 +130,11 @@ worth writing down:
    (which survives `prebuild`) rather than the generated `android/`.
 4. **A system image + AVD.** `sdkmanager "system-images;android-36;google_apis;arm64-v8a"` then
    `avdmanager create avd -n hyperwave -k <that> -d pixel_7`.
+5. **The AVD's camera, if you want the capture path.** In `~/.android/avd/<name>.avd/config.ini`
+   set `hw.camera.front = webcam0` and `hw.camera.back = emulated`, then cold-boot
+   (`-no-snapshot-load`). Pointing the SAME webcam at both cameras makes the emulator expose only
+   a back camera — and `Capture.js` requests `facing='front'`, so the preview is silently black.
+   This is the one thing the iOS Simulator cannot do at all, so it's worth getting right.
 
 ```bash
 export JAVA_HOME=~/.jdks/jdk-17.0.19+10/Contents/Home

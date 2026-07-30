@@ -288,9 +288,26 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         foojay fallback crashes on Gradle 9), both NDKs RN and AGP ask for, `minSdkVersion` 29 (now
         in `app.json` via `expo-build-properties`, since `react-native-bare-kit` requires it), and a
         system image + AVD. Full diagnosis in `mobile/README.md` §Android.
-  - [ ] **Exercise the FEATURES on Android**, now that it runs — the emulator can do what the iOS
-        Simulator can't: point the AVD's camera at the host webcam and finally exercise the capture
-        path (EXIF strip, downscale ladder, the 256 KB entry cap).
+  - [~] **Exercise the FEATURES on Android — mostly DONE (2026-07-30).** Verified on the emulator
+    against a headless peer: onboarding + the country switcher (Cancel is non-destructive),
+    wave start with the paid gate (`burned 2 sat`, balance steps down), the wave chip strip
+    (including a STRANGER's wave off the public DHT), lobby, the capture sheet, a LIVE webcam
+    preview, the sweep bar filling, the feed with caption/byline/`Tip 5 sats`, cross-peer
+    replication (`FEED size=3`), the ended-wave drop at its TTL, and the whole wallet screen
+    (mint picker with ⚠ REAL-sats warnings, top up, cash out + Scan QR, persisted history).
+  - [ ] **BUG: the moment feed will not page backwards.** Reproducible on Android: with a 3-entry
+        feed showing `3 of 3`, no swipe moves it to an earlier moment — the auto-advance can only
+        ever go forward, so a user can never see their own moment. Ruled out so far: page height is
+        measured correctly (`onLayout h=914`, which IS the screen in dp); touch reaches the app
+        (the header flag opens the picker); and adding `flex: 1` to the FlatList — the usual RN
+        "ScrollView sizes to content and can't scroll" trap — changed NOTHING, so that is NOT the
+        cause. Next: log inside `onScrollBeginDrag`/`onScroll` to see whether the gesture reaches
+        the list at all, which separates "touch never arrives" (overlay/responder problem) from
+        "list scrolls then snaps back" (state problem).
+  - [ ] **AVD camera setup** — map the host webcam to the FRONT camera only
+        (`hw.camera.front = webcam0`, `hw.camera.back = emulated`). Pointing the same webcam at
+        both makes the emulator expose only a back camera, and `Capture.js` asks for
+        `facing='front'`, so the preview is black. Belongs in `mobile/README.md` §Android.
   - [ ] **Verify on real hardware**: a real camera frame (the simulator has none, so the
         downscale ladder + EXIF strip are unexercised), a successful cash-out melt against a
         payable bolt11, and a tip sent from the phone. `mobile/README.md` §Manual device
