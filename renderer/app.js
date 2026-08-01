@@ -174,6 +174,7 @@ function renderActiveWave() {
     // gallery closed, and handle() ignores feed repaints while closed (it would otherwise paint
     // nothing until the engine's next periodic re-emit).
     gallery.setActive(wave.phase === 'racing');
+    gallery.setEnded(wave.phase !== 'racing'); // an empty ended gallery says why
     gallery.handle(snapshot.feed);
     if (wave.phase !== 'racing') {
       gallery.restoreReplay(); // ended: bring the spark back, parked + draggable
@@ -384,6 +385,7 @@ const EVENT_HANDLERS = {
   'wave-idle': () => {
     hud.showStart(true);
     gallery.setActive(false);
+    gallery.setEnded(true); // nothing more is coming — an empty centre now explains itself
     setDim(false); // safety: never leave the ring faded if the lobby exited without a race
     // NB: do NOT stop the replay here — `completed` fires immediately before `wave-idle`, and
     // the frozen replay + scrubber are meant to persist through idle so the gallery stays
@@ -410,6 +412,13 @@ const EVENT_HANDLERS = {
     hud.waveStatus(
       `📸 your moment joins the wave! — hop ${evt.hopCount ?? ''}`
     );
+  },
+
+  // My moment couldn't be posted yet (the engine holds it and retries): the write-gate needs my
+  // join attestation, and without this the only symptom would be my own moment quietly missing
+  // from my own gallery.
+  'entry-deferred': () => {
+    hud.waveStatus('⏳ your moment is waiting on your join signature…');
   },
 
   // live protocol progress only — ball animation is the replay sweep, not per-hop events

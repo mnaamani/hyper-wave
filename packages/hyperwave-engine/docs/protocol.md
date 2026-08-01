@@ -684,6 +684,13 @@ Posting is immediate — the peer **owns** its feed core (§8.2), so there is no
 and nothing to wait for; it appends its one entry at block 0. The wave itself never waits on
 anything either.
 
+**One exception, and it is not a wait on the network:** the entry carries my join attestation,
+and the feed's write-gate (§8.2) drops an entry without one on _every_ peer — including the one
+that wrote it. So an entry that would be posted before the attestation is signed is **held** and
+retried on each feed tick instead of appended (appending would spend the once-per-wave guard on
+a block nobody, myself included, will ever display). The engine emits `entry-deferred` once so a
+host can show why its own moment hasn't appeared.
+
 **The entry is captured up-front, in the lobby.** The sweep must never wait on a human, so
 capture and posting are split: when a peer opts in, the renderer opens the camera and shows a
 countdown; the captured frame is **staged** to the worker (`stage-entry`), and posted at the
@@ -1237,6 +1244,8 @@ announcing), `wave-verified` (start burn proven — join is now allowed), `wave-
 (start failed verification — wave abandoned), `join-blocked {reason}` (tried to join
 before the start is verified), `joined`, `roster`, `wave-active`, `wave-idle`, `busy`,
 `started`, `holding {angle,hopCount,...}` (my sweep slot fired — my staged entry
-posts now), `position {holder,angle,hopCount}` (locally generated from the schedule as each
+posts now), `entry-deferred {waveId,reason}` (my entry is held, not posted — currently only
+`reason: 'no-join-attestation'`; the engine retries on each feed tick, and the host should say
+so rather than show an empty gallery), `position {holder,angle,hopCount}` (locally generated from the schedule as each
 slot passes — this is what animates the travelling marker; there is no position gossip), `completed
 {waveId,hops,angle}` (fires on **every** peer at the deterministic end).
