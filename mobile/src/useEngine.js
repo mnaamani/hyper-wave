@@ -78,6 +78,10 @@ const EVENT_TOASTS = {
   started: () => '⚡ the wave is off!',
   holding: (evt) =>
     `📸 your moment joins the wave! — hop ${evt.hopCount ?? ''}`,
+  // My moment couldn't be posted yet (the engine holds it and retries): the feed's write-gate
+  // needs my join attestation. Without this beat the only symptom would be my own moment quietly
+  // missing from my own feed.
+  'entry-deferred': () => '⏳ your moment is waiting on your join signature…',
   position: (evt) => `wave rolling — hop ${evt.hopCount ?? ''}`,
   completed: (evt) => `✅ wave completed — ${evt.hops} hops`,
   'wave-idle': () => null, // the last beat (completed) deliberately stays on screen
