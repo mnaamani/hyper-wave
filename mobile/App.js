@@ -103,6 +103,10 @@ export default function App() {
   // The wave whose capture the user dismissed ("Skip") — they still take part, just without a
   // moment, exactly like the desktop's skip button.
   const [skippedWaveId, setSkippedWaveId] = useState(null);
+  // The wave whose moment is already staged. Closing the sheet on capture is the confirmation
+  // that the frame was taken — the camera has nothing left to do, since the moment posts at this
+  // peer's sweep slot. Desktop does the same (proof.js capture() ends in close()).
+  const [capturedWaveId, setCapturedWaveId] = useState(null);
   const [walletOpen, setWalletOpen] = useState(false);
   // What this peer will say about the wave it starts. It rides the wave's announce, so every peer
   // browsing the directory reads it while deciding whether to join.
@@ -179,11 +183,14 @@ export default function App() {
   const rawUnit = wallet?.unit || 'sat';
   const inLobby = activeWave && activeWave.phase === 'lobby';
   const emptyFeedText = emptyFeedTextFor(activeWave);
-  // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one.
+  // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one, or
+  // already taken my frame (the sheet closing IS the confirmation; see capturedWaveId).
+  const captured = capturedWaveId === activeWaveId;
   const capturing =
     inLobby &&
     (activeWave.joined || activeWave.mine) &&
-    skippedWaveId !== activeWaveId;
+    skippedWaveId !== activeWaveId &&
+    !captured;
 
   // Wave start: make sure the frame is taken (auto, if the user didn't press Capture), mirroring
   // the desktop's proof.captureAndStage() on wave-active.
@@ -206,6 +213,13 @@ export default function App() {
   const stageMoment = useCallback(
     (moment) => engine.stageMoment(moment, activeWaveId),
     [engine.stageMoment, activeWaveId]
+  );
+
+  // The frame is staged: close the capture sheet. Bound to the wave it was taken for, so the next
+  // wave's lobby reopens the camera rather than inheriting this one's "already captured".
+  const markCaptured = useCallback(
+    () => setCapturedWaveId(activeWaveId),
+    [activeWaveId]
   );
 
   const canTip = useCallback(
@@ -324,6 +338,7 @@ export default function App() {
             wave={activeWave}
             unit={rawUnit}
             onJoin={() => engine.joinWave()}
+            captured={captured}
           />
         ) : null}
 
@@ -359,6 +374,7 @@ export default function App() {
         captureRef={captureRef}
         onStage={stageMoment}
         onSkip={() => setSkippedWaveId(activeWaveId)}
+        onCaptured={markCaptured}
       />
 
       <Wallet

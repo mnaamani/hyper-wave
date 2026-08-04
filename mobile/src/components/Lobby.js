@@ -34,9 +34,11 @@ function useCountdown(deadline) {
  * @param {Object} props.wave - The active wave's directory entry.
  * @param {string} props.unit - The wallet's RAW unit code (e.g. 'sat'); inflected for the fee.
  * @param {() => void} props.onJoin - Join handler.
+ * @param {boolean} [props.captured] - Whether this wave's moment is already staged, so the panel
+ *   confirms it once the capture sheet closes (desktop says the same on its status line).
  * @returns {JSX.Element} The lobby panel.
  */
-export function Lobby({ wave, unit, onJoin }) {
+export function Lobby({ wave, unit, onJoin, captured }) {
   const msLeft = useCountdown(wave.lobbyDeadline);
   const joinable = wave.paid === 'verified';
   const joined = !!wave.joined || !!wave.mine;
@@ -59,7 +61,9 @@ export function Lobby({ wave, unit, onJoin }) {
       </Text>
       {joined ? (
         <Text style={styles.hint}>
-          Your moment posts when the sweep reaches your seat.
+          {captured
+            ? '📸 moment captured — it posts when the sweep reaches your seat.'
+            : 'Your moment posts when the sweep reaches your seat.'}
         </Text>
       ) : (
         <Pressable
