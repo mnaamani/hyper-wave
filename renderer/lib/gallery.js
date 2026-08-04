@@ -18,10 +18,16 @@ const nsfwRevealBtn = document.getElementById('nsfw-reveal');
 // The tip amount, in sats — a few sats so the tip survives the mint's ~1-sat swap fee.
 const tipAmount = () => 5;
 
+// The centre message when a wave is over and NOTHING arrived. Without it, "nobody posted", "the
+// roster's cores never replicated to me" and "my own entry was held" all render as the same blank
+// circle — the state that sent me hunting for a rendering bug that wasn't there.
+const NO_MOMENTS_TEXT = 'no moments arrived — the wave didn’t reach you';
+
 let items = [];
 let centerIdx = 0;
 let expected = 0;
 let active = false;
+let ended = false; // the active wave is over — an empty gallery is now final, not still syncing
 let closed = false; // gallery view closed (a new wave's lobby/capture owns the ring centre)
 let myAddress = null; // my own wallet — never tip myself
 // The app's tip sender (app.js wires it to the app core, which owns the tip choreography: remember
@@ -89,9 +95,23 @@ export function count() {
 
 export function setActive(on) {
   active = on;
+  if (on) {
+    ended = false; // a racing wave can still deliver moments
+  }
   // Any wave-lifecycle transition (racing → true, idle → false) means the forming/capture stage is
   // over and the ring centre is the gallery's again — reopen it (close() sets this while capturing).
   closed = false;
+  refreshStage();
+}
+
+/**
+ * Mark the active wave as over. An empty gallery then means no moment is coming, which the centre
+ * says out loud instead of going blank (see NO_MOMENTS_TEXT).
+ * @param {boolean} on - Whether the active wave has ended.
+ * @returns {void}
+ */
+export function setEnded(on) {
+  ended = !!on;
   refreshStage();
 }
 
@@ -108,21 +128,27 @@ export function setWaiting(text) {
 }
 
 // Keep the ring centre useful when there's no moment to show: a spinner + message during the
-// post-capture wait and while moments are still syncing in — instead of a blank centre.
+// post-capture wait and while moments are still syncing in, and a FINAL (spinner-less) message
+// once the wave is over and nothing came — instead of a blank centre in any of those states.
 function refreshStage() {
   const hasFeatured = !!items[centerIdx];
   let text = '';
+  let final = false;
   if (!hasFeatured) {
     if (active) {
       const total = Math.max(expected, items.length, 1);
       text = items.length
         ? `collecting moments… ${items.length} / ${total}`
         : 'the wave is rolling — moments incoming…';
+    } else if (ended && !items.length) {
+      text = NO_MOMENTS_TEXT;
+      final = true;
     } else if (waitingText) {
       text = waitingText;
     }
   }
   stageEl.classList.toggle('show', !!text);
+  stageEl.classList.toggle('final', final);
   stageTextEl.textContent = text;
 }
 
@@ -234,6 +260,7 @@ export function clearView() {
   shownKeys.clear();
   pendingReplay = false;
   waitingText = '';
+  ended = false; // a fresh view isn't an ended wave's empty one
   ring.setCenter(null);
   refreshStage();
   refreshTip(); // no featured moment now → hide the tip button (don't leave it over the capture)

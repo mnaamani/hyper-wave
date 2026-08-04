@@ -772,6 +772,10 @@
       #stage-status.show {
         display: flex;
       }
+      /* a FINAL message (the wave ended with nothing to show) — not a wait, so no spinner */
+      #stage-status.final .stage-spinner {
+        display: none;
+      }
       .stage-spinner {
         width: 34px;
         height: 34px;

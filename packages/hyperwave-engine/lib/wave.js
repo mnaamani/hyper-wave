@@ -436,6 +436,10 @@ function createWave({
     walletAddress: () => walletAddress,
     burnProof: (waveId) => waves.get(waveId)?.pipeline.burnProof ?? null,
     joinProof: (waveId) => waves.get(waveId)?.joinSig ?? null,
+    // My entry can't be posted yet (no join attestation) and is being retried — surface it,
+    // so a host never shows a silently empty gallery where MY moment should be.
+    onEntryDeferred: ({ waveId, reason }) =>
+      emitEvent({ event: 'entry-deferred', waveId, reason }),
     log
   });
 

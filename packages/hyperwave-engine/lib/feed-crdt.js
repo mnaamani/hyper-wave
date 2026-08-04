@@ -52,6 +52,8 @@ function shortId(hex) {
  * @property {function(string): (string|null)} joinProof - My signed join attestation for the
  *   given wave (attest.js signJoin over waveId|peerId|writerKey) — every feed entry carries
  *   it (mergeFeed's write-gate).
+ * @property {function({waveId: string, reason: string}): void} [onEntryDeferred] - My entry
+ *   couldn't be posted yet and is held for retry (see postEntry).
  * @property {function(...*): void} log - Diagnostic logger.
  */
 
@@ -61,6 +63,10 @@ function shortId(hex) {
  * @property {Object} own - My writable Hypercore for this wave.
  * @property {Map<string, Object>} foreign - peerId → read-only Hypercore (opened by key).
  * @property {boolean} posted - Whether I've appended my one entry op yet.
+ * @property {?{hopCount: number, payload: *}} pending - My entry, held because it isn't
+ *   postable yet (no join attestation); retried on every tick.
+ * @property {boolean} deferredReported - Whether the host has been told about `pending`
+ *   (told once per wave, not once per retry).
  */
 
 /**
@@ -74,19 +80,30 @@ class CrdtFeed {
   #walletAddress;
   #burnProof;
   #joinProof;
+  #onEntryDeferred;
   #log;
   #waves = new Map(); // waveId -> WaveCores
 
   /**
    * @param {CrdtFeedCtx} ctx - Store + host callbacks + live accessors.
    */
-  constructor({ store, me, onFeed, walletAddress, burnProof, joinProof, log }) {
+  constructor({
+    store,
+    me,
+    onFeed,
+    walletAddress,
+    burnProof,
+    joinProof,
+    onEntryDeferred = () => {},
+    log
+  }) {
     this.#store = store;
     this.#me = me;
     this.#onFeed = onFeed;
     this.#walletAddress = walletAddress;
     this.#burnProof = burnProof;
     this.#joinProof = joinProof;
+    this.#onEntryDeferred = onEntryDeferred;
     this.#log = log;
   }
 
@@ -118,7 +135,13 @@ class CrdtFeed {
         name: 'wave-feed:' + waveId,
         valueEncoding: 'json'
       });
-      wave = { own, foreign: new Map(), posted: false };
+      wave = {
+        own,
+        foreign: new Map(),
+        posted: false,
+        pending: null,
+        deferredReported: false
+      };
       this.#waves.set(waveId, wave);
       own.on('append', () => this.#emitView(waveId));
     }
@@ -165,6 +188,13 @@ class CrdtFeed {
   /**
    * Post my entry: append my one op (block 0) to my own core. No admission, no
    * writable-wait — I own my core. Guarded to post exactly once per wave.
+   *
+   * WITHOUT my join attestation the op is unpostable, not merely unproven: mergeFeed's
+   * write-gate drops a joinSig-less entry on EVERY peer, mine included, so appending it
+   * would burn the once-per-wave guard on a block nobody — not even I — will ever display.
+   * So the entry is HELD instead (`pending`) and retried on each tick until the attestation
+   * lands (it's signed locally the moment my core is ready, so this is a startup race, not a
+   * wait on the network); the host is told once, so a peer whose moment is stuck can say so.
    * @param {Object} entry - The staged entry.
    * @param {string} entry.waveId - The wave this belongs to.
    * @param {number} entry.hopCount - My rank in the sweep (feed ordering key).
@@ -183,8 +213,18 @@ class CrdtFeed {
     // wave would blank them, stripping our own tip address / write credential
     const burnProof = this.#burnProof(waveId);
     const joinSig = this.#joinProof(waveId);
+    if (!joinSig) {
+      wave.pending = { hopCount, payload };
+      this.#log('feed: entry held — no join attestation yet');
+      if (!wave.deferredReported) {
+        wave.deferredReported = true;
+        this.#onEntryDeferred({ waveId, reason: 'no-join-attestation' });
+      }
+      return;
+    }
     await wave.own.ready();
     wave.posted = true;
+    wave.pending = null;
     await wave.own.append({
       type: 'wave-entry',
       waveId,
@@ -203,14 +243,18 @@ class CrdtFeed {
   }
 
   /**
-   * Pull replicated entries for every held wave, then repaint each. Called periodically by
-   * wave.js so every feed keeps converging even when no `append` event fires locally.
+   * Pull replicated entries for every held wave, retry any entry held for a missing join
+   * attestation, then repaint each. Called periodically by wave.js so every feed keeps
+   * converging even when no `append` event fires locally.
    * @returns {void}
    */
   tick() {
     for (const [waveId, wave] of this.#waves) {
       for (const core of [wave.own, ...wave.foreign.values()]) {
         core.update().catch(() => {});
+      }
+      if (wave.pending && !wave.posted) {
+        this.postEntry({ waveId, ...wave.pending }).catch(() => {});
       }
       this.#emitView(waveId);
     }

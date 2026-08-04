@@ -60,6 +60,29 @@ function momentKey(moment) {
   return moment.peerId || String(moment.hopCount);
 }
 
+// What an EMPTY feed says, by the active wave's phase. An ended wave with nothing in it is final,
+// not still syncing, so it must not keep promising moments that will never come — the phone's
+// counterpart of the desktop ring centre's terminal message. Without it, "nobody posted", "the
+// roster's cores never replicated to me" and "my own entry was held" all read as the same screen.
+const EMPTY_FEED_TEXT = {
+  lobby: 'Moments appear here as the wave sweeps the ring.',
+  racing: 'Moments appear here as the wave sweeps the ring.',
+  ended: 'No moments arrived — the wave didn’t reach you.'
+};
+const NO_WAVE_TEXT = 'Start a wave, or tap one above to watch it.';
+
+/**
+ * The empty-feed message for the wave on screen.
+ * @param {Object|null} activeWave - The active wave, or null when none is selected.
+ * @returns {string} What to show in place of the feed.
+ */
+function emptyFeedTextFor(activeWave) {
+  if (!activeWave) {
+    return NO_WAVE_TEXT;
+  }
+  return EMPTY_FEED_TEXT[activeWave.phase] || EMPTY_FEED_TEXT.lobby;
+}
+
 export default function App() {
   const engine = useEngine({
     ...(TOPIC ? { topicId: TOPIC } : {}),
@@ -80,6 +103,10 @@ export default function App() {
   // The wave whose capture the user dismissed ("Skip") — they still take part, just without a
   // moment, exactly like the desktop's skip button.
   const [skippedWaveId, setSkippedWaveId] = useState(null);
+  // The wave whose moment is already staged. Closing the sheet on capture is the confirmation
+  // that the frame was taken — the camera has nothing left to do, since the moment posts at this
+  // peer's sweep slot. Desktop does the same (proof.js capture() ends in close()).
+  const [capturedWaveId, setCapturedWaveId] = useState(null);
   const [walletOpen, setWalletOpen] = useState(false);
   // What this peer will say about the wave it starts. It rides the wave's announce, so every peer
   // browsing the directory reads it while deciding whether to join.
@@ -155,11 +182,15 @@ export default function App() {
   // balance of exactly 1 reads "1 sat" while a standing label reads "sats".
   const rawUnit = wallet?.unit || 'sat';
   const inLobby = activeWave && activeWave.phase === 'lobby';
-  // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one.
+  const emptyFeedText = emptyFeedTextFor(activeWave);
+  // Frame a moment while I'm in a forming wave's lobby — unless I've opted out of this one, or
+  // already taken my frame (the sheet closing IS the confirmation; see capturedWaveId).
+  const captured = capturedWaveId === activeWaveId;
   const capturing =
     inLobby &&
     (activeWave.joined || activeWave.mine) &&
-    skippedWaveId !== activeWaveId;
+    skippedWaveId !== activeWaveId &&
+    !captured;
 
   // Wave start: make sure the frame is taken (auto, if the user didn't press Capture), mirroring
   // the desktop's proof.captureAndStage() on wave-active.
@@ -182,6 +213,13 @@ export default function App() {
   const stageMoment = useCallback(
     (moment) => engine.stageMoment(moment, activeWaveId),
     [engine.stageMoment, activeWaveId]
+  );
+
+  // The frame is staged: close the capture sheet. Bound to the wave it was taken for, so the next
+  // wave's lobby reopens the camera rather than inheriting this one's "already captured".
+  const markCaptured = useCallback(
+    () => setCapturedWaveId(activeWaveId),
+    [activeWaveId]
   );
 
   const canTip = useCallback(
@@ -226,11 +264,7 @@ export default function App() {
         onTip={tipMoment}
         canTip={canTip}
         tipLabel={`${TIP_SATS} ${unitLabelFor(rawUnit, TIP_SATS)}`}
-        emptyText={
-          activeWave
-            ? 'Moments appear here as the wave sweeps the ring.'
-            : 'Start a wave, or tap one above to watch it.'
-        }
+        emptyText={emptyFeedText}
       />
 
       {/* everything below floats OVER the feed — box-none so only the controls take touches */}
@@ -304,6 +338,7 @@ export default function App() {
             wave={activeWave}
             unit={rawUnit}
             onJoin={() => engine.joinWave()}
+            captured={captured}
           />
         ) : null}
 
@@ -339,6 +374,7 @@ export default function App() {
         captureRef={captureRef}
         onStage={stageMoment}
         onSkip={() => setSkippedWaveId(activeWaveId)}
+        onCaptured={markCaptured}
       />
 
       <Wallet

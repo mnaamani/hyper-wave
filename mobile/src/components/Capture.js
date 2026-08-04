@@ -93,11 +93,20 @@ async function grabFrame(camera) {
  * @param {number} props.deadline - Date.now()-based ms when the lobby closes.
  * @param {(moment: {image: string, caption: string}) => void} props.onStage - Stage the moment.
  * @param {() => void} props.onSkip - Opt out of posting a moment this wave.
+ * @param {() => void} props.onCaptured - The frame is staged; the host closes this sheet (the
+ *   counterpart of desktop proof.js calling close() at the end of capture()).
  * @param {Object} props.captureRef - Ref the host fills with { captureAndStage } (the wave-start
  *   and wave-switch hooks call it, mirroring desktop's proof.captureAndStage()).
  * @returns {JSX.Element|null} The sheet.
  */
-export function Capture({ visible, deadline, onStage, onSkip, captureRef }) {
+export function Capture({
+  visible,
+  deadline,
+  onStage,
+  onSkip,
+  onCaptured,
+  captureRef
+}) {
   const cameraRef = useRef(null);
   const captionRef = useRef('');
   const stagedRef = useRef(false);
@@ -108,6 +117,11 @@ export function Capture({ visible, deadline, onStage, onSkip, captureRef }) {
 
   // Capture + stage exactly once per wave. Exposed on `captureRef` so the host can force it when
   // the wave starts (or when the user navigates to another wave — app-core invariant 3).
+  //
+  // `onCaptured` at the end is what makes a MANUAL capture visible: the frame is staged and posts
+  // at this peer's sweep slot, so there is no reason to keep the camera up — and leaving it up (as
+  // this did) makes tapping Capture look like it did nothing at all, since the live preview and
+  // the countdown just carry on. Desktop's proof.js has always closed its preview here.
   useEffect(() => {
     const captureAndStage = async () => {
       if (stagedRef.current || !visible) {
@@ -118,12 +132,13 @@ export function Capture({ visible, deadline, onStage, onSkip, captureRef }) {
       const image = await grabFrame(cameraRef.current);
       onStage({ image, caption: captionRef.current });
       setBusy(false);
+      onCaptured();
     };
     captureRef.current = { captureAndStage };
     return () => {
       captureRef.current = null;
     };
-  }, [visible, onStage, captureRef]);
+  }, [visible, onStage, onCaptured, captureRef]);
 
   // Reset for each new lobby.
   useEffect(() => {

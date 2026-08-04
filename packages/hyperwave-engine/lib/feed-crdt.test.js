@@ -313,3 +313,66 @@ test('CrdtFeed: concurrent waves stay independent (open one never closes another
     'wave-B untouched by closing wave-A'
   );
 });
+
+// A joinSig-less entry is dropped by mergeFeed on EVERY peer — including the one that wrote it
+// (feed.js's write-gate doesn't special-case me). Appending it anyway would spend the
+// once-per-wave guard on a block nobody ever sees: my own moment vanishes from my own gallery,
+// silently and permanently. So it's held and retried instead, and the host is told once.
+test('CrdtFeed: an entry with no join attestation is held, then posts on retry', async (t) => {
+  const dir = `/tmp/hw-crdt-nojoin-${Date.now()}`;
+  const store = new Corestore(dir);
+  const keyPair = crypto.keyPair();
+  const deferrals = [];
+  let joinSig = null; // not signed yet — the state a startup race leaves us in
+  const feeds = new Map();
+  const session = new CrdtFeed({
+    store,
+    me: { id: b4a.toString(keyPair.publicKey, 'hex'), tag: null },
+    onFeed: (waveId, items) => {
+      feeds.set(waveId, items);
+    },
+    walletAddress: () => null,
+    burnProof: () => null,
+    joinProof: () => joinSig,
+    onEntryDeferred: (info) => deferrals.push(info),
+    log: () => {}
+  });
+  t.teardown(async () => {
+    await session.close();
+    await store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const writerKey = await session.open(WAVE);
+  await session.postEntry({ waveId: WAVE, hopCount: 0, payload: 'mine' });
+  t.alike(
+    deferrals,
+    [{ waveId: WAVE, reason: 'no-join-attestation' }],
+    'the host is told the entry could not be posted'
+  );
+  t.absent(
+    feeds.get(WAVE)?.length,
+    'nothing appended — the gate would drop it anyway'
+  );
+
+  // a tick before the attestation lands retries but still can't post, and doesn't re-report
+  session.tick();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  t.is(deferrals.length, 1, 'reported once per wave, not once per retry');
+
+  // the attestation lands (it is signed locally as soon as my core is ready)
+  joinSig = signJoin(keyPair, { waveId: WAVE, writerKey });
+  session.tick();
+  const posted = await until(() => feeds.get(WAVE)?.length === 1);
+  t.ok(posted, 'the held entry posts once the attestation is available');
+  t.is(
+    feeds.get(WAVE)[0].payload,
+    'mine',
+    'my moment made it into my own feed'
+  );
+
+  // and it stays a single entry — the retry can't double-post
+  session.tick();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  t.is(feeds.get(WAVE).length, 1, 'still exactly one entry per peer');
+});
