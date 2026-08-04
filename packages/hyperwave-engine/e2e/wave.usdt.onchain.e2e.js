@@ -13,7 +13,7 @@
 //   HYPERWAVE_E2E_SEED_1        — initiator P1 (kick-off burn; keep it well-funded)
 //   HYPERWAVE_E2E_SEED_2        — joiner P2 (join burn)
 // Fund TRX via the Nile faucet (https://nileex.io/join/getJoinPage); fund USDT from a Nile faucet /
-// a prior transfer. See the repo README (§Demo).
+// a prior transfer. See the repo README (section "Demo").
 const test = require('brittle');
 const { Cluster, sleep } = require('./harness');
 

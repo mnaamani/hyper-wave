@@ -1,4 +1,4 @@
-// Pure gossip-flood dedup (protocol.md §3.1). A peer floods a lifecycle control message
+// Pure gossip-flood dedup (protocol.md section 3.1). A peer floods a lifecycle control message
 // by stamping it with a unique id and relaying each id **on first sight only**; repeats
 // are dropped. That single rule is what turns a one-hop broadcast into an epidemic that
 // blankets a partial mesh, without loops or unbounded traffic.

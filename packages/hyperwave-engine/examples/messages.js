@@ -1,6 +1,6 @@
 // messages.js — the gossip message seam: one factory per on-wire kind (builds KIND + PAYLOAD)
 // and one shape validator per kind (run at the receive edge). Every message ALSO carries the
-// uniform envelope (origin/ts/sig — protocol.md §5.0), stamped at origination; validGossip
+// uniform envelope (origin/ts/sig — protocol.md section 5.0), stamped at origination; validGossip
 // checks the envelope + payload shape, and attest.verifyMessage verifies the signature.
 // Run:  bare examples/messages.js
 const crypto = require('hypercore-crypto');

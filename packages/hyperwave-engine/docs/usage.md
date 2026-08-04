@@ -32,7 +32,7 @@ const {
   wireWallet,
   burnMemo, // the wallet-agnostic fee flows (payments.js)
   serveEngine,
-  createRpcClient // the host<->UI IPC seam (rpc.js) — §12
+  createRpcClient // the host<->UI IPC seam (rpc.js) — section 12
 } = require('hyperwave-engine');
 
 // 2. The payment abstraction — its own packages (install only what you use):
@@ -52,7 +52,7 @@ const messages = require('hyperwave-engine/lib/messages');
 const { Flood } = require('hyperwave-engine/lib/flood');
 const feed = require('hyperwave-engine/lib/feed');
 
-// 4. The stateful classes wave.js composes (also subpath imports — see §11):
+// 4. The stateful classes wave.js composes (also subpath imports — see section 11):
 const { PeerTable } = require('hyperwave-engine/lib/peer-table');
 const { EntryPipeline } = require('hyperwave-engine/lib/entry');
 const { CrdtFeed } = require('hyperwave-engine/lib/feed-crdt');
@@ -136,13 +136,13 @@ engine.exec({
 }); // switch mint live
 engine.exec({ type: 'fund-wallet', amount: 100 }); // mint funds → { type:'fund-result', invoice?, minted }
 engine.exec({ type: 'redeem', token: '<cashuB…>' }); // redeem a received bearer token → { type:'redeem-result' }
-// Multi-account wallet (Tron): list-accounts + set-account (see §9).
+// Multi-account wallet (Tron): list-accounts + set-account (see section 9).
 
 await engine.close();
 ```
 
-Command / event reference: `protocol.md` §5; the state-machine `event` names (`started`,
-`joined`, `roster`, `holding`, `position`, `completed`, `note`, `dm`, …) in §5 as well.
+Command / event reference: `protocol.md` section 5; the state-machine `event` names (`started`,
+`joined`, `roster`, `holding`, `position`, `completed`, `note`, `dm`, …) in section 5 as well.
 
 ---
 
@@ -172,7 +172,7 @@ const wave = createWave({
       console.log('feed', msg.waveId, msg.items.length);
     }
   }
-  // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see §10)
+  // swarmSeed: '<hex>'  // optional injected identity seed; else <storage>/swarm.seed (see section 10)
   // swarm: myHyperswarm  // optional: share the host's Hyperswarm instead of creating one; the
   //   engine takes its identity from it and NEVER destroys it (it only leaves the topics it
   //   joined on close). Use when the app also runs Hyperswarm — one instance per process.
@@ -190,11 +190,11 @@ dm, setWallet, feeFor, announcePaid, recordBurn, close }`. Concurrent waves are 
 `startWave()` never returns null and there is no "busy" guard. `join(waveId?)` /
 `stageEntry({payload, waveId?})` default to the newest joinable / joined wave; `subscribe(waveId)` /
 `unsubscribe(waveId)` open / close a wave's feed (holding cores only for waves you subscribed to —
-see §11 CrdtFeed). `note({waveId, note})` floods an authenticated note to the wave's subscribers;
+see section 11 CrdtFeed). `note({waveId, note})` floods an authenticated note to the wave's subscribers;
 `dm({waveId, to, note})` unicasts a **directed** note to one peer (private counterpart of `note` —
-protocol.md §5). There is no routing surface — the wave is a deterministic sweep. The payment
+protocol.md section 5). There is no routing surface — the wave is a deterministic sweep. The payment
 methods (`setWallet`/`feeFor`/`announcePaid`/`recordBurn`) are driven by the fee flows over an
-injected `Wallet` — see §9.
+injected `Wallet` — see section 9.
 
 ---
 
@@ -309,10 +309,10 @@ verifyJoin({ waveId, peerId, writerKey }, joinSig); // → true (peerId signed t
 
 ## 6. `messages.js` — the gossip message seam
 
-The single definition point for the on-wire message kinds (`protocol.md` §5: `heartbeat`, `subs`,
+The single definition point for the on-wire message kinds (`protocol.md` section 5: `heartbeat`, `subs`,
 `wave-announce`, `wave-join`, `wave-start`, `wave-sync`, `wave-note` (flooded roster-member
 broadcast), `wave-dm` (directed/unicast note to one peer)): one `make*` factory per kind
-(builds the KIND + PAYLOAD; the uniform envelope — `origin`/`ts`/`sig`, §5.0 — is stamped at
+(builds the KIND + PAYLOAD; the uniform envelope — `origin`/`ts`/`sig`, section 5.0 — is stamped at
 origination by wave.js via `attest.signMessage`) and one shape validator per kind, run once at the
 receive edge via `validGossip` (which checks the envelope + payload shape) before the envelope-sig
 verification (`attest.verifyMessage`), age check, and state work. Validation is shape only —
@@ -388,7 +388,7 @@ that peer's own `wave-join` (self-certified by the join attestation). Every peer
 the wave** opens every participant's core, downloads block 0, and folds the bag with the pure
 **`mergeFeed`** — every peer that has replicated the same set of cores computes a **byte-identical**
 feed. No indexer, no admission, no consensus, no shared feed key. The stateful `CrdtFeed` that owns
-the cores is in `feed-crdt.js` (§11); it holds one feed per subscribed wave concurrently.
+the cores is in `feed-crdt.js` (section 11); it holds one feed per subscribed wave concurrently.
 
 ```js
 const crypto = require('hypercore-crypto');
@@ -446,8 +446,8 @@ same seed → the `wallet` message reports the new `accountIndex` + address). `w
 derives the first `count` addresses offline for the picker.
 
 Each wallet declares a **`type`** (e.g. `'tron-nile'`) that travels on the wire (wave-announce/
-start/sync), so a joiner only joins a wave whose payment mechanism its own wallet supports (§ the
-`walletType` gate in `protocol.md` §9). The `fee` is the wallet's own participation-fee amount.
+start/sync), so a joiner only joins a wave whose payment mechanism its own wallet supports (see the
+`walletType` gate in `protocol.md` section 9). The `fee` is the wallet's own participation-fee amount.
 The **`TronWallet` type is network-derived** — `tron-<network>` (`tron-nile`, `tron-mainnet`, …) —
 so testnet and mainnet are automatically distinct mechanisms and their waves never mix.
 
@@ -642,7 +642,7 @@ parseBootstrap('127.0.0.1:49737'); // → [{ host: '127.0.0.1', port: 49737 }]
 // Creates + writes <storage>/swarm.seed on first run; an injected hex seed is used verbatim.
 const seed = loadOrCreateSwarmSeed('/tmp/hw/a'); // Buffer(32)
 const crypto = require('hypercore-crypto');
-const keyPair = crypto.keyPair(seed); // the same identity every run (see protocol.md §1 (sibling))
+const keyPair = crypto.keyPair(seed); // the same identity every run (see protocol.md section 1 (sibling))
 ```
 
 `createWave` calls `loadOrCreateSwarmSeed` for you; pass `createWave({ swarmSeed })` only to inject
@@ -654,7 +654,7 @@ an identity (e.g. from mobile secure storage). It is a **separate** seed from th
 ## 11. The stateful classes wave.js composes
 
 `createWave` is a composition root: the per-concern state machines live in their own classes,
-each subpath-importable and unit-tested. `Flood` is shown in §7; the others:
+each subpath-importable and unit-tested. `Flood` is shown in section 7; the others:
 
 - **`PeerTable`** (`lib/peer-table.js`) — live peer bookkeeping: ring seats (angle always
   derived from the id, never the wire) and direct-send channels; a direct disconnect drops
@@ -670,7 +670,7 @@ each subpath-importable and unit-tested. `Flood` is shown in §7; the others:
   `wave-join`) and downloads its one entry, `postEntry(entry)` appends my single op, `tick()`
   pulls replication + repaints every held wave (`onFeed(waveId, items)`), and
   `closeWave(waveId)` frees one wave's cores (on unsubscribe). No admission, no indexer, no
-  retention — every subscribed peer holds every core and merges locally with `mergeFeed` (§8).
+  retention — every subscribed peer holds every core and merges locally with `mergeFeed` (section 8).
 
 ---
 

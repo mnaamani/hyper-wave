@@ -1,5 +1,5 @@
 // Pure ring geometry. The DHT keyspace is the ring; a peer's key is its seat on it
-// (protocol.md §2.1, in docs/). No state, no I/O — unit-tested in wave.logic.test.js.
+// (protocol.md section 2.1, in docs/). No state, no I/O — unit-tested in wave.logic.test.js.
 const b4a = require('b4a');
 
 /**

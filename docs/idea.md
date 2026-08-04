@@ -114,8 +114,11 @@ very large gatherings.
 
 ## Limitations
 
-- **Testnet only.** The money is real in mechanism but test-value by design — no legal or
-  regulatory work has been done to handle real funds.
+- **Test money by default.** The app starts on a free test mint, where the money is real in
+  mechanism but has no value. A peer can switch to a real (mainnet) Lightning mint, and then
+  fees and tips move real sats — no legal or regulatory work has been done around that, so
+  it's on the peer who chooses it. Test-money and real-money peers never even discover each
+  other (the discovery topic is split by network).
 - **Miss the lobby, watch the wave.** Everyone who wants a place has to opt in during the
   short lobby window; a latecomer still sees the whole wave and the gallery, but can't add
   a moment to that wave. (In exchange, the wave itself never stalls and takes a fixed few

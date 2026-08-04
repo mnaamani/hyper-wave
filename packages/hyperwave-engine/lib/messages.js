@@ -1,5 +1,5 @@
 // The gossip message seam: the single definition point for every on-wire message kind
-// (protocol.md §5). Each kind has a `make*` factory (used at every send site, so a shape
+// (protocol.md section 5). Each kind has a `make*` factory (used at every send site, so a shape
 // can't drift per call site) and a shape validator (run once at the receive edge, so
 // handlers downstream can trust field presence and types). Validation here is SHAPE ONLY
 // — the envelope signature (attest.verifyMessage), the age check, the paid gate, and
@@ -7,7 +7,7 @@
 // Unknown extra fields are tolerated (forward compat); unknown kinds are rejected. Pure —
 // no state, no I/O. Unit-tested in messages.test.js.
 //
-// UNIFORM ENVELOPE (protocol.md §5.0): every message carries `origin` (the author's ring id,
+// UNIFORM ENVELOPE (protocol.md section 5.0): every message carries `origin` (the author's ring id,
 // hex), `ts` (author timestamp, ms), and `sig` (an Ed25519 signature by `origin` over the whole
 // message minus `sig` — attest.signMessage). Factories build the KIND + PAYLOAD; the envelope is
 // stamped at wave.js's single origination point (which holds the ring key). So there is no
@@ -15,7 +15,7 @@
 // names the wave INITIATOR (payload) distinct from the sync's sender (`origin`).
 
 /**
- * Any gossip message: the envelope (`origin`/`ts`/`sig`) + `kind` + that kind's payload (protocol.md §5).
+ * Any gossip message: the envelope (`origin`/`ts`/`sig`) + `kind` + that kind's payload (protocol.md section 5).
  * @typedef {Object} GossipMessage
  * @property {string} kind - The message kind (one of those defined below).
  * @property {string} [origin] - The author's ring id (hex); stamped by wave.js at origination.
@@ -25,7 +25,7 @@
  */
 
 /**
- * A participant's feed-core credential as carried in `writers` (protocol.md §5).
+ * A participant's feed-core credential as carried in `writers` (protocol.md section 5).
  * @typedef {Object} WriterCred
  * @property {string} peerId - The participant's ring id (64 hex chars).
  * @property {string} writerKey - Its feed core key (64 hex chars).
@@ -45,7 +45,7 @@ const FLOODED_KINDS = new Set([
 
 // Max bytes for a wave-note's opaque payload (JSON) — announcements are tiny (a tip note is a few
 // dozen bytes), so cap them small so the roster-broadcast primitive can't be turned into a bulk
-// data channel. Belt-and-suspenders alongside the frame cap + per-author flood cap (protocol.md §11).
+// data channel. Belt-and-suspenders alongside the frame cap + per-author flood cap (protocol.md section 11).
 const MAX_NOTE_BYTES = 2048;
 
 // Max bytes for a wave-announce's opaque `meta` (JSON) — the initiator's own words about the wave
@@ -155,7 +155,7 @@ function isWriterCred(entry) {
   );
 }
 
-// Hard per-wave roster cap (protocol.md §5/§6). A wave holds at most this many participants; the
+// Hard per-wave roster cap (protocol.md section 5/section 6). A wave holds at most this many participants; the
 // initiator caps its roster here, so `wave-start`/`wave-sync`'s `writers` array — the one O(N)
 // gossip payload — is bounded to a known constant, which in turn lets the receive edge enforce a
 // constant max frame size (wave.js MAX_FRAME_BYTES). Scale comes from MANY concurrent bounded waves,

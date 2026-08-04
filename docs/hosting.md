@@ -145,7 +145,7 @@ participates fully (pays fees, joins waves, captures moments, relays), and every
 keyed by the random `waveId`, nothing persists across runs.
 
 The gallery is a **multicore CRDT** — one Hypercore per participant, merged locally (no
-indexer, no coordinator; see `protocol.md` §8) — so every participant already holds every
+indexer, no coordinator; see `protocol.md` section 8) — so every participant already holds every
 core and could serve the whole gallery of a subscribed wave. There is not even a per-wave
 asymmetry: the initiator is an ordinary participant (posts its own moment, publishes its own core,
 no indexer/admission/retention role). A departing peer's moment survives in everyone's view because

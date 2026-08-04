@@ -10,7 +10,7 @@ const CONFIRM_ATTEMPTS = 12;
 const CONFIRM_INTERVAL_MS = 2500;
 
 /**
- * The memo that provably ties a burn to its wave + payer (protocol.md §9.2).
+ * The memo that provably ties a burn to its wave + payer (protocol.md section 9.2).
  * @param {string} waveId - The wave the burn is for.
  * @param {string} peerId - Hex id of the paying peer.
  * @returns {string} The on-chain memo string `hyperwave:<waveId>:<peerId>`.

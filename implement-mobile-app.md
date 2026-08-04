@@ -138,7 +138,7 @@ map, active-wave selection, the ended-wave TTL, the theme mapping (`payload` ↔
 package, **`packages/hyperwave-app-core`**, which both hosts import — desktop's `app.js` and
 mobile's `useEngine.js`. The alternative (a second, RN-local implementation) was rejected: the
 current mobile drift _is_ that outcome already observed, and one of the rules being duplicated
-loses money if missed (see the `dm` invariant in §4.1). Full detail of the extraction is Phase 2.
+loses money if missed (see the `dm` invariant in section 4.1). Full detail of the extraction is Phase 2.
 
 ### 4.1 What moves, and the invariants it must preserve
 
@@ -268,7 +268,7 @@ change in the same commit.** Verification is manual (run two desktop peers throu
 start, join, capture, sweep, gallery, tip, redeem) plus the new package tests from 2c. Keep it
 reviewable; if the diff starts growing features, stop and split.
 
-**2c — Tests (S).** Cover the five invariants in §4.1 with a fake `send` + scripted engine
+**2c — Tests (S).** Cover the five invariants in section 4.1 with a fake `send` + scripted engine
 messages. This is the first test coverage this logic has ever had; it is also the regression net
 for 2b, so write the tests against the extracted module before finishing the desktop port.
 
@@ -336,7 +336,7 @@ has not been exercised from the phone.
 1. **P1** Android: the `bare-link` CMake path, `npm run android` verified on an emulator.
 2. **P3** tests: the `hyperwave-app-core` suite already landed in Phase 2c — extend it with the
    cases mobile turns up, wire it into the root `npm test`, and add a manual device checklist to
-   `mobile/README.md` (§Manual device checklist — there is no DEMO.md).
+   `mobile/README.md` (section "Manual device checklist" — there is no DEMO.md).
 3. **P5** pin a bootstrap peer via `config.bootstrap` for demos.
 4. **D3** NSFW decision executed (implement or document the asymmetry).
 5. **P4** docs: `mobile/README.md` rewritten, `CLAUDE.md` mobile paragraph updated, `TODO.md`
@@ -346,11 +346,11 @@ has not been exercised from the phone.
 
 _Added 2026-07-28, after using Phase 3's UI on the simulator._
 
-Phases 3–4 pursued "comparable UI" (§2.5) by porting the desktop's presentation. On a phone that
+Phases 3–4 pursued "comparable UI" (section 2.5) by porting the desktop's presentation. On a phone that
 was the wrong target: the ring is a 320pt circle competing with the moments it frames, so the
 gallery — the actual content — got whatever height was left, and the screen read as cramped.
 
-Parity is about the wire and the money (§2.1–2.4); presentation should be native to the device.
+Parity is about the wire and the money (section 2.1–2.4); presentation should be native to the device.
 So mobile's presentation now diverges deliberately:
 
 1. **The ring is deleted** (`src/components/Ring.js` gone). It remains the DESKTOP's map of the
@@ -371,7 +371,7 @@ still come from `hyperwave-app-core`, which is what let the presentation be reth
 **Done when:** a wave watched on a phone reads like a feed you'd scroll anyway. _Result:_ the
 layout is confirmed on screen (2026-07-28). Still owed, because it takes a live wave with peers:
 the segment bar filling in sweep order, the feed auto-advancing as moments land, and the
-drag-takes-control rule (see `mobile/README.md` §Manual device checklist step 6).
+drag-takes-control rule (see `mobile/README.md` section "Manual device checklist" step 6).
 
 ---
 

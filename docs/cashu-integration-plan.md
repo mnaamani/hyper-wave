@@ -27,7 +27,7 @@ De-risked by `spike/cashu/` (mint → burn → verify under Bare, all green).
   framing, or flooding. Cashu rides existing opaque fields
   (`walletType`, `burn`, `address`, `fee`). The rename (Part 0) touches
   **attestation payload key names only** — a coordinated schema tweak, all peers
-  update together (pre-release), documented in `protocol.md §5`.
+  update together (pre-release), documented in `protocol.md section 5`.
 - **Money model unchanged:** burned fees + tips; NO sponsor rewards.
 - **Engine stays theme-agnostic.** The curated mint list lives in the desktop.
 - **Testnet only.**
@@ -171,7 +171,7 @@ the recipient's pubkey**, so it is safe to broadcast — only the recipient can
 redeem it. Carry it in the existing `wave-note` tip note (opaque, size-capped,
 flooded to a wave's subscribers): `{ kind:'tip', to, peerId, amount, token }`.
 ~600 bytes, well under `MAX_FRAME_BYTES`. **This is the same primitive the
-desktop already uses** (`wave-note` §Message Types) — additive payload field,
+desktop already uses** (`wave-note` section "Message Types") — additive payload field,
 no engine/gossip change.
 
 ### Send (tipper)
@@ -284,7 +284,7 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
 - `CLAUDE.md` — payment stack, wallet-type list, the rename, the wipe-vs-proof-
   store caveat.
 - `TODO.md` — track the phases below.
-- New `docs/cashu.md` (or a protocol §) — mint choice + multimint swap +
+- New `docs/cashu.md` (or a protocol section) — mint choice + multimint swap +
   funding UX + trust model.
 
 ---
@@ -343,7 +343,7 @@ with `/verify` (two peers, a paid Cashu wave, a tip that redeems).
 5. ✅ **Part 6/7** — a **headless two-peer paid-wave e2e** on Cashu
    (`npm run test:e2e:cashu`, gated `E2E_CASHU=1`) passes over a local DHT +
    testnut: fund → paid gate → paid join → feed converges to 2 (~37s). Docs done:
-   protocol.md §2.3/§9 (rename + mechanism note), `docs/cashu.md`, CLAUDE.md,
+   protocol.md section 2.3/section 9 (rename + mechanism note), `docs/cashu.md`, CLAUDE.md,
    idea.md, docs/README.md. _(done — the only remaining item is the **GUI**
    end-to-end on a display: two live desktop peers, a paid Cashu wave, a redeeming
    tip; can't run headless here.)_

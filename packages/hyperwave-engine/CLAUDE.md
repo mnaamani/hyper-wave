@@ -58,6 +58,6 @@ site.
 ## Docs
 
 This package documents itself under `docs/` — `protocol.md` (the authoritative
-on-wire spec: messages, the uniform Ed25519 envelope, lifecycle, feed, §11
+on-wire spec: messages, the uniform Ed25519 envelope, lifecycle, feed, section 11
 hardening) and `usage.md` (API examples). Keep `protocol.md` in sync when the
 protocol changes.

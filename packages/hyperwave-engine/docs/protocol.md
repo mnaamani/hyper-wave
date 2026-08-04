@@ -86,8 +86,8 @@ joinSig = hex( Ed25519_sign( joinHash, mySecretKey ) )
 verify  = Ed25519_verify( joinHash, fromHex(joinSig), fromHex(peerId) )
 ```
 
-It rides `wave-join` (which **publishes** the participant's feed core; §8.2) and every
-feed entry (the write-gate in `mergeFeed()`, §8.2). Covering `writerKey` matters: it is
+It rides `wave-join` (which **publishes** the participant's feed core; section 8.2) and every
+feed entry (the write-gate in `mergeFeed()`, section 8.2). Covering `writerKey` matters: it is
 what makes each core key **self-certifying** — without it, a relay could substitute its own
 core key under someone else's `peerId` and hijack that peer's one feed seat. There is no
 shared feed key to sign; this attestation is the only credential the feed needs. This is
@@ -96,7 +96,7 @@ authenticity, not uniqueness — one-entry-per-peer and the byte caps bound what
 ### 2.3 Fee-burn attestation
 
 The signed proof binding a peer's ring identity to its fee burn (schema and
-verification in §9.0). The burn is **mechanism-abstract**: `burnRef` is the payment
+verification in section 9.0). The burn is **mechanism-abstract**: `burnRef` is the payment
 mechanism's burn reference (a Tron tx hash, or a Cashu ecash token) and `payerAddress`
 is the wallet/identity that funded it. (These fields were `txHash`/`tronAddress` before
 the currency-agnostic rename — all peers updated together, pre-release.)
@@ -125,9 +125,9 @@ sig = hex( Ed25519_sign( burnHash, mySecretKey ) )
   desktop host uses it to keep **mainnet** and **testnet** peers in separate directories
   (testnet/unknown/wallet-less on the base topic, mainnet on `<base>:mainnet`), so
   real-money and test-money peers never even discover each other — a first, coarse
-  separation layer in front of the per-burn cross-network filter (§5 / mint classification).
+  separation layer in front of the per-burn cross-network filter (section 5 / mint classification).
 - **Per connection** (Noise-encrypted duplex stream from Hyperswarm):
-  1. `Corestore.replicate(conn)` — replicates the per-participant feed cores (see §8).
+  1. `Corestore.replicate(conn)` — replicates the per-participant feed cores (see section 8).
   2. A **Protomux** channel with protocol id `"hyperwave/gossip"`, carrying a single
      message type whose encoding is `compact-encoding` **`string`** (length-prefixed
      UTF-8). Each message is a **JSON object** with a `kind` field.
@@ -153,7 +153,7 @@ revisited, only the message **envelope** would change encoding; the signed attes
 call for the opposite reason — it adopted `bare-rpc` but kept JSON, because a single-build IPC has
 no version skew for a schema to solve; see Appendix A.)
 
-All timing constants are in §10.
+All timing constants are in section 10.
 
 ### 3.1 Message propagation & relay rules
 
@@ -185,7 +185,7 @@ are relayed hop-to-hop:
   is evicted first, so under pressure the dedup set forgets the ids least likely to still be
   in flight rather than the recent ones.
 
-**Unicast.** **`wave-sync`** is sent point-to-point to a newcomer on connect (§7.4) — the
+**Unicast.** **`wave-sync`** is sent point-to-point to a newcomer on connect (section 7.4) — the
 catch-up path for a peer that joins after a flood has already passed.
 
 **Membership** is **DHT-discovered but liveness-gated.** `swarm.peers` (Hyperswarm's PeerInfo
@@ -225,7 +225,7 @@ mutual subscription).
 ## 4. Peer map (membership & liveness)
 
 Each peer maintains a map of **other** peers (never itself), keyed by id:
-`id -> { id, angle, lastSeen, tag }`. `angle` is derived from `id` (§2.1) — never
+`id -> { id, angle, lastSeen, tag }`. `angle` is derived from `id` (section 2.1) — never
 trusted from the wire; `tag` is a cosmetic short string (or null — the reference app uses an ISO-3166-1 alpha-2 country code).
 
 Inputs that build the map:
@@ -256,7 +256,7 @@ immediately; the TTL expires peers known _indirectly_ (a `swarm.peers` entry tha
 since gone) once they stop being refreshed.
 
 Note the peer map serves **topology and display**, not the sweep: the sweep's schedule is
-derived from the flooded `wave-start`'s `by`/`writers` (§6), so all peers agree on it even
+derived from the flooded `wave-start`'s `by`/`writers` (section 6), so all peers agree on it even
 if their live-ring views differ.
 
 ```mermaid
@@ -272,13 +272,13 @@ flowchart LR
 ```
 
 On connect, a peer **greets** the newcomer with its `heartbeat` and — if a wave is active —
-a `wave-sync` (§7.4), so the newcomer's map _and_ wave state converge immediately.
+a `wave-sync` (section 7.4), so the newcomer's map _and_ wave state converge immediately.
 
 ## 5. Gossip message catalog
 
 The protocol has **seven** message kinds, all JSON objects on the one `hyperwave/gossip`
 channel per connection. Unknown `kind`s are ignored. `wave-announce` floods the whole
-directory; `wave-join`/`wave-start`/`wave-note` flood only a wave's subscribers (§3, scaling.md
+directory; `wave-join`/`wave-start`/`wave-note` flood only a wave's subscribers (section 3, scaling.md
 Phase 3), with `wave-note` additionally gated on roster membership; `heartbeat`/`subs`/`wave-sync`
 are one-hop.
 
@@ -301,10 +301,10 @@ are one-hop.
 ```
 
 - **`origin`** — the single authorship field on every message (peerId = the ring public key in
-  hex). `angle` is derived from it locally (§2.1), never trusted from the wire. There is **no**
+  hex). `angle` is derived from it locally (section 2.1), never trusted from the wire. There is **no**
   separate `id`/`by`/`peerId` author field — `origin` is the author everywhere. The one exception
   is `wave-sync`'s **`by`**, which is the wave INITIATOR (payload) distinct from `origin` (the peer
-  that _sent_ the sync). Identity binding (§11.2) is now **one shared check**: a DIRECT
+  that _sent_ the sync). Identity binding (section 11.2) is now **one shared check**: a DIRECT
   (one-hop: heartbeat/subs/wave-sync) message's `origin` must equal the Noise connection id; a
   FLOODED message's `origin` is a third party at relay hops, authenticated by `sig`.
 - **`sig`** — an Ed25519 signature by `origin`'s ring key over the canonical serialization
@@ -321,9 +321,9 @@ are one-hop.
   1 min). This is a **hard cap on how long a flooded message can circulate** — independent of `mid`
   dedup — so a routing loop / dedup-set bug can't amplify into unbounded flooding; and it is
   **replay-attack prevention**: a captured message can't be re-injected later because its `ts` is
-  signed and can't be refreshed without the author's key (§11.2). Generous clock-skew tolerance
+  signed and can't be refreshed without the author's key (section 11.2). Generous clock-skew tolerance
   (peers aren't time-synchronized). The start burn additionally carries a signed `burnTs` with
-  its own freshness window (§9.0) — belt-and-suspenders against reusing an old burn in a fresh frame.
+  its own freshness window (section 9.0) — belt-and-suspenders against reusing an old burn in a fresh frame.
 
 **Shape enforcement.** The schemas below are code, not just documentation: `lib/messages.js`
 defines one factory per kind (every send site builds the KIND + PAYLOAD through it) and one shape
@@ -352,7 +352,7 @@ The practical rule: a new field must be **optional** (absent is valid — that i
 that hasn't upgraded will send) and **size-capped** if it rides a flooded kind. Removing or
 retyping an existing field is NOT compatible; only addition is.
 
-> Each schema below shows the **kind + payload**. Every message ALSO carries the §5.0 envelope
+> Each schema below shows the **kind + payload**. Every message ALSO carries the section 5.0 envelope
 > (`origin`, `ts`, `sig`, + `mid` on flooded kinds); it is omitted from the blocks for brevity.
 > The author is always `origin` — there is no per-kind `id`/`by`/`peerId` (except `wave-sync`'s
 > `by`, the wave initiator).
@@ -390,7 +390,7 @@ subscription, the peer unicasts a `wave-sync` to catch the neighbour up (so a la
 subscribe or a flood that raced the subscription is always recovered). Not relayed; carries
 no `mid`.
 
-The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carries a unique
+The three `wave-*` lifecycle messages below are **flooded** (section 3.1): each carries a unique
 `mid` (random hex id); receivers relay on first sight and drop repeats.
 
 ### wave-announce — flooded (originator, on start)
@@ -401,7 +401,7 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
   "waveId": "<hex16>",
   "lobbyMs": 15000,
   "paid": {
-    /* start attestation, §9.0 — present when the paid-wave gate is enforced */
+    /* start attestation, section 9.0 — present when the paid-wave gate is enforced */
   },
   "walletType": "tron-nile", // the payment-mechanism id (paid waves) — see below
   "fee": 1, // the initiator-set participation fee every joiner burns (paid waves) — see below
@@ -409,8 +409,8 @@ The three `wave-*` lifecycle messages below are **flooded** (§3.1): each carrie
 }
 ```
 
-Opens the lobby; the envelope `origin` is the initiator. Receivers that accept it (§7.1 adoption)
-enter `lobby` for `waveId` (as merely **aware** — no cores open until they subscribe/join, §7.2).
+Opens the lobby; the envelope `origin` is the initiator. Receivers that accept it (section 7.1 adoption)
+enter `lobby` for `waveId` (as merely **aware** — no cores open until they subscribe/join, section 7.2).
 A fresh announce floods the whole directory. On connect, a peer also **forwards the initiator's
 stored, signed announce VERBATIM** (same frame, same `mid`, same `origin`/`sig`) for every wave it
 knows, so a peer that joined the swarm after the original flood can still discover the wave — the
@@ -430,13 +430,13 @@ to a wave's subscribers; this is not. The cap is enforced at the receive edge (a
 makes the whole message invalid) **and** at origination (an oversized `meta` is dropped rather than
 sent, so a wave is never made invisible by a field the initiator can't see).
 
-`meta` is inside the envelope, so it is signed like every other field (§5.0): a relay can neither
+`meta` is inside the envelope, so it is signed like every other field (section 5.0): a relay can neither
 inject one nor edit the initiator's words in flight, and stripping it invalidates the frame. Treat
 it as **untrusted text** at the point of display — the app strips control/bidi characters and
 clamps the length before rendering (`hyperwave-app-core`'s theme boundary).
 
 **No shared feed key.** There is no shared per-wave feed core and no feed key to
-carry or sign — each participant owns its own feed core (§8). The originator is a participant too: right
+carry or sign — each participant owns its own feed core (section 8). The originator is a participant too: right
 after announcing it floods **its own** `wave-join` publishing its core (`floodMyFeedCore`),
 exactly as every joiner does.
 
@@ -454,7 +454,7 @@ same `paid` proof rides `wave-sync`, so a mid-lobby newcomer can verify too. (Wi
 `Wallet` interface (a base class in the `hyperwave-wallet` package), so an app can plug in its own wallet — a
 different chain, a custodial service, a mock. Each wallet declares a `type` id (the default Tron
 wallet is `"tron-nile"`). A **paid** wave carries its initiator's `walletType` on `wave-announce`
-(and `wave-start`/`wave-sync`), authenticated by the envelope `sig` (§5.0). A joiner can only pay
+(and `wave-start`/`wave-sync`), authenticated by the envelope `sig` (section 5.0). A joiner can only pay
 with a wallet of the SAME type — verifying the burn + paying the fee are wallet-specific — so
 `join()` **refuses** a wave whose `walletType` its own wallet doesn't match (or when it has no
 wallet), emitting `join-blocked` with `reason: "wallet-unsupported"`. Such a peer can still
@@ -464,7 +464,7 @@ incompatible payment mechanisms coexist on a topic: each joins only the waves it
 
 **Participation fee (`fee`).** The **initiator sets** the fee for its wave (its wallet's own fee),
 and it rides `wave-announce`/`wave-start`/`wave-sync` alongside `walletType`, authenticated by the
-envelope `sig` (§5.0). Every joiner burns **exactly this** amount (`payFee` reads it via `feeFor`, so
+envelope `sig` (section 5.0). Every joiner burns **exactly this** amount (`payFee` reads it via `feeFor`, so
 all participants pay the same, initiator-chosen fee — not each their own local fee), and a verifier
 gates the initiator's start burn against it on-chain (`minTrx = fee`, so an initiator that advertises
 a high fee but underpays is rejected). Each peer also enforces a **local anti-sybil floor** (`minFee`,
@@ -484,25 +484,25 @@ positive number — the shape gate rejects zero/negative/non-numeric.
   "writerKey": "<coreKeyHex>",
   "joinSig": "<hex64>",
   "burn": {
-    /* the joiner's fee-burn attestation, §9.0 — once its join fee confirms */
+    /* the joiner's fee-burn attestation, section 9.0 — once its join fee confirms */
   }
 }
 ```
 
 **The join publishes the peer's feed core.** The joiner is the envelope `origin`. `writerKey` is
-its own Hypercore key for this wave's feed (§8), and `joinSig` is its join attestation over
-`(waveId, origin, writerKey)` (§2.2). **Every peer** that sees the join (during the lobby)
+its own Hypercore key for this wave's feed (section 8), and `joinSig` is its join attestation over
+`(waveId, origin, writerKey)` (section 2.2). **Every peer** that sees the join (during the lobby)
 verifies `joinSig`, adds `origin` to the `writers` map, and opens+downloads that core (block 0
-only, §8.2) — there is no admission and no coordinator. A joiner whose join fee confirms mid-lobby
+only, section 8.2) — there is no admission and no coordinator. A joiner whose join fee confirms mid-lobby
 **re-floods** its `wave-join` with the `burn` attestation attached (paid gate). A join without a
 credential is ignored — the `writers` map is the roster, so a seat that can never post would only
 stretch the schedule with a guaranteed-empty slot.
 
-Flooded (to the wave's subscribers, §3) so it reaches every subscriber (and the initiator, which
+Flooded (to the wave's subscribers, section 3) so it reaches every subscriber (and the initiator, which
 assembles the roster) even across a partial mesh. `wave-join` is authenticated by the envelope
 `sig` (and its `joinSig` binds the credential) — it is relayed, so at relay hops its `origin` is a
 third party. **Paid gate:** when enforced, **every peer** ignores a `wave-join` whose `burn`
-doesn't authorize `origin` for `waveId` (`burnAuthorizes`, §9.2) before ingesting it — the check
+doesn't authorize `origin` for `waveId` (`burnAuthorizes`, section 9.2) before ingesting it — the check
 that was once the initiator's alone at admission.
 
 ### wave-start — flooded (originator, when the lobby closes)
@@ -514,7 +514,7 @@ that was once the initiator's alone at admission.
   "writers": [{ "peerId": "<peerId>", "writerKey": "<coreKeyHex>", "joinSig": "<hex64>" }, ...],
   "t0": 1719705612080,
   "lapMs": 8000,
-  "paid": { /* start attestation, §9.0 — present when the paid-wave gate is enforced */ },
+  "paid": { /* start attestation, section 9.0 — present when the paid-wave gate is enforced */ },
   "walletType": "tron-nile", // the payment-mechanism id (paid waves)
   "fee": 1 // the initiator-set participation fee (paid waves)
 }
@@ -528,9 +528,9 @@ source). (`writers[].peerId` are the participants — DATA — distinct from the
 (`now + SWEEP_LEAD_MS` at the initiator — a short lead so the flooded start blankets the
 swarm before the first slot fires); `lapMs` is the lap duration,
 `clamp(rosterSize × SLOT_MS, MIN_LAP_MS, MAX_LAP_MS)`. Every receiver derives the identical
-schedule from `(origin + writers, t0, lapMs)` (§6). Receivers clamp hostile values: `lapMs` is capped
+schedule from `(origin + writers, t0, lapMs)` (section 6). Receivers clamp hostile values: `lapMs` is capped
 at `MAX_LAP_MS`, and a start whose `t0` is more than `MAX_LAP_MS` in the future is ignored
-(§11.2).
+(section 11.2).
 
 **`writers` makes the start self-contained.** It carries every participant's feed-core
 credential (`{peerId, writerKey, joinSig}` — the same tuple `wave-join` published), so a peer
@@ -546,13 +546,13 @@ receive edge rejects any `wave-start`/`wave-sync` whose `writers` array exceeds 
 gate (before any signature work — `isWriters`). This is the design's scale answer made concrete: a
 wave is a **bounded** unit and thousands of peers spread across **many concurrent waves**
 (the [scaling note](./scaling.md)), never one unbounded wave. The bound also fixes the max
-gossip-frame size, so the transport can reject oversized frames with a constant cap (§11.2).
+gossip-frame size, so the transport can reject oversized frames with a constant cap (section 11.2).
 Determinism is unaffected: the sweep schedule derives from the single flooded `wave-start`, not any
-peer's local `writers`, so all receivers of a given start compute the identical schedule (§6).
+peer's local `writers`, so all receivers of a given start compute the identical schedule (section 6).
 
 Compression is now an **optional efficiency**, not a scale requirement (the cap already bounds the
 frame). If ever added, it must preserve **both** self-containment and
-determinism: lossless framing (deflate the frame — see §3) does, and roughly halves the
+determinism: lossless framing (deflate the frame — see section 3) does, and roughly halves the
 hex+JSON writers array (~256 B/entry → ~130 B, the crypto-entropy floor of
 peerId+writerKey+joinSig). A lossy scheme that ships only peerId **prefixes** and resolves
 `writerKey`/`joinSig` from each peer's locally-cached `wave-join`s does **not**: it reinstates
@@ -560,7 +560,7 @@ the non-self-containment `writers` exists to remove (a peer that missed a join c
 its prefix), and prefix resolution against per-peer-divergent id sets is ambiguous and
 grindable (peerIds gate feed writes + tips). Deriving the roster from received `wave-join`s
 instead of carrying `writers` fails for the same determinism reason as below. When the paid-wave gate is enforced, `wave-start` also carries the start `paid`
-proof and is gated on it (§11); carrying it also lets a peer that adopted via `wave-start`
+proof and is gated on it (section 11); carrying it also lets a peer that adopted via `wave-start`
 re-authenticate a later `wave-sync` to a newcomer. Receivers transition `lobby → racing`.
 
 The derived roster is the initiator-finalized answer to "who is actually in this wave?" —
@@ -585,7 +585,7 @@ same slots), and (b) each peer knows whether it has a slot (roster member) or me
 }
 ```
 
-Lets a peer joining mid-wave sync (§7.4). **This is the one kind where `origin` ≠ the subject:**
+Lets a peer joining mid-wave sync (section 7.4). **This is the one kind where `origin` ≠ the subject:**
 the envelope `origin` (which, being direct, must equal the Noise connection id) is the peer that
 _sent_ the sync — any subscriber — while **`by` is the wave INITIATOR** (the roster derives from
 `{by} ∪ writers[].peerId`, and `by` signed the `paid` proof). Like `wave-start`, it carries the
@@ -595,8 +595,8 @@ core without needing to have seen the lobby's `wave-join`s; each is re-verified 
 before its core is opened. `t0`/`lapMs` (racing phase) let a mid-race newcomer derive the
 schedule, animate the travelling marker from the right point, and end at the same deterministic moment as
 everyone else. When the paid-wave gate is enforced, a `wave-sync` must carry the start
-`paid` proof (§9.0) **for either phase** — including `racing` — and is adopted only if it
-verifies (§11), so a fabricated racing sync can't push a newcomer into a bogus wave. (`paid`
+`paid` proof (section 9.0) **for either phase** — including `racing` — and is adopted only if it
+verifies (section 11), so a fabricated racing sync can't push a newcomer into a bogus wave. (`paid`
 is omitted from the schema line above for brevity.)
 
 ### wave-note — flooded (a roster member's authenticated broadcast)
@@ -621,7 +621,7 @@ participant, **drops it** (no relay, no process), so the flood dies at the edge 
 it and a non-participant can't inject notes onto a wave. Origination is gated the same way — the
 engine only sends a `wave-note` for a wave you actually joined. The `note` is size-capped
 (`isNote` ≤ `MAX_NOTE_BYTES`) so the primitive can't become a bulk-data channel, on top of the
-per-author flood cap + frame cap (§11). It's the engine's generic "authenticated broadcast from a
+per-author flood cap + frame cap (section 11). It's the engine's generic "authenticated broadcast from a
 participant" primitive; theme-specific meaning stays in the app.
 
 ### wave-dm — directed (unicast to one peer)
@@ -660,14 +660,14 @@ Every peer computes the identical schedule from the canonical inputs — the der
 (`{by} ∪ writers[].peerId`) plus `(t0, lapMs)`:
 
 ```
-seats  = dedupe(rosterIds), each with angle = angleOf(id)            // §2.1
+seats  = dedupe(rosterIds), each with angle = angleOf(id)            // section 2.1
 sort seats by (angle asc, id asc)                                    // id breaks angle ties
 count  = |seats|
 slot[rank] = { id, angle, rank, at: t0 + round((rank / count) × lapMs) }
 ```
 
 `rank` (0-based, angle order) is the entry's **`hopCount`** — still the feed ordering key
-(§8.3). Because the inputs are the flooded `by`/`writers` and two integers, all honest
+(section 8.3). Because the inputs are the flooded `by`/`writers` and two integers, all honest
 peers derive byte-identical schedules; nothing about the sweep depends on any peer's local
 ring view.
 
@@ -676,16 +676,16 @@ ring view.
 A roster member arms a local timer for its own slot. When it fires:
 
 - Record the slot (`waveId`, `hopCount = rank`) into the entry pipeline. The pipeline pairs
-  it with the entry **staged during the lobby** and posts the feed entry (§8.2) —
+  it with the entry **staged during the lobby** and posts the feed entry (section 8.2) —
   whichever half arrives second triggers the post, exactly once per wave.
 - Emit the local `holding` event (UI: "the wave is at my seat").
 
-Posting is immediate — the peer **owns** its feed core (§8.2), so there is no admission
+Posting is immediate — the peer **owns** its feed core (section 8.2), so there is no admission
 and nothing to wait for; it appends its one entry at block 0. The wave itself never waits on
 anything either.
 
 **One exception, and it is not a wait on the network:** the entry carries my join attestation,
-and the feed's write-gate (§8.2) drops an entry without one on _every_ peer — including the one
+and the feed's write-gate (section 8.2) drops an entry without one on _every_ peer — including the one
 that wrote it. So an entry that would be posted before the attestation is signed is **held** and
 retried on each feed tick instead of appended (appending would spend the once-per-wave guard on
 a block nobody, myself included, will ever display). The engine emits `entry-deferred` once so a
@@ -812,7 +812,7 @@ Among **subscribed** peers there are still no lasting roles:
   `writers` and the sweep parameters. It is otherwise an **ordinary participant** with no
   lasting asymmetry: its slot is wherever its angle falls, it posts its own entry, and there
   is no indexer, admission, or retention role. (Every _subscriber_ holds every core during
-  the wave — §8 — so a departing peer's entry survives; a subscribed wave's feed stays open
+  the wave — section 8 — so a departing peer's entry survives; a subscribed wave's feed stays open
   until `unsubscribe()` or `close()` — the post-race idle feed + latecomer replication rely
   on it; it is **not** auto-closed at wave-end, since final-slot entries keep replicating past
   the deterministic end.)
@@ -827,7 +827,7 @@ Among **subscribed** peers there are still no lasting roles:
 
 Lifecycle floods fire once, so a peer connecting or subscribing mid-wave would miss them. Two
 catch-up paths converge state: a **`catchup` re-announce** on connect (directory; makes a
-newcomer _aware_, §5 wave-announce), and a **`wave-sync`** exchanged when two peers become
+newcomer _aware_, section 5 wave-announce), and a **`wave-sync`** exchanged when two peers become
 mutually subscribed (each learns the other's subscription from a `subs` message and unicasts
 a sync). The subscriber receiving a `wave-sync`:
 
@@ -864,8 +864,8 @@ of cores produces a byte-identical feed on every peer, so convergence is purely 
   **is** the participant's `writerKey`. It starts empty per wave (the namespace is keyed by
   the random `waveId`).
 - **The join publishes the key.** A participant floods its `writerKey` on its own `wave-join`
-  (§5), self-certified by the join attestation `joinSig` over `(waveId, peerId, writerKey)`
-  (§2.2). The originator is a participant too and floods its own `wave-join` right after
+  (section 5), self-certified by the join attestation `joinSig` over `(waveId, peerId, writerKey)`
+  (section 2.2). The originator is a participant too and floods its own `wave-join` right after
   announcing. There is no signed feed key because there is no shared core to sign — each
   core key stands on its own join attestation, so a relay can neither forge nor substitute one.
 - Cores replicate over the existing `Corestore.replicate(conn)` on each connection. Entry
@@ -886,7 +886,7 @@ There is no admission: a peer doesn't grant writers, it just **learns and replic
   entry per peer** — extra blocks a malicious writer appends are never fetched. `wave-start` /
   `wave-sync` carry the same credentials in `writers`, so a late adopter is self-contained.
 - **Paid gate, per peer.** When enforced, every peer checks `burnAuthorizes(burn, peerId,
-waveId)` (§9.2) on a **direct** `wave-join` before ingesting it — a signature-only
+waveId)` (section 9.2) on a **direct** `wave-join` before ingesting it — a signature-only
   check, run identically by everyone. (The `writers` on
   `wave-start`/`wave-sync` omit the burn: they were pre-vetted by the initiator during the
   lobby, and the wave as a whole is gated by the start `paid` proof.) No on-chain call is on
@@ -897,7 +897,7 @@ waveId)` (§9.2) on a **direct** `wave-join` before ingesting it — a signature
 - **The view is a pure merge.** `mergeFeed(rawEntries)` folds the block-0 op of every held
   core into the ordered feed with one deterministic gate over the whole bag at once:
   - drop any op whose `joinSig` doesn't verify over `(waveId, peerId, writerKey)` by `peerId`
-    (§2.2), or whose serialized `payload` exceeds `MAX_PAYLOAD_BYTES` (oversized dropped);
+    (section 2.2), or whose serialized `payload` exceeds `MAX_PAYLOAD_BYTES` (oversized dropped);
   - keep the tip **`address` only if a signed burn backs it** (`burnAuthorizes` +
     `tronAddress === address`, else blanked);
   - verify-for-address then **drop the bulky `burn`**, keeping only `burnTx`;
@@ -941,32 +941,32 @@ sequenceDiagram
   "tag": "BR",
   "payload": {/* opaque application content — the host owns its shape */},
   "address": "T…",
-  "burn": {/* the poster's §9.0 attestation — verified then dropped */},
+  "burn": {/* the poster's section 9.0 attestation — verified then dropped */},
   "burnTx": "<tron-tx-hash>" /* kept from the burn so the on-chain burn is locatable */,
   "timestamp": 1719705650000
 }
 ```
 
 The op lives at **block 0** of the poster's own core. `hopCount` is the poster's **sweep
-rank** (its slot index in the schedule, §6.1) — the feed ordering key, so entries present
+rank** (its slot index in the schedule, section 6.1) — the feed ordering key, so entries present
 in ring order. `writerKey` + `joinSig` are the write-gate credential `mergeFeed()` verifies
-(§8.2). `payload` is **opaque to the protocol** — arbitrary JSON the host owns, transported
+(section 8.2). `payload` is **opaque to the protocol** — arbitrary JSON the host owns, transported
 and byte-capped but never interpreted (the reference app puts a `{image, caption}` moment,
 where `image` is an inline JPEG data-URL thumbnail; Hyperblobs is the scaling path). `tag`
 is a cosmetic short string (the reference app uses an ISO country code). `address` is the poster's Tron (TRX) wallet, carried so a
 viewer can **tip** this entry with a real testnet transfer (renderer `tip` → worker
-`pay.send(address, amount)`; §WDK) — but only if `mergeFeed()` finds it backed by the
-`burn` (§8.2), so a tip always reaches the wallet that paid in. Merged form: one entry per
+`pay.send(address, amount)`; section "WDK") — but only if `mergeFeed()` finds it backed by the
+`burn` (section 8.2), so a tip always reaches the wallet that paid in. Merged form: one entry per
 `(waveId, peerId)`, the bulky `burn` stripped (its `burnRef` kept as `burnTx` for audit),
 sorted by `hopCount` then `timestamp`.
 
 ## 9. Participation fees — burning & verification
 
-The money layer is **burned fees** (anti-spam / skin in the game) and **feed tips** (§8.3).
+The money layer is **burned fees** (anti-spam / skin in the game) and **feed tips** (section 8.3).
 Each burn does real work: the **start** burn gates whether a wave is adoptable at all (the
-paid-wave gate, §9.3), and a **join** burn gates whether peers will ingest that participant's
-feed core (the ingest gate, §8.2). (Wire details: the paid-wave gate on
-`wave-announce`/`wave-start`/`wave-sync` §5; the ingest gate rides `wave-join` §8.2.)
+paid-wave gate, section 9.3), and a **join** burn gates whether peers will ingest that participant's
+feed core (the ingest gate, section 8.2). (Wire details: the paid-wave gate on
+`wave-announce`/`wave-start`/`wave-sync` section 5; the ingest gate rides `wave-join` section 8.2.)
 
 **The payment mechanism is pluggable** (the abstract `Wallet` interface, the `hyperwave-wallet` package). This
 section describes the flow with the default **Tron** wallet (native TRX burned to a black-hole
@@ -981,7 +981,7 @@ identical; only the mechanism behind the `Wallet` interface differs. See `docs/c
 
 A fee burn is attested by a signed proof. The **start** attestation is carried as the
 `paid` field on `wave-announce` / `wave-start` / `wave-sync`; a **join** attestation is
-carried as the `burn` field on `wave-join` (§8.2). It is **not** an on-wire feed entry:
+carried as the `burn` field on `wave-join` (section 8.2). It is **not** an on-wire feed entry:
 
 ```json
 {
@@ -1004,9 +1004,9 @@ keypair from the ring identity, so both are needed):
    The burn _itself names the wave + peer_ — a third party can confirm it, and it can't be an old
    burn replayed for another wave (each carries its own random `waveId`, unguessable in advance).
 2. **Ring attestation.** `sig` = Ed25519 by `peerId` over
-   `(waveId, peerId, reason, amount, burnRef, payerAddress, burnTs)` (§2.3) — binds the ring
+   `(waveId, peerId, reason, amount, burnRef, payerAddress, burnTs)` (section 2.3) — binds the ring
    participant to the burn. `validStartProof` admits the proof only if `sig` verifies, and a peer
-   then cross-checks the `burnRef` with the mechanism (`verifyBurnTx`) before joining (§9.2).
+   then cross-checks the `burnRef` with the mechanism (`verifyBurnTx`) before joining (section 9.2).
    (Cashu note: ecash is anonymous, so `payerAddress` is **not** re-checkable from the token —
    the payer binding rests on the memo's `peerId` + this ring signature.)
 
@@ -1036,14 +1036,14 @@ memo is part of the signed tx.
 
 A second binding ties the burn to the ring identity, since the Tron key that signs the tx is a
 **different keypair** from the peer's Ed25519 ring identity: the peer signs the attestation of
-§9.0 with its ring key. Both fees carry it — the **start** one as the `paid` proof (so
+section 9.0 with its ring key. Both fees carry it — the **start** one as the `paid` proof (so
 peers can gate wave adoption), the **join** one as the `wave-join` `burn` field (so **every
-peer** can gate whether it ingests that participant's feed core — §8.2).
+peer** can gate whether it ingests that participant's feed core — section 8.2).
 
 ### 9.3 Verification (who checks what, when)
 
 - **Before joining (every peer):** a `wave-announce` must carry the initiator's start
-  attestation (§9.0), validly signed — otherwise the announce is **ignored** (an unpaid wave
+  attestation (section 9.0), validly signed — otherwise the announce is **ignored** (an unpaid wave
   is invisible). Before a peer joins (and pays its own fee), it verifies the start burn
   **on-chain** — `verifyBurnTx`: the tx exists, is a `TransferContract` **to the black
   hole**, from the attested address, `amount ≥ fee`, and the **memo commits this `waveId`**.
@@ -1053,7 +1053,7 @@ peer** can gate whether it ingests that participant's feed core — §8.2).
 - **On each `wave-join` (every peer):** only the join's burn attestation **signature** is
   checked locally (`burnAuthorizes`, bound to peerId + wave) before ingesting that
   participant's feed core — ingest is **optimistic**, with deliberately **no on-chain call
-  on the ingest path** (§8.2). The burn is verified on-chain where it has value: by
+  on the ingest path** (section 8.2). The burn is verified on-chain where it has value: by
   tippers/auditors via the entry's `burnTx`.
 - **Anyone, later:** because every fee's memo is on-chain, a third party can audit the fees
   of any wave with nothing but a Tron node — no trust in anyone's bookkeeping required.
@@ -1063,20 +1063,20 @@ the gate (waves announce immediately, unpaid).
 
 ## 10. Constants (reference build)
 
-| Constant            | Value  | Meaning                                                                        |
-| ------------------- | ------ | ------------------------------------------------------------------------------ |
-| `HEARTBEAT_MS`      | 2000   | heartbeat cadence (liveness + tag)                                             |
-| `RINGUPDATE_MS`     | 4000   | seat-staleness + feed-pull maintenance cadence                                 |
-| `PEER_STALE_MS`     | 12000  | a peer with no heartbeat within this window is stale (dropped)                 |
-| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                          |
-| `SWEEP_LEAD_MS`     | 3000   | wave-start lead: `t0 = now + lead`, so the flooded start beats slot 0          |
-| `SLOT_MS`           | 400    | per-roster-member slot spacing target (`lapMs ≈ rosterSize × SLOT_MS`)         |
-| `MIN_LAP_MS`        | 4000   | lap floor (a tiny roster still sweeps visibly)                                 |
-| `MAX_LAP_MS`        | 60000  | lap cap; also the receiver's `t0` horizon clamp (§6.6)                         |
-| `END_GRACE_MS`      | 2000   | after the last slot, before every peer returns to idle                         |
-| `PAY_TIMEOUT_MS`    | 60000  | initiator abandons the wave if its start burn never confirms                   |
-| `GOSSIP_SEEN_CAP`   | 4096   | flood-dedup id cap (oldest evicted first)                                      |
-| `MAX_PAYLOAD_BYTES` | 262144 | per-entry serialized payload cap (bounds writes under optimistic ingest, §8.2) |
+| Constant            | Value  | Meaning                                                                               |
+| ------------------- | ------ | ------------------------------------------------------------------------------------- |
+| `HEARTBEAT_MS`      | 2000   | heartbeat cadence (liveness + tag)                                                    |
+| `RINGUPDATE_MS`     | 4000   | seat-staleness + feed-pull maintenance cadence                                        |
+| `PEER_STALE_MS`     | 12000  | a peer with no heartbeat within this window is stale (dropped)                        |
+| `LOBBY_MS`          | 15000  | lobby / opt-in window                                                                 |
+| `SWEEP_LEAD_MS`     | 3000   | wave-start lead: `t0 = now + lead`, so the flooded start beats slot 0                 |
+| `SLOT_MS`           | 400    | per-roster-member slot spacing target (`lapMs ≈ rosterSize × SLOT_MS`)                |
+| `MIN_LAP_MS`        | 4000   | lap floor (a tiny roster still sweeps visibly)                                        |
+| `MAX_LAP_MS`        | 60000  | lap cap; also the receiver's `t0` horizon clamp (section 6.6)                         |
+| `END_GRACE_MS`      | 2000   | after the last slot, before every peer returns to idle                                |
+| `PAY_TIMEOUT_MS`    | 60000  | initiator abandons the wave if its start burn never confirms                          |
+| `GOSSIP_SEEN_CAP`   | 4096   | flood-dedup id cap (oldest evicted first)                                             |
+| `MAX_PAYLOAD_BYTES` | 262144 | per-entry serialized payload cap (bounds writes under optimistic ingest, section 8.2) |
 
 These are timing/UX tunables, not wire-format; a compatible client should keep them in the
 same ballpark for interop but exact values aren't required to match. The exceptions are the
@@ -1089,9 +1089,9 @@ tuning.
 
 - **Angle/seat** is bound to the public key and can't be forged without grinding keys.
 - **Join attestations** authenticate each feed entry to a peer identity and to the writer
-  core it posted from (§2.2); the **schedule** is derived by every peer from the same flooded
+  core it posted from (section 2.2); the **schedule** is derived by every peer from the same flooded
   `by`/`writers`, so all honest peers agree on who fires when without trusting each other.
-- The **feed write-gate** is authenticity, not proof-of-participation (§8.2). A malicious
+- The **feed write-gate** is authenticity, not proof-of-participation (section 8.2). A malicious
   fork can drop/ignore anything locally (open P2P); the protocol keeps _honest_ peers
   consistent. There are **no sponsor rewards**, so there is nothing to steal by faking
   participation — the only money flows are burned fees (nobody profits) and voluntary tips
@@ -1106,7 +1106,7 @@ The transport (Noise over Hyperswarm) authenticates _who_ a message came from, b
 application logic must actually **use** that rather than trust self-reported fields. The
 following guards keep a hostile peer running a modified app from disrupting honest peers:
 
-- **Uniform envelope authenticity (§5.0).** Every message carries `origin`/`ts`/`sig`, and the
+- **Uniform envelope authenticity (section 5.0).** Every message carries `origin`/`ts`/`sig`, and the
   receive edge verifies the envelope `sig` (by `origin`) on **every** message before acting or
   relaying — one shared check, so a forgery can't be relayed and authenticity never depends on the
   connection a flooded message arrived over.
@@ -1116,18 +1116,18 @@ following guards keep a hostile peer running a modified app from disrupting hone
   `wave-*` messages are deliberately **not** connection-bound: they are relayed, so their `origin`
   is a third party at relay hops — the envelope `sig` (plus the domain attestations: start proof,
   `joinSig`) authenticates them instead.
-- **Message age bound / replay prevention (§5.0).** The receive edge drops (and never relays) any
+- **Message age bound / replay prevention (section 5.0).** The receive edge drops (and never relays) any
   message whose signed `ts` is older than `GOSSIP_MAX_AGE_MS` — a hard cap on flood circulation
   (independent of `mid` dedup) AND replay prevention (a captured message can't have its `ts`
   refreshed without the key). The start burn carries its own signed `burnTs` freshness window
   (`validStartProof`), so a stale burn reused in a fresh frame is also rejected.
 - **Self-certifying feed cores.** A `wave-join`'s credential is signed over
-  `(waveId, peerId, writerKey)` (§2.2), so a relay can't forge or substitute a core key under
+  `(waveId, peerId, writerKey)` (section 2.2), so a relay can't forge or substitute a core key under
   someone else's `peerId` and hijack that peer's feed seat — and there is **no shared
-  feed key** to attack in the first place (each participant owns its own core, §8.1). The
+  feed key** to attack in the first place (each participant owns its own core, section 8.1). The
   same signature is re-verified deterministically by `mergeFeed()` on every entry.
 - **Hostile wave-start clamps.** A receiver caps `lapMs` at `MAX_LAP_MS` and ignores a start
-  whose `t0` is more than `MAX_LAP_MS` in the future (§6.6), so a forged/buggy start can't
+  whose `t0` is more than `MAX_LAP_MS` in the future (section 6.6), so a forged/buggy start can't
   wedge a wave open indefinitely — the deterministic end always arrives.
 - **Canonical-roster schedule.** The sweep schedule is a pure function of the flooded
   `(origin + writers, t0, lapMs)`, so no peer can shift its own (or anyone's) slot without
@@ -1139,13 +1139,13 @@ following guards keep a hostile peer running a modified app from disrupting hone
 - **Optimistic per-peer ingest, bounded locally.** Ingesting a participant's core requires a
   valid join attestation and (when enforced) a _signed_ burn attestation, checked by **every
   peer** on each `wave-join`, but with **no on-chain check on the ingest path** (that would be
-  O(N) reads per peer, §8.2). Spam is bounded deterministically instead — **block-0-only
+  O(N) reads per peer, section 8.2). Spam is bounded deterministically instead — **block-0-only
   download → one entry per peer + a byte-size cap** — and the burn is verified where it has
   value: by tippers/auditors via `burnTx`. Trade-off: the hard "no unpaid write" gate becomes
   a **soft, publicly-detectable** one.
 - **Burn-bound tip address + one entry per peer.** `mergeFeed()` deterministically keeps a
   entry's tip `address` only if a signed burn names that wallet, and folds one entry per peer
-  (§8.2) — so tips can't be routed to a non-payer and a seat can't bloat the feed.
+  (section 8.2) — so tips can't be routed to a non-payer and a seat can't bloat the feed.
 - **Cheap-before-expensive.** Adoption runs the cheap wave-filter (`canAdopt`) and flood
   dedup before any signature verification, limiting the CPU a gossip flood can extract.
 - **Per-connection rate limit (`rate-limiter.js`).** Each connection gets its own token bucket
@@ -1155,7 +1155,7 @@ following guards keep a hostile peer running a modified app from disrupting hone
   refill rate (+ a burst). It's per-connection on purpose: the flood is epidemic, so throttling one
   noisy link never blackholes a message (a dropped relay re-arrives from another neighbour), and one
   attacker can't drain a budget shared across honest peers. This bounds _how many_ joins/entries a
-  single peer can push at the optimistic-ingest edge (§8.2), pairing with the deterministic feed
+  single peer can push at the optimistic-ingest edge (section 8.2), pairing with the deterministic feed
   bounds (block-0-only + byte cap) to make a valid-key holder's flood rate-limited as well as
   size-limited.
 - **Per-author flood cap (`rate-limiter.js` `KeyedRateLimiter`).** The per-connection limiter charges
@@ -1179,8 +1179,8 @@ following guards keep a hostile peer running a modified app from disrupting hone
   `wave-start`, is ~77 KB), so an over-cap frame is hostile/corrupt and the connection is
   **destroyed**, not merely the frame dropped — bounding a peer to at most one such frame per
   connection (reconnection is gated by the peer-table churn cooldown + the DHT). Determinism is
-  preserved because the sweep derives from the single flooded `wave-start`, not local `writers` (§6).
-  Caveat (see §11.3): this bounds _processing_ and _sustained_ abuse, not the single transport-level
+  preserved because the sweep derives from the single flooded `wave-start`, not local `writers` (section 6).
+  Caveat (see section 11.3): this bounds _processing_ and _sustained_ abuse, not the single transport-level
   allocation.
 
 ### 11.3 Known residual risks (hardening backlog)
@@ -1197,13 +1197,13 @@ following guards keep a hostile peer running a modified app from disrupting hone
   it is not set — that swarm's other protocols may use larger messages, so the host owns its cap.)
   The patch is anchored on exact source lines and idempotent, so a secret-stream upgrade that moves
   them fails loudly (a build warning + a failing `secret-stream-patch` test) rather than silently
-  dropping the guard. Above this, §11.2's receive-edge frame cap (256 KB, disconnect) still bounds
+  dropping the guard. Above this, section 11.2's receive-edge frame cap (256 KB, disconnect) still bounds
   gossip _processing_ + sustained abuse. Residual: the one legitimate-shape allocation up to the
   configured cap (1 MB) — the price of not forking the wire — recoverable and `maxPeers`-bounded.
 - **Optimistic ingest is a soft gate.** Since the burn isn't checked on the ingest path
-  (§8.2), the feed can hold unpaid entries until they're caught (a tipper / an auditor via
+  (section 8.2), the feed can hold unpaid entries until they're caught (a tipper / an auditor via
   `burnTx`). They are detectable, but they _do_ consume (bounded) storage. Acceptable for the
-  MVP scale; the per-connection rate limit (§11.2) now caps how fast such entries can be pushed.
+  MVP scale; the per-connection rate limit (section 11.2) now caps how fast such entries can be pushed.
 - **Clock skew shifts the choreography.** Slots and the deterministic end are wall-clock
   epoch times; a peer with a badly skewed clock fires early/late (a cosmetic wobble) and ends
   off-beat. `END_GRACE_MS` absorbs ordinary skew; there is no time-sync protocol.
@@ -1216,10 +1216,10 @@ following guards keep a hostile peer running a modified app from disrupting hone
 
 The reference build splits worker (protocol) from renderer (UI); they exchange these over
 a local IPC bridge — the **`bare-rpc` host↔UI seam**, JSON-encoded (request/response for
-`tip`/`send-trx`/`fetch-transactions`, one-way events otherwise; see `usage.md` §12). It kept
+`tip`/`send-trx`/`fetch-transactions`, one-way events otherwise; see `usage.md` section 12). It kept
 JSON (rather than a schema'd binary encoding) precisely because a single-build IPC has no version
-skew for a schema to solve — the opposite trade-off from the gossip wire in §3, for the opposite
-reason. A different client would have its own UI and need not match these — only §3–§8 are the
+skew for a schema to solve — the opposite trade-off from the gossip wire in section 3, for the opposite
+reason. A different client would have its own UI and need not match these — only section 3–section 8 are the
 interop surface.
 
 **Renderer → worker (commands):** `start-wave`, `join-wave`, `subscribe-wave {waveId}` /

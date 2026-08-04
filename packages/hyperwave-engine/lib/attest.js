@@ -33,7 +33,7 @@ const b4a = require('b4a');
 // The payment key that signed the burn is a *different* keypair, so this ring-key signature is
 // what ties the burn to the ring participant. Used for the paid-wave anti-spam gate: the
 // initiator's start proof rides `wave-announce`, and peers cross-check its burnRef with the
-// payment mechanism (destination, amount, memo commits waveId) before joining. (§ protocol.md §9)
+// payment mechanism (destination, amount, memo commits waveId) before joining. (see protocol.md section 9)
 /**
  * Hash the burn attestation tuple that the peer signs with its ring key.
  * @param {BurnFields} fields - The burn attestation fields.
@@ -197,7 +197,7 @@ function verifyJoin({ waveId, peerId, writerKey }, sigHex) {
 // connection a flooded message arrived over, and the signed `ts` gives every message a
 // hard age bound (a replayed message can't have its timestamp refreshed without the key).
 // The domain attestations above (join, burn) still bind their own tuples; the envelope `sig`
-// additionally authenticates the message as a whole. (§ protocol.md §5.0)
+// additionally authenticates the message as a whole. (see protocol.md section 5.0)
 
 /**
  * Deterministically serialize any JSON value with object keys sorted recursively, so the

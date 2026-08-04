@@ -5,7 +5,7 @@
 // message BEFORE decryption hands the plaintext to Protomux / our receive edge — and it exposes no
 // option to cap that. So a hostile peer can force a ~16 MB allocation per frame it pushes, on the
 // gossip channel AND the shared Hypercore replication channel, before any app-level check runs
-// (protocol.md §11.3). This teaches secret-stream an opt-in `maxMessageSize`: it rejects an
+// (protocol.md section 11.3). This teaches secret-stream an opt-in `maxMessageSize`: it rejects an
 // oversized message AT the length-prefix read, before the allocation. wave.js sets it per
 // connection (on an engine-owned swarm) so both channels refuse an oversized frame without
 // allocating it.

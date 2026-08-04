@@ -7,12 +7,13 @@ Chaumian ecash on a Lightning-connected mint — implemented in its own package,
 one via `createEngine({ deps: { createPayments: createCashuWallet } })`). The Tron
 (TRX) + TRC-20 USDT wallets live in `packages/hyperwave-wallet-tron/`. This doc
 covers the Cashu mechanism; the on-wire protocol is unchanged (see
-`packages/hyperwave-engine/docs/protocol.md` §9).
+`packages/hyperwave-engine/docs/protocol.md` section 9).
 
 ## Why it fits the money model
 
 The rules don't change: **burned participation fees + gallery tips, no sponsor
-rewards, testnet only.** Cashu maps each concept onto ecash without touching the
+rewards; a test mint by default, real mainnet mints only if the peer picks one.**
+Cashu maps each concept onto ecash without touching the
 gossip protocol — everything rides the existing opaque wire fields (`walletType`,
 the `paid`/`burn` attestations, `address`, `fee`).
 
@@ -126,13 +127,13 @@ renderer list):
 - **testnut** (`testnut.cashu.space`) + **testnut · no fees**
   (`nofee.testnut.cashu.space`) — the free TEST mints (auto-pay, no real
   Lightning). The default; play money.
-- **⚠ Minibits** (`mint.minibits.cash/Bitcoin`) and **⚠ Coinos**
-  (`mint.coinos.io`) — real, reputable **mainnet** Lightning mints (verified via
-  `/v1/info`: bolt11 mint+melt, NUT-07/11/12). Selecting one means **REAL sats** —
-  Top up pays a real invoice, burns/tips move real funds. They're the only way to
-  actually settle cross-mint tips (`consolidate`), which fake mints can't do. This
-  sits in tension with the project's testnet-only rule, so they're clearly
-  labelled and never the default.
+- **Minibits** (`mint.minibits.cash/Bitcoin`), **21Mint** (`21mint.me`) and
+  **Coinos** (`mint.coinos.io`) — real, reputable **mainnet** Lightning mints
+  (verified via `/v1/info`: bolt11 mint+melt, NUT-07/11/12). Selecting one means
+  **REAL sats** — Top up pays a real invoice, burns/tips move real funds. They're
+  the only way to actually settle cross-mint tips (`consolidate`), which fake
+  mints can't do. They're clearly labelled `mainnet · REAL sats`, and a test mint
+  stays the default, so real money is never reached by accident.
 
 ## Cashu is stateful — the proof store
 

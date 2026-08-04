@@ -6,13 +6,13 @@ values into the Bare worker over the IPC pipe (`workers/hyperwave.js` is now ini
 like the mobile worklet). No engine change was needed — the injection seam already existed. The
 plaintext-file path remains only as the **headless / dev / no-keychain fallback**.
 
-**Bootstrapping chose option (B), not (A):** main generates the seeds itself. §6 recommended (A)
+**Bootstrapping chose option (B), not (A):** main generates the seeds itself. section 6 recommended (A)
 "worker generates, main persists" to avoid duplicating WDK's seed logic — but WDK's generator IS the
 standard `bip39` lib (`bip39@3.1.0`, verified: `getRandomSeedPhrase` → `bip39.generateMnemonic`, and
 `WalletAccountTron` validates with `bip39.validateMnemonic`). So main mints a fully WDK-compatible
 mnemonic with the same `bip39` (proven end-to-end: a `generateMnemonic()` seed derives a valid Tron
 address through WDK), plus a 32-byte hex swarm seed — no report-seed round-trip, and the engine stays
-untouched. The rest of this note is the original design; §6/§9 annotated with what shipped.
+untouched. The rest of this note is the original design; section 6/section 9 annotated with what shipped.
 
 Read [`hosting.md`](./hosting.md) and [`protocol.md`](../../packages/hyperwave-engine/docs/protocol.md) first.
 
@@ -48,9 +48,10 @@ What we want the store to defend against, and where the ceiling honestly is:
 - **A compromised app process.** If the running app is subverted, it already holds the decrypted
   seed in memory.
 
-**Context:** HyperWave is **testnet-only** (native TRX on Nile, faucet-funded, no real value), so
-today's exposure is low-stakes. This design is the right foundation _if_ it ever touches mainnet,
-and it aligns desktop with the mobile secure-storage plan — not an urgent security fix.
+**Context:** the default is test money (a free Cashu test mint; the Tron wallet is faucet-funded
+Nile), so a default install is low-stakes. But a peer CAN select a real mainnet Cashu mint, at
+which point the seeds guard real funds — which is exactly why this design exists, and why it
+aligns desktop with the mobile secure-storage plan.
 
 ## 3. Options considered
 
@@ -64,7 +65,7 @@ and it aligns desktop with the mobile secure-storage plan — not an urgent secu
 3. **App-level passphrase (KDF).** Encrypt the seed with a key derived from a user password. Strong
    against same-user malware (the key isn't at rest), but adds a password UX and a lost-password =
    lost-wallet failure mode. Out of scope for now; could layer on later.
-4. **Do nothing** (status quo plaintext). Rejected — see §1.
+4. **Do nothing** (status quo plaintext). Rejected — see section 1.
 
 ## 4. The architectural catch
 
@@ -103,7 +104,7 @@ Flow:
 
 1. **On worker spawn, main resolves the seeds.** For each of wallet / swarm: read
    `<userData>/<name>.seed.enc`; if present, `safeStorage.decryptString` → seed. If absent, this is
-   first run — see §6 for who generates.
+   first run — see section 6 for who generates.
 2. **Main delivers the seeds to the worker over the IPC pipe**, _not_ argv/env (argv and env are
    visible to `ps` / other processes — a secret must never ride them). This requires the desktop
    worker to **wait for an init message** carrying the config, rather than booting immediately from
@@ -181,7 +182,7 @@ would be worse than today — it would _imply_ security we don't have. Also gate
   round-trip, and whether main or worker decides "first run."
 - **Swarm-seed injection through `engine.js`:** confirm `config.swarmSeed` is the name we want on the
   host config (parallel to `config.seed` for the wallet).
-- **Do we want the passphrase layer (§3.3)** as a follow-up for same-user-malware resistance, or is
+- **Do we want the passphrase layer (section 3.3)** as a follow-up for same-user-malware resistance, or is
   keychain-at-rest sufficient for the project's scope?
 - **Windows/macOS signing:** the same-user-malware ceiling only tightens with a properly
   code-signed build + keychain ACL — track alongside the distributable build work.

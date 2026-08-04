@@ -46,7 +46,7 @@ The global "wave of moments" product and how the two hosts wrap the engine.
   renderer↔worker IPC seam, the module map, and where logic lives. (Formerly `architecture.md`.)
 - [cashu.md](./cashu.md) — the **Cashu (ecash) payment mechanism**, the desktop
   default: NUMS-pubkey burns, mint-signed memos, per-peer mint choice, redeemable multimint
-  tips, funding, and the (custodial) trust model. The protocol is unchanged (see protocol.md §9).
+  tips, funding, and the (custodial) trust model. The protocol is unchanged (see protocol.md section 9).
 - [secure-seed-storage.md](./secure-seed-storage.md) — design for moving desktop
   secret storage (wallet + swarm seeds) to the OS keychain (planned, not built).
 

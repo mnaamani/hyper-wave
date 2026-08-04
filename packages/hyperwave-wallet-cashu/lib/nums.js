@@ -10,7 +10,7 @@
 const b4a = require('b4a');
 
 // The domain the burn key commits to. FROZEN — changing it changes the burn
-// address, so every peer must derive the same string. (protocol.md payments §)
+// address, so every peer must derive the same string. (protocol.md, payments section)
 const NUMS_DOMAIN = 'hyperwave:burn:v1';
 
 let cached = null;

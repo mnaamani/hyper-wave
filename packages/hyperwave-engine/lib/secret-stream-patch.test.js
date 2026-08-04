@@ -1,7 +1,7 @@
 // Verifies the vendored @hyperswarm/secret-stream security patch (scripts/patch-secret-stream.js,
 // applied at postinstall) is present AND behaves: the transport rejects an oversized message AT the
 // 3-byte length prefix, before it allocUnsafe's the (attacker-declared) body — closing the ~16 MB
-// allocation vector (protocol.md §11.3). Doubles as a CI guard: if a secret-stream upgrade drops the
+// allocation vector (protocol.md section 11.3). Doubles as a CI guard: if a secret-stream upgrade drops the
 // patch, these fail loudly rather than the protection silently vanishing. Runs under Bare:
 //   bare lib/secret-stream-patch.test.js   (or `npm test`)
 const test = require('brittle');

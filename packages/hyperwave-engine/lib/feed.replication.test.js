@@ -1,5 +1,5 @@
 // Transitive feed replication over a PARTIAL mesh (line topology), no swarm,
-// for the multicore CRDT feed (protocol.md §8). Peers are wired
+// for the multicore CRDT feed (protocol.md section 8). Peers are wired
 // A<->B and B<->C but NOT A<->C, so A and C are never directly connected. We assert the
 // per-participant cores replicate *transitively*: C converges to A's entry purely by
 // forwarding through B, and A likewise receives C's — Corestore serves any core it

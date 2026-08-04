@@ -2,7 +2,7 @@
 
 Refinement backlog, roughly prioritized. Design context in `docs/idea.md`;
 engine spec in `packages/hyperwave-engine/docs/protocol.md`, app docs in `docs/`; demo script in
-`README.md` §Demo, and the phone checklist in `mobile/README.md` §Manual device checklist.
+`README.md` section "Demo", and the phone checklist in `mobile/README.md` section "Manual device checklist".
 
 ## Done
 
@@ -11,7 +11,7 @@ Completed work is not itemized here — the current system is described in
 change history (the token walk → deterministic sweep, Chord → pinless mesh,
 Autobase indexer → multicore CRDT gallery, sponsor-rewards + peer-roles
 removal, the WDK/Cashu payment layer, the 128-peer scale campaign, adversarial
-hardening §11.2, e2e tiers) is in git.
+hardening section 11.2, e2e tiers) is in git.
 
 ## Backlog
 
@@ -33,7 +33,7 @@ hardening §11.2, e2e tiers) is in git.
 ### Propagation at extreme scale (Phase 5 — DECIDED: the sweep is built)
 
 The deterministic angular sweep replaced the serial token entirely (see the Done
-section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining scale work:
+section above and `packages/hyperwave-engine/docs/protocol.md` section 6). Remaining scale work:
 
 > **Reframed by scaling.md Phases 1–3 (2026-07-16).** The adopted answer to "large N on one
 > topic" is **sharding across concurrent waves** + a subscription layer (O(subscribed) core
@@ -58,7 +58,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       `wave-start` carry only ids the receiver back-fills (loses self-containedness — a start
       adopter would need a follow-up sync). Measure before doing any of it.
 
-### Adversarial hardening still open (`packages/hyperwave-engine/docs/protocol.md` §11.3)
+### Adversarial hardening still open (`packages/hyperwave-engine/docs/protocol.md` section 11.3)
 
 - [~] **Automated coverage for the paid gate — PARTIALLY DONE (2026-07-16).** Done: the pure
   gate predicate `startProofValid` + the freshness/replay window (`attest.test.js`),
@@ -101,13 +101,13 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       and trivially cacheable, but it's the last per-participant on-chain read. Left as-is (it's
       the anti-_wave_-spam gate; making it optimistic would re-open free wave-spam).
 - [x] **Uniform gossip message envelope: `origin` + `sig` + `ts` on every message — DONE
-      (2026-07-16).** Every message now carries the envelope (protocol.md §5.0, `attest.js`
+      (2026-07-16).** Every message now carries the envelope (protocol.md section 5.0, `attest.js`
       `signMessage`/`verifyMessage`/`stableStringify`, stamped at wave.js's `originate()` choke
       point): (1) **`origin`** replaced the per-kind `id`/`by`/`peerId` author field everywhere
       (the only surviving `by` is wave-sync's INITIATOR, distinct from the sync's sender-origin);
       (2) **`sig`** — Ed25519 by `origin` over the canonical (recursively key-sorted) message minus
       `sig`, verified on every message at the receive edge before acting/relaying, so a forgery
-      can't be amplified and identity binding (§11.2) is now one shared check; (3) **`ts`** — the
+      can't be amplified and identity binding (section 11.2) is now one shared check; (3) **`ts`** — the
       receive edge drops/never-relays a message older than `GOSSIP_MAX_AGE_MS` (5 min) or too far
       future (`CLOCK_SKEW_MS`) — the hard flood-circulation cap + replay prevention. Enabled the
       catch-up simplification (forward the initiator's stored signed announce verbatim; dropped the
@@ -135,7 +135,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
       was considered and **rejected**: it breaks the self-containment `writers` exists to provide (a
       peer that missed a join can't resolve its prefix) and prefix resolution against per-peer-
       divergent id sets is ambiguous + grindable (peerIds gate feed writes + tips) — see
-      `protocol.md` §5 `wave-start`. Likewise, `writers` can't be dropped in favour of deriving the
+      `protocol.md` section 5 `wave-start`. Likewise, `writers` can't be dropped in favour of deriving the
       roster from received `wave-join` floods: flood delivery is racy, so per-peer rosters would
       diverge and desync the deterministic sweep — the initiator's snapshot is the consensus. Note
       the bigger byte win at scale is orthogonal to gossip: the feed moment is a base64 dataURL
@@ -287,7 +287,7 @@ section above and `packages/hyperwave-engine/docs/protocol.md` §6). Remaining s
         joins the directory topic. Needed a JDK 17 (the RN plugin's toolchain — without it Gradle's
         foojay fallback crashes on Gradle 9), both NDKs RN and AGP ask for, `minSdkVersion` 29 (now
         in `app.json` via `expo-build-properties`, since `react-native-bare-kit` requires it), and a
-        system image + AVD. Full diagnosis in `mobile/README.md` §Android.
+        system image + AVD. Full diagnosis in `mobile/README.md` section "Android".
   - [~] **Exercise the FEATURES on Android — mostly DONE (2026-07-30).** Verified on the emulator
     against a headless peer: onboarding + the country switcher (Cancel is non-destructive),
     wave start with the paid gate (`burned 2 sat`, balance steps down), the wave chip strip
@@ -310,7 +310,7 @@ emulator"}` — and renders on the phone's own chip. A tip moved the balance 67 
         (5 + a 1-sat swap fee) and produced the full choreography at the far end: a private `dm`
         carrying the P2PK token to the recipient, plus the stripped `note` ({kind:tip, amount:5},
         no token, no recipient) on the flood.
-  - [x] **AVD resourcing — DOCUMENTED (2026-07-31), `mobile/README.md` §Android step 5.** A test
+  - [x] **AVD resourcing — DOCUMENTED (2026-07-31), `mobile/README.md` section "Android" step 5.** A test
         AVD needs a GPU (`hw.gpu.enabled = yes` / `hw.gpu.mode = host`) AND more than
         `avdmanager`'s defaults (1536 MB / 4 cores → 4096 MB, `vm.heapSize = 512`, 6 cores), then
         a cold boot. Under either shortfall the app ANRs ("HyperWave isn't responding"), which
@@ -320,10 +320,10 @@ emulator"}` — and renders on the phone's own chip. A tip moved the balance 67 
   - [ ] **AVD camera setup** — map the host webcam to the FRONT camera only
         (`hw.camera.front = webcam0`, `hw.camera.back = emulated`). Pointing the same webcam at
         both makes the emulator expose only a back camera, and `Capture.js` asks for
-        `facing='front'`, so the preview is black. Belongs in `mobile/README.md` §Android.
+        `facing='front'`, so the preview is black. Belongs in `mobile/README.md` section "Android".
   - [ ] **Verify on real hardware**: a real camera frame (the iOS simulator has none — the
         Android emulator's webcam covers this now, see above) and a successful cash-out melt
-        against a payable bolt11. `mobile/README.md` §Manual device checklist is the script.
+        against a payable bolt11. `mobile/README.md` section "Manual device checklist" is the script.
   - [~] **iOS re-run after the feed-scroll fix — PARTLY DONE (2026-07-30).** The app boots on the
     iPhone 16e sim with the current JS and worklet bundle, and OBSERVABLE changes check out:
     the `sats` plural in the balance chip, the wave-message input, and a remote wave's message

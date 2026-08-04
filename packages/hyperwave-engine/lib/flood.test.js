@@ -1,4 +1,4 @@
-// Partial-topology harness for gossip flooding (protocol.md §3.1). Hyperswarm
+// Partial-topology harness for gossip flooding (protocol.md section 3.1). Hyperswarm
 // full-meshes small swarms, so we can't force a partial mesh through the real
 // transport — instead we drive the *real* per-node flood decision (Flood) over
 // synthetic graphs (line, ring, star, random partial mesh, disconnected) and assert:

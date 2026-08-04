@@ -45,7 +45,7 @@ _is_ the shard key.
 
 A second unlock makes this clean: **the sweep needs only the per-wave roster, never the global
 ring.** Each id's seat angle is intrinsic (`angleOf(id)`), not relative to other seats — so a wave's
-schedule is derived from its own roster alone (see `protocol.md` §6). Per-wave rosters are bounded,
+schedule is derived from its own roster alone (see `protocol.md` section 6). Per-wave rosters are bounded,
 and the global O(N) membership ring becomes **optional** — a visualization nicety, not a correctness
 requirement.
 
@@ -61,7 +61,7 @@ status; `CrdtFeed` holds every engaged wave's feed at once and emits `onFeed(wav
 gossip wire is already keyed by `waveId`, so it is unchanged — this was a state-management refactor.
 The public command surface stays backwards-compatible: `join(waveId?)` / `stageEntry({waveId?})`
 default to the newest joinable / joined wave, and the host's `feed` message gains an additive
-`waveId`. Control gossip still floods to every peer on the topic (that is §4.3, Phase 3).
+`waveId`. Control gossip still floods to every peer on the topic (that is section 4.3, Phase 3).
 
 ### 4.2 Subscription layer (the new concept)
 
@@ -131,7 +131,7 @@ Each phase is independently shippable and testable:
   per-wave. Is there one global ring of participants, or a ring _per_ wave? A product/theme call.
 - **Drops the "exactly one wave at a time" rule** and the singleton FSM.
 - **Drops "every peer holds every core" as a _global_ property** — it is preserved _per wave_.
-- **The directory-at-scale problem is new** (§4.4).
+- **The directory-at-scale problem is new** (section 4.4).
 
 ## 7. Invariants preserved
 
@@ -142,7 +142,8 @@ Each phase is independently shippable and testable:
 - **Deterministic sweep** and its per-wave canonical roster snapshot (`wave-start.writers`) are
   unchanged — determinism was always per-wave.
 - **Byte-identical, no-indexer feed** is preserved **within each bounded wave** — the whole point.
-- **Testnet only**, JSON gossip wire (subject to the §3 encoding note in `protocol.md`).
+- **Payments unchanged** (the engine is payment-agnostic), JSON gossip wire (subject to the section 3
+  encoding note in `protocol.md`).
 
 ## 8. Alternative considered — scale a _single_ wave to thousands
 
@@ -162,10 +163,10 @@ where it is cheap.
 - **Cross-wave identity/reputation**: out of scope — money and credentials stay per-wave, which also
   keeps sybil surface bounded per wave.
 - **`wave-start` compression** is now optional — the roster cap (`MAX_WRITERS` = 256, `protocol.md`
-  §5) bounds a single wave's `writers` payload to a constant, so deflate is an efficiency nicety, not
+  section 5) bounds a single wave's `writers` payload to a constant, so deflate is an efficiency nicety, not
   a scale requirement (TODO backlog).
 
 ---
 
-_See also:_ [`protocol.md`](./protocol.md) (current single-wave spec — §5 `wave-start`, §6 the
-sweep, §8 the feed), and the "compress O(N) gossip" entry in [`../../../TODO.md`](../../../TODO.md).
+_See also:_ [`protocol.md`](./protocol.md) (current single-wave spec — section 5 `wave-start`, section 6 the
+sweep, section 8 the feed), and the "compress O(N) gossip" entry in [`../../../TODO.md`](../../../TODO.md).

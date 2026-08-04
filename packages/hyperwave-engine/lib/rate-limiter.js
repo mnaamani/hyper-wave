@@ -1,4 +1,4 @@
-// A per-connection token-bucket rate limiter (protocol.md §11). The gossip receive edge is cheap
+// A per-connection token-bucket rate limiter (protocol.md section 11). The gossip receive edge is cheap
 // to reject on — but not free: every shaped frame costs a JSON.parse + an Ed25519 signature verify
 // before it can be dropped, so a peer blasting validly-framed junk can burn a node's CPU. This caps
 // the RATE at which a single connection can make us do that work: over-budget frames are dropped
@@ -15,7 +15,7 @@
 //
 // `KeyedRateLimiter` (below) is the same bucket keyed by an arbitrary key instead of the
 // connection — wave.js keys it on the authenticated message `origin` for the per-AUTHOR flood cap
-// (protocol.md §11), the complement to the per-connection one.
+// (protocol.md section 11), the complement to the per-connection one.
 
 /**
  * A lazy token-bucket rate limiter: `capacity` tokens, refilled at `refillPerSec`, one spent per
@@ -76,7 +76,7 @@ class RateLimiter {
 /**
  * A rate limiter keyed by an arbitrary key (e.g. a message `origin`) — one {@link RateLimiter}
  * bucket per key, so each key gets its own independent budget. Used for the per-ORIGIN flood cap
- * (protocol.md §11): the per-connection limiter charges whoever RELAYS a frame, but a flooded
+ * (protocol.md section 11): the per-connection limiter charges whoever RELAYS a frame, but a flooded
  * message's authenticated `origin` is a third party at every relay hop, so a spammy author's floods
  * ride honest relayers outward uncharged. Keying the budget on the (signed, unspoofable) `origin`
  * makes every honest peer independently throttle that author, so the flood dies instead of

@@ -91,7 +91,7 @@ const PEER_STALE_MS = 12000; // a peer whose last heartbeat is older than this i
 // Lobby: after "start", the wave is announced and peers get this long to opt in
 // (get ready / opt in) before the sweep starts.
 const LOBBY_MS = 15000;
-// The sweep (protocol.md §6): the initiator's wave-start carries `t0` (epoch
+// The sweep (protocol.md section 6): the initiator's wave-start carries `t0` (epoch
 // ms, a short lead so the flooded start reaches everyone before the first slot fires)
 // and `lapMs`; every roster peer self-triggers at its own angle-ordered slot. Wall-clock
 // is a CHOSEN constant regardless of N — no token, no per-hop round-trips, no healing
@@ -106,7 +106,7 @@ const END_GRACE_MS = 2000; // after the last slot, before every peer returns to 
 // (flood.js), so a straggling duplicate of a very old message might re-flood once —
 // harmless and very rare.
 const GOSSIP_SEEN_CAP = 4096;
-// Per-connection gossip rate limit (rate-limiter.js, protocol.md §11): a token bucket that drops a
+// Per-connection gossip rate limit (rate-limiter.js, protocol.md section 11): a token bucket that drops a
 // connection's over-budget frames BEFORE the parse + signature verify, capping the CPU a single
 // peer can force us to spend on junk. Sized well above real traffic (a connection sees a heartbeat
 // every 2s + bursty flood relays bounded by peers×waves — tens at most) but far below a blast:
@@ -115,7 +115,7 @@ const GOSSIP_SEEN_CAP = 4096;
 // the epidemic flood re-delivers a dropped relay from another neighbour.
 const GOSSIP_BURST = 256; // bucket capacity (max burst)
 const GOSSIP_RATE_PER_SEC = 64; // sustained frames/sec per connection
-// Per-AUTHOR flood cap (rate-limiter.js KeyedRateLimiter, protocol.md §11): the complement to the
+// Per-AUTHOR flood cap (rate-limiter.js KeyedRateLimiter, protocol.md section 11): the complement to the
 // per-connection limiter. A flooded message's authenticated `origin` is a third party at every
 // relay hop, so the per-connection budget charges whoever RELAYS it, not the spammy author —
 // letting one author's floods ride honest relayers outward. Keying a bucket on the (signed,
@@ -156,7 +156,7 @@ const PAY_TIMEOUT_MS = 60000;
 // momentary foreign-mint blip can't permanently kill an honest cross-mint wave (verifyStartProof).
 const VERIFY_MAX_RETRIES = 3; // 3 retries at 1.5s / 3s / 4.5s ≈ 9s, well within the lobby window
 const VERIFY_RETRY_MS = 1500;
-// Envelope age bound (protocol.md §5.0): a message whose signed `ts` is older than this is
+// Envelope age bound (protocol.md section 5.0): a message whose signed `ts` is older than this is
 // dropped at the receive edge (and never relayed). This is a HARD cap on how long any flooded
 // message can circulate — independent of `mid` dedup — so a routing loop / dedup-set bug can't
 // amplify into unbounded flooding, AND a captured message can't be replayed later (its `ts` is
@@ -384,7 +384,7 @@ function createWave({
   const flood = new Flood({ cap: GOSSIP_SEEN_CAP }); // flood dedup for relayed control msgs
   // Per-author flood budget: caps how many distinct floods a single (authenticated) origin can push
   // through me before I stop relaying/processing them — the anti-amplification complement to the
-  // per-connection rate limiter (protocol.md §11).
+  // per-connection rate limiter (protocol.md section 11).
   const originFlood = new KeyedRateLimiter({
     capacity: FLOOD_ORIGIN_BURST,
     refillPerSec: FLOOD_ORIGIN_RATE_PER_SEC,
@@ -576,7 +576,7 @@ function createWave({
       // Per-author flood cap: charge this distinct flood (checked AFTER dedup, so it counts genuine
       // originations, not re-sightings) against its authenticated `origin`'s budget. An over-budget
       // author's excess floods are dropped here — never relayed, never processed — so a spammy
-      // author can't amplify across the subgraph on honest relayers' backs (protocol.md §11).
+      // author can't amplify across the subgraph on honest relayers' backs (protocol.md section 11).
       if (!originFlood.allow(msg.origin, Date.now())) {
         return;
       }
@@ -1360,7 +1360,7 @@ function createWave({
       // divergence).
       writers: new Map(),
       // The wave's payment-mechanism id (set on a paid wave — by me if I'm the initiator, else
-      // learned from the announce/start/sync). join() blocks if I can't support it (§ join).
+      // learned from the announce/start/sync). join() blocks if I can't support it (see join()).
       walletType,
       // The wave's participation fee, SET BY THE INITIATOR (mine → myFee; else learned from the
       // announce/start/sync). Every joiner burns exactly this (payFee via feeFor), and verifiers
@@ -2099,7 +2099,7 @@ function createWave({
         // message from its own 3-byte length prefix — up to ~16 MB — before this callback runs, and
         // exposes no lower cap), but disconnecting stops a peer SUSTAINING it: reconnection is gated
         // by the peer-table churn cooldown + the DHT. This guards the gossip channel; replication
-        // rides its own protomux channel and is bounded by Hypercore + the transport ceiling (§11.3).
+        // rides its own protomux channel and is bounded by Hypercore + the transport ceiling (section 11.3).
         // `.length` is UTF-16 units — gossip is ASCII (hex + JSON; tags ≤8 chars), so it tracks bytes.
         if (str.length > MAX_FRAME_BYTES) {
           log(

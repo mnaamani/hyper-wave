@@ -226,7 +226,7 @@ Tracked in detail in `../implement-mobile-app.md`:
 - ~~An Android BUILD~~ — **DONE (2026-07-29): the APK builds, installs and runs on an emulator**,
   with the worklet booting the full stack (`engine up` → `cashu wallet ready` → `joined directory
 topic`). Bare's addons `dlopen` on Android, which is what `link-android-addons.mjs` exists for.
-  See §Android below for the four things that had to be true first.
+  See section "Android" below for the four things that had to be true first.
 - **Discovery** — no local DHT on device; you're on the public DHT (~20–35s cold). Pin a
   well-known bootstrap peer via `config.bootstrap` to speed a demo.
 - **Background lifecycle** — `useEngine` wires RN `AppState` → `Worklet.update(state)`, so the Bare

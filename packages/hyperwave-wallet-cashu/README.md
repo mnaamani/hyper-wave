@@ -61,9 +61,12 @@ repo for the full money model.
 CommonJS; runs under [Bare](https://github.com/holepunchto/bare) (the shims bridge cashu-ts's
 web APIs) and Node.
 
-## Testnet only
+## Test mint by default, mainnet on request
 
-Ecash on a testnet Lightning mint; no real value. Do not point it at a production mint with
-real funds.
+The default mint is a free TEST mint (auto-paying, no real Lightning — play money). The curated
+list also ships real **mainnet** Lightning mints; selecting one means the wallet holds REAL sats
+and burns/tips move real funds. Mints are classified by network (`mint-networks.js`), and a burn
+from a different network than the local wallet's is rejected offline — test money and real money
+never mix.
 
 License: Apache-2.0
