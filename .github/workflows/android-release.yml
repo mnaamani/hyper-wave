@@ -1,0 +1,190 @@
+name: Android Release
+
+# Build the mobile host's Android .apk and attach it to the GitHub Release for the tag.
+#
+# TRIGGER: a `hyperwave-mobile@<version>` tag push, or manual dispatch. The tag is namespaced to
+# the mobile package (`mobile/package.json` name) exactly as the desktop app tags as
+# `hyperwave-desktop@<version>` — the two apps' versions are free-running and independent.
+#
+# The build reproduces `mobile/README.md` section "Android" on a runner, in order:
+#   1. JDK 17            — RN's gradle plugin declares jvmToolchain(17); without a real 17 present
+#                          Gradle falls through to a foojay-resolver that crashes on Gradle 9.
+#   2. Two NDKs          — RN pins 27.1.12297006; a module pinning none inherits AGP's 27.0.12077973.
+#                          Installed explicitly (not left to Gradle) so a half-finished download
+#                          can't leave an empty ndk/<version>/ stub the next build hangs on.
+#   3. bare-pack bundle  — mobile/bundles/app.bundle.mjs is gitignored and imported by src/useEngine.js.
+#   4. Android addons    — bare-kit's own gradle `link` task scans the workspace ROOT, which has no
+#                          addon deps in this monorepo; without this the APK ships zero .so files
+#                          and the worklet's dlopen fails at runtime (scripts/link-android-addons.mjs).
+#   5. expo prebuild     — mobile/android is NOT committed (Continuous Native Generation).
+#                          --no-install so it can't clobber the root workspace's hoisted install.
+#
+# SIGNING is optional. Without the secrets below the release APK is signed with the RN template's
+# debug keystore (Expo's prebuild wires `release { signingConfig signingConfigs.debug }`) — it
+# installs fine for testing but is NOT distributable on Play. Set these repo secrets to sign with a
+# real upload key: ANDROID_KEYSTORE_BASE64 (base64 of the .jks), ANDROID_KEYSTORE_PASSWORD,
+# ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+on:
+  push:
+    tags:
+      - 'hyperwave-mobile@*'
+  workflow_dispatch:
+
+env:
+  # Keep in sync with mobile/README.md section "Android".
+  NDK_RN: 27.1.12297006
+  NDK_AGP: 27.0.12077973
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # attaching the APK to the release
+    env:
+      # Job-level so the optional-signing step can guard on it in its own `if:` (a step cannot read
+      # its own step-level env there). Empty when the secret is not configured.
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json # single source of truth (volta.node / engines)
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Install the pinned NDKs
+        run: |
+          set -euo pipefail
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          for ndk in "$NDK_RN" "$NDK_AGP"; do
+            # An NDK dir without source.properties is the empty stub a killed download leaves
+            # behind; Gradle then sits on it forever. Remove it before (re)installing.
+            dir="$ANDROID_HOME/ndk/$ndk"
+            if [ -d "$dir" ] && [ ! -f "$dir/source.properties" ]; then
+              echo "Removing empty NDK stub at $dir"
+              rm -rf "$dir"
+            fi
+            if [ ! -f "$dir/source.properties" ]; then
+              "$sdkmanager" --install "ndk;$ndk"
+            fi
+            test -f "$dir/source.properties"
+          done
+
+      # Workspace install from the repo root (hoists deps; runs the fix-bare-engines and
+      # patch-secret-stream postinstalls, and mobile's addon-link postinstall).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle the Bare worklet
+        run: npm run bundle -w hyperwave-mobile
+
+      - name: Vendor the Bare Android addons into react-native-bare-kit
+        run: npm run link:android-addons -w hyperwave-mobile
+
+      - name: Generate the native Android project (expo prebuild)
+        working-directory: mobile
+        run: npx expo prebuild --platform android --no-install
+
+      # Optional real signing. Skipped entirely when ANDROID_KEYSTORE_BASE64 is unset, in which case
+      # the release APK keeps the template's debug signing config (installable, not distributable).
+      - name: Apply the upload keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        working-directory: mobile/android
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > app/upload.keystore
+          # The generated build.gradle points the release buildType at signingConfigs.debug. Add a
+          # real `release` signing config reading these properties, and repoint the buildType at it.
+          # Every assumption about the generated file is asserted, so a template change fails the
+          # build loudly instead of silently producing a debug-signed "release" APK.
+          node -e '
+            const fs = require("fs");
+            const path = "app/build.gradle";
+            let src = fs.readFileSync(path, "utf8");
+            const marker = "signingConfigs {";
+            const start = src.indexOf(marker);
+            if (start === -1) throw new Error("no signingConfigs block");
+            let depth = 0;
+            let close = -1;
+            for (let i = start + marker.length - 1; i < src.length; i++) {
+              if (src[i] === "{") depth++;
+              else if (src[i] === "}" && --depth === 0) { close = i; break; }
+            }
+            if (close === -1) throw new Error("unterminated signingConfigs block");
+            // Groovy strings are DOUBLE quoted here: this script is itself inside a single-quoted
+            // shell word, so a literal single quote would end it and Gradle would see a bare
+            // identifier (file(upload.keystore)). The first line inherits the indentation that
+            // preceded the replaced closing brace, hence the 4-space offsets.
+            const config = [
+              "    release {",
+              "            storeFile file(\"upload.keystore\")",
+              "            storePassword System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")",
+              "            keyAlias System.getenv(\"ANDROID_KEY_ALIAS\")",
+              "            keyPassword System.getenv(\"ANDROID_KEY_PASSWORD\")",
+              "        }",
+              "    }"
+            ].join("\n");
+            src = src.slice(0, close) + config + src.slice(close + 1);
+            const ref = "signingConfig signingConfigs.debug";
+            const refs = src.split(ref).length - 1;
+            if (refs !== 2) throw new Error("unexpected signing layout: " + refs + " debug refs");
+            // The LAST of the two is the release buildType (the debug buildType comes first).
+            const last = src.lastIndexOf(ref);
+            src = src.slice(0, last) + "signingConfig signingConfigs.release" + src.slice(last + ref.length);
+            fs.writeFileSync(path, src);
+          '
+          grep -n 'signingConfig' app/build.gradle
+
+      - name: Assemble the release APK
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      # Name the artifact after the app + version so a downloaded APK is self-identifying.
+      - name: Collect the APK
+        id: collect
+        run: |
+          set -euo pipefail
+          version=$(jq -r '.version' mobile/package.json)
+          mkdir -p release-assets
+          found=0
+          for apk in mobile/android/app/build/outputs/apk/release/*.apk; do
+            [ -e "$apk" ] || continue
+            suffix=$(basename "$apk" .apk | sed 's/^app-release$//; s/^app-//; s/-release$//')
+            if [ -n "$suffix" ]; then
+              cp "$apk" "release-assets/HyperWave-$version-$suffix.apk"
+            else
+              cp "$apk" "release-assets/HyperWave-$version.apk"
+            fi
+            found=1
+          done
+          if [ "$found" -eq 0 ]; then
+            echo 'no APK produced' >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          ls -la release-assets
+
+      - name: Upload the APK as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperwave-android-${{ steps.collect.outputs.version }}
+          path: release-assets/*.apk
+          if-no-files-found: error
+
+      # Only for a real tag push — a manual dispatch just leaves the workflow artifact above.
+      - name: Attach the APK to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.apk
+          fail_on_unmatched_files: true

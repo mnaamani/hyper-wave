@@ -158,6 +158,26 @@ survive an interrupt — on a flaky link, fetch the zip yourself (`curl -C -`) a
 `.temp/PackageOperation01/` before running `sdkmanager`, which then verifies and installs it
 without re-downloading.
 
+### Releasing an .apk
+
+`.github/workflows/android-release.yml` builds the release APK on a runner and attaches it to the
+GitHub Release. It reproduces the six prerequisites above (JDK 17, both pinned NDKs, the
+bare-pack bundle, the vendored Android addons, then `expo prebuild` — `mobile/android` is not
+committed) and is triggered by a **`hyperwave-mobile@<version>` tag** matching this package's
+version, or by manual dispatch (which uploads the APK as a workflow artifact only):
+
+```bash
+npm version --workspace hyperwave-mobile <version>   # also bump expo.version in app.json
+git tag hyperwave-mobile@<version> && git push --tags
+```
+
+By default the APK is signed with the RN template's **debug keystore** — installable for testing,
+not distributable on Play. To sign with a real upload key, set the repo secrets
+`ANDROID_KEYSTORE_BASE64` (base64 of the `.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
+and `ANDROID_KEY_PASSWORD`; the workflow then injects a `release` signing config into the
+generated `app/build.gradle`. Note `versionCode` comes from `expo.android.versionCode` in
+`app.json` and defaults to `1` — Play requires it to increase per upload.
+
 ## Manual device checklist
 
 Automated tests cover the shared rules (`hyperwave-app-core`) and the engine; everything below is
