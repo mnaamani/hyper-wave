@@ -171,6 +171,11 @@ npm version --workspace hyperwave-mobile <version>   # also bump expo.version in
 git tag hyperwave-mobile@<version> && git push --tags
 ```
 
+The APK is **arm64-v8a only** (`-PreactNativeArchitectures=arm64-v8a`). The Bare stack's native
+libs are large — bare-kit's `android/libs` is 230 MB across ABIs before the vendored addons — so a
+universal 4-ABI APK is ~414 MB. Under `minSdkVersion` 29 every shipping device is arm64; x86/x86_64
+are emulator-only (use `npm run android` locally for those) and armeabi-v7a predates the minSdk.
+
 By default the APK is signed with the RN template's **debug keystore** — installable for testing,
 not distributable on Play. To sign with a real upload key, set the repo secrets
 `ANDROID_KEYSTORE_BASE64` (base64 of the `.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
