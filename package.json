@@ -3,7 +3,7 @@
   "productName": "HyperWave",
   "version": "0.5.0",
   "upgrade": "pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y",
-  "description": "HyperWave \u2014 a worldwide P2P wave of moments (Tether Developers Cup). Electron desktop host at the repo root + the reusable Bare engine and wallets in packages/*; the mobile host in mobile/.",
+  "description": "HyperWave — a worldwide P2P wave of moments (Tether Developers Cup). Electron desktop host at the repo root + the reusable Bare engine and wallets in packages/*; the mobile host in mobile/.",
   "license": "Apache-2.0",
   "author": "",
   "type": "commonjs",
@@ -33,12 +33,25 @@
     "ethers": {
       "ws": "8.21.0"
     },
-    "tar": "7.5.19",
+    "tar": "7.5.22",
     "tmp": "0.2.7",
     "xcode": {
       "uuid": "11.1.1"
     },
-    "hyperdht": "6.32.0"
+    "hyperdht": "6.32.0",
+    "app-builder-lib": "$app-builder-lib",
+    "brace-expansion@1": "1.1.18",
+    "brace-expansion@2": "2.1.4",
+    "brace-expansion@5": "5.0.9",
+    "builder-util-runtime": "9.7.0",
+    "fast-uri": "3.1.5",
+    "ip-address": "10.5.0",
+    "js-yaml@3": "3.15.1",
+    "js-yaml@4": "4.3.1",
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26",
+    "undici@6": "6.28.0",
+    "undici@7": "7.29.0"
   },
   "dependencies": {
     "bare-env": "^3.0.1",
@@ -63,7 +76,7 @@
     "@electron-forge/maker-rpm": "^7.11.1",
     "@electron-forge/maker-zip": "^7.11.1",
     "@tensorflow/tfjs": "^4.22.0",
-    "app-builder-lib": "^26.8.1",
+    "app-builder-lib": "^26.15.7",
     "electron": "^40.2.1",
     "electron-forge-plugin-prune-prebuilds": "^1.0.0",
     "electron-forge-plugin-universal-prebuilds": "^1.0.0",
