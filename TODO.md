@@ -30,6 +30,38 @@ hardening section 11.2, e2e tiers) is in git.
       `E2E_DUMP=<dir>` (write each peer's full log on a failed run). CI's two e2e steps still
       carry a temporary `continue-on-error` — drop it after a few green runs.
 
+- [ ] **Electron is pinned to 40 (`^40.2.1`) and carries a known high-severity advisory:**
+      "Sandboxed iframe can bypass the allow-popups restriction via the OpenURL navigation path"
+      (fixed in 41.10.3). **Bumping to 41.10.4 silently breaks the app**: the Bare worker never
+      boots — no `wallet.seed.enc`/`swarm.seed.enc`, no `<storage>/hyperwave` corestore, and
+      NOTHING is logged (not even with `ELECTRON_ENABLE_LOGGING=1`). The renderer's window opens
+      (Chromium writes its session dirs) but never reaches `renderer/lib/ipc.js`'s `startWorker`,
+      so main's `client.call('init', …)` never runs. Tell-tale: `[main] storage dir:` prints TWICE
+      on 40 and ONCE on 41. Verified A/B on one machine by launching with `--storage <tmp>` and
+      checking for the two seed files + the corestore dir (40: both present; 41: neither).
+      **`npm test`, `npm run lint` AND `npm run make` all pass on 41** — only launching the app
+      catches it, so add a boot smoke test before attempting this again. Suspect the
+      pear-runtime/pear-electron worker seam vs an Electron 41 API change; 42/43 untested.
+
+- [ ] **`image-size` has no fixed version and cannot be resolved** — every published release
+      including the latest (2.0.2) is vulnerable (ICNS/JXL/HEIF parser infinite-loop DoS). It is
+      the only remaining leaf advisory and accounts for 13 of the 14 `npm audit` findings, via two
+      build-time-only paths: `@electron-forge/maker-dmg` → `electron-installer-dmg` → `appdmg`,
+      and `mobile`'s `expo` → `metro`. Neither ships to users — an attacker would have to feed a
+      malicious image to the build machine. Re-check when upstream publishes a fix.
+
+- [ ] **Do NOT run `npm audit fix --force` on this repo.** It proposes DOWNGRADES that npm counts
+      as fixes because they leave the vulnerable range: `pear-electron-forge-maker-appimage` →
+      `0.0.0`, flatpak → `0.0.4`, `expo` 55 → 53, `react-native` 0.83 → 0.72, plus an
+      `undefined to undefined` change — and still leaves most highs. Plain `npm audit fix` is a
+      no-op here (everything flagged is transitive and pinned by its parent). The working lever is
+      the root `overrides` block, using npm's `name@major` selector so each major line gets a patch
+      bump instead of being force-marched across majors (see `brace-expansion@1/@2/@5`). Note a
+      direct dependency cannot be overridden by literal version — use `"$name"`
+      (see `app-builder-lib`). After editing overrides, regenerate the lock from scratch
+      (`rm -rf node_modules package-lock.json && npm install`): an incremental `npm install` left
+      the `mobile` workspace's subtree on the old versions.
+
 ### Propagation at extreme scale (Phase 5 — DECIDED: the sweep is built)
 
 The deterministic angular sweep replaced the serial token entirely (see the Done
