@@ -40,6 +40,9 @@
     },
     "hyperdht": "6.32.0",
     "app-builder-lib": "$app-builder-lib",
+    "pear-electron-forge-maker-appimage": {
+      "app-builder-lib": "25.1.8"
+    },
     "brace-expansion@1": "1.1.18",
     "brace-expansion@2": "2.1.4",
     "brace-expansion@5": "5.0.9",
