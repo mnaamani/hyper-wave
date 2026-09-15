@@ -17,7 +17,7 @@ join (so bots can't flood it), and you can tip the photos you like.
 ## Pear-install
 
 ```sh
-npx pear-install pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y
+npx pear-install pear://e5n4ctw1pr8pk59nrbyoo48mhkrjkne47chckiqh87kh5uxtonny
 ```
 
 ## Install pre-compiled package
