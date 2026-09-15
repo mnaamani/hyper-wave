@@ -1,7 +1,15 @@
 # Releasing HyperWave (desktop)
 
 Publishing is **two things**, both keyed by the same `pear://` link in `package.json#upgrade`
-(currently `pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y`, minted with `pear touch`):
+(currently `pear://e5n4ctw1pr8pk59nrbyoo48mhkrjkne47chckiqh87kh5uxtonny`, minted with `pear touch`):
+
+> **Link rotated 2026-09-15.** The previous link
+> (`pear://pwfsihrajqdzscrheaegd5n98xfo8qik9q4cpixjdenjniri718y`) is frozen: its writer host was
+> decommissioned and `pear gc`'d before any other peer held a full copy, so no store can append to
+> it any more. Apps installed from it never see OTA updates on the new link — those users need
+> one manual install. Lesson: before retiring a writer, confirm a surviving store holds the whole
+> drive (every `by-arch` tree, not one platform's prefix — an installed app only downloads its
+> own).
 
 - **Installers** — the `.dmg` / `.msix` / `.AppImage` a new user downloads. Installer makers are
   **OS-native** (dmg→macOS, msix→Windows, AppImage/Snap/Flatpak→Linux), so you **can't cross-build
