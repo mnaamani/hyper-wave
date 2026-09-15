@@ -1,7 +1,7 @@
 {
   "name": "hyperwave-desktop",
   "productName": "HyperWave",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "upgrade": "pear://e5n4ctw1pr8pk59nrbyoo48mhkrjkne47chckiqh87kh5uxtonny",
   "description": "HyperWave — a worldwide P2P wave of moments (Tether Developers Cup). Electron desktop host at the repo root + the reusable Bare engine and wallets in packages/*; the mobile host in mobile/.",
   "license": "Apache-2.0",
@@ -40,6 +40,9 @@
     },
     "hyperdht": "6.32.0",
     "app-builder-lib": "$app-builder-lib",
+    "pear-electron-forge-maker-appimage": {
+      "app-builder-lib": "25.1.8"
+    },
     "brace-expansion@1": "1.1.18",
     "brace-expansion@2": "2.1.4",
     "brace-expansion@5": "5.0.9",

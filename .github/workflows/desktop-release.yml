@@ -69,6 +69,13 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v5
+      # make-pear-app@v1 stopped installing dependencies (holepunchto/actions#103), so
+      # install them here, WITH scripts: upstream's node-base-extended runs `npm ci
+      # --ignore-scripts`, which would skip fix-bare-engines + patch-secret-stream.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
       - uses: holepunchto/actions/make-pear-app@v1
         with:
           channel: ${{ env.CHANNEL }}
@@ -98,6 +105,13 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v5
+      # make-pear-app@v1 stopped installing dependencies (holepunchto/actions#103), so
+      # install them here, WITH scripts: upstream's node-base-extended runs `npm ci
+      # --ignore-scripts`, which would skip fix-bare-engines + patch-secret-stream.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
       - uses: holepunchto/actions/make-pear-app@v1
         with:
           channel: ${{ env.CHANNEL }}
