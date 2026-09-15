@@ -8,7 +8,8 @@ to another machine, so all future `pear stage` / release steps run there.
 
 A Pear link's write capability is an ed25519 keypair whose secret key Pear
 stores in a per-core auth record inside the platform corestore
-(`~/Library/Application Support/pear/corestores/platform`). It is **not** a
+(`~/Library/Application Support/pear/corestores/platform-next` on Pear 3.x;
+`.../platform` on older Pear). It is **not** a
 file you can `cp`, and it is **not** re-derivable (`pear touch` generates it
 from a random name that is immediately discarded).
 
@@ -43,8 +44,16 @@ again.** Keep the origin around only as a seeder/backup.
   `npm install`.
 - **Pear shut down on whichever machine a script touches** (`pear shutdown`) —
   the sidecar holds an exclusive lock on the platform corestore.
-- The scripts default `--store` to the macOS platform corestore path; pass
-  `--store <dir>` on Linux/Windows or for a test store.
+- The scripts default `--store` to the macOS platform corestore:
+  `corestores/platform-next` if it exists (Pear 3.x), else
+  `corestores/platform`. A key created under older Pear may live only in
+  `platform` — pass `--store` explicitly to extract it. Pass `--store <dir>`
+  on Linux/Windows or for a test store.
+- **Inject needs a store with no core for the link.** Hypercore persists a
+  keypair only when it _creates_ a core, so injecting into an existing
+  read-only replica cannot make it writable — `--force` skips the guard, but
+  inject then reopens the link and fails unless the key really persisted.
+  Remove the link's core and blobs first, inject, then re-sync.
 
 ## Procedure
 
