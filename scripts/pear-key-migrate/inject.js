@@ -8,7 +8,9 @@
 //
 // After this runs the link is writable here, so `pear stage <link>` /
 // `pear seed <link>` work. Refuses to run if a core for the link already
-// exists in the target store (honours the abort-if-exists guard).
+// exists in the target store (honours the abort-if-exists guard). --force
+// skips that guard, but only succeeds if the existing core already holds this
+// key: a keypair cannot be added to an existing replica.
 //
 // Pear must be shut down first (`pear shutdown`).
 //
@@ -26,10 +28,15 @@ const Corestore = require('corestore');
 const crypto = require('hypercore-crypto');
 const idEnc = require('hypercore-id-encoding');
 
-const DEFAULT_STORE = path.join(
+const CORESTORES_DIR = path.join(
   os.homedir(),
-  'Library/Application Support/pear/corestores/platform'
+  'Library/Application Support/pear/corestores'
 );
+// Pear 3.x reads `platform-next`; older Pear read `platform`. Writing into the
+// store Pear no longer reads leaves the link read-only in `pear cores`.
+const DEFAULT_STORE = fs.existsSync(path.join(CORESTORES_DIR, 'platform-next'))
+  ? path.join(CORESTORES_DIR, 'platform-next')
+  : path.join(CORESTORES_DIR, 'platform');
 
 function usage() {
   process.stderr.write(
@@ -88,6 +95,16 @@ function fail(message, err) {
 function fingerprint(secretKey) {
   const digest = crypto.hash(secretKey);
   return b4a.toString(digest.subarray(0, 8), 'hex');
+}
+
+async function isPersistedWritable(storeDir, publicKey) {
+  const store = new Corestore(storeDir);
+  const core = store.get({ key: publicKey });
+  await core.ready();
+  const writable = core.writable;
+  await core.close();
+  await store.close();
+  return writable;
 }
 
 async function main() {
@@ -149,7 +166,6 @@ async function main() {
 
   const core = store.get({ keyPair, exclusive: true });
   await core.ready();
-  const writable = core.writable;
   const derivedKey = core.key;
   await core.close();
   await store.close();
@@ -164,8 +180,19 @@ async function main() {
         `${b4a.toString(publicKey, 'hex')}). Wrong --in file for this link.`
     );
   }
+  // `core.writable` on the registering session is NOT proof of persistence:
+  // it only reflects the keypair held in memory. Hypercore persists a keypair
+  // only when it CREATES a core, so on an existing core (--force) nothing is
+  // stored. Reopen by link key alone in a fresh store — what Pear does.
+  const writable = await isPersistedWritable(args.store, publicKey);
   if (!writable) {
-    fail('Registration completed but the core is not writable.');
+    fail(
+      'The write key was NOT persisted: reopening the link by key alone ' +
+        'gives a read-only core. Hypercore only stores a keypair when it ' +
+        'creates a core, so an existing replica cannot be made writable. ' +
+        'Remove the core (and its blobs) from the store, inject into the ' +
+        'clean store, then re-sync.'
+    );
   }
 
   process.stdout.write(`\nInjected write key for pear://${normalized}\n`);

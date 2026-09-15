@@ -20,10 +20,15 @@ const Corestore = require('corestore');
 const crypto = require('hypercore-crypto');
 const idEnc = require('hypercore-id-encoding');
 
-const DEFAULT_STORE = path.join(
+const CORESTORES_DIR = path.join(
   os.homedir(),
-  'Library/Application Support/pear/corestores/platform'
+  'Library/Application Support/pear/corestores'
 );
+// Pear 3.x reads `platform-next`; older Pear read `platform`. A key created
+// under older Pear may only live in `platform` — pass `--store` for that.
+const DEFAULT_STORE = fs.existsSync(path.join(CORESTORES_DIR, 'platform-next'))
+  ? path.join(CORESTORES_DIR, 'platform-next')
+  : path.join(CORESTORES_DIR, 'platform');
 
 function usage() {
   process.stderr.write(
